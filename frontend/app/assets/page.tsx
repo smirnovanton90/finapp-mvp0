@@ -305,18 +305,7 @@ export default function Page() {
 
   return (
     <main className="min-h-screen bg-muted/40 px-8 py-8">
-      {/* header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Активы и обязательства</h1>
-          <p className="text-sm text-muted-foreground">
-            Все ваши активы и обязательства в одном месте!
-          </p>
-        </div>
-        <Button variant="outline" onClick={() => signOut()}>
-          Выйти
-        </Button>
-      </div>
+
 
       {/* таблица */}
       <Card>

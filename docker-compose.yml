@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: finapp_db
+    environment:
+      POSTGRES_USER: finapp
+      POSTGRES_PASSWORD: finapp
+      POSTGRES_DB: finapp
+    ports:
+      - "5432:5432"
+    volumes:
+      - finapp_pgdata:/var/lib/postgresql/data
+
+volumes:
+  finapp_pgdata:

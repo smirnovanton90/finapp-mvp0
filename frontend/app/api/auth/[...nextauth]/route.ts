@@ -8,7 +8,26 @@ const handler = NextAuth({
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     }),
   ],
-  session: { strategy: "jwt" },
+
+  session: {
+    strategy: "jwt",
+  },
+
+  callbacks: {
+    async jwt({ token, account }) {
+      // при логине сохраняем Google id_token
+      if (account?.id_token) {
+        token.idToken = account.id_token;
+      }
+      return token;
+    },
+
+    async session({ session, token }) {
+      // прокидываем idToken в session
+      (session as any).idToken = token.idToken;
+      return session;
+    },
+  },
 });
 
 export { handler as GET, handler as POST };

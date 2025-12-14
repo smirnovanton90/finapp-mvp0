@@ -6,25 +6,22 @@ const handler = NextAuth({
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      // важно: чтобы Google точно возвращал id_token
+      authorization: { params: { scope: "openid email profile" } },
     }),
   ],
-
-  session: {
-    strategy: "jwt",
-  },
-
   callbacks: {
     async jwt({ token, account }) {
-      // при логине сохраняем Google id_token
-      if (account?.id_token) {
-        token.idToken = account.id_token;
+      // account доступен только при логине/обновлении
+      if (account) {
+        // Google кладёт id_token именно сюда
+        (token as any).idToken = (account as any).id_token;
       }
       return token;
     },
-
     async session({ session, token }) {
-      // прокидываем idToken в session
-      (session as any).idToken = token.idToken;
+      // прокидываем idToken в session, чтобы фронт мог его взять
+      (session as any).idToken = (token as any).idToken;
       return session;
     },
   },

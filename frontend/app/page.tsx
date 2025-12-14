@@ -1,5 +1,27 @@
 "use client";
 
+import { Plus } from "lucide-react";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { useEffect, useMemo, useState } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
 
@@ -75,10 +97,91 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+
   const [kind, setKind] = useState<ItemKind>("ASSET");
   const [typeCode, setTypeCode] = useState("");
   const [name, setName] = useState("");
-  const [initialValue, setInitialValue] = useState(0);
+  const [amountStr, setAmountStr] = useState(""); // строка: "1234.56" / "1 234,56"
+
+  function resetCreateForm() {
+    setKind("ASSET");
+    setName("");
+    setAmountStr("");
+  }  
+
+  function parseRubToCents(input: string): number {
+    const normalized = input
+      .trim()
+      .replace(/\s/g, "")      // убираем пробелы-разделители
+      .replace(",", ".");      // запятая -> точка
+  
+    const value = Number(normalized);
+    if (!Number.isFinite(value)) return NaN;
+  
+    return Math.round(value * 100);
+  }
+
+  function formatRubInput(raw: string): string {
+    if (!raw) return "";
+  
+    // оставляем только цифры и разделители
+    const cleaned = raw.replace(/[^\d.,]/g, "");
+  
+    // запоминаем: пользователь только что ввёл разделитель в конце
+    const endsWithSep = /[.,]$/.test(cleaned);
+  
+    // берём первую встреченную точку/запятую как разделитель
+    const sepIndex = cleaned.search(/[.,]/);
+  
+    let intPart = "";
+    let decPart = "";
+  
+    if (sepIndex === -1) {
+      intPart = cleaned;
+    } else {
+      intPart = cleaned.slice(0, sepIndex);
+      decPart = cleaned.slice(sepIndex + 1).replace(/[.,]/g, ""); // убираем лишние разделители
+    }
+  
+    // если начали с ",5" → считаем как "0,5"
+    if (sepIndex === 0) intPart = "0";
+  
+    // нормализуем целую часть (убираем лидирующие нули)
+    intPart = intPart.replace(/^0+(?=\d)/, "");
+    if (!intPart) intPart = "0";
+  
+    // форматируем целую часть с пробелами
+    const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  
+    // ограничиваем копейки
+    const formattedDec = decPart.slice(0, 2);
+  
+    // если пользователь только что ввёл запятую, показываем её
+    if (endsWithSep && formattedDec.length === 0) {
+      return `${formattedInt},`;
+    }
+  
+    return formattedDec.length > 0 ? `${formattedInt},${formattedDec}` : formattedInt;
+  }  
+  
+  function normalizeRubOnBlur(value: string): string {
+    const v = value.trim();
+    if (!v) return "";
+  
+    // если заканчивается запятой: "123," -> "123,00"
+    if (v.endsWith(",")) return `${v}00`;
+  
+    const parts = v.split(",");
+    const intPart = parts[0] || "0";
+    const decPart = parts[1] ?? "";
+  
+    if (decPart.length === 0) return `${intPart},00`;
+    if (decPart.length === 1) return `${intPart},${decPart}0`;
+  
+    // если больше 2 — обрежем
+    return `${intPart},${decPart.slice(0, 2)}`;
+  }  
 
   const typeOptions = useMemo(
     () => (kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES),
@@ -128,21 +231,33 @@ export default function Page() {
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
+  
     if (!name.trim()) {
       setError("Название не может быть пустым");
       return;
     }
-
+  
+    const cents = parseRubToCents(amountStr);
+    if (!Number.isFinite(cents) || cents < 0) {
+      setError("Сумма должна быть числом (например 1234,56)");
+      return;
+    }
+  
     setLoading(true);
     try {
       await createItem({
         kind,
         type_code: typeCode,
         name: name.trim(),
-        initial_value_rub: Math.round(initialValue * 100),
+        initial_value_rub: cents, // копейки
       });
+  
+      // очищаем форму и закрываем модалку
       setName("");
-      setInitialValue(0);
+      setAmountStr("");
+      setIsCreateOpen(false);
+  
       await loadItems();
     } catch (e: any) {
       setError(e?.message ?? "Ошибка создания");
@@ -150,7 +265,7 @@ export default function Page() {
       setLoading(false);
     }
   }
-
+  
   async function onArchive(id: number) {
     setLoading(true);
     try {
@@ -195,7 +310,7 @@ export default function Page() {
         <div>
           <h1 className="text-2xl font-semibold">Активы и обязательства</h1>
           <p className="text-sm text-muted-foreground">
-            Все ваши активы и долги в одном месте
+            Все ваши активы и обязательства в одном месте!
           </p>
         </div>
         <Button variant="outline" onClick={() => signOut()}>
@@ -203,65 +318,112 @@ export default function Page() {
         </Button>
       </div>
 
-      {/* форма добавления */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">Добавить запись</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-4 md:grid-cols-4" onSubmit={onCreate}>
-            <select
-              className="h-10 rounded-md border px-3"
-              value={kind}
-              onChange={(e) => setKind(e.target.value as ItemKind)}
-            >
-              <option value="ASSET">Актив</option>
-              <option value="LIABILITY">Обязательство</option>
-            </select>
-
-            <select
-              className="h-10 rounded-md border px-3"
-              value={typeCode}
-              onChange={(e) => setTypeCode(e.target.value)}
-            >
-              {typeOptions.map((t) => (
-                <option key={t.code} value={t.code}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-
-            <input
-              className="h-10 rounded-md border px-3"
-              placeholder="Название"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-
-            <input
-              className="h-10 rounded-md border px-3"
-              type="number"
-              placeholder="Сумма (например 1234.56)"
-              value={initialValue}
-              onChange={(e) => setInitialValue(Number(e.target.value))}
-            />
-
-            <Button
-              type="submit"
-              disabled={loading}
-              className="bg-violet-600 hover:bg-violet-700 text-white"
-            >
-              Добавить
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
       {/* таблица */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">АКТИВЫ / ОБЯЗАТЕЛЬСТВА</CardTitle>
+
+          <Dialog
+            open={isCreateOpen}
+            onOpenChange={(open) => {
+              setIsCreateOpen(open);
+              if (!open) {
+                resetCreateForm();
+              } else {
+                // при открытии тоже можно сбрасывать, чтобы всегда было чисто
+                resetCreateForm();
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button className="bg-violet-600 hover:bg-violet-700 text-white">
+                <Plus className="mr-2 h-4 w-4" />
+                Добавить
+              </Button>
+            </DialogTrigger>
+
+            <DialogContent className="sm:max-w-[520px]">
+              <DialogHeader>
+                <DialogTitle>Добавление актива/обязательства</DialogTitle>
+              </DialogHeader>
+
+              <form onSubmit={onCreate} className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label>Актив/обязательство</Label>
+                  <Select
+                    value={kind}
+                    onValueChange={(v) => setKind(v as ItemKind)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите тип" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ASSET">Актив</SelectItem>
+                      <SelectItem value="LIABILITY">Обязательство</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Вид</Label>
+                  <Select value={typeCode} onValueChange={setTypeCode}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите вид" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {typeOptions.map((t) => (
+                        <SelectItem key={t.code} value={t.code}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Название</Label>
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Например: Кошелек / Ипотека Газпромбанк"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Текущая сумма</Label>
+                  <Input
+                    value={amountStr}
+                    onChange={(e) => {
+                      const formatted = formatRubInput(e.target.value);
+                      setAmountStr(formatted);
+                    }}
+                    onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                    inputMode="decimal"
+                    placeholder="Например: 1 234 567,89"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsCreateOpen(false)}
+                  >
+                    Отмена
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={loading}
+                    className="bg-violet-600 hover:bg-violet-700 text-white"
+                  >
+                    {loading ? "Добавляем..." : "Добавить"}
+                  </Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
         </CardHeader>
+
         <CardContent>
           <Table>
             <TableHeader className="bg-muted/40">
@@ -276,7 +438,7 @@ export default function Page() {
                   Текущая сумма
                 </TableHead>
                 <TableHead className="text-right font-medium text-muted-foreground">
-                  Дата
+                  Дата добавления
                 </TableHead>
                 <TableHead />
               </TableRow>

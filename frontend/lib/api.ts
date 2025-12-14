@@ -50,7 +50,7 @@ async function authFetch(
 
 export async function fetchItems(): Promise<ItemOut[]> {
   const res = await authFetch(`${API_BASE}/items`);
-  if (!res.ok) throw new Error("Failed to fetch items");
+  if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
@@ -59,7 +59,7 @@ export async function createItem(payload: ItemCreate): Promise<ItemOut> {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error("Failed to create item");
+  if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
@@ -67,6 +67,11 @@ export async function archiveItem(id: number): Promise<ItemOut> {
     const res = await authFetch(`${API_BASE}/items/${id}/archive`, {
       method: "PATCH",
     });
-    if (!res.ok) throw new Error("Failed to archive item");
+    if (!res.ok) throw new Error(await readError(res));
     return res.json();
-  }  
+  }
+
+async function readError(res: Response) {
+  const text = await res.text();
+  return `HTTP ${res.status}: ${text || res.statusText}`;
+}

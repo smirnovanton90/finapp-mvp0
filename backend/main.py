@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy import func
 
 from db import get_db
 from models import Item, User
@@ -31,8 +32,10 @@ def list_items(
     user: User = Depends(get_current_user),
 ):
     stmt = select(Item).where(Item.user_id == user.id)
+
     if not include_archived:
         stmt = stmt.where(Item.archived_at.is_(None))
+
     stmt = stmt.order_by(Item.created_at.desc())
     return list(db.execute(stmt).scalars())
 
@@ -56,8 +59,7 @@ def create_item(
     db.refresh(item)
     return item
 
-
-@app.post("/items/{item_id}/archive", response_model=ItemOut)
+@app.patch("/items/{item_id}/archive", response_model=ItemOut)
 def archive_item(
     item_id: int,
     db: Session = Depends(get_db),
@@ -66,3 +68,25 @@ def archive_item(
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    if item.archived_at is None:
+        item.archived_at = func.now()
+
+    db.commit()
+    db.refresh(item)
+    return item
+
+@app.get("/items/archived", response_model=list[ItemOut])
+def list_archived_items(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+
+    stmt = select(Item).where(
+        Item.user_id == user.id,
+        or_(
+            Item.is_archived == False,
+            Item.is_archived.is_(None),
+        )
+    )
+    return db.scalars(stmt).all()

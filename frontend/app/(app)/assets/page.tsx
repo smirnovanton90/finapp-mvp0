@@ -103,6 +103,7 @@ export default function Page() {
   const [items, setItems] = useState<ItemOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
@@ -290,16 +291,16 @@ export default function Page() {
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setFormError(null);
   
     if (!name.trim()) {
-      setError("Название не может быть пустым");
+      setFormError("Название не может быть пустым");
       return;
     }
   
     const cents = parseRubToCents(amountStr);
     if (!Number.isFinite(cents) || cents < 0) {
-      setError("Сумма должна быть числом (например 1234,56)");
+      setFormError("Сумма должна быть числом (например 1234,56)");
       return;
     }
   
@@ -319,7 +320,7 @@ export default function Page() {
   
       await loadItems();
     } catch (e: any) {
-      setError(e?.message ?? "Ошибка создания");
+      setFormError(e?.message ?? "Ошибка создания");
     } finally {
       setLoading(false);
     }
@@ -464,6 +465,7 @@ export default function Page() {
           open={isCreateOpen}
           onOpenChange={(open) => {
             setIsCreateOpen(open);
+            setFormError(null);
             if (!open) {
               resetCreateForm();
             } else {
@@ -484,6 +486,11 @@ export default function Page() {
             </DialogHeader>
 
             <form onSubmit={onCreate} className="grid gap-4">
+              {formError && (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
+                  {formError}
+                </div>
+              )}
               <div className="grid gap-2">
                 <Label>Актив/обязательство</Label>
                 <Select

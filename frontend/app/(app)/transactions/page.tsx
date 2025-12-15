@@ -96,10 +96,6 @@ function formatDirection(dir: TransactionOut["direction"]) {
   return "Перевод";
 }
 
-function formatTxType(t: TransactionOut["transaction_type"]) {
-  return t === "ACTUAL" ? "Фактическая" : "Плановая";
-}
-
 // "1 234,56" -> 123456
 function parseRubToCents(input: string): number {
   const normalized = input.trim().replace(/\s/g, "").replace(",", ".");
@@ -167,6 +163,7 @@ export default function TransactionsPage() {
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [isOpen, setIsOpen] = useState(false);
 
@@ -196,6 +193,45 @@ export default function TransactionsPage() {
   const cat3Options = useMemo(() => CATEGORY_L3[cat2] ?? [], [cat2]);
 
   const itemsById = useMemo(() => new Map(items.map((x) => [x.id, x])), [items]);
+
+  // Разделяем транзакции по типам
+  const actualTxs = useMemo(
+    () => txs.filter((tx) => tx.transaction_type === "ACTUAL"),
+    [txs]
+  );
+
+  const plannedTxs = useMemo(
+    () => txs.filter((tx) => tx.transaction_type === "PLANNED"),
+    [txs]
+  );
+
+  // Итоги для фактических транзакций
+  const actualTotalAmount = useMemo(() => {
+    return actualTxs.reduce((sum, tx) => {
+      if (tx.direction === "EXPENSE") {
+        return sum - tx.amount_rub;
+      } else if (tx.direction === "INCOME") {
+        return sum + tx.amount_rub;
+      } else if (tx.direction === "TRANSFER") {
+        return sum + tx.amount_rub;
+      }
+      return sum;
+    }, 0);
+  }, [actualTxs]);
+
+  // Итоги для плановых транзакций
+  const plannedTotalAmount = useMemo(() => {
+    return plannedTxs.reduce((sum, tx) => {
+      if (tx.direction === "EXPENSE") {
+        return sum - tx.amount_rub;
+      } else if (tx.direction === "INCOME") {
+        return sum + tx.amount_rub;
+      } else if (tx.direction === "TRANSFER") {
+        return sum + tx.amount_rub;
+      }
+      return sum;
+    }, 0);
+  }, [plannedTxs]);
 
   function itemName(id: number | null | undefined) {
     if (!id) return "—";
@@ -237,30 +273,180 @@ export default function TransactionsPage() {
     if (session) loadAll();
   }, [session]);
 
+  // Компонент таблицы транзакций
+  function TransactionsTable({
+    transactions,
+    totalAmount,
+  }: {
+    transactions: TransactionOut[];
+    totalAmount: number;
+  }) {
+    return (
+      <div className="w-full overflow-hidden">
+        <Table>
+          <TableHeader className="bg-muted/40">
+            <TableRow>
+              <TableHead className="font-medium text-muted-foreground w-[100px] min-w-[100px]">
+                Дата
+              </TableHead>
+              <TableHead className="font-medium text-muted-foreground w-[120px] min-w-[100px]">Актив</TableHead>
+              <TableHead className="font-medium text-muted-foreground w-[100px] min-w-[100px] whitespace-nowrap">Сумма</TableHead>
+              <TableHead className="font-medium text-muted-foreground w-[120px] min-w-[100px]">
+                Корр. актив
+              </TableHead>
+              <TableHead className="font-medium text-muted-foreground w-[120px] min-w-[100px]">Категория</TableHead>
+              <TableHead className="font-medium text-muted-foreground min-w-0">Описание</TableHead>
+              <TableHead className="font-medium text-muted-foreground min-w-0">Комментарий</TableHead>
+              <TableHead className="w-[50px] min-w-[50px]" />
+            </TableRow>
+          </TableHeader>
+
+          <TableBody>
+            {transactions.map((tx) => {
+              const isExpense = tx.direction === "EXPENSE";
+              const isTxTransfer = tx.direction === "TRANSFER";
+
+              const amountText = isExpense
+                ? `-${formatRub(tx.amount_rub)}`
+                : formatRub(tx.amount_rub);
+
+              // Определяем цвет фона строки в зависимости от характера транзакции
+              const rowBgClass = 
+                tx.direction === "EXPENSE" ? "bg-red-50 hover:!bg-red-100" :
+                tx.direction === "INCOME" ? "bg-green-50 hover:!bg-green-100" :
+                "bg-violet-50 hover:!bg-violet-100";
+
+              return (
+                <TableRow key={tx.id} className={rowBgClass}>
+                  <TableCell className="whitespace-nowrap text-xs">
+                    <div>{new Date(tx.transaction_date).toLocaleDateString("ru-RU")}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(tx.created_at).toLocaleTimeString("ru-RU", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  </TableCell>
+
+                  <TableCell>
+                    <div className="font-medium truncate" title={itemName(tx.primary_item_id)}>
+                      {itemName(tx.primary_item_id)}
+                    </div>
+                  </TableCell>
+
+                  <TableCell
+                    className={[
+                      "text-right font-semibold tabular-nums whitespace-nowrap",
+                      isExpense ? "text-red-600" : "",
+                    ].join(" ")}
+                  >
+                    {amountText}
+                  </TableCell>
+
+                  <TableCell>
+                    {isTxTransfer ? (
+                      <div className="font-medium truncate" title={itemName(tx.counterparty_item_id)}>
+                        {itemName(tx.counterparty_item_id)}
+                      </div>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+
+                  <TableCell className="text-xs">
+                    {isTxTransfer ? (
+                      "—"
+                    ) : (
+                      <div>
+                        <div className="truncate">{tx.category_l1 || "—"}</div>
+                        {(tx.category_l2 || tx.category_l3) && (
+                          <div className="text-xs text-muted-foreground truncate">
+                            {[tx.category_l2, tx.category_l3].filter(Boolean).join(" / ") || ""}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+
+                  <TableCell className="text-xs">
+                    <div className="truncate" title={tx.description || undefined}>
+                      {tx.description || "—"}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <div className="truncate" title={tx.comment || undefined}>
+                      {tx.comment || "—"}
+                    </div>
+                  </TableCell>
+
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="text-red-600"
+                          onClick={() => setTxToDelete(tx)}
+                        >
+                          Удалить
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+
+            {transactions.length > 0 && (
+              <TableRow className="bg-muted/60 font-semibold">
+                <TableCell colSpan={2}>Итого</TableCell>
+                <TableCell
+                  className={[
+                    "text-right font-semibold tabular-nums whitespace-nowrap",
+                    totalAmount < 0 ? "text-red-600" : "",
+                  ].join(" ")}
+                >
+                  {totalAmount < 0
+                    ? `-${formatRub(Math.abs(totalAmount))}`
+                    : formatRub(totalAmount)}
+                </TableCell>
+                <TableCell colSpan={5} />
+              </TableRow>
+            )}
+
+            {transactions.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                  Пока нет записей
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-muted/40 px-8 py-8">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">ТРАНЗАКЦИИ</CardTitle>
-
-          <div className="flex items-center gap-3">
-            <div className="text-sm text-muted-foreground">
-              {loading ? "Обновляем…" : `${txs.length} шт.`}
-            </div>
-
-            <Dialog
-              open={isOpen}
-              onOpenChange={(open) => {
-                setIsOpen(open);
-                if (open) resetForm();
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button className="bg-violet-600 hover:bg-violet-700 text-white">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Добавить
-                </Button>
-              </DialogTrigger>
+    <main className="min-h-screen bg-muted/40 px-8 py-8 overflow-x-hidden">
+      <div className="mb-6 flex justify-end">
+        <Dialog
+          open={isOpen}
+          onOpenChange={(open) => {
+            setIsOpen(open);
+            setFormError(null);
+            if (open) resetForm();
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-white">
+              <Plus className="mr-2 h-4 w-4" />
+              Добавить
+            </Button>
+          </DialogTrigger>
 
               <DialogContent className="sm:max-w-[560px]">
                 <DialogHeader>
@@ -271,21 +457,28 @@ export default function TransactionsPage() {
                   className="grid gap-4"
                   onSubmit={async (e) => {
                     e.preventDefault();
-                    setError(null);
+                    setFormError(null);
 
                     const cents = parseRubToCents(amountStr);
 
                     if (!primaryItemId) {
-                      setError("Выберите актив/обязательство");
+                      setFormError("Выберите актив/обязательство");
                       return;
                     }
                     if (!Number.isFinite(cents) || cents < 0) {
-                      setError("Сумма должна быть числом (например 1234,56)");
+                      setFormError("Сумма должна быть числом (например 1234,56)");
                       return;
                     }
                     if (isTransfer && !counterpartyItemId) {
-                      setError("Для перевода выберите корреспондирующий актив");
+                      setFormError("Для перевода выберите корреспондирующий актив");
                       return;
+                    }
+                    if (txType === "PLANNED") {
+                      const today = new Date().toISOString().slice(0, 10);
+                      if (date < today) {
+                        setFormError("Плановая транзакция не может быть создана ранее текущего дня");
+                        return;
+                      }
                     }
 
                     try {
@@ -309,10 +502,15 @@ export default function TransactionsPage() {
                       setIsOpen(false);
                       await loadAll();
                     } catch (e: any) {
-                      setError(e?.message ?? "Ошибка создания транзакции");
+                      setFormError(e?.message ?? "Ошибка создания транзакции");
                     }
                   }}
                 >
+                  {formError && (
+                    <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
+                      {formError}
+                    </div>
+                  )}
                   <div className="grid gap-2">
                     <Label>Дата транзакции</Label>
                     <Input
@@ -527,117 +725,31 @@ export default function TransactionsPage() {
                 </form>
               </DialogContent>
             </Dialog>
-          </div>
-        </CardHeader>
+      </div>
 
-        <CardContent>
-          <div className="w-full overflow-x-auto">
-            <Table>
-              <TableHeader className="bg-muted/40">
-                <TableRow>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Дата транзакции
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Актив</TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Сумма</TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Корреспондирующий актив
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Характер</TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Категория L1</TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Категория L2</TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Категория L3</TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Тип</TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Описание</TableHead>
-                  <TableHead className="font-medium text-muted-foreground">Комментарий</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
+      <div className="space-y-6">
+        {/* Фактические транзакции */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Фактические транзакции</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden">
+            <TransactionsTable transactions={actualTxs} totalAmount={actualTotalAmount} />
+          </CardContent>
+        </Card>
 
-              <TableBody>
-                {txs.map((tx) => {
-                  const isExpense = tx.direction === "EXPENSE";
-                  const isTxTransfer = tx.direction === "TRANSFER";
+        {/* Плановые транзакции */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Плановые транзакции</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden">
+            <TransactionsTable transactions={plannedTxs} totalAmount={plannedTotalAmount} />
+          </CardContent>
+        </Card>
+      </div>
 
-                  const amountText = isExpense
-                    ? `-${formatRub(tx.amount_rub)}`
-                    : formatRub(tx.amount_rub);
-
-                  return (
-                    <TableRow key={tx.id}>
-                      <TableCell className="whitespace-nowrap">
-                        {new Date(tx.transaction_date).toLocaleDateString("ru-RU")}
-                      </TableCell>
-
-                      <TableCell className="min-w-[220px]">
-                        <div className="font-medium">{itemName(tx.primary_item_id)}</div>
-                      </TableCell>
-
-                      <TableCell
-                        className={[
-                          "text-right font-semibold tabular-nums whitespace-nowrap",
-                          isExpense ? "text-red-600" : "",
-                        ].join(" ")}
-                      >
-                        {amountText}
-                      </TableCell>
-
-                      <TableCell className="min-w-[220px]">
-                        {isTxTransfer ? (
-                          <div className="font-medium">{itemName(tx.counterparty_item_id)}</div>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-
-                      <TableCell className="whitespace-nowrap">{formatDirection(tx.direction)}</TableCell>
-
-                      <TableCell className="whitespace-nowrap">{tx.category_l1 || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap">{tx.category_l2 || "—"}</TableCell>
-                      <TableCell className="whitespace-nowrap">{tx.category_l3 || "—"}</TableCell>
-
-                      <TableCell className="whitespace-nowrap">
-                        {formatTxType(tx.transaction_type)}
-                      </TableCell>
-
-                      <TableCell className="min-w-[260px]">{tx.description || "—"}</TableCell>
-                      <TableCell className="min-w-[260px]">{tx.comment || "—"}</TableCell>
-
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              className="text-red-600"
-                              onClick={() => setTxToDelete(tx)}
-                            >
-                              Удалить
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-
-                {txs.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={12} className="h-24 text-center text-muted-foreground">
-                      Пока нет записей
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          {error && <div className="mt-4 text-sm text-red-600">Ошибка: {error}</div>}
-        </CardContent>
-      </Card>
+      {error && <div className="mt-4 text-sm text-red-600">Ошибка: {error}</div>}
 
       {/* AlertDialog удаления */}
       <AlertDialog

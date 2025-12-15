@@ -1,6 +1,8 @@
 "use client";
 
 import { Sidebar } from "@/components/ui/sidebar";
+import { useSidebar } from "@/components/ui/sidebar-context";
+import { cn } from "@/lib/utils";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -8,6 +10,7 @@ import { useEffect } from "react";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { isCollapsed } = useSidebar();
 
   useEffect(() => {
     if (status !== "loading" && !session) {
@@ -31,7 +34,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-muted/40">
       <div className="flex">
         <Sidebar />
-        <div className="flex-1 ml-72">{children}</div>
+        <div
+          className={cn(
+            "flex-1 transition-all duration-300",
+            isCollapsed ? "ml-16" : "ml-72"
+          )}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

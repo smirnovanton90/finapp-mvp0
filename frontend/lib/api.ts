@@ -20,33 +20,61 @@ export type ItemCreate = {
   initial_value_rub: number;
 };
 
+export type TransactionDirection = "INCOME" | "EXPENSE" | "TRANSFER";
+export type TransactionType = "ACTUAL" | "PLANNED";
+
+export type TransactionOut = {
+  id: number;
+
+  transaction_date: string; // YYYY-MM-DD
+  primary_item_id: number;
+  counterparty_item_id: number | null;
+
+  amount_rub: number; // в копейках
+  direction: TransactionDirection;
+  transaction_type: TransactionType;
+
+  category_l1: string;
+  category_l2: string;
+  category_l3: string;
+
+  description: string | null;
+  comment: string | null;
+
+  created_at: string;
+};
+
+export type TransactionCreate = {
+  transaction_date: string; // YYYY-MM-DD
+  primary_item_id: number;
+  counterparty_item_id?: number | null;
+
+  amount_rub: number; // в копейках
+  direction: TransactionDirection;
+  transaction_type: TransactionType;
+
+  category_l1: string;
+  category_l2: string;
+  category_l3: string;
+
+  description?: string | null;
+  comment?: string | null;
+};
+
 const API_BASE = "http://localhost:8000";
 
-async function authFetch(
-    input: RequestInfo,
-    init: RequestInit = {}
-  ): Promise<Response> {
-    const session = await getSession();
-    const idToken = (session as any)?.idToken;
-  
-    if (!idToken) {
-      throw new Error("No idToken in session");
-    }
-  
-    const headers = new Headers(init.headers);
-  
-    headers.set("Authorization", `Bearer ${idToken}`);
-  
-    // ⚠️ ВАЖНО: Content-Type ставим ТОЛЬКО если есть body
-    if (init.body) {
-      headers.set("Content-Type", "application/json");
-    }
-  
-    return fetch(input, {
-      ...init,
-      headers,
-    });
-  }
+async function authFetch(input: RequestInfo, init?: RequestInit) {
+  const session = await getSession();
+  const idToken = (session as any)?.idToken;
+
+  if (!idToken) throw new Error("No idToken in session");
+
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${idToken}`);
+  headers.set("Content-Type", "application/json");
+
+  return fetch(input, { ...init, headers });
+}
 
 export async function fetchItems(): Promise<ItemOut[]> {
   const res = await authFetch(`${API_BASE}/items`);
@@ -74,4 +102,21 @@ export async function archiveItem(id: number): Promise<ItemOut> {
 async function readError(res: Response) {
   const text = await res.text();
   return `HTTP ${res.status}: ${text || res.statusText}`;
+}
+
+export async function fetchTransactions(): Promise<TransactionOut[]> {
+  const res = await authFetch(`${API_BASE}/transactions`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createTransaction(
+  payload: TransactionCreate
+): Promise<TransactionOut> {
+  const res = await authFetch(`${API_BASE}/transactions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
 }

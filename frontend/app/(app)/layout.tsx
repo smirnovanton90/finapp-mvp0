@@ -31,7 +31,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-muted/40">
       <div className="flex">
         <Sidebar />
-        <div className="flex-1">{children}</div>
+        <div className="flex-1 ml-72">{children}</div>
       </div>
     </div>
   );

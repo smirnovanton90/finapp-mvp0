@@ -17,7 +17,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-screen w-72 flex-col border-r bg-white">
+    <aside className="fixed left-0 top-0 flex h-screen w-72 flex-col border-r bg-white">
        <div className="flex h-16 items-center px-6">
          <div className="text-sm font-semibold">FinApp</div>
        </div>

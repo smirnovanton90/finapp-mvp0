@@ -412,10 +412,16 @@ export default function Page() {
             </TableHeader>
 
             <TableBody>
-              {items.map((it) => (
+              {items.map((it) => {
+                const typeLabel = (it.kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES).find(
+                  (t) => t.code === it.type_code
+                )?.label || it.type_code;
+
+                return (
                 <TableRow key={it.id}>
                   <TableCell>
                     <div className="font-medium">{it.name}</div>
+                    <div className="text-xs text-muted-foreground">{typeLabel}</div>
                   </TableCell>
 
                   <TableCell>
@@ -465,7 +471,8 @@ export default function Page() {
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
 
               {items.length === 0 && (
                 <TableRow>

@@ -42,6 +42,26 @@ import {
   TransactionOut,
 } from "@/lib/api";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
+import { deleteTransaction } from "@/lib/api";
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
 /* ------------ категории (временные справочники) ------------ */
 
 const CATEGORY_L1 = ["Питание", "Транспорт", "Услуги"];
@@ -170,6 +190,8 @@ export default function TransactionsPage() {
   const [txType, setTxType] = useState<"ACTUAL" | "PLANNED">("ACTUAL");
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
+
+  const [txToDelete, setTxToDelete] = useState<TransactionOut | null>(null);
 
   // options
   const cat2Options = useMemo(() => CATEGORY_L2[cat1] ?? [], [cat1]);
@@ -553,6 +575,7 @@ export default function TransactionsPage() {
                   <TableHead className="font-medium text-muted-foreground">
                     Комментарий
                   </TableHead>
+                  <TableHead />
                 </TableRow>
               </TableHeader>
 
@@ -608,6 +631,23 @@ export default function TransactionsPage() {
 
                       <TableCell className="min-w-[260px]">{tx.description || "—"}</TableCell>
                       <TableCell className="min-w-[260px]">{tx.comment || "—"}</TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="text-red-600"
+                              onClick={() => setTxToDelete(tx)}
+                            >
+                              Удалить
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -620,6 +660,31 @@ export default function TransactionsPage() {
                     >
                       Пока нет записей
                     </TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="text-red-600"
+                            onClick={async () => {
+                              if (!confirm("Удалить транзакцию? Балансы будут пересчитаны.")) return;
+                              try {
+                                await deleteTransaction(tx.id);
+                                await loadAll();
+                              } catch (e: any) {
+                                setError(e?.message ?? "Ошибка удаления");
+                              }
+                            }}
+                          >
+                            Удалить
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -629,6 +694,50 @@ export default function TransactionsPage() {
           {error && <div className="mt-4 text-sm text-red-600">Ошибка: {error}</div>}
         </CardContent>
       </Card>
+      <AlertDialog
+        open={!!txToDelete}
+        onOpenChange={(open) => {
+          if (!open) setTxToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Удалить транзакцию?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Транзакция будет удалена, а балансы активов пересчитаны.
+              <br />
+              <span className="font-medium text-foreground">
+                Это действие нельзя отменить.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              Отмена
+            </AlertDialogCancel>
+
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={async () => {
+                if (!txToDelete) return;
+                try {
+                  await deleteTransaction(txToDelete.id);
+                  setTxToDelete(null);
+                  await loadAll();
+                } catch (e: any) {
+                  setError(e?.message ?? "Ошибка удаления");
+                  setTxToDelete(null);
+                }
+              }}
+            >
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

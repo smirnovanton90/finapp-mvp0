@@ -120,3 +120,10 @@ export async function createTransaction(
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
+
+export async function deleteTransaction(id: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/transactions/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}

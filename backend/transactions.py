@@ -6,6 +6,7 @@ from auth import get_current_user
 from models import Transaction, Item, User
 from schemas import TransactionCreate, TransactionOut
 from sqlalchemy import select
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -19,6 +20,7 @@ def list_transactions(
     return (
         db.query(Transaction)
         .filter(Transaction.user_id == user.id)
+        .filter(Transaction.deleted_at.is_(None))
         .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
         .all()
     )
@@ -109,3 +111,79 @@ def create_transaction(
     db.commit()
     db.refresh(tx)
     return tx
+
+@router.delete("/{tx_id}")
+def delete_transaction(
+    tx_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # Лочим транзакцию, чтобы два удаления не подрались
+    tx = (
+        db.query(Transaction)
+        .filter(Transaction.id == tx_id, Transaction.user_id == user.id)
+        .with_for_update()
+        .first()
+    )
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if tx.deleted_at is not None:
+        # идемпотентность: уже удалена — ок
+        return {"ok": True}
+
+    # Лочим primary item
+    primary = (
+        db.query(Item)
+        .filter(Item.id == tx.primary_item_id, Item.user_id == user.id)
+        .with_for_update()
+        .first()
+    )
+    if not primary:
+        raise HTTPException(status_code=400, detail="Primary item not found")
+
+    counter = None
+    if tx.direction == "TRANSFER":
+        if not tx.counterparty_item_id:
+            raise HTTPException(status_code=400, detail="Broken transfer transaction")
+        counter = (
+            db.query(Item)
+            .filter(Item.id == tx.counterparty_item_id, Item.user_id == user.id)
+            .with_for_update()
+            .first()
+        )
+        if not counter:
+            raise HTTPException(status_code=400, detail="Counterparty item not found")
+
+    # Откат балансов только для ACTUAL
+    if tx.transaction_type == "ACTUAL":
+        amt = tx.amount_rub
+
+        if tx.direction == "INCOME":
+            # откат дохода = минус
+            if primary.current_value_rub < amt:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete: would make balance negative. Delete later transactions first.",
+                )
+            primary.current_value_rub -= amt
+
+        elif tx.direction == "EXPENSE":
+            # откат расхода = плюс
+            primary.current_value_rub += amt
+
+        elif tx.direction == "TRANSFER":
+            # откат перевода: вернуть в источник, забрать у получателя
+            if counter.current_value_rub < amt:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete: would make counterparty balance negative. Delete later transactions first.",
+                )
+            primary.current_value_rub += amt
+            counter.current_value_rub -= amt
+
+    # soft delete
+    tx.deleted_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return {"ok": True}

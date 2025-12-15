@@ -81,6 +81,8 @@ class Transaction(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         CheckConstraint("direction in ('INCOME','EXPENSE','TRANSFER')", name="ck_transactions_direction"),
         CheckConstraint("transaction_type in ('ACTUAL','PLANNED')", name="ck_transactions_type"),

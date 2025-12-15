@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Plus, Wallet, TrendingUp, Home, Package, AlertCircle, Calculator } from "lucide-react";
 
 import {
   Dialog,
@@ -79,6 +79,12 @@ const LIABILITY_TYPES = [
   { code: "private_loan", label: "Частный заём" },
   { code: "other_liability", label: "Другое" },
 ];
+
+// Категории активов
+const CASH_TYPES = ["cash", "bank_account", "bank_card"];
+const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "brokerage", "securities"];
+const PROPERTY_TYPES = ["real_estate", "car"];
+const OTHER_ASSET_TYPES = ["other_asset"];
 
 function formatRub(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
@@ -189,6 +195,58 @@ export default function Page() {
     [kind]
   );
 
+  // Фильтрация по категориям
+  const cashItems = useMemo(
+    () => items.filter((x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code)),
+    [items]
+  );
+
+  const financialInstrumentsItems = useMemo(
+    () => items.filter((x) => x.kind === "ASSET" && FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)),
+    [items]
+  );
+
+  const propertyItems = useMemo(
+    () => items.filter((x) => x.kind === "ASSET" && PROPERTY_TYPES.includes(x.type_code)),
+    [items]
+  );
+
+  const otherAssetItems = useMemo(
+    () => items.filter((x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code)),
+    [items]
+  );
+
+  const liabilityItems = useMemo(
+    () => items.filter((x) => x.kind === "LIABILITY"),
+    [items]
+  );
+
+  // Итоги по категориям
+  const cashTotal = useMemo(
+    () => cashItems.reduce((sum, x) => sum + x.current_value_rub, 0),
+    [cashItems]
+  );
+
+  const financialInstrumentsTotal = useMemo(
+    () => financialInstrumentsItems.reduce((sum, x) => sum + x.current_value_rub, 0),
+    [financialInstrumentsItems]
+  );
+
+  const propertyTotal = useMemo(
+    () => propertyItems.reduce((sum, x) => sum + x.current_value_rub, 0),
+    [propertyItems]
+  );
+
+  const otherAssetTotal = useMemo(
+    () => otherAssetItems.reduce((sum, x) => sum + x.current_value_rub, 0),
+    [otherAssetItems]
+  );
+
+  const liabilityTotal = useMemo(
+    () => liabilityItems.reduce((sum, x) => sum + x.current_value_rub, 0),
+    [liabilityItems]
+  );
+
   const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
     const assets = items
       .filter((x) => x.kind === "ASSET")
@@ -279,240 +337,303 @@ export default function Page() {
     }
   }
 
+  // Компонент таблицы категории
+  function CategoryTable({
+    title,
+    items: categoryItems,
+    total,
+    isLiability = false,
+    icon: Icon,
+  }: {
+    title: string;
+    items: ItemOut[];
+    total: number;
+    isLiability?: boolean;
+    icon?: React.ComponentType<{ className?: string }>;
+  }) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            {Icon && <Icon className="h-5 w-5 text-violet-600" />}
+            {title}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {categoryItems.length === 0 ? (
+            <div className="h-24 flex items-center justify-center text-muted-foreground">
+              Пока нет записей
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-muted/40">
+                <TableRow>
+                  <TableHead className="font-medium text-muted-foreground">
+                    Название
+                  </TableHead>
+                  <TableHead className="text-right font-medium text-muted-foreground">
+                    Текущая сумма
+                  </TableHead>
+                  <TableHead className="text-right font-medium text-muted-foreground">
+                    Дата добавления
+                  </TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                {categoryItems.map((it) => {
+                  const typeLabel = (it.kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES).find(
+                    (t) => t.code === it.type_code
+                  )?.label || it.type_code;
+
+                  return (
+                    <TableRow key={it.id}>
+                      <TableCell>
+                        <div className="font-medium">{it.name}</div>
+                        <div className="text-xs text-muted-foreground">{typeLabel}</div>
+                      </TableCell>
+
+                      <TableCell
+                        className={[
+                          "text-right font-semibold tabular-nums",
+                          isLiability ? "text-red-600" : "",
+                        ].join(" ")}
+                      >
+                        {isLiability
+                          ? `-${formatRub(it.current_value_rub)}`
+                          : formatRub(it.current_value_rub)}
+                      </TableCell>
+
+                      <TableCell className="text-right text-sm text-muted-foreground">
+                        {new Date(it.created_at).toLocaleDateString("ru-RU")}
+                      </TableCell>
+
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="text-red-600"
+                              onClick={() => onArchive(it.id)}
+                            >
+                              Архивировать
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+
+              <TableFooter>
+                <TableRow className="bg-muted/30">
+                  <TableCell className="font-medium">Итого</TableCell>
+                  <TableCell
+                    className={[
+                      "text-right font-semibold tabular-nums",
+                      isLiability ? "text-red-600" : "",
+                    ].join(" ")}
+                  >
+                    {isLiability
+                      ? `-${formatRub(total)}`
+                      : formatRub(total)}
+                  </TableCell>
+                  <TableCell />
+                  <TableCell />
+                </TableRow>
+              </TableFooter>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
   /* ------------------ основной UI ------------------ */
 
   return (
     <main className="min-h-screen bg-muted/40 px-8 py-8">
+      <div className="mb-6 flex justify-end">
+        <Dialog
+          open={isCreateOpen}
+          onOpenChange={(open) => {
+            setIsCreateOpen(open);
+            if (!open) {
+              resetCreateForm();
+            } else {
+              resetCreateForm();
+            }
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-white">
+              <Plus className="mr-2 h-4 w-4" />
+              Добавить
+            </Button>
+          </DialogTrigger>
 
+          <DialogContent className="sm:max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle>Добавление актива/обязательства</DialogTitle>
+            </DialogHeader>
 
-      {/* таблица */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">АКТИВЫ / ОБЯЗАТЕЛЬСТВА</CardTitle>
+            <form onSubmit={onCreate} className="grid gap-4">
+              <div className="grid gap-2">
+                <Label>Актив/обязательство</Label>
+                <Select
+                  value={kind}
+                  onValueChange={(v) => setKind(v as ItemKind)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите тип" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ASSET">Актив</SelectItem>
+                    <SelectItem value="LIABILITY">Обязательство</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <Dialog
-            open={isCreateOpen}
-            onOpenChange={(open) => {
-              setIsCreateOpen(open);
-              if (!open) {
-                resetCreateForm();
-              } else {
-                // при открытии тоже можно сбрасывать, чтобы всегда было чисто
-                resetCreateForm();
-              }
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button className="bg-violet-600 hover:bg-violet-700 text-white">
-                <Plus className="mr-2 h-4 w-4" />
-                Добавить
-              </Button>
-            </DialogTrigger>
+              <div className="grid gap-2">
+                <Label>Вид</Label>
+                <Select value={typeCode} onValueChange={setTypeCode}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите вид" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {typeOptions.map((t) => (
+                      <SelectItem key={t.code} value={t.code}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <DialogContent className="sm:max-w-[520px]">
-              <DialogHeader>
-                <DialogTitle>Добавление актива/обязательства</DialogTitle>
-              </DialogHeader>
+              <div className="grid gap-2">
+                <Label>Название</Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Например: Кошелек / Ипотека Газпромбанк"
+                />
+              </div>
 
-              <form onSubmit={onCreate} className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label>Актив/обязательство</Label>
-                  <Select
-                    value={kind}
-                    onValueChange={(v) => setKind(v as ItemKind)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите тип" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ASSET">Актив</SelectItem>
-                      <SelectItem value="LIABILITY">Обязательство</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="grid gap-2">
+                <Label>Текущая сумма</Label>
+                <Input
+                  value={amountStr}
+                  onChange={(e) => {
+                    const formatted = formatRubInput(e.target.value);
+                    setAmountStr(formatted);
+                  }}
+                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                  inputMode="decimal"
+                  placeholder="Например: 1 234 567,89"
+                />
+              </div>
 
-                <div className="grid gap-2">
-                  <Label>Вид</Label>
-                  <Select value={typeCode} onValueChange={setTypeCode}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите вид" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {typeOptions.map((t) => (
-                        <SelectItem key={t.code} value={t.code}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsCreateOpen(false)}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-violet-600 hover:bg-violet-700 text-white"
+                >
+                  {loading ? "Добавляем..." : "Добавить"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
 
-                <div className="grid gap-2">
-                  <Label>Название</Label>
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Например: Кошелек / Ипотека Газпромбанк"
-                  />
-                </div>
+      <div className="space-y-6">
+        <CategoryTable
+          title="Денежные средства"
+          items={cashItems}
+          total={cashTotal}
+          icon={Wallet}
+        />
 
-                <div className="grid gap-2">
-                  <Label>Текущая сумма</Label>
-                  <Input
-                    value={amountStr}
-                    onChange={(e) => {
-                      const formatted = formatRubInput(e.target.value);
-                      setAmountStr(formatted);
-                    }}
-                    onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                    inputMode="decimal"
-                    placeholder="Например: 1 234 567,89"
-                  />
-                </div>
+        <CategoryTable
+          title="Финансовые инструменты"
+          items={financialInstrumentsItems}
+          total={financialInstrumentsTotal}
+          icon={TrendingUp}
+        />
 
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsCreateOpen(false)}
-                  >
-                    Отмена
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-violet-600 hover:bg-violet-700 text-white"
-                  >
-                    {loading ? "Добавляем..." : "Добавить"}
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </CardHeader>
+        <CategoryTable
+          title="Имущество"
+          items={propertyItems}
+          total={propertyTotal}
+          icon={Home}
+        />
 
-        <CardContent>
-          <Table>
-            <TableHeader className="bg-muted/40">
-              <TableRow>
-                <TableHead className="font-medium text-muted-foreground">
-                  Название
-                </TableHead>
-                <TableHead className="font-medium text-muted-foreground">
-                  Тип
-                </TableHead>
-                <TableHead className="text-right font-medium text-muted-foreground">
-                  Текущая сумма
-                </TableHead>
-                <TableHead className="text-right font-medium text-muted-foreground">
-                  Дата добавления
-                </TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
+        <CategoryTable
+          title="Другие активы"
+          items={otherAssetItems}
+          total={otherAssetTotal}
+          icon={Package}
+        />
 
-            <TableBody>
-              {items.map((it) => {
-                const typeLabel = (it.kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES).find(
-                  (t) => t.code === it.type_code
-                )?.label || it.type_code;
+        <CategoryTable
+          title="Обязательства"
+          items={liabilityItems}
+          total={liabilityTotal}
+          isLiability={true}
+          icon={AlertCircle}
+        />
 
-                return (
-                <TableRow key={it.id}>
-                  <TableCell>
-                    <div className="font-medium">{it.name}</div>
-                    <div className="text-xs text-muted-foreground">{typeLabel}</div>
-                  </TableCell>
-
-                  <TableCell>
-                    {it.kind === "ASSET" ? (
-                      <span className="inline-flex h-6 items-center rounded-full bg-violet-600 px-3 text-xs font-semibold leading-none text-white">
-                        Актив
-                      </span>
-                    ) : (
-                      <span className="inline-flex h-6 items-center rounded-full bg-red-100 px-3 text-xs font-semibold leading-none text-red-700">
-                        Обязательство
-                      </span>
-                    )}
-                  </TableCell>
-
-
-
-                  <TableCell
-                    className={[
-                      "text-right font-semibold tabular-nums",
-                      it.kind === "LIABILITY" ? "text-red-600" : "",
-                    ].join(" ")}
-                  >
-                    {it.kind === "LIABILITY"
-                      ? `-${formatRub(it.current_value_rub)}`
-                      : formatRub(it.current_value_rub)}
-                  </TableCell>
-
-                  <TableCell className="text-right text-sm text-muted-foreground">
-                    {new Date(it.created_at).toLocaleDateString("ru-RU")}
-                  </TableCell>
-
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          className="text-red-600"
-                          onClick={() => onArchive(it.id)}
-                        >
-                          Архивировать
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-                );
-              })}
-
-              {items.length === 0 && (
-                <TableRow>
-                  <TableCell
-                    colSpan={5}
-                    className="h-24 text-center text-muted-foreground"
-                  >
-                    Пока нет записей
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-            <TableFooter>
-              <TableRow className="bg-muted/30">
-                <TableCell className="font-medium">
-                  Итого
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Активы: {formatRub(totalAssets)} • Обязательства: -{formatRub(totalLiabilities)}
-                  </div>
-                </TableCell>
-
-                <TableCell />
-
-                <TableCell
+        {/* Общая итоговая плашка */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Calculator className="h-5 w-5 text-violet-600" />
+              ИТОГО
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Активы:</span>
+                <span className="font-semibold tabular-nums">{formatRub(totalAssets)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Обязательства:</span>
+                <span className="font-semibold tabular-nums text-red-600">
+                  -{formatRub(totalLiabilities)}
+                </span>
+              </div>
+              <div className="pt-2 border-t flex justify-between items-center">
+                <span className="font-medium">Чистые активы:</span>
+                <span
                   className={[
-                    "text-right font-semibold tabular-nums",
+                    "font-semibold tabular-nums",
                     netTotal < 0 ? "text-red-600" : "",
                   ].join(" ")}
                 >
-                  {netTotal < 0 ? `-${formatRub(Math.abs(netTotal))}` : formatRub(netTotal)}
-                </TableCell>
-
-                <TableCell />
-
-                <TableCell />
-              </TableRow>
-            </TableFooter>
-          </Table>
-        </CardContent>
-      </Card>
+                  {netTotal < 0
+                    ? `-${formatRub(Math.abs(netTotal))}`
+                    : formatRub(netTotal)}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {error && (
         <div className="mt-4 text-sm text-red-600">Ошибка: {error}</div>

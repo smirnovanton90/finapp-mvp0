@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Plus } from "lucide-react";
+import { MoreHorizontal, Plus } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -35,21 +35,11 @@ import {
 } from "@/components/ui/select";
 
 import {
-  fetchItems,
-  fetchTransactions,
-  createTransaction,
-  ItemOut,
-  TransactionOut,
-} from "@/lib/api";
-
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
-import { deleteTransaction } from "@/lib/api";
 
 import {
   AlertDialog,
@@ -61,6 +51,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+import {
+  fetchItems,
+  fetchTransactions,
+  createTransaction,
+  deleteTransaction,
+  ItemOut,
+  TransactionOut,
+} from "@/lib/api";
 
 /* ------------ категории (временные справочники) ------------ */
 
@@ -168,7 +167,6 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ---- modal state (ВАЖНО: внутри компонента!) ----
   const [isOpen, setIsOpen] = useState(false);
 
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -177,9 +175,7 @@ export default function TransactionsPage() {
   );
 
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
-  const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(
-    null
-  );
+  const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
 
   const [amountStr, setAmountStr] = useState("");
 
@@ -193,7 +189,8 @@ export default function TransactionsPage() {
 
   const [txToDelete, setTxToDelete] = useState<TransactionOut | null>(null);
 
-  // options
+  const isTransfer = direction === "TRANSFER";
+
   const cat2Options = useMemo(() => CATEGORY_L2[cat1] ?? [], [cat1]);
   const cat3Options = useMemo(() => CATEGORY_L3[cat2] ?? [], [cat2]);
 
@@ -304,7 +301,7 @@ export default function TransactionsPage() {
                       setError("Сумма должна быть числом (например 1234,56)");
                       return;
                     }
-                    if (direction === "TRANSFER" && !counterpartyItemId) {
+                    if (isTransfer && !counterpartyItemId) {
                       setError("Для перевода выберите корреспондирующий актив");
                       return;
                     }
@@ -313,14 +310,16 @@ export default function TransactionsPage() {
                       await createTransaction({
                         transaction_date: date,
                         primary_item_id: primaryItemId,
-                        counterparty_item_id:
-                          direction === "TRANSFER" ? counterpartyItemId : null,
+                        counterparty_item_id: isTransfer ? counterpartyItemId : null,
                         amount_rub: cents,
                         direction,
                         transaction_type: txType,
-                        category_l1: cat1,
-                        category_l2: cat2,
-                        category_l3: cat3Options.length ? cat3 : "",
+
+                        // для TRANSFER категории не используем
+                        category_l1: isTransfer ? "" : cat1,
+                        category_l2: isTransfer ? "" : cat2,
+                        category_l3: isTransfer ? "" : cat3,
+
                         description: description || null,
                         comment: comment || null,
                       });
@@ -348,7 +347,20 @@ export default function TransactionsPage() {
                       onValueChange={(v) => {
                         const val = v as "INCOME" | "EXPENSE" | "TRANSFER";
                         setDirection(val);
-                        if (val !== "TRANSFER") setCounterpartyItemId(null);
+
+                        if (val !== "TRANSFER") {
+                          setCounterpartyItemId(null);
+                        }
+
+                        if (val === "TRANSFER") {
+                          setCat1("");
+                          setCat2("");
+                          setCat3("");
+                        } else {
+                          setCat1("Питание");
+                          setCat2("Продукты");
+                          setCat3("Супермаркет");
+                        }
                       }}
                     >
                       <SelectTrigger>
@@ -381,7 +393,7 @@ export default function TransactionsPage() {
                     </Select>
                   </div>
 
-                  {direction === "TRANSFER" && (
+                  {isTransfer && (
                     <div className="grid gap-2">
                       <Label>Корреспондирующий актив</Label>
                       <Select
@@ -409,77 +421,80 @@ export default function TransactionsPage() {
                     <Input
                       value={amountStr}
                       onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                      onBlur={() =>
-                        setAmountStr((prev) => normalizeRubOnBlur(prev))
-                      }
+                      onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
                       inputMode="decimal"
                       placeholder="Например: 1 234,56"
                     />
                   </div>
 
-                  <div className="grid gap-2">
-                    <Label>Категория L1</Label>
-                    <Select
-                      value={cat1}
-                      onValueChange={(v) => {
-                        setCat1(v);
-                        const first2 = (CATEGORY_L2[v] ?? [])[0] ?? "";
-                        setCat2(first2);
-                        const first3 = (CATEGORY_L3[first2] ?? [])[0] ?? "";
-                        setCat3(first3);
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CATEGORY_L1.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {/* ✅ КАТЕГОРИИ СКРЫВАЕМ ДЛЯ TRANSFER */}
+                  {!isTransfer && (
+                    <>
+                      <div className="grid gap-2">
+                        <Label>Категория L1</Label>
+                        <Select
+                          value={cat1}
+                          onValueChange={(v) => {
+                            setCat1(v);
+                            const first2 = (CATEGORY_L2[v] ?? [])[0] ?? "";
+                            setCat2(first2);
+                            const first3 = (CATEGORY_L3[first2] ?? [])[0] ?? "";
+                            setCat3(first3);
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CATEGORY_L1.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
 
-                  <div className="grid gap-2">
-                    <Label>Категория L2</Label>
-                    <Select
-                      value={cat2}
-                      onValueChange={(v) => {
-                        setCat2(v);
-                        const first3 = (CATEGORY_L3[v] ?? [])[0] ?? "";
-                        setCat3(first3);
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cat2Options.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      <div className="grid gap-2">
+                        <Label>Категория L2</Label>
+                        <Select
+                          value={cat2}
+                          onValueChange={(v) => {
+                            setCat2(v);
+                            const first3 = (CATEGORY_L3[v] ?? [])[0] ?? "";
+                            setCat3(first3);
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {cat2Options.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
 
-                  <div className="grid gap-2">
-                    <Label>Категория L3</Label>
-                    <Select value={cat3} onValueChange={setCat3}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="—" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(cat3Options.length ? cat3Options : ["—"]).map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      <div className="grid gap-2">
+                        <Label>Категория L3</Label>
+                        <Select value={cat3} onValueChange={setCat3}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="—" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(cat3Options.length ? cat3Options : ["—"]).map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  )}
 
                   <div className="grid gap-2">
                     <Label>Тип транзакции</Label>
@@ -516,11 +531,7 @@ export default function TransactionsPage() {
                   </div>
 
                   <div className="flex justify-end gap-2 pt-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsOpen(false)}
-                    >
+                    <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
                       Отмена
                     </Button>
                     <Button
@@ -545,36 +556,18 @@ export default function TransactionsPage() {
                   <TableHead className="font-medium text-muted-foreground">
                     Дата транзакции
                   </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Актив
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Сумма
-                  </TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Актив</TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Сумма</TableHead>
                   <TableHead className="font-medium text-muted-foreground">
                     Корреспондирующий актив
                   </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Характер
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Категория L1
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Категория L2
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Категория L3
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Тип
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Описание
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
-                    Комментарий
-                  </TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Характер</TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Категория L1</TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Категория L2</TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Категория L3</TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Тип</TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Описание</TableHead>
+                  <TableHead className="font-medium text-muted-foreground">Комментарий</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -582,7 +575,7 @@ export default function TransactionsPage() {
               <TableBody>
                 {txs.map((tx) => {
                   const isExpense = tx.direction === "EXPENSE";
-                  const isTransfer = tx.direction === "TRANSFER";
+                  const isTxTransfer = tx.direction === "TRANSFER";
 
                   const amountText = isExpense
                     ? `-${formatRub(tx.amount_rub)}`
@@ -608,22 +601,18 @@ export default function TransactionsPage() {
                       </TableCell>
 
                       <TableCell className="min-w-[220px]">
-                        {isTransfer ? (
-                          <div className="font-medium">
-                            {itemName(tx.counterparty_item_id)}
-                          </div>
+                        {isTxTransfer ? (
+                          <div className="font-medium">{itemName(tx.counterparty_item_id)}</div>
                         ) : (
                           "—"
                         )}
                       </TableCell>
 
-                      <TableCell className="whitespace-nowrap">
-                        {formatDirection(tx.direction)}
-                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{formatDirection(tx.direction)}</TableCell>
 
-                      <TableCell className="whitespace-nowrap">{tx.category_l1}</TableCell>
-                      <TableCell className="whitespace-nowrap">{tx.category_l2}</TableCell>
-                      <TableCell className="whitespace-nowrap">{tx.category_l3}</TableCell>
+                      <TableCell className="whitespace-nowrap">{tx.category_l1 || "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap">{tx.category_l2 || "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap">{tx.category_l3 || "—"}</TableCell>
 
                       <TableCell className="whitespace-nowrap">
                         {formatTxType(tx.transaction_type)}
@@ -631,6 +620,7 @@ export default function TransactionsPage() {
 
                       <TableCell className="min-w-[260px]">{tx.description || "—"}</TableCell>
                       <TableCell className="min-w-[260px]">{tx.comment || "—"}</TableCell>
+
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -654,36 +644,8 @@ export default function TransactionsPage() {
 
                 {txs.length === 0 && (
                   <TableRow>
-                    <TableCell
-                      colSpan={11}
-                      className="h-24 text-center text-muted-foreground"
-                    >
+                    <TableCell colSpan={12} className="h-24 text-center text-muted-foreground">
                       Пока нет записей
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            className="text-red-600"
-                            onClick={async () => {
-                              if (!confirm("Удалить транзакцию? Балансы будут пересчитаны.")) return;
-                              try {
-                                await deleteTransaction(tx.id);
-                                await loadAll();
-                              } catch (e: any) {
-                                setError(e?.message ?? "Ошибка удаления");
-                              }
-                            }}
-                          >
-                            Удалить
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 )}
@@ -694,6 +656,8 @@ export default function TransactionsPage() {
           {error && <div className="mt-4 text-sm text-red-600">Ошибка: {error}</div>}
         </CardContent>
       </Card>
+
+      {/* AlertDialog удаления */}
       <AlertDialog
         open={!!txToDelete}
         onOpenChange={(open) => {
@@ -702,22 +666,16 @@ export default function TransactionsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              Удалить транзакцию?
-            </AlertDialogTitle>
+            <AlertDialogTitle>Удалить транзакцию?</AlertDialogTitle>
             <AlertDialogDescription>
               Транзакция будет удалена, а балансы активов пересчитаны.
               <br />
-              <span className="font-medium text-foreground">
-                Это действие нельзя отменить.
-              </span>
+              <span className="font-medium text-foreground">Это действие нельзя отменить.</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              Отмена
-            </AlertDialogCancel>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
 
             <AlertDialogAction
               className="bg-red-600 hover:bg-red-700 text-white"

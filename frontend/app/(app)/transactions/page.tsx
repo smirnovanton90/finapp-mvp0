@@ -61,6 +61,7 @@ import {
   TransactionOut,
 } from "@/lib/api";
 
+
 /* ------------ категории (временные справочники) ------------ */
 
 const CATEGORY_L1 = ["Питание", "Транспорт", "Услуги"];
@@ -160,7 +161,7 @@ function normalizeRubOnBlur(value: string): string {
 /* ------------ page ------------ */
 
 export default function TransactionsPage() {
-  const { data: session, status } = useSession();
+  const { data: session } = useSession();
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
@@ -235,25 +236,6 @@ export default function TransactionsPage() {
   useEffect(() => {
     if (session) loadAll();
   }, [session]);
-
-  if (status === "loading") {
-    return <main className="p-8">Загрузка…</main>;
-  }
-
-  if (!session) {
-    return (
-      <main className="min-h-screen bg-muted/40 px-8 py-8">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">ТРАНЗАКЦИИ</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Чтобы смотреть транзакции — войдите в аккаунт.
-          </CardContent>
-        </Card>
-      </main>
-    );
-  }
 
   return (
     <main className="min-h-screen bg-muted/40 px-8 py-8">

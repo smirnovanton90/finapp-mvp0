@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 
 import { useEffect, useMemo, useState } from "react";
-import { signIn, signOut, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 
 import {
   Table,
@@ -53,6 +53,7 @@ import {
   ItemKind,
   ItemOut,
 } from "@/lib/api";
+
 
 /* ------------------ справочники ------------------ */
 
@@ -91,7 +92,7 @@ function formatRub(valueInCents: number) {
 /* ------------------ страница ------------------ */
 
 export default function Page() {
-  const { data: session, status } = useSession();
+  const { data: session } = useSession();
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [loading, setLoading] = useState(false);
@@ -276,29 +277,6 @@ export default function Page() {
     } finally {
       setLoading(false);
     }
-  }
-
-  /* ------------------ auth экраны ------------------ */
-
-  if (status === "loading") {
-    return <main className="p-8">Загрузка…</main>;
-  }
-
-  if (!session) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-muted/40">
-        <Card className="w-[360px]">
-          <CardHeader>
-            <CardTitle>FinApp</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Button className="w-full" onClick={() => signIn("google")}>
-              Войти через Google
-            </Button>
-          </CardContent>
-        </Card>
-      </main>
-    );
   }
 
   /* ------------------ основной UI ------------------ */

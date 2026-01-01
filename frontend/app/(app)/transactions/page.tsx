@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { MoreHorizontal, Plus } from "lucide-react";
 
@@ -232,7 +232,9 @@ export default function TransactionsPage() {
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
 
-  const [txToDelete, setTxToDelete] = useState<TransactionOut | null>(null);
+  const [selectedTxIds, setSelectedTxIds] = useState<Set<number>>(() => new Set());
+  const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [actualCat1Filter, setActualCat1Filter] = useState<string>(ALL_VALUE);
   const [actualCat2Filter, setActualCat2Filter] = useState<string>(ALL_VALUE);
@@ -251,6 +253,9 @@ export default function TransactionsPage() {
   const cat3Options = useMemo(() => CATEGORY_L3[cat2] ?? [], [cat2]);
 
   const itemsById = useMemo(() => new Map(items.map((x) => [x.id, x])), [items]);
+  const selectedCount = selectedTxIds.size;
+  const deleteCount = deleteIds?.length ?? 0;
+  const isBulkDelete = deleteCount > 1;
 
   // Разделяем транзакции по типам
   const actualTxs = useMemo(
@@ -377,6 +382,23 @@ export default function TransactionsPage() {
     if (session) loadAll();
   }, [session]);
 
+  useEffect(() => {
+    setSelectedTxIds((prev) => {
+      if (prev.size === 0) return prev;
+      const availableIds = new Set(txs.map((tx) => tx.id));
+      let changed = false;
+      const next = new Set<number>();
+      prev.forEach((id) => {
+        if (availableIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [txs]);
+
   const buildCat2Options = (
     cat1Filter: string,
     options: CategoryOptions
@@ -407,6 +429,37 @@ export default function TransactionsPage() {
     }
 
     return Array.from(merged).sort();
+  };
+
+  const toggleTxSelection = (id: number, checked: boolean) => {
+    setSelectedTxIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllSelection = (ids: number[], checked: boolean) => {
+    setSelectedTxIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => {
+        if (checked) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const openDeleteDialog = (ids: number[]) => {
+    if (ids.length === 0) return;
+    setDeleteIds(ids);
   };
 
   function CategoryFilters({
@@ -515,15 +568,53 @@ export default function TransactionsPage() {
   function TransactionsTable({
     transactions,
     totalAmount,
+    selectedIds,
+    onToggleSelection,
+    onToggleAll,
+    isDeleting,
   }: {
     transactions: TransactionOut[];
     totalAmount: number;
+    selectedIds: Set<number>;
+    onToggleSelection: (id: number, checked: boolean) => void;
+    onToggleAll: (ids: number[], checked: boolean) => void;
+    isDeleting: boolean;
   }) {
+    const selectAllRef = useRef<HTMLInputElement | null>(null);
+    const transactionIds = transactions.map((tx) => tx.id);
+    const selectedVisibleCount = transactionIds.reduce(
+      (count, id) => count + (selectedIds.has(id) ? 1 : 0),
+      0
+    );
+    const allSelected =
+      transactionIds.length > 0 && selectedVisibleCount === transactionIds.length;
+    const someSelected = selectedVisibleCount > 0 && !allSelected;
+
+    useEffect(() => {
+      if (selectAllRef.current) {
+        selectAllRef.current.indeterminate = someSelected;
+      }
+    }, [someSelected]);
+
     return (
       <div className="w-full overflow-hidden">
         <Table>
           <TableHeader className="bg-muted/40">
             <TableRow>
+              <TableHead className="w-[160px] min-w-[140px]">
+                <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className="h-4 w-4 accent-violet-600"
+                    checked={allSelected}
+                    onChange={(e) => onToggleAll(transactionIds, e.target.checked)}
+                    disabled={transactionIds.length === 0 || isDeleting}
+                    aria-label="Выделить все"
+                  />
+                  <span>Выделить все</span>
+                </label>
+              </TableHead>
               <TableHead className="font-medium text-muted-foreground w-[100px] min-w-[100px]">
                 Дата
               </TableHead>
@@ -543,6 +634,7 @@ export default function TransactionsPage() {
             {transactions.map((tx) => {
               const isExpense = tx.direction === "EXPENSE";
               const isTxTransfer = tx.direction === "TRANSFER";
+              const isSelected = selectedIds.has(tx.id);
 
               const amountText = isExpense
                 ? `-${formatRub(tx.amount_rub)}`
@@ -555,7 +647,21 @@ export default function TransactionsPage() {
                 "bg-violet-50 hover:!bg-violet-100";
 
               return (
-                <TableRow key={tx.id} className={rowBgClass}>
+                <TableRow
+                  key={tx.id}
+                  className={rowBgClass}
+                  data-state={isSelected ? "selected" : undefined}
+                >
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-violet-600"
+                      checked={isSelected}
+                      onChange={(e) => onToggleSelection(tx.id, e.target.checked)}
+                      disabled={isDeleting}
+                      aria-label={`Выделить транзакцию ${tx.id}`}
+                    />
+                  </TableCell>
                   <TableCell className="whitespace-nowrap text-xs">
                     <div>{new Date(tx.transaction_date).toLocaleDateString("ru-RU")}</div>
                     <div className="text-xs text-muted-foreground">
@@ -627,7 +733,7 @@ export default function TransactionsPage() {
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem
                           className="text-red-600"
-                          onClick={() => setTxToDelete(tx)}
+                          onClick={() => openDeleteDialog([tx.id])}
                         >
                           Удалить
                         </DropdownMenuItem>
@@ -640,7 +746,7 @@ export default function TransactionsPage() {
 
             {transactions.length > 0 && (
               <TableRow className="bg-muted/60 font-semibold">
-                <TableCell colSpan={2}>Итого</TableCell>
+                <TableCell colSpan={3}>Итого</TableCell>
                 <TableCell
                   className={[
                     "text-right font-semibold tabular-nums whitespace-nowrap",
@@ -657,7 +763,7 @@ export default function TransactionsPage() {
 
             {transactions.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
                   Пока нет записей
                 </TableCell>
               </TableRow>
@@ -670,7 +776,16 @@ export default function TransactionsPage() {
 
   return (
     <main className="min-h-screen bg-muted/40 px-8 py-8 overflow-x-hidden">
-      <div className="mb-6 flex justify-end">
+      <div className="mb-6 flex items-center justify-end gap-2">
+        {selectedCount > 0 && (
+          <Button
+            className="bg-red-600 hover:bg-red-700 text-white"
+            onClick={() => openDeleteDialog(Array.from(selectedTxIds))}
+            disabled={isDeleting}
+          >
+            Удалить ({selectedCount})
+          </Button>
+        )}
         <Dialog
           open={isOpen}
           onOpenChange={(open) => {
@@ -1021,6 +1136,10 @@ export default function TransactionsPage() {
             <TransactionsTable
               transactions={actualFilteredTxs}
               totalAmount={actualTotalAmount}
+              selectedIds={selectedTxIds}
+              onToggleSelection={toggleTxSelection}
+              onToggleAll={toggleAllSelection}
+              isDeleting={isDeleting}
             />
           </CardContent>
         </Card>
@@ -1043,6 +1162,10 @@ export default function TransactionsPage() {
             <TransactionsTable
               transactions={plannedFilteredTxs}
               totalAmount={plannedTotalAmount}
+              selectedIds={selectedTxIds}
+              onToggleSelection={toggleTxSelection}
+              onToggleAll={toggleAllSelection}
+              isDeleting={isDeleting}
             />
           </CardContent>
         </Card>
@@ -1052,18 +1175,35 @@ export default function TransactionsPage() {
 
       {/* AlertDialog удаления */}
       <AlertDialog
-        open={!!txToDelete}
+        open={deleteCount > 0}
         onOpenChange={(open) => {
-          if (!open) setTxToDelete(null);
+          if (!open) setDeleteIds(null);
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Удалить транзакцию?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isBulkDelete ? "Удалить выбранные транзакции?" : "Удалить транзакцию?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Транзакция будет удалена, а балансы активов пересчитаны.
-              <br />
-              <span className="font-medium text-foreground">Это действие нельзя отменить.</span>
+              {isBulkDelete ? (
+                <>
+                  Будут удалены транзакции: {deleteCount}. Балансы активов будут
+                  пересчитаны.
+                  <br />
+                  <span className="font-medium text-foreground">
+                    Это действие нельзя отменить.
+                  </span>
+                </>
+              ) : (
+                <>
+                  Транзакция будет удалена, а балансы активов пересчитаны.
+                  <br />
+                  <span className="font-medium text-foreground">
+                    Это действие нельзя отменить.
+                  </span>
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -1072,15 +1212,26 @@ export default function TransactionsPage() {
 
             <AlertDialogAction
               className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={isDeleting}
               onClick={async () => {
-                if (!txToDelete) return;
+                if (!deleteIds || deleteIds.length === 0) return;
+                const idsToDelete = deleteIds;
+                setIsDeleting(true);
                 try {
-                  await deleteTransaction(txToDelete.id);
-                  setTxToDelete(null);
+                  await Promise.all(idsToDelete.map((id) => deleteTransaction(id)));
+                  setSelectedTxIds((prev) => {
+                    if (prev.size === 0) return prev;
+                    const next = new Set(prev);
+                    idsToDelete.forEach((id) => next.delete(id));
+                    return next;
+                  });
+                  setDeleteIds(null);
                   await loadAll();
                 } catch (e: any) {
                   setError(e?.message ?? "Ошибка удаления");
-                  setTxToDelete(null);
+                  setDeleteIds(null);
+                } finally {
+                  setIsDeleting(false);
                 }
               }}
             >

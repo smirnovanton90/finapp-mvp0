@@ -748,25 +748,27 @@ export default function TransactionsPage() {
                   )}
                   <div className="grid gap-2">
                     <Label>Тип транзакции</Label>
-                    <div className="flex gap-2">
+                    <div className="inline-flex w-full items-stretch rounded-md border border-input bg-muted/60 p-0.5 overflow-hidden">
                       <button
                         type="button"
+                        aria-pressed={txType === "ACTUAL"}
                         onClick={() => setTxType("ACTUAL")}
-                        className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
                           txType === "ACTUAL"
-                            ? "bg-violet-100 text-violet-700 border-violet-200"
-                            : "bg-white text-muted-foreground border-input hover:bg-muted"
+                            ? "bg-violet-100 text-violet-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
                         }`}
                       >
                         Фактическая
                       </button>
                       <button
                         type="button"
+                        aria-pressed={txType === "PLANNED"}
                         onClick={() => setTxType("PLANNED")}
-                        className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
                           txType === "PLANNED"
-                            ? "bg-violet-100 text-violet-700 border-violet-200"
-                            : "bg-white text-muted-foreground border-input hover:bg-muted"
+                            ? "bg-violet-100 text-violet-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
                         }`}
                       >
                         Плановая

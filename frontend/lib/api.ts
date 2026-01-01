@@ -110,6 +110,12 @@ export async function fetchTransactions(): Promise<TransactionOut[]> {
   return res.json();
 }
 
+export async function fetchDeletedTransactions(): Promise<TransactionOut[]> {
+  const res = await authFetch(`${API_BASE}/transactions/deleted`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function createTransaction(
   payload: TransactionCreate
 ): Promise<TransactionOut> {

@@ -26,6 +26,20 @@ def list_transactions(
     )
 
 
+@router.get("/deleted", response_model=list[TransactionOut])
+def list_deleted_transactions(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return (
+        db.query(Transaction)
+        .filter(Transaction.user_id == user.id)
+        .filter(Transaction.deleted_at.isnot(None))
+        .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        .all()
+    )
+
+
 @router.post("", response_model=TransactionOut)
 @router.post("", response_model=TransactionOut)
 def create_transaction(

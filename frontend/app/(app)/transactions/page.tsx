@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
@@ -55,6 +55,7 @@ import {
 import {
   fetchItems,
   fetchTransactions,
+  fetchDeletedTransactions,
   createTransaction,
   deleteTransaction,
   ItemOut,
@@ -67,16 +68,16 @@ import {
 const CATEGORY_L1 = ["Питание", "Транспорт", "Услуги"];
 
 const CATEGORY_L2: Record<string, string[]> = {
-  Питание: ["Продукты", "Кафе", "Доставка"],
-  Транспорт: ["Такси", "Метро", "Бензин"],
-  Услуги: ["Связь", "Подписки", "Прочее"],
+  "Питание": ["Продукты", "Кафе", "Доставка"],
+  "Транспорт": ["Такси", "Метро", "Бензин"],
+  "Услуги": ["Связь", "Подписки", "Прочее"],
 };
 
 const CATEGORY_L3: Record<string, string[]> = {
-  Продукты: ["Супермаркет", "Рынок"],
-  Кафе: ["Кофе", "Ресторан"],
-  Такси: ["Яндекс", "Uber"],
-  Связь: ["Мобильная", "Интернет"],
+  "Продукты": ["Супермаркет", "Рынок"],
+  "Кафе": ["Кофе", "Ресторан"],
+  "Такси": ["Яндекс", "Uber"],
+  "Связь": ["Мобильная", "Интернет"],
 };
 
 /* ------------ helpers ------------ */
@@ -211,6 +212,10 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+  const [deletedError, setDeletedError] = useState<string | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const [isOpen, setIsOpen] = useState(false);
 
@@ -246,6 +251,18 @@ export default function TransactionsPage() {
   const [plannedCat1Filter, setPlannedCat1Filter] = useState<string>(ALL_VALUE);
   const [plannedCat2Filter, setPlannedCat2Filter] = useState<string>(ALL_VALUE);
   const [plannedCat3Filter, setPlannedCat3Filter] = useState<string>(ALL_VALUE);
+  const [deletedActualCat1Filter, setDeletedActualCat1Filter] =
+    useState<string>(ALL_VALUE);
+  const [deletedActualCat2Filter, setDeletedActualCat2Filter] =
+    useState<string>(ALL_VALUE);
+  const [deletedActualCat3Filter, setDeletedActualCat3Filter] =
+    useState<string>(ALL_VALUE);
+  const [deletedPlannedCat1Filter, setDeletedPlannedCat1Filter] =
+    useState<string>(ALL_VALUE);
+  const [deletedPlannedCat2Filter, setDeletedPlannedCat2Filter] =
+    useState<string>(ALL_VALUE);
+  const [deletedPlannedCat3Filter, setDeletedPlannedCat3Filter] =
+    useState<string>(ALL_VALUE);
 
   const isTransfer = direction === "TRANSFER";
 
@@ -268,6 +285,16 @@ export default function TransactionsPage() {
     [txs]
   );
 
+  const deletedActualTxs = useMemo(
+    () => deletedTxs.filter((tx) => tx.transaction_type === "ACTUAL"),
+    [deletedTxs]
+  );
+
+  const deletedPlannedTxs = useMemo(
+    () => deletedTxs.filter((tx) => tx.transaction_type === "PLANNED"),
+    [deletedTxs]
+  );
+
   // Итоги для фактических транзакций
   const actualCategoryOptions = useMemo(
     () => buildCategoryOptions(actualTxs),
@@ -277,6 +304,16 @@ export default function TransactionsPage() {
   const plannedCategoryOptions = useMemo(
     () => buildCategoryOptions(plannedTxs),
     [plannedTxs]
+  );
+
+  const deletedActualCategoryOptions = useMemo(
+    () => buildCategoryOptions(deletedActualTxs),
+    [deletedActualTxs]
+  );
+
+  const deletedPlannedCategoryOptions = useMemo(
+    () => buildCategoryOptions(deletedPlannedTxs),
+    [deletedPlannedTxs]
   );
 
   const actualFilteredTxs = useMemo(() => {
@@ -315,6 +352,70 @@ export default function TransactionsPage() {
     });
   }, [plannedCat1Filter, plannedCat2Filter, plannedCat3Filter, plannedTxs]);
 
+  const deletedActualFilteredTxs = useMemo(() => {
+    return deletedActualTxs.filter((tx) => {
+      if (
+        deletedActualCat1Filter !== ALL_VALUE &&
+        tx.category_l1 !== deletedActualCat1Filter
+      ) {
+        return false;
+      }
+
+      if (
+        deletedActualCat2Filter !== ALL_VALUE &&
+        tx.category_l2 !== deletedActualCat2Filter
+      ) {
+        return false;
+      }
+
+      if (
+        deletedActualCat3Filter !== ALL_VALUE &&
+        tx.category_l3 !== deletedActualCat3Filter
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    deletedActualCat1Filter,
+    deletedActualCat2Filter,
+    deletedActualCat3Filter,
+    deletedActualTxs,
+  ]);
+
+  const deletedPlannedFilteredTxs = useMemo(() => {
+    return deletedPlannedTxs.filter((tx) => {
+      if (
+        deletedPlannedCat1Filter !== ALL_VALUE &&
+        tx.category_l1 !== deletedPlannedCat1Filter
+      ) {
+        return false;
+      }
+
+      if (
+        deletedPlannedCat2Filter !== ALL_VALUE &&
+        tx.category_l2 !== deletedPlannedCat2Filter
+      ) {
+        return false;
+      }
+
+      if (
+        deletedPlannedCat3Filter !== ALL_VALUE &&
+        tx.category_l3 !== deletedPlannedCat3Filter
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    deletedPlannedCat1Filter,
+    deletedPlannedCat2Filter,
+    deletedPlannedCat3Filter,
+    deletedPlannedTxs,
+  ]);
+
   const actualTotalAmount = useMemo(() => {
     return actualFilteredTxs.reduce((sum, tx) => {
       if (tx.direction === "EXPENSE") {
@@ -341,6 +442,32 @@ export default function TransactionsPage() {
       return sum;
     }, 0);
   }, [plannedFilteredTxs]);
+
+  const deletedActualTotalAmount = useMemo(() => {
+    return deletedActualFilteredTxs.reduce((sum, tx) => {
+      if (tx.direction === "EXPENSE") {
+        return sum - tx.amount_rub;
+      } else if (tx.direction === "INCOME") {
+        return sum + tx.amount_rub;
+      } else if (tx.direction === "TRANSFER") {
+        return sum + tx.amount_rub;
+      }
+      return sum;
+    }, 0);
+  }, [deletedActualFilteredTxs]);
+
+  const deletedPlannedTotalAmount = useMemo(() => {
+    return deletedPlannedFilteredTxs.reduce((sum, tx) => {
+      if (tx.direction === "EXPENSE") {
+        return sum - tx.amount_rub;
+      } else if (tx.direction === "INCOME") {
+        return sum + tx.amount_rub;
+      } else if (tx.direction === "TRANSFER") {
+        return sum + tx.amount_rub;
+      }
+      return sum;
+    }, 0);
+  }, [deletedPlannedFilteredTxs]);
 
   function itemName(id: number | null | undefined) {
     if (!id) return "—";
@@ -375,6 +502,19 @@ export default function TransactionsPage() {
       setError(e?.message ?? "Ошибка загрузки");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadDeleted() {
+    setDeletedLoading(true);
+    setDeletedError(null);
+    try {
+      const deletedData = await fetchDeletedTransactions();
+      setDeletedTxs(deletedData);
+    } catch (e: any) {
+      setDeletedError(e?.message ?? "Не удалось загрузить удаленные транзакции");
+    } finally {
+      setDeletedLoading(false);
     }
   }
 
@@ -460,6 +600,14 @@ export default function TransactionsPage() {
   const openDeleteDialog = (ids: number[]) => {
     if (ids.length === 0) return;
     setDeleteIds(ids);
+  };
+
+  const handleToggleDeleted = () => {
+    const next = !showDeleted;
+    setShowDeleted(next);
+    if (next && !deletedLoading) {
+      loadDeleted();
+    }
   };
 
   function CategoryFilters({
@@ -572,49 +720,69 @@ export default function TransactionsPage() {
     onToggleSelection,
     onToggleAll,
     isDeleting,
+    readOnly = false,
   }: {
     transactions: TransactionOut[];
     totalAmount: number;
-    selectedIds: Set<number>;
-    onToggleSelection: (id: number, checked: boolean) => void;
-    onToggleAll: (ids: number[], checked: boolean) => void;
-    isDeleting: boolean;
+    selectedIds?: Set<number>;
+    onToggleSelection?: (id: number, checked: boolean) => void;
+    onToggleAll?: (ids: number[], checked: boolean) => void;
+    isDeleting?: boolean;
+    readOnly?: boolean;
   }) {
     const selectAllRef = useRef<HTMLInputElement | null>(null);
+    const selectionEnabled = !readOnly;
+    const safeSelectedIds = selectedIds ?? new Set<number>();
+    const noopToggleSelection = (_id: number, _checked: boolean) => {};
+    const noopToggleAll = (_ids: number[], _checked: boolean) => {};
+    const safeOnToggleSelection = onToggleSelection ?? noopToggleSelection;
+    const safeOnToggleAll = onToggleAll ?? noopToggleAll;
+    const safeIsDeleting = isDeleting ?? false;
     const transactionIds = transactions.map((tx) => tx.id);
-    const selectedVisibleCount = transactionIds.reduce(
-      (count, id) => count + (selectedIds.has(id) ? 1 : 0),
-      0
-    );
+    const selectedVisibleCount = selectionEnabled
+      ? transactionIds.reduce(
+          (count, id) => count + (safeSelectedIds.has(id) ? 1 : 0),
+          0
+        )
+      : 0;
     const allSelected =
-      transactionIds.length > 0 && selectedVisibleCount === transactionIds.length;
-    const someSelected = selectedVisibleCount > 0 && !allSelected;
+      selectionEnabled &&
+      transactionIds.length > 0 &&
+      selectedVisibleCount === transactionIds.length;
+    const someSelected =
+      selectionEnabled && selectedVisibleCount > 0 && !allSelected;
+    const totalLabelSpan = selectionEnabled ? 3 : 2;
+    const totalTailSpan = selectionEnabled ? 5 : 4;
+    const emptyColSpan = selectionEnabled ? 9 : 7;
 
     useEffect(() => {
+      if (!selectionEnabled) return;
       if (selectAllRef.current) {
         selectAllRef.current.indeterminate = someSelected;
       }
-    }, [someSelected]);
+    }, [selectionEnabled, someSelected]);
 
     return (
       <div className="w-full overflow-hidden">
         <Table>
           <TableHeader className="bg-muted/40">
             <TableRow>
-              <TableHead className="w-[160px] min-w-[140px]">
+              {selectionEnabled && (
+                <TableHead className="w-[160px] min-w-[140px]">
                 <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                   <input
                     ref={selectAllRef}
                     type="checkbox"
                     className="h-4 w-4 accent-violet-600"
                     checked={allSelected}
-                    onChange={(e) => onToggleAll(transactionIds, e.target.checked)}
-                    disabled={transactionIds.length === 0 || isDeleting}
+                    onChange={(e) => safeOnToggleAll(transactionIds, e.target.checked)}
+                    disabled={transactionIds.length === 0 || safeIsDeleting}
                     aria-label="Выделить все"
                   />
                   <span>Выделить все</span>
                 </label>
               </TableHead>
+              )}
               <TableHead className="font-medium text-muted-foreground w-[100px] min-w-[100px]">
                 Дата
               </TableHead>
@@ -626,7 +794,9 @@ export default function TransactionsPage() {
               <TableHead className="font-medium text-muted-foreground w-[120px] min-w-[100px]">Категория</TableHead>
               <TableHead className="font-medium text-muted-foreground min-w-0">Описание</TableHead>
               <TableHead className="font-medium text-muted-foreground min-w-0">Комментарий</TableHead>
-              <TableHead className="w-[50px] min-w-[50px]" />
+              {selectionEnabled && (
+                <TableHead className="w-[50px] min-w-[50px]" />
+              )}
             </TableRow>
           </TableHeader>
 
@@ -634,7 +804,7 @@ export default function TransactionsPage() {
             {transactions.map((tx) => {
               const isExpense = tx.direction === "EXPENSE";
               const isTxTransfer = tx.direction === "TRANSFER";
-              const isSelected = selectedIds.has(tx.id);
+              const isSelected = selectionEnabled && safeSelectedIds.has(tx.id);
 
               const amountText = isExpense
                 ? `-${formatRub(tx.amount_rub)}`
@@ -652,16 +822,18 @@ export default function TransactionsPage() {
                   className={rowBgClass}
                   data-state={isSelected ? "selected" : undefined}
                 >
-                  <TableCell>
+                  {selectionEnabled && (
+                    <TableCell>
                     <input
                       type="checkbox"
                       className="h-4 w-4 accent-violet-600"
                       checked={isSelected}
-                      onChange={(e) => onToggleSelection(tx.id, e.target.checked)}
-                      disabled={isDeleting}
+                      onChange={(e) => safeOnToggleSelection(tx.id, e.target.checked)}
+                      disabled={safeIsDeleting}
                       aria-label={`Выделить транзакцию ${tx.id}`}
                     />
                   </TableCell>
+                  )}
                   <TableCell className="whitespace-nowrap text-xs">
                     <div>{new Date(tx.transaction_date).toLocaleDateString("ru-RU")}</div>
                     <div className="text-xs text-muted-foreground">
@@ -723,7 +895,8 @@ export default function TransactionsPage() {
                     </div>
                   </TableCell>
 
-                  <TableCell className="text-right">
+                  {selectionEnabled && (
+                    <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon">
@@ -740,13 +913,14 @@ export default function TransactionsPage() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
+                  )}
                 </TableRow>
               );
             })}
 
             {transactions.length > 0 && (
               <TableRow className="bg-muted/60 font-semibold">
-                <TableCell colSpan={3}>Итого</TableCell>
+                <TableCell colSpan={totalLabelSpan}>Итого</TableCell>
                 <TableCell
                   className={[
                     "text-right font-semibold tabular-nums whitespace-nowrap",
@@ -757,13 +931,13 @@ export default function TransactionsPage() {
                     ? `-${formatRub(Math.abs(totalAmount))}`
                     : formatRub(totalAmount)}
                 </TableCell>
-                <TableCell colSpan={5} />
+                <TableCell colSpan={totalTailSpan} />
               </TableRow>
             )}
 
             {transactions.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={emptyColSpan} className="h-24 text-center text-muted-foreground">
                   Пока нет записей
                 </TableCell>
               </TableRow>
@@ -786,6 +960,9 @@ export default function TransactionsPage() {
             Удалить ({selectedCount})
           </Button>
         )}
+        <Button variant="outline" onClick={handleToggleDeleted}>
+          {showDeleted ? "Скрыть удаленные транзакции" : "Показать удаленные транзакции"}
+        </Button>
         <Dialog
           open={isOpen}
           onOpenChange={(open) => {
@@ -1169,8 +1346,60 @@ export default function TransactionsPage() {
             />
           </CardContent>
         </Card>
-      </div>
 
+        {showDeleted && (
+          <>
+            <Card>
+              <CardHeader>
+                <CategoryFilters
+                  title="Удаленные фактические транзакции"
+                  cat1Filter={deletedActualCat1Filter}
+                  cat2Filter={deletedActualCat2Filter}
+                  cat3Filter={deletedActualCat3Filter}
+                  onCat1Change={setDeletedActualCat1Filter}
+                  onCat2Change={setDeletedActualCat2Filter}
+                  onCat3Change={setDeletedActualCat3Filter}
+                  options={deletedActualCategoryOptions}
+                />
+              </CardHeader>
+              <CardContent className="overflow-hidden">
+                <TransactionsTable
+                  transactions={deletedActualFilteredTxs}
+                  totalAmount={deletedActualTotalAmount}
+                  readOnly
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CategoryFilters
+                  title="Удаленные плановые транзакции"
+                  cat1Filter={deletedPlannedCat1Filter}
+                  cat2Filter={deletedPlannedCat2Filter}
+                  cat3Filter={deletedPlannedCat3Filter}
+                  onCat1Change={setDeletedPlannedCat1Filter}
+                  onCat2Change={setDeletedPlannedCat2Filter}
+                  onCat3Change={setDeletedPlannedCat3Filter}
+                  options={deletedPlannedCategoryOptions}
+                />
+              </CardHeader>
+              <CardContent className="overflow-hidden">
+                <TransactionsTable
+                  transactions={deletedPlannedFilteredTxs}
+                  totalAmount={deletedPlannedTotalAmount}
+                  readOnly
+                />
+              </CardContent>
+            </Card>
+          </>
+        )}
+      </div>
+      {showDeleted && deletedError && (
+        <div className="mt-4 text-sm text-red-600">
+          Ошибка загрузки удаленных транзакций: {deletedError}
+        </div>
+      )}
       {error && <div className="mt-4 text-sm text-red-600">Ошибка: {error}</div>}
 
       {/* AlertDialog удаления */}
@@ -1227,6 +1456,9 @@ export default function TransactionsPage() {
                   });
                   setDeleteIds(null);
                   await loadAll();
+                  if (showDeleted) {
+                    await loadDeleted();
+                  }
                 } catch (e: any) {
                   setError(e?.message ?? "Ошибка удаления");
                   setDeleteIds(null);
@@ -1243,3 +1475,4 @@ export default function TransactionsPage() {
     </main>
   );
 }
+

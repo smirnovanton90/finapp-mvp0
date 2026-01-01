@@ -77,7 +77,22 @@ export type TransactionCreate = {
   comment?: string | null;
 };
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
+const inferredBase = (() => {
+  if (typeof window === "undefined") return "";
+
+  // When running the Next.js dev server on :3000, the FastAPI backend is
+  // expected to be on :8000. Fallback to that to avoid hitting the Next.js
+  // HTML pages (which causes the "Unexpected token '<'" JSON parse error).
+  if (window.location.port === "3000") {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+
+  // Otherwise, prefer same-origin absolute URL (helps when the app is
+  // reverse-proxied and the API is available on the same host).
+  return `${window.location.origin}`;
+})();
+
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? inferredBase).replace(/\/$/, "");
 
 function apiUrl(path: string) {
   if (!API_BASE) return path;

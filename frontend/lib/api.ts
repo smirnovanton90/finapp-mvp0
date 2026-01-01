@@ -77,7 +77,13 @@ export type TransactionCreate = {
   comment?: string | null;
 };
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
+
+function apiUrl(path: string) {
+  if (!API_BASE) return path;
+  if (path.startsWith("/")) return `${API_BASE}${path}`;
+  return `${API_BASE}/${path}`;
+}
 
 async function authFetch(input: RequestInfo, init?: RequestInit) {
   const session = await getSession();
@@ -93,13 +99,13 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
 }
 
 export async function fetchItems(): Promise<ItemOut[]> {
-  const res = await authFetch(`${API_BASE}/items`);
+  const res = await authFetch(apiUrl("/items"));
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
 export async function createItem(payload: ItemCreate): Promise<ItemOut> {
-  const res = await authFetch(`${API_BASE}/items`, {
+  const res = await authFetch(apiUrl("/items"), {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -108,7 +114,7 @@ export async function createItem(payload: ItemCreate): Promise<ItemOut> {
 }
 
 export async function archiveItem(id: number): Promise<ItemOut> {
-    const res = await authFetch(`${API_BASE}/items/${id}/archive`, {
+    const res = await authFetch(apiUrl(`/items/${id}/archive`), {
       method: "PATCH",
     });
     if (!res.ok) throw new Error(await readError(res));
@@ -121,7 +127,7 @@ async function readError(res: Response) {
 }
 
 export async function fetchTransactions(): Promise<TransactionOut[]> {
-  const res = await authFetch(`${API_BASE}/transactions`);
+  const res = await authFetch(apiUrl("/transactions"));
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
@@ -129,7 +135,7 @@ export async function fetchTransactions(): Promise<TransactionOut[]> {
 export async function createTransaction(
   payload: TransactionCreate
 ): Promise<TransactionOut> {
-  const res = await authFetch(`${API_BASE}/transactions`, {
+  const res = await authFetch(apiUrl("/transactions"), {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -138,20 +144,20 @@ export async function createTransaction(
 }
 
 export async function deleteTransaction(id: number): Promise<void> {
-  const res = await authFetch(`${API_BASE}/transactions/${id}`, {
+  const res = await authFetch(apiUrl(`/transactions/${id}`), {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await readError(res));
 }
 
 export async function fetchCategories(): Promise<CategoryOut[]> {
-  const res = await authFetch(`${API_BASE}/categories`);
+  const res = await authFetch(apiUrl("/categories"));
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
 export async function createCategory(payload: CategoryCreate): Promise<CategoryOut> {
-  const res = await authFetch(`${API_BASE}/categories`, {
+  const res = await authFetch(apiUrl("/categories"), {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -160,7 +166,7 @@ export async function createCategory(payload: CategoryCreate): Promise<CategoryO
 }
 
 export async function deleteCategory(id: number): Promise<void> {
-  const res = await authFetch(`${API_BASE}/categories/${id}`, {
+  const res = await authFetch(apiUrl(`/categories/${id}`), {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await readError(res));

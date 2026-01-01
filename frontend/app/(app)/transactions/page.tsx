@@ -238,6 +238,9 @@ export default function TransactionsPage() {
   const [actualCat2Filter, setActualCat2Filter] = useState<string>(ALL_VALUE);
   const [actualCat3Filter, setActualCat3Filter] = useState<string>(ALL_VALUE);
 
+  const segmentedButtonBase =
+    "flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+
   const [plannedCat1Filter, setPlannedCat1Filter] = useState<string>(ALL_VALUE);
   const [plannedCat2Filter, setPlannedCat2Filter] = useState<string>(ALL_VALUE);
   const [plannedCat3Filter, setPlannedCat3Filter] = useState<string>(ALL_VALUE);
@@ -746,6 +749,93 @@ export default function TransactionsPage() {
                       {formError}
                     </div>
                   )}
+                  <div className="grid gap-2" role="group" aria-label="Тип транзакции">
+                    <div className="inline-flex w-full items-stretch rounded-md border border-input bg-muted/60 p-0.5 overflow-hidden">
+                      <button
+                        type="button"
+                        aria-pressed={txType === "ACTUAL"}
+                        onClick={() => setTxType("ACTUAL")}
+                        className={`${segmentedButtonBase} ${
+                          txType === "ACTUAL"
+                            ? "bg-violet-50 text-violet-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
+                        }`}
+                      >
+                        Фактическая
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={txType === "PLANNED"}
+                        onClick={() => setTxType("PLANNED")}
+                        className={`${segmentedButtonBase} ${
+                          txType === "PLANNED"
+                            ? "bg-violet-50 text-violet-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
+                        }`}
+                      >
+                        Плановая
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2" role="group" aria-label="Характер транзакции">
+                    <div className="inline-flex w-full items-stretch rounded-md border border-input bg-muted/60 p-0.5 overflow-hidden">
+                      <button
+                        type="button"
+                        aria-pressed={direction === "INCOME"}
+                        onClick={() => {
+                          setDirection("INCOME");
+                          setCounterpartyItemId(null);
+                          setCat1("Питание");
+                          setCat2("Продукты");
+                          setCat3("Супермаркет");
+                        }}
+                        className={`${segmentedButtonBase} ${
+                          direction === "INCOME"
+                            ? "bg-green-50 text-green-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
+                        }`}
+                      >
+                        Доход
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={direction === "EXPENSE"}
+                        onClick={() => {
+                          setDirection("EXPENSE");
+                          setCounterpartyItemId(null);
+                          setCat1("Питание");
+                          setCat2("Продукты");
+                          setCat3("Супермаркет");
+                        }}
+                        className={`${segmentedButtonBase} ${
+                          direction === "EXPENSE"
+                            ? "bg-red-50 text-red-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
+                        }`}
+                      >
+                        Расход
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={direction === "TRANSFER"}
+                        onClick={() => {
+                          setDirection("TRANSFER");
+                          setCounterpartyItemId(null);
+                          setCat1("");
+                          setCat2("");
+                          setCat3("");
+                        }}
+                        className={`${segmentedButtonBase} ${
+                          direction === "TRANSFER"
+                            ? "bg-violet-50 text-violet-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
+                        }`}
+                      >
+                        Перевод
+                      </button>
+                    </div>
+                  </div>
                   <div className="grid gap-2">
                     <Label>Дата транзакции</Label>
                     <Input
@@ -753,40 +843,6 @@ export default function TransactionsPage() {
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                     />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>Характер</Label>
-                    <Select
-                      value={direction}
-                      onValueChange={(v) => {
-                        const val = v as "INCOME" | "EXPENSE" | "TRANSFER";
-                        setDirection(val);
-
-                        if (val !== "TRANSFER") {
-                          setCounterpartyItemId(null);
-                        }
-
-                        if (val === "TRANSFER") {
-                          setCat1("");
-                          setCat2("");
-                          setCat3("");
-                        } else {
-                          setCat1("Питание");
-                          setCat2("Продукты");
-                          setCat3("Супермаркет");
-                        }
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="INCOME">Доход</SelectItem>
-                        <SelectItem value="EXPENSE">Расход</SelectItem>
-                        <SelectItem value="TRANSFER">Перевод</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
 
                   <div className="grid gap-2">
@@ -910,22 +966,6 @@ export default function TransactionsPage() {
                       </div>
                     </>
                   )}
-
-                  <div className="grid gap-2">
-                    <Label>Тип транзакции</Label>
-                    <Select
-                      value={txType}
-                      onValueChange={(v) => setTxType(v as "ACTUAL" | "PLANNED")}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ACTUAL">Фактическая</SelectItem>
-                        <SelectItem value="PLANNED">Плановая</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
 
                   <div className="grid gap-2">
                     <Label>Описание</Label>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Wallet, TrendingUp, Home, Package, AlertCircle, Calculator } from "lucide-react";
+import { Plus, Wallet, TrendingUp, Home, Package, AlertCircle, Calculator, Trash2 } from "lucide-react";
 
 import {
   Dialog,
@@ -37,14 +37,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-
-import { MoreHorizontal } from "lucide-react";
 
 import {
   fetchItems,
@@ -411,21 +403,15 @@ export default function Page() {
                       </TableCell>
 
                       <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              className="text-red-600"
-                              onClick={() => onArchive(it.id)}
-                            >
-                              Архивировать
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-muted-foreground hover:text-violet-600 hover:bg-transparent"
+                          onClick={() => onArchive(it.id)}
+                          aria-label="Архивировать"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );

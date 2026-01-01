@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Layers3, Plus, Trash } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { Layers3, Minus, Plus, Trash } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -26,11 +27,17 @@ export default function CategoriesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newLevel, setNewLevel] = useState<1 | 2 | 3>(1);
   const [newL1, setNewL1] = useState("");
   const [newL2Name, setNewL2Name] = useState("");
   const [newL2Parent, setNewL2Parent] = useState<number | null>(null);
   const [newL3Name, setNewL3Name] = useState("");
   const [newL3Parent, setNewL3Parent] = useState<number | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const [expandedL1, setExpandedL1] = useState<Set<number>>(new Set());
+  const [expandedL2, setExpandedL2] = useState<Set<number>>(new Set());
 
   async function loadCategories() {
     setLoading(true);
@@ -82,20 +89,6 @@ export default function CategoriesPage() {
     return map;
   }, [level3]);
 
-  async function handleCreate(
-    payload: Parameters<typeof createCategory>[0],
-    reset: () => void
-  ) {
-    setError(null);
-    try {
-      await createCategory(payload);
-      reset();
-      await loadCategories();
-    } catch (e: any) {
-      setError(e?.message ?? "Не удалось создать категорию");
-    }
-  }
-
   async function handleDelete(id: number) {
     if (!confirm("Удалить категорию и все вложенные?")) return;
     setError(null);
@@ -107,8 +100,158 @@ export default function CategoriesPage() {
     }
   }
 
+  useEffect(() => {
+    if (newLevel === 2 && !newL2Parent && level1[0]) {
+      setNewL2Parent(level1[0].id);
+    }
+    if (newLevel === 3 && !newL3Parent && level2[0]) {
+      setNewL3Parent(level2[0].id);
+    }
+  }, [level1, level2, newLevel, newL2Parent, newL3Parent]);
+
+  const segmentedButtonBase =
+    "flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+
+  function resetForm() {
+    setNewLevel(1);
+    setNewL1("");
+    setNewL2Name("");
+    setNewL3Name("");
+    setNewL2Parent(level1[0]?.id ?? null);
+    setNewL3Parent(level2[0]?.id ?? null);
+    setFormError(null);
+  }
+
+  async function onCreateSubmit(e: FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+
+    try {
+      if (newLevel === 1) {
+        if (!newL1.trim()) {
+          setFormError("Укажите название категории");
+          return;
+        }
+        await createCategory({ name: newL1.trim(), level: 1 });
+      } else if (newLevel === 2) {
+        if (!newL2Parent) {
+          setFormError("Выберите категорию первого уровня");
+          return;
+        }
+        if (!newL2Name.trim()) {
+          setFormError("Укажите название категории");
+          return;
+        }
+        await createCategory({ name: newL2Name.trim(), level: 2, parent_id: newL2Parent });
+      } else {
+        if (!newL3Parent) {
+          setFormError("Выберите категорию второго уровня");
+          return;
+        }
+        if (!newL3Name.trim()) {
+          setFormError("Укажите название категории");
+          return;
+        }
+        await createCategory({ name: newL3Name.trim(), level: 3, parent_id: newL3Parent });
+      }
+
+      resetForm();
+      setIsCreateOpen(false);
+      await loadCategories();
+    } catch (e: any) {
+      setFormError(e?.message ?? "Не удалось создать категорию");
+    }
+  }
+
+  const toggleL1 = (id: number) => {
+    setExpandedL1((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleL2 = (id: number) => {
+    setExpandedL2((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const renderLevel3 = (parentId: number) => {
+    const children = level3ByParent.get(parentId) ?? [];
+    if (!children.length) return null;
+
+    return (
+      <div className="ml-12 space-y-2 border-l pl-4">
+        {children.map((cat) => (
+          <div key={cat.id} className="flex items-center justify-between rounded-md bg-white px-3 py-2 shadow-sm">
+            <span>{cat.name}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground"
+              onClick={() => handleDelete(cat.id)}
+            >
+              <Trash className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderLevel2 = (parentId: number) => {
+    const children = level2ByParent.get(parentId) ?? [];
+    if (!children.length) return null;
+
+    return (
+      <div className="mt-2 space-y-2">
+        {children.map((cat) => {
+          const hasLevel3 = (level3ByParent.get(cat.id) ?? []).length > 0;
+          const isExpanded = expandedL2.has(cat.id);
+
+          return (
+            <div key={cat.id} className="space-y-2 rounded-md border bg-muted/30 p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {hasLevel3 ? (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8"
+                      onClick={() => toggleL2(cat.id)}
+                    >
+                      {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                    </Button>
+                  ) : (
+                    <span className="h-8 w-8" />
+                  )}
+                  <span>{cat.name}</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground"
+                  onClick={() => handleDelete(cat.id)}
+                >
+                  <Trash className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {hasLevel3 && isExpanded && renderLevel3(cat.id)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
-    <main className="p-6">
+    <main className="min-h-screen bg-muted/40 px-8 py-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Категории</h1>
@@ -125,250 +268,181 @@ export default function CategoriesPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="border-violet-100">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between text-base">
-              <span>Уровень 1</span>
-              <span className="text-xs font-normal text-muted-foreground">Основные группы</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleCreate(
-                  { name: newL1, level: 1 },
-                  () => setNewL1("")
-                );
-              }}
-            >
-              <Input
-                value={newL1}
-                onChange={(e) => setNewL1(e.target.value)}
-                placeholder="Новая категория"
-              />
-              <Button type="submit" disabled={loading}>
-                <Plus className="mr-1 h-4 w-4" />
-                Добавить
-              </Button>
-            </form>
+      <div className="mb-4 flex justify-end">
+        <Dialog
+          open={isCreateOpen}
+          onOpenChange={(open) => {
+            setIsCreateOpen(open);
+            if (open) {
+              resetForm();
+            }
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button className="bg-violet-600 text-white hover:bg-violet-700">
+              <Plus className="mr-2 h-4 w-4" />
+              Добавить
+            </Button>
+          </DialogTrigger>
 
-            <div className="divide-y rounded-md border">
-              {level1.map((cat) => (
-                <div key={cat.id} className="flex items-center justify-between px-3 py-2">
-                  <span>{cat.name}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground"
-                    onClick={() => handleDelete(cat.id)}
+          <DialogContent className="sm:max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle>Добавление категории</DialogTitle>
+            </DialogHeader>
+
+            <form onSubmit={onCreateSubmit} className="grid gap-4">
+              {formError && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {formError}
+                </div>
+              )}
+
+              <div className="grid gap-2" role="group" aria-label="Уровень категории">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+                  <button
+                    type="button"
+                    aria-pressed={newLevel === 1}
+                    onClick={() => setNewLevel(1)}
+                    className={`${segmentedButtonBase} ${
+                      newLevel === 1
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
                   >
-                    <Trash className="h-4 w-4" />
-                  </Button>
+                    Уровень 1
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={newLevel === 2}
+                    onClick={() => setNewLevel(2)}
+                    className={`${segmentedButtonBase} ${
+                      newLevel === 2
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Уровень 2
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={newLevel === 3}
+                    onClick={() => setNewLevel(3)}
+                    className={`${segmentedButtonBase} ${
+                      newLevel === 3
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Уровень 3
+                  </button>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-violet-100">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between text-base">
-              <span>Уровень 2</span>
-              <span className="text-xs font-normal text-muted-foreground">Привязаны к уровню 1</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <form
-              className="grid gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!newL2Parent) {
-                  setError("Выберите категорию первого уровня");
-                  return;
-                }
-                handleCreate(
-                  { name: newL2Name, level: 2, parent_id: newL2Parent },
-                  () => {
-                    setNewL2Name("");
-                    setNewL2Parent(null);
-                  }
-                );
-              }}
-            >
-              <div className="grid gap-1">
-                <Label className="text-xs text-muted-foreground">Категория 1 уровня</Label>
-                <Select
-                  value={newL2Parent ? String(newL2Parent) : ""}
-                  onValueChange={(v) => setNewL2Parent(Number(v))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите родителя" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {level1.map((cat) => (
-                      <SelectItem key={cat.id} value={String(cat.id)}>
-                        {cat.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
 
-              <div className="grid gap-1">
-                <Label className="text-xs text-muted-foreground">Название категории</Label>
-                <Input
-                  value={newL2Name}
-                  onChange={(e) => setNewL2Name(e.target.value)}
-                  placeholder="Новая подкатегория"
-                />
-              </div>
-
-              <Button type="submit" disabled={loading} className="justify-self-start">
-                <Plus className="mr-1 h-4 w-4" />
-                Добавить
-              </Button>
-            </form>
-
-            <div className="space-y-3">
-              {level1.map((parent) => (
-                <div key={parent.id} className="rounded-md border">
-                  <div className="flex items-center justify-between bg-muted/50 px-3 py-2 text-sm font-medium">
-                    {parent.name}
-                  </div>
-                  {level2ByParent.get(parent.id)?.map((cat) => (
-                    <div
-                      key={cat.id}
-                      className="flex items-center justify-between border-t px-3 py-2"
-                    >
-                      <span>{cat.name}</span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-muted-foreground"
-                        onClick={() => handleDelete(cat.id)}
-                      >
-                        <Trash className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  )) || (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">Подкатегорий нет</div>
-                  )}
+              {newLevel === 2 && (
+                <div className="grid gap-2">
+                  <Label>Категория 1 уровня</Label>
+                  <Select
+                    value={newL2Parent ? String(newL2Parent) : ""}
+                    onValueChange={(v) => setNewL2Parent(Number(v))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите родителя" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {level1.map((cat) => (
+                        <SelectItem key={cat.id} value={String(cat.id)}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              )}
 
-        <Card className="border-violet-100">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between text-base">
-              <span>Уровень 3</span>
-              <span className="text-xs font-normal text-muted-foreground">Привязаны к уровню 2</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <form
-              className="grid gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!newL3Parent) {
-                  setError("Выберите категорию второго уровня");
-                  return;
-                }
-                handleCreate(
-                  { name: newL3Name, level: 3, parent_id: newL3Parent },
-                  () => {
-                    setNewL3Name("");
-                    setNewL3Parent(null);
-                  }
-                );
-              }}
-            >
-              <div className="grid gap-1">
-                <Label className="text-xs text-muted-foreground">Категория 1 уровня</Label>
-                <Select
-                  value={(() => {
-                    if (!newL3Parent) return "";
-                    const parent = level2.find((c) => c.id === newL3Parent);
-                    return parent?.parent_id ? String(parent.parent_id) : "";
-                  })()}
-                  onValueChange={(val) => {
-                    const l2 = level2ByParent.get(Number(val));
-                    setNewL3Parent(l2?.[0]?.id ?? null);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите категорию уровня 1" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {level1.map((cat) => (
-                      <SelectItem key={cat.id} value={String(cat.id)}>
-                        {cat.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-1">
-                <Label className="text-xs text-muted-foreground">Категория 2 уровня</Label>
-                <Select
-                  value={newL3Parent ? String(newL3Parent) : ""}
-                  onValueChange={(v) => setNewL3Parent(Number(v))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите родителя" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {level1.map((parent) => (
-                      <div key={parent.id}>
-                        <div className="px-3 py-1 text-xs font-medium text-muted-foreground">
-                          {parent.name}
+              {newLevel === 3 && (
+                <div className="grid gap-2">
+                  <Label>Категория 2 уровня</Label>
+                  <Select
+                    value={newL3Parent ? String(newL3Parent) : ""}
+                    onValueChange={(v) => setNewL3Parent(Number(v))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите родителя" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {level1.map((parent) => (
+                        <div key={parent.id}>
+                          <div className="px-3 py-1 text-xs font-medium text-muted-foreground">{parent.name}</div>
+                          {(level2ByParent.get(parent.id) ?? []).map((child) => (
+                            <SelectItem key={child.id} value={String(child.id)}>
+                              {child.name}
+                            </SelectItem>
+                          ))}
                         </div>
-                        {(level2ByParent.get(parent.id) ?? []).map((child) => (
-                          <SelectItem key={child.id} value={String(child.id)}>
-                            {child.name}
-                          </SelectItem>
-                        ))}
-                      </div>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-              <div className="grid gap-1">
-                <Label className="text-xs text-muted-foreground">Название категории</Label>
+              <div className="grid gap-2">
+                <Label>Название категории</Label>
                 <Input
-                  value={newL3Name}
-                  onChange={(e) => setNewL3Name(e.target.value)}
-                  placeholder="Новая категория 3 уровня"
+                  value={newLevel === 1 ? newL1 : newLevel === 2 ? newL2Name : newL3Name}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (newLevel === 1) setNewL1(value);
+                    if (newLevel === 2) setNewL2Name(value);
+                    if (newLevel === 3) setNewL3Name(value);
+                  }}
+                  placeholder="Введите название"
                 />
               </div>
 
-              <Button type="submit" disabled={loading} className="justify-self-start">
-                <Plus className="mr-1 h-4 w-4" />
-                Добавить
-              </Button>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
+                  Отмена
+                </Button>
+                <Button type="submit" disabled={loading} className="bg-violet-600 text-white hover:bg-violet-700">
+                  Создать
+                </Button>
+              </div>
             </form>
+          </DialogContent>
+        </Dialog>
+      </div>
 
+      <Card className="border-violet-100">
+        <CardHeader>
+          <CardTitle className="text-base">Категории</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {level1.length === 0 ? (
+            <div className="text-sm text-muted-foreground">Категории отсутствуют</div>
+          ) : (
             <div className="space-y-3">
-              {level2.map((parent) => (
-                <div key={parent.id} className="rounded-md border">
-                  <div className="flex items-center justify-between bg-muted/50 px-3 py-2 text-sm font-medium">
-                    <span className="truncate">{parent.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {level1.find((l1) => l1.id === parent.parent_id)?.name || ""}
-                    </span>
-                  </div>
-                  {level3ByParent.get(parent.id)?.map((cat) => (
-                    <div
-                      key={cat.id}
-                      className="flex items-center justify-between border-t px-3 py-2"
-                    >
-                      <span>{cat.name}</span>
+              {level1.map((cat) => {
+                const hasLevel2 = (level2ByParent.get(cat.id) ?? []).length > 0;
+                const isExpanded = expandedL1.has(cat.id);
+
+                return (
+                  <div key={cat.id} className="space-y-2 rounded-md border bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {hasLevel2 ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            onClick={() => toggleL1(cat.id)}
+                          >
+                            {isExpanded ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                          </Button>
+                        ) : (
+                          <span className="h-8 w-8" />
+                        )}
+                        <span className="font-medium">{cat.name}</span>
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -378,15 +452,15 @@ export default function CategoriesPage() {
                         <Trash className="h-4 w-4" />
                       </Button>
                     </div>
-                  )) || (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">Подкатегорий нет</div>
-                  )}
-                </div>
-              ))}
+
+                    {hasLevel2 && isExpanded && renderLevel2(cat.id)}
+                  </div>
+                );
+              })}
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          )}
+        </CardContent>
+      </Card>
     </main>
   );
 }

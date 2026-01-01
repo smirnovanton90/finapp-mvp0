@@ -238,6 +238,9 @@ export default function TransactionsPage() {
   const [actualCat2Filter, setActualCat2Filter] = useState<string>(ALL_VALUE);
   const [actualCat3Filter, setActualCat3Filter] = useState<string>(ALL_VALUE);
 
+  const segmentedButtonBase =
+    "flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+
   const [plannedCat1Filter, setPlannedCat1Filter] = useState<string>(ALL_VALUE);
   const [plannedCat2Filter, setPlannedCat2Filter] = useState<string>(ALL_VALUE);
   const [plannedCat3Filter, setPlannedCat3Filter] = useState<string>(ALL_VALUE);
@@ -752,7 +755,7 @@ export default function TransactionsPage() {
                         type="button"
                         aria-pressed={txType === "ACTUAL"}
                         onClick={() => setTxType("ACTUAL")}
-                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`${segmentedButtonBase} ${
                           txType === "ACTUAL"
                             ? "bg-violet-50 text-violet-700"
                             : "bg-white text-muted-foreground hover:bg-white"
@@ -764,7 +767,7 @@ export default function TransactionsPage() {
                         type="button"
                         aria-pressed={txType === "PLANNED"}
                         onClick={() => setTxType("PLANNED")}
-                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`${segmentedButtonBase} ${
                           txType === "PLANNED"
                             ? "bg-violet-50 text-violet-700"
                             : "bg-white text-muted-foreground hover:bg-white"
@@ -787,7 +790,7 @@ export default function TransactionsPage() {
                           setCat2("Продукты");
                           setCat3("Супермаркет");
                         }}
-                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`${segmentedButtonBase} ${
                           direction === "INCOME"
                             ? "bg-green-50 text-green-700"
                             : "bg-white text-muted-foreground hover:bg-white"
@@ -805,7 +808,7 @@ export default function TransactionsPage() {
                           setCat2("Продукты");
                           setCat3("Супермаркет");
                         }}
-                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`${segmentedButtonBase} ${
                           direction === "EXPENSE"
                             ? "bg-red-50 text-red-700"
                             : "bg-white text-muted-foreground hover:bg-white"
@@ -823,7 +826,7 @@ export default function TransactionsPage() {
                           setCat2("");
                           setCat3("");
                         }}
-                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`${segmentedButtonBase} ${
                           direction === "TRANSFER"
                             ? "bg-violet-50 text-violet-700"
                             : "bg-white text-muted-foreground hover:bg-white"

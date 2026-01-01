@@ -746,8 +746,7 @@ export default function TransactionsPage() {
                       {formError}
                     </div>
                   )}
-                  <div className="grid gap-2">
-                    <Label>Тип транзакции</Label>
+                  <div className="grid gap-2" role="group" aria-label="Тип транзакции">
                     <div className="inline-flex w-full items-stretch rounded-md border border-input bg-muted/60 p-0.5 overflow-hidden">
                       <button
                         type="button"
@@ -755,7 +754,7 @@ export default function TransactionsPage() {
                         onClick={() => setTxType("ACTUAL")}
                         className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
                           txType === "ACTUAL"
-                            ? "bg-violet-100 text-violet-700"
+                            ? "bg-violet-50 text-violet-700"
                             : "bg-white text-muted-foreground hover:bg-white"
                         }`}
                       >
@@ -767,11 +766,70 @@ export default function TransactionsPage() {
                         onClick={() => setTxType("PLANNED")}
                         className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
                           txType === "PLANNED"
-                            ? "bg-violet-100 text-violet-700"
+                            ? "bg-violet-50 text-violet-700"
                             : "bg-white text-muted-foreground hover:bg-white"
                         }`}
                       >
                         Плановая
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2" role="group" aria-label="Характер транзакции">
+                    <div className="inline-flex w-full items-stretch rounded-md border border-input bg-muted/60 p-0.5 overflow-hidden">
+                      <button
+                        type="button"
+                        aria-pressed={direction === "INCOME"}
+                        onClick={() => {
+                          setDirection("INCOME");
+                          setCounterpartyItemId(null);
+                          setCat1("Питание");
+                          setCat2("Продукты");
+                          setCat3("Супермаркет");
+                        }}
+                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
+                          direction === "INCOME"
+                            ? "bg-green-50 text-green-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
+                        }`}
+                      >
+                        Доход
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={direction === "EXPENSE"}
+                        onClick={() => {
+                          setDirection("EXPENSE");
+                          setCounterpartyItemId(null);
+                          setCat1("Питание");
+                          setCat2("Продукты");
+                          setCat3("Супермаркет");
+                        }}
+                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
+                          direction === "EXPENSE"
+                            ? "bg-red-50 text-red-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
+                        }`}
+                      >
+                        Расход
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={direction === "TRANSFER"}
+                        onClick={() => {
+                          setDirection("TRANSFER");
+                          setCounterpartyItemId(null);
+                          setCat1("");
+                          setCat2("");
+                          setCat3("");
+                        }}
+                        className={`flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors ${
+                          direction === "TRANSFER"
+                            ? "bg-violet-50 text-violet-700"
+                            : "bg-white text-muted-foreground hover:bg-white"
+                        }`}
+                      >
+                        Перевод
                       </button>
                     </div>
                   </div>
@@ -782,40 +840,6 @@ export default function TransactionsPage() {
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                     />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>Характер</Label>
-                    <Select
-                      value={direction}
-                      onValueChange={(v) => {
-                        const val = v as "INCOME" | "EXPENSE" | "TRANSFER";
-                        setDirection(val);
-
-                        if (val !== "TRANSFER") {
-                          setCounterpartyItemId(null);
-                        }
-
-                        if (val === "TRANSFER") {
-                          setCat1("");
-                          setCat2("");
-                          setCat3("");
-                        } else {
-                          setCat1("Питание");
-                          setCat2("Продукты");
-                          setCat3("Супермаркет");
-                        }
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="INCOME">Доход</SelectItem>
-                        <SelectItem value="EXPENSE">Расход</SelectItem>
-                        <SelectItem value="TRANSFER">Перевод</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
 
                   <div className="grid gap-2">

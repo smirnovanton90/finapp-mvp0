@@ -21,27 +21,36 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 flex h-screen flex-col border-r bg-white transition-all duration-300",
+        "fixed left-0 top-0 flex h-screen flex-col overflow-hidden rounded-none rounded-r-3xl border border-white/10 bg-gradient-to-b from-[#8D63FF] via-[#7A58F3] to-[#5A5FF0] text-white shadow-xl transition-all duration-300",
         isCollapsed ? "w-16" : "w-72"
       )}
     >
-      <div className="flex h-16 items-center justify-between px-6">
-        {!isCollapsed && <div className="text-sm font-semibold">FinApp</div>}
+      <div className="relative flex h-16 items-center justify-center px-5">
+        {!isCollapsed && (
+          <div className="text-base font-semibold tracking-wide text-white drop-shadow-sm">
+            FinApp
+          </div>
+        )}
         <Button
           variant="ghost"
           size="icon"
           onClick={toggleSidebar}
-          className="ml-auto h-8 w-8"
+          className={cn(
+            "h-6 w-6 rounded-full border-2 border-white/90 bg-transparent text-white shadow-sm hover:bg-white hover:text-violet-700",
+            isCollapsed
+              ? "absolute left-1/2 -translate-x-1/2"
+              : "absolute right-4"
+          )}
         >
           {isCollapsed ? (
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />
           ) : (
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
           )}
         </Button>
       </div>
 
-      <nav className="flex-1 px-3">
+      <nav className="flex flex-1 flex-col gap-2 px-0 pt-2">
         {nav.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
@@ -51,31 +60,31 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "mb-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                isCollapsed ? "justify-center" : "",
+                "relative flex w-full items-center gap-3 py-2 text-base font-semibold transition-colors",
+                isCollapsed ? "justify-center px-0" : "pl-7 pr-5",
                 active
-                  ? "bg-violet-50 text-violet-700"
-                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  ? "text-white before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-white before:content-['']"
+                  : "text-white/80 hover:text-white"
               )}
               title={isCollapsed ? item.label : undefined}
             >
-              <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-violet-700" : "")} />
+              <Icon className={cn("h-6 w-6 flex-shrink-0", active ? "text-white" : "text-white/90")} />
               {!isCollapsed && <span>{item.label}</span>}
             </Link>
           );
         })}
       </nav>
-      <div className="border-t p-3">
+      <div className="px-4 pb-4">
         <Button
-          variant="outline"
+          variant="ghost"
           className={cn(
-            "w-full gap-2",
-            isCollapsed ? "justify-center px-0" : "justify-start"
+            "w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+            isCollapsed ? "px-0" : "px-4"
           )}
           onClick={() => signOut()}
           title={isCollapsed ? "Выйти" : undefined}
         >
-          <LogOut className="h-4 w-4 flex-shrink-0" />
+          <LogOut className={cn("h-4 w-4 flex-shrink-0", isCollapsed ? "" : "hidden")} />
           {!isCollapsed && <span>Выйти</span>}
         </Button>
       </div>

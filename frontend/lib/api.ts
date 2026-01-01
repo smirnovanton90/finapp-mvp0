@@ -49,6 +49,7 @@ export type CategoryOut = {
   name: string;
   level: number;
   parent_id: number | null;
+  direction: "INCOME" | "EXPENSE" | "BOTH";
   created_at: string;
 };
 
@@ -56,6 +57,7 @@ export type CategoryCreate = {
   name: string;
   level: number;
   parent_id?: number | null;
+  direction: "INCOME" | "EXPENSE" | "BOTH";
 };
 
 export type TransactionCreate = {

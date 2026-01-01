@@ -34,6 +34,7 @@ class Category(Base):
 
     level: Mapped[int] = mapped_column(BigInteger, nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("categories.id", ondelete="CASCADE"), nullable=True
     )
@@ -44,6 +45,10 @@ class Category(Base):
 
     __table_args__ = (
         CheckConstraint("level in (1,2,3)", name="ck_categories_level"),
+        CheckConstraint(
+            "direction in ('INCOME','EXPENSE','BOTH')",
+            name="ck_categories_direction",
+        ),
     )
 
 

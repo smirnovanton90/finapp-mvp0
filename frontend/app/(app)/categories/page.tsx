@@ -34,6 +34,8 @@ export default function CategoriesPage() {
   const [newL2Parent, setNewL2Parent] = useState<number | null>(null);
   const [newL3Name, setNewL3Name] = useState("");
   const [newL3Parent, setNewL3Parent] = useState<number | null>(null);
+  const [dirIncome, setDirIncome] = useState(false);
+  const [dirExpense, setDirExpense] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [expandedL1, setExpandedL1] = useState<Set<number>>(new Set());
@@ -119,20 +121,37 @@ export default function CategoriesPage() {
     setNewL3Name("");
     setNewL2Parent(level1[0]?.id ?? null);
     setNewL3Parent(level2[0]?.id ?? null);
+    setDirIncome(false);
+    setDirExpense(true);
     setFormError(null);
   }
+
+  const resolvedDirection = useMemo(() => {
+    if (dirIncome && dirExpense) return "BOTH";
+    if (dirIncome) return "INCOME";
+    return "EXPENSE";
+  }, [dirIncome, dirExpense]);
 
   async function onCreateSubmit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
 
     try {
+      if (!dirIncome && !dirExpense) {
+        setFormError("Выберите, к каким операциям относится категория");
+        return;
+      }
+
       if (newLevel === 1) {
         if (!newL1.trim()) {
           setFormError("Укажите название категории");
           return;
         }
-        await createCategory({ name: newL1.trim(), level: 1 });
+        await createCategory({
+          name: newL1.trim(),
+          level: 1,
+          direction: resolvedDirection,
+        });
       } else if (newLevel === 2) {
         if (!newL2Parent) {
           setFormError("Выберите категорию первого уровня");
@@ -142,7 +161,12 @@ export default function CategoriesPage() {
           setFormError("Укажите название категории");
           return;
         }
-        await createCategory({ name: newL2Name.trim(), level: 2, parent_id: newL2Parent });
+        await createCategory({
+          name: newL2Name.trim(),
+          level: 2,
+          parent_id: newL2Parent,
+          direction: resolvedDirection,
+        });
       } else {
         if (!newL3Parent) {
           setFormError("Выберите категорию второго уровня");
@@ -152,7 +176,12 @@ export default function CategoriesPage() {
           setFormError("Укажите название категории");
           return;
         }
-        await createCategory({ name: newL3Name.trim(), level: 3, parent_id: newL3Parent });
+        await createCategory({
+          name: newL3Name.trim(),
+          level: 3,
+          parent_id: newL3Parent,
+          direction: resolvedDirection,
+        });
       }
 
       resetForm();
@@ -334,6 +363,50 @@ export default function CategoriesPage() {
                     }`}
                   >
                     Уровень 3
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-2" role="group" aria-label="Тип операции">
+                <Label className="text-xs font-medium text-muted-foreground">Категория для</Label>
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+                  <button
+                    type="button"
+                    aria-pressed={dirIncome}
+                    onClick={() => {
+                      const next = !dirIncome;
+                      if (!next && !dirExpense) {
+                        setDirIncome(true);
+                        return;
+                      }
+                      setDirIncome(next);
+                    }}
+                    className={`${segmentedButtonBase} ${
+                      dirIncome
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Доход
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={dirExpense}
+                    onClick={() => {
+                      const next = !dirExpense;
+                      if (!next && !dirIncome) {
+                        setDirExpense(true);
+                        return;
+                      }
+                      setDirExpense(next);
+                    }}
+                    className={`${segmentedButtonBase} ${
+                      dirExpense
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Расход
                   </button>
                 </div>
               </div>

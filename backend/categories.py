@@ -52,6 +52,9 @@ def create_category(
         if parent.level != payload.level - 1:
             raise HTTPException(status_code=400, detail="Invalid parent level")
 
+        if not _direction_subset(payload.direction, parent.direction):
+            raise HTTPException(status_code=400, detail="Invalid direction for parent")
+
         parent_id = parent.id
     else:
         raise HTTPException(status_code=400, detail="Unsupported level")
@@ -70,7 +73,13 @@ def create_category(
     if duplicate:
         raise HTTPException(status_code=409, detail="Category already exists")
 
-    cat = Category(user_id=user.id, name=name, level=payload.level, parent_id=parent_id)
+    cat = Category(
+        user_id=user.id,
+        name=name,
+        level=payload.level,
+        parent_id=parent_id,
+        direction=payload.direction,
+    )
     db.add(cat)
     db.commit()
     db.refresh(cat)
@@ -100,3 +109,11 @@ def delete_category(
     db.commit()
 
     return {"ok": True}
+
+
+def _direction_subset(child: str, parent: str) -> bool:
+    if parent == "BOTH":
+        return True
+    if child == "BOTH":
+        return parent in ("INCOME", "EXPENSE")
+    return child == parent

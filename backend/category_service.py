@@ -4,7 +4,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from category_defaults import DEFAULT_CATEGORIES_L1, DEFAULT_CATEGORIES_L2
+from category_defaults import (
+    DEFAULT_CATEGORIES_L1,
+    DEFAULT_CATEGORIES_L2,
+    DEFAULT_CATEGORY_DIRECTIONS,
+)
 from models import Category, User
 
 
@@ -19,7 +23,8 @@ def ensure_default_categories(db: Session, user: User) -> None:
     parents: dict[str, Category] = {}
 
     for name in DEFAULT_CATEGORIES_L1:
-        cat = Category(user_id=user.id, level=1, name=name)
+        direction = DEFAULT_CATEGORY_DIRECTIONS.get(name, "EXPENSE")
+        cat = Category(user_id=user.id, level=1, name=name, direction=direction)
         db.add(cat)
         db.flush()
         parents[name] = cat
@@ -31,7 +36,11 @@ def ensure_default_categories(db: Session, user: User) -> None:
 
         for child_name in children:
             cat = Category(
-                user_id=user.id, level=2, name=child_name, parent_id=parent.id
+                user_id=user.id,
+                level=2,
+                name=child_name,
+                parent_id=parent.id,
+                direction=parent.direction,
             )
             db.add(cat)
 
@@ -42,6 +51,7 @@ def validate_category_hierarchy(
     *,
     db: Session,
     user: User,
+    direction: str,
     category_l1: str,
     category_l2: str,
     category_l3: str,
@@ -58,6 +68,9 @@ def validate_category_hierarchy(
     if not l1:
         raise HTTPException(status_code=400, detail="Unknown category_l1")
 
+    if not _direction_matches(l1.direction, direction):
+        raise HTTPException(status_code=400, detail="Invalid category for direction")
+
     if category_l2:
         l2 = db.execute(
             select(Category).where(
@@ -70,6 +83,9 @@ def validate_category_hierarchy(
 
         if not l2:
             raise HTTPException(status_code=400, detail="Invalid category_l2 for category_l1")
+
+        if not _direction_matches(l2.direction, direction):
+            raise HTTPException(status_code=400, detail="Invalid category for direction")
 
         if category_l3:
             l3 = db.execute(
@@ -85,6 +101,9 @@ def validate_category_hierarchy(
                 raise HTTPException(
                     status_code=400, detail="Invalid category_l3 for category_l2"
                 )
+
+            if not _direction_matches(l3.direction, direction):
+                raise HTTPException(status_code=400, detail="Invalid category for direction")
     elif category_l3:
         raise HTTPException(status_code=400, detail="category_l3 requires category_l2")
 
@@ -104,3 +123,9 @@ def collect_descendants(category_id: int, categories: Iterable[Category]) -> set
                 queue.append(child.id)
 
     return ids
+
+
+def _direction_matches(category_direction: str, tx_direction: str) -> bool:
+    if category_direction == "BOTH":
+        return True
+    return category_direction == tx_direction

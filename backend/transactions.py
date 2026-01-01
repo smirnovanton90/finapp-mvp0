@@ -77,6 +77,7 @@ def create_transaction(
         validate_category_hierarchy(
             db=db,
             user=user,
+            direction=data.direction,
             category_l1=data.category_l1,
             category_l2=data.category_l2,
             category_l3=data.category_l3,

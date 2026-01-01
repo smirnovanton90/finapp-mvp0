@@ -273,19 +273,29 @@ export default function TransactionsPage() {
 
   const isTransfer = direction === "TRANSFER";
 
+  const filteredCategories = useMemo(() => {
+    if (isTransfer) return [] as CategoryOut[];
+    return categories.filter(
+      (c) => c.direction === "BOTH" || c.direction === direction
+    );
+  }, [categories, direction, isTransfer]);
+
   const categoriesById = useMemo(
     () => new Map(categories.map((c) => [c.id, c])),
     [categories]
   );
 
   const level1Categories = useMemo(
-    () => categories.filter((c) => c.level === 1).sort((a, b) => a.name.localeCompare(b.name)),
-    [categories]
+    () =>
+      filteredCategories
+        .filter((c) => c.level === 1)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [filteredCategories]
   );
 
   const level2ByParent = useMemo(() => {
     const map = new Map<number, CategoryOut[]>();
-    categories
+    filteredCategories
       .filter((c) => c.level === 2 && c.parent_id)
       .forEach((c) => {
         if (!c.parent_id) return;
@@ -298,11 +308,11 @@ export default function TransactionsPage() {
       )
     );
     return map;
-  }, [categories]);
+  }, [filteredCategories]);
 
   const level3ByParent = useMemo(() => {
     const map = new Map<number, CategoryOut[]>();
-    categories
+    filteredCategories
       .filter((c) => c.level === 3 && c.parent_id)
       .forEach((c) => {
         if (!c.parent_id) return;
@@ -315,7 +325,7 @@ export default function TransactionsPage() {
       )
     );
     return map;
-  }, [categories]);
+  }, [filteredCategories]);
 
   const cat2Options = useMemo(() => {
     if (!cat1Id) return [];
@@ -420,7 +430,7 @@ export default function TransactionsPage() {
   }
 
   function applyDefaultCategories() {
-    const defaults = defaultCategorySelection(categories);
+    const defaults = defaultCategorySelection(filteredCategories);
     setCat1Id(defaults.cat1);
     setCat2Id(defaults.cat2);
     setCat3Id(defaults.cat3);
@@ -437,7 +447,7 @@ export default function TransactionsPage() {
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
     setAmountStr("");
-    const defaults = defaultCategorySelection(categories);
+    const defaults = defaultCategorySelection(filteredCategories);
     setCat1Id(defaults.cat1);
     setCat2Id(defaults.cat2);
     setCat3Id(defaults.cat3);
@@ -470,13 +480,29 @@ export default function TransactionsPage() {
   }, [session]);
 
   useEffect(() => {
-    if (!isTransfer && categories.length > 0 && cat1Id === null) {
-      const defaults = defaultCategorySelection(categories);
+    if (!isTransfer && filteredCategories.length > 0 && cat1Id === null) {
+      const defaults = defaultCategorySelection(filteredCategories);
       setCat1Id(defaults.cat1);
       setCat2Id(defaults.cat2);
       setCat3Id(defaults.cat3);
     }
-  }, [categories, cat1Id, isTransfer]);
+  }, [filteredCategories, cat1Id, isTransfer]);
+
+  useEffect(() => {
+    if (isTransfer) {
+      setCat1Id(null);
+      setCat2Id(null);
+      setCat3Id(null);
+      return;
+    }
+
+    if (cat1Id && !filteredCategories.some((c) => c.id === cat1Id)) {
+      const defaults = defaultCategorySelection(filteredCategories);
+      setCat1Id(defaults.cat1);
+      setCat2Id(defaults.cat2);
+      setCat3Id(defaults.cat3);
+    }
+  }, [filteredCategories, isTransfer, cat1Id]);
 
   useEffect(() => {
     if (!cat1Id) {

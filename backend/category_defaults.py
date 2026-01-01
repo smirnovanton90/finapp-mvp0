@@ -33,6 +33,13 @@ DEFAULT_CATEGORIES_L1 = [
     "Электроника",
 ]
 
+DEFAULT_CATEGORY_DIRECTIONS: dict[str, str] = {
+    "Доход от основного места работы": "INCOME",
+    "Пассивный доход": "INCOME",
+    "Бонусы и Cash-back": "INCOME",
+    "Прочие доходы": "INCOME",
+}
+
 
 DEFAULT_CATEGORIES_L2: dict[str, list[str]] = {
     "Доход от основного места работы": [

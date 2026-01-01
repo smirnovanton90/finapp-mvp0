@@ -54,6 +54,7 @@ class CategoryBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     level: int = Field(ge=1, le=3)
     parent_id: Optional[int] = None
+    direction: Literal["INCOME", "EXPENSE", "BOTH"]
 
 
 class CategoryCreate(CategoryBase):

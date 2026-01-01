@@ -57,27 +57,11 @@ import {
   fetchTransactions,
   createTransaction,
   deleteTransaction,
+  fetchCategories,
   ItemOut,
+  CategoryOut,
   TransactionOut,
 } from "@/lib/api";
-
-
-/* ------------ категории (временные справочники) ------------ */
-
-const CATEGORY_L1 = ["Питание", "Транспорт", "Услуги"];
-
-const CATEGORY_L2: Record<string, string[]> = {
-  Питание: ["Продукты", "Кафе", "Доставка"],
-  Транспорт: ["Такси", "Метро", "Бензин"],
-  Услуги: ["Связь", "Подписки", "Прочее"],
-};
-
-const CATEGORY_L3: Record<string, string[]> = {
-  Продукты: ["Супермаркет", "Рынок"],
-  Кафе: ["Кофе", "Ресторан"],
-  Такси: ["Яндекс", "Uber"],
-  Связь: ["Мобильная", "Интернет"],
-};
 
 /* ------------ helpers ------------ */
 
@@ -89,17 +73,36 @@ type CategoryOptions = {
   l3: Record<string, string[]>;
 };
 
-function buildCategoryOptions(txs: TransactionOut[]): CategoryOptions {
-  const l1 = new Set(CATEGORY_L1);
+function buildCategoryOptions(
+  txs: TransactionOut[],
+  categories: CategoryOut[]
+): CategoryOptions {
+  const l1 = new Set<string>();
   const l2 = new Map<string, Set<string>>();
   const l3 = new Map<string, Set<string>>();
 
-  Object.entries(CATEGORY_L2).forEach(([level1, level2List]) => {
-    l2.set(level1, new Set(level2List));
-    level2List.forEach((level2) => {
-      const level3List = CATEGORY_L3[level2];
-      if (level3List) l3.set(level2, new Set(level3List));
-    });
+  const byId = new Map(categories.map((c) => [c.id, c]));
+
+  categories.forEach((cat) => {
+    if (cat.level === 1) {
+      l1.add(cat.name);
+    }
+
+    if (cat.level === 2 && cat.parent_id) {
+      const parent = byId.get(cat.parent_id);
+      if (!parent) return;
+      if (!l2.has(parent.name)) l2.set(parent.name, new Set());
+      l2.get(parent.name)?.add(cat.name);
+    }
+
+    if (cat.level === 3 && cat.parent_id) {
+      const parent = byId.get(cat.parent_id);
+      if (!parent) return;
+      const grandParent = parent.parent_id ? byId.get(parent.parent_id) : null;
+      if (!grandParent) return;
+      if (!l3.has(parent.name)) l3.set(parent.name, new Set());
+      l3.get(parent.name)?.add(cat.name);
+    }
   });
 
   txs.forEach((tx) => {
@@ -126,6 +129,28 @@ function buildCategoryOptions(txs: TransactionOut[]): CategoryOptions {
       Array.from(l3.entries()).map(([key, value]) => [key, Array.from(value).sort()])
     ),
   };
+}
+
+function defaultCategorySelection(categories: CategoryOut[]) {
+  const level1 = categories
+    .filter((c) => c.level === 1)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const byParent = new Map<number, CategoryOut[]>();
+
+  categories
+    .filter((c) => c.parent_id)
+    .forEach((c) => {
+      if (!c.parent_id) return;
+      byParent.set(c.parent_id, [...(byParent.get(c.parent_id) ?? []), c]);
+    });
+
+  const cat1 = level1[0]?.id ?? null;
+  const cat2 = cat1 ? byParent.get(cat1)?.sort((a, b) => a.name.localeCompare(b.name))[0]?.id ?? null : null;
+  const cat3 = cat2
+    ? byParent.get(cat2)?.sort((a, b) => a.name.localeCompare(b.name))[0]?.id ?? null
+    : null;
+
+  return { cat1, cat2, cat3 };
 }
 
 function formatRub(valueInCents: number) {
@@ -207,6 +232,7 @@ export default function TransactionsPage() {
   const { data: session } = useSession();
 
   const [items, setItems] = useState<ItemOut[]>([]);
+  const [categories, setCategories] = useState<CategoryOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -224,9 +250,9 @@ export default function TransactionsPage() {
 
   const [amountStr, setAmountStr] = useState("");
 
-  const [cat1, setCat1] = useState("Питание");
-  const [cat2, setCat2] = useState("Продукты");
-  const [cat3, setCat3] = useState("Супермаркет");
+  const [cat1Id, setCat1Id] = useState<number | null>(null);
+  const [cat2Id, setCat2Id] = useState<number | null>(null);
+  const [cat3Id, setCat3Id] = useState<number | null>(null);
 
   const [txType, setTxType] = useState<"ACTUAL" | "PLANNED">("ACTUAL");
   const [description, setDescription] = useState("");
@@ -247,8 +273,59 @@ export default function TransactionsPage() {
 
   const isTransfer = direction === "TRANSFER";
 
-  const cat2Options = useMemo(() => CATEGORY_L2[cat1] ?? [], [cat1]);
-  const cat3Options = useMemo(() => CATEGORY_L3[cat2] ?? [], [cat2]);
+  const categoriesById = useMemo(
+    () => new Map(categories.map((c) => [c.id, c])),
+    [categories]
+  );
+
+  const level1Categories = useMemo(
+    () => categories.filter((c) => c.level === 1).sort((a, b) => a.name.localeCompare(b.name)),
+    [categories]
+  );
+
+  const level2ByParent = useMemo(() => {
+    const map = new Map<number, CategoryOut[]>();
+    categories
+      .filter((c) => c.level === 2 && c.parent_id)
+      .forEach((c) => {
+        if (!c.parent_id) return;
+        map.set(c.parent_id, [...(map.get(c.parent_id) ?? []), c]);
+      });
+    map.forEach((arr, key) =>
+      map.set(
+        key,
+        arr.slice().sort((a, b) => a.name.localeCompare(b.name))
+      )
+    );
+    return map;
+  }, [categories]);
+
+  const level3ByParent = useMemo(() => {
+    const map = new Map<number, CategoryOut[]>();
+    categories
+      .filter((c) => c.level === 3 && c.parent_id)
+      .forEach((c) => {
+        if (!c.parent_id) return;
+        map.set(c.parent_id, [...(map.get(c.parent_id) ?? []), c]);
+      });
+    map.forEach((arr, key) =>
+      map.set(
+        key,
+        arr.slice().sort((a, b) => a.name.localeCompare(b.name))
+      )
+    );
+    return map;
+  }, [categories]);
+
+  const cat2Options = useMemo(() => {
+    if (!cat1Id) return [];
+    return level2ByParent.get(cat1Id) ?? [];
+  }, [cat1Id, level2ByParent]);
+
+  const cat3Options = useMemo(() => {
+    if (!cat2Id) return [];
+    return level3ByParent.get(cat2Id) ?? [];
+  }, [cat2Id, level3ByParent]);
 
   const itemsById = useMemo(() => new Map(items.map((x) => [x.id, x])), [items]);
 
@@ -265,13 +342,13 @@ export default function TransactionsPage() {
 
   // Итоги для фактических транзакций
   const actualCategoryOptions = useMemo(
-    () => buildCategoryOptions(actualTxs),
-    [actualTxs]
+    () => buildCategoryOptions(actualTxs, categories),
+    [actualTxs, categories]
   );
 
   const plannedCategoryOptions = useMemo(
-    () => buildCategoryOptions(plannedTxs),
-    [plannedTxs]
+    () => buildCategoryOptions(plannedTxs, categories),
+    [plannedTxs, categories]
   );
 
   const actualFilteredTxs = useMemo(() => {
@@ -342,15 +419,28 @@ export default function TransactionsPage() {
     return itemsById.get(id)?.name ?? `#${id}`;
   }
 
+  function applyDefaultCategories() {
+    const defaults = defaultCategorySelection(categories);
+    setCat1Id(defaults.cat1);
+    setCat2Id(defaults.cat2);
+    setCat3Id(defaults.cat3);
+  }
+
+  function categoryName(id: number | null) {
+    if (!id) return "";
+    return categoriesById.get(id)?.name ?? "";
+  }
+
   function resetForm() {
     setDate(new Date().toISOString().slice(0, 10));
     setDirection("EXPENSE");
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
     setAmountStr("");
-    setCat1("Питание");
-    setCat2("Продукты");
-    setCat3("Супермаркет");
+    const defaults = defaultCategorySelection(categories);
+    setCat1Id(defaults.cat1);
+    setCat2Id(defaults.cat2);
+    setCat3Id(defaults.cat3);
     setTxType("ACTUAL");
     setDescription("");
     setComment("");
@@ -360,12 +450,14 @@ export default function TransactionsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [itemsData, txData] = await Promise.all([
+      const [itemsData, txData, categoryData] = await Promise.all([
         fetchItems(),
         fetchTransactions(),
+        fetchCategories(),
       ]);
       setItems(itemsData);
       setTxs(txData);
+      setCategories(categoryData);
     } catch (e: any) {
       setError(e?.message ?? "Ошибка загрузки");
     } finally {
@@ -376,6 +468,53 @@ export default function TransactionsPage() {
   useEffect(() => {
     if (session) loadAll();
   }, [session]);
+
+  useEffect(() => {
+    if (!isTransfer && categories.length > 0 && cat1Id === null) {
+      const defaults = defaultCategorySelection(categories);
+      setCat1Id(defaults.cat1);
+      setCat2Id(defaults.cat2);
+      setCat3Id(defaults.cat3);
+    }
+  }, [categories, cat1Id, isTransfer]);
+
+  useEffect(() => {
+    if (!cat1Id) {
+      setCat2Id(null);
+      setCat3Id(null);
+      return;
+    }
+
+    if (cat2Options.length === 0) {
+      setCat2Id(null);
+      setCat3Id(null);
+      return;
+    }
+
+    if (!cat2Id || !cat2Options.some((c) => c.id === cat2Id)) {
+      const first = cat2Options[0];
+      setCat2Id(first?.id ?? null);
+      const cat3List = first ? level3ByParent.get(first.id) ?? [] : [];
+      setCat3Id(cat3List[0]?.id ?? null);
+    }
+  }, [cat1Id, cat2Id, cat2Options, level3ByParent]);
+
+  useEffect(() => {
+    if (!cat2Id) {
+      setCat3Id(null);
+      return;
+    }
+
+    const options = level3ByParent.get(cat2Id) ?? [];
+    if (options.length === 0) {
+      setCat3Id(null);
+      return;
+    }
+
+    if (!cat3Id || !options.some((c) => c.id === cat3Id)) {
+      setCat3Id(options[0].id);
+    }
+  }, [cat2Id, cat3Id, level3ByParent]);
 
   const buildCat2Options = (
     cat1Filter: string,
@@ -719,7 +858,16 @@ export default function TransactionsPage() {
                       }
                     }
 
+                    if (!isTransfer && !cat1Id) {
+                      setFormError("Выберите категорию первого уровня");
+                      return;
+                    }
+
                     try {
+                      const category_l1 = categoryName(cat1Id);
+                      const category_l2 = categoryName(cat2Id);
+                      const category_l3 = categoryName(cat3Id);
+
                       await createTransaction({
                         transaction_date: date,
                         primary_item_id: primaryItemId,
@@ -729,9 +877,9 @@ export default function TransactionsPage() {
                         transaction_type: txType,
 
                         // для TRANSFER категории не используем
-                        category_l1: isTransfer ? "" : cat1,
-                        category_l2: isTransfer ? "" : cat2,
-                        category_l3: isTransfer ? "" : cat3,
+                        category_l1: isTransfer ? "" : category_l1,
+                        category_l2: isTransfer ? "" : category_l2,
+                        category_l3: isTransfer ? "" : category_l3,
 
                         description: description || null,
                         comment: comment || null,
@@ -786,9 +934,7 @@ export default function TransactionsPage() {
                         onClick={() => {
                           setDirection("INCOME");
                           setCounterpartyItemId(null);
-                          setCat1("Питание");
-                          setCat2("Продукты");
-                          setCat3("Супермаркет");
+                          applyDefaultCategories();
                         }}
                         className={`${segmentedButtonBase} ${
                           direction === "INCOME"
@@ -804,9 +950,7 @@ export default function TransactionsPage() {
                         onClick={() => {
                           setDirection("EXPENSE");
                           setCounterpartyItemId(null);
-                          setCat1("Питание");
-                          setCat2("Продукты");
-                          setCat3("Супермаркет");
+                          applyDefaultCategories();
                         }}
                         className={`${segmentedButtonBase} ${
                           direction === "EXPENSE"
@@ -822,9 +966,9 @@ export default function TransactionsPage() {
                         onClick={() => {
                           setDirection("TRANSFER");
                           setCounterpartyItemId(null);
-                          setCat1("");
-                          setCat2("");
-                          setCat3("");
+                          setCat1Id(null);
+                          setCat2Id(null);
+                          setCat3Id(null);
                         }}
                         className={`${segmentedButtonBase} ${
                           direction === "TRANSFER"
@@ -904,22 +1048,25 @@ export default function TransactionsPage() {
                       <div className="grid gap-2">
                         <Label>Категория L1</Label>
                         <Select
-                          value={cat1}
+                          value={cat1Id ? String(cat1Id) : ""}
                           onValueChange={(v) => {
-                            setCat1(v);
-                            const first2 = (CATEGORY_L2[v] ?? [])[0] ?? "";
-                            setCat2(first2);
-                            const first3 = (CATEGORY_L3[first2] ?? [])[0] ?? "";
-                            setCat3(first3);
+                            const id = Number(v);
+                            setCat1Id(id);
+                            const first2 = level2ByParent.get(id)?.[0];
+                            setCat2Id(first2?.id ?? null);
+                            const first3 = first2
+                              ? level3ByParent.get(first2.id)?.[0]
+                              : null;
+                            setCat3Id(first3?.id ?? null);
                           }}
                         >
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {CATEGORY_L1.map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
+                            {level1Categories.map((c) => (
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -929,20 +1076,21 @@ export default function TransactionsPage() {
                       <div className="grid gap-2">
                         <Label>Категория L2</Label>
                         <Select
-                          value={cat2}
+                          value={cat2Id ? String(cat2Id) : ""}
                           onValueChange={(v) => {
-                            setCat2(v);
-                            const first3 = (CATEGORY_L3[v] ?? [])[0] ?? "";
-                            setCat3(first3);
+                            const id = Number(v);
+                            setCat2Id(id);
+                            const first3 = level3ByParent.get(id)?.[0];
+                            setCat3Id(first3?.id ?? null);
                           }}
                         >
                           <SelectTrigger>
-                            <SelectValue />
+                            <SelectValue placeholder="Не выбрано" />
                           </SelectTrigger>
                           <SelectContent>
                             {cat2Options.map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -951,14 +1099,17 @@ export default function TransactionsPage() {
 
                       <div className="grid gap-2">
                         <Label>Категория L3</Label>
-                        <Select value={cat3} onValueChange={setCat3}>
+                        <Select
+                          value={cat3Id ? String(cat3Id) : ""}
+                          onValueChange={(v) => setCat3Id(Number(v))}
+                        >
                           <SelectTrigger>
-                            <SelectValue placeholder="—" />
+                            <SelectValue placeholder="Не выбрано" />
                           </SelectTrigger>
                           <SelectContent>
-                            {(cat3Options.length ? cat3Options : ["—"]).map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
+                            {cat3Options.map((c) => (
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.name}
                               </SelectItem>
                             ))}
                           </SelectContent>

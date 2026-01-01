@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Wallet, ArrowLeftRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { Wallet, ArrowLeftRight, ChevronLeft, ChevronRight, Layers3 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { useSidebar } from "./sidebar-context";
 const nav = [
   { href: "/assets", label: "Активы и обязательства", icon: Wallet },
   { href: "/transactions", label: "Транзакции", icon: ArrowLeftRight },
+  { href: "/categories", label: "Категории", icon: Layers3 },
 ];
 
 export function Sidebar() {

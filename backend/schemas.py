@@ -2,6 +2,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import Literal
 from datetime import date
+from typing import Optional
 
 ItemKind = Literal["ASSET", "LIABILITY"]
 
@@ -42,6 +43,24 @@ class TransactionCreate(TransactionBase):
     pass
 
 class TransactionOut(TransactionBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CategoryBase(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    level: int = Field(ge=1, le=3)
+    parent_id: Optional[int] = None
+
+
+class CategoryCreate(CategoryBase):
+    pass
+
+
+class CategoryOut(CategoryBase):
     id: int
     created_at: datetime
 

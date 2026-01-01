@@ -9,10 +9,12 @@ from schemas import ItemCreate, ItemOut
 from auth import get_current_user
 
 from transactions import router as transactions_router
+from categories import router as categories_router
 
 app = FastAPI(title="FinApp API", version="0.1.0")
 
 app.include_router(transactions_router)
+app.include_router(categories_router)
 
 from fastapi.middleware.cors import CORSMiddleware
 

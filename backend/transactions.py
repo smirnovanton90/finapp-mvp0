@@ -7,6 +7,7 @@ from models import Transaction, Item, User
 from schemas import TransactionCreate, TransactionOut
 from sqlalchemy import select
 from datetime import datetime, timezone
+from category_service import ensure_default_categories, validate_category_hierarchy
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -33,6 +34,7 @@ def create_transaction(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    ensure_default_categories(db, user)
     # 1) Проверяем, что primary_item принадлежит пользователю
     primary = (
         db.query(Item)
@@ -71,6 +73,14 @@ def create_transaction(
                 status_code=400,
                 detail="counterparty_item_id is only allowed for TRANSFER",
             )
+
+        validate_category_hierarchy(
+            db=db,
+            user=user,
+            category_l1=data.category_l1,
+            category_l2=data.category_l2,
+            category_l3=data.category_l3,
+        )
 
     # 3) Создаём транзакцию
     tx = Transaction(

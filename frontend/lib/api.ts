@@ -44,6 +44,20 @@ export type TransactionOut = {
   created_at: string;
 };
 
+export type CategoryOut = {
+  id: number;
+  name: string;
+  level: number;
+  parent_id: number | null;
+  created_at: string;
+};
+
+export type CategoryCreate = {
+  name: string;
+  level: number;
+  parent_id?: number | null;
+};
+
 export type TransactionCreate = {
   transaction_date: string; // YYYY-MM-DD
   primary_item_id: number;
@@ -123,6 +137,28 @@ export async function createTransaction(
 
 export async function deleteTransaction(id: number): Promise<void> {
   const res = await authFetch(`${API_BASE}/transactions/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function fetchCategories(): Promise<CategoryOut[]> {
+  const res = await authFetch(`${API_BASE}/categories`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createCategory(payload: CategoryCreate): Promise<CategoryOut> {
+  const res = await authFetch(`${API_BASE}/categories`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function deleteCategory(id: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/categories/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await readError(res));

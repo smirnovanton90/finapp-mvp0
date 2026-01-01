@@ -6,6 +6,7 @@ from google.auth.transport import requests
 
 from db import get_db
 from models import User
+from category_service import ensure_default_categories
 
 GOOGLE_REQUEST = requests.Request()
 
@@ -39,5 +40,7 @@ def get_current_user(
         db.add(user)
         db.commit()
         db.refresh(user)
+
+    ensure_default_categories(db, user)
 
     return user

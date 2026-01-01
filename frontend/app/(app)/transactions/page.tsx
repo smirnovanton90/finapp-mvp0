@@ -81,6 +81,53 @@ const CATEGORY_L3: Record<string, string[]> = {
 
 /* ------------ helpers ------------ */
 
+const ALL_VALUE = "__ALL__";
+
+type CategoryOptions = {
+  l1: string[];
+  l2: Record<string, string[]>;
+  l3: Record<string, string[]>;
+};
+
+function buildCategoryOptions(txs: TransactionOut[]): CategoryOptions {
+  const l1 = new Set(CATEGORY_L1);
+  const l2 = new Map<string, Set<string>>();
+  const l3 = new Map<string, Set<string>>();
+
+  Object.entries(CATEGORY_L2).forEach(([level1, level2List]) => {
+    l2.set(level1, new Set(level2List));
+    level2List.forEach((level2) => {
+      const level3List = CATEGORY_L3[level2];
+      if (level3List) l3.set(level2, new Set(level3List));
+    });
+  });
+
+  txs.forEach((tx) => {
+    if (tx.category_l1) {
+      l1.add(tx.category_l1);
+      if (tx.category_l2) {
+        if (!l2.has(tx.category_l1)) l2.set(tx.category_l1, new Set());
+        l2.get(tx.category_l1)?.add(tx.category_l2);
+
+        if (tx.category_l3) {
+          if (!l3.has(tx.category_l2)) l3.set(tx.category_l2, new Set());
+          l3.get(tx.category_l2)?.add(tx.category_l3);
+        }
+      }
+    }
+  });
+
+  return {
+    l1: Array.from(l1).sort(),
+    l2: Object.fromEntries(
+      Array.from(l2.entries()).map(([key, value]) => [key, Array.from(value).sort()])
+    ),
+    l3: Object.fromEntries(
+      Array.from(l3.entries()).map(([key, value]) => [key, Array.from(value).sort()])
+    ),
+  };
+}
+
 function formatRub(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
     style: "currency",
@@ -187,6 +234,14 @@ export default function TransactionsPage() {
 
   const [txToDelete, setTxToDelete] = useState<TransactionOut | null>(null);
 
+  const [actualCat1Filter, setActualCat1Filter] = useState<string>(ALL_VALUE);
+  const [actualCat2Filter, setActualCat2Filter] = useState<string>(ALL_VALUE);
+  const [actualCat3Filter, setActualCat3Filter] = useState<string>(ALL_VALUE);
+
+  const [plannedCat1Filter, setPlannedCat1Filter] = useState<string>(ALL_VALUE);
+  const [plannedCat2Filter, setPlannedCat2Filter] = useState<string>(ALL_VALUE);
+  const [plannedCat3Filter, setPlannedCat3Filter] = useState<string>(ALL_VALUE);
+
   const isTransfer = direction === "TRANSFER";
 
   const cat2Options = useMemo(() => CATEGORY_L2[cat1] ?? [], [cat1]);
@@ -206,8 +261,54 @@ export default function TransactionsPage() {
   );
 
   // Итоги для фактических транзакций
+  const actualCategoryOptions = useMemo(
+    () => buildCategoryOptions(actualTxs),
+    [actualTxs]
+  );
+
+  const plannedCategoryOptions = useMemo(
+    () => buildCategoryOptions(plannedTxs),
+    [plannedTxs]
+  );
+
+  const actualFilteredTxs = useMemo(() => {
+    return actualTxs.filter((tx) => {
+      if (actualCat1Filter !== ALL_VALUE && tx.category_l1 !== actualCat1Filter) {
+        return false;
+      }
+
+      if (actualCat2Filter !== ALL_VALUE && tx.category_l2 !== actualCat2Filter) {
+        return false;
+      }
+
+      if (actualCat3Filter !== ALL_VALUE && tx.category_l3 !== actualCat3Filter) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [actualCat1Filter, actualCat2Filter, actualCat3Filter, actualTxs]);
+
+  const plannedFilteredTxs = useMemo(() => {
+    return plannedTxs.filter((tx) => {
+      if (plannedCat1Filter !== ALL_VALUE && tx.category_l1 !== plannedCat1Filter) {
+        return false;
+      }
+
+      if (plannedCat2Filter !== ALL_VALUE && tx.category_l2 !== plannedCat2Filter) {
+        return false;
+      }
+
+      if (plannedCat3Filter !== ALL_VALUE && tx.category_l3 !== plannedCat3Filter) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [plannedCat1Filter, plannedCat2Filter, plannedCat3Filter, plannedTxs]);
+
   const actualTotalAmount = useMemo(() => {
-    return actualTxs.reduce((sum, tx) => {
+    return actualFilteredTxs.reduce((sum, tx) => {
       if (tx.direction === "EXPENSE") {
         return sum - tx.amount_rub;
       } else if (tx.direction === "INCOME") {
@@ -217,11 +318,11 @@ export default function TransactionsPage() {
       }
       return sum;
     }, 0);
-  }, [actualTxs]);
+  }, [actualFilteredTxs]);
 
   // Итоги для плановых транзакций
   const plannedTotalAmount = useMemo(() => {
-    return plannedTxs.reduce((sum, tx) => {
+    return plannedFilteredTxs.reduce((sum, tx) => {
       if (tx.direction === "EXPENSE") {
         return sum - tx.amount_rub;
       } else if (tx.direction === "INCOME") {
@@ -231,7 +332,7 @@ export default function TransactionsPage() {
       }
       return sum;
     }, 0);
-  }, [plannedTxs]);
+  }, [plannedFilteredTxs]);
 
   function itemName(id: number | null | undefined) {
     if (!id) return "—";
@@ -272,6 +373,140 @@ export default function TransactionsPage() {
   useEffect(() => {
     if (session) loadAll();
   }, [session]);
+
+  const buildCat2Options = (
+    cat1Filter: string,
+    options: CategoryOptions
+  ): string[] => {
+    if (cat1Filter !== ALL_VALUE) return options.l2[cat1Filter] ?? [];
+
+    const merged = new Set<string>();
+    Object.values(options.l2).forEach((vals) => vals.forEach((v) => merged.add(v)));
+    return Array.from(merged).sort();
+  };
+
+  const buildCat3Options = (
+    cat1Filter: string,
+    cat2Filter: string,
+    options: CategoryOptions
+  ): string[] => {
+    if (cat2Filter !== ALL_VALUE) return options.l3[cat2Filter] ?? [];
+
+    const merged = new Set<string>();
+
+    if (cat1Filter !== ALL_VALUE) {
+      const cat2List = options.l2[cat1Filter] ?? [];
+      cat2List.forEach((cat2Value) => {
+        (options.l3[cat2Value] ?? []).forEach((v) => merged.add(v));
+      });
+    } else {
+      Object.values(options.l3).forEach((vals) => vals.forEach((v) => merged.add(v)));
+    }
+
+    return Array.from(merged).sort();
+  };
+
+  function CategoryFilters({
+    title,
+    cat1Filter,
+    cat2Filter,
+    cat3Filter,
+    onCat1Change,
+    onCat2Change,
+    onCat3Change,
+    options,
+  }: {
+    title: string;
+    cat1Filter: string;
+    cat2Filter: string;
+    cat3Filter: string;
+    onCat1Change: (val: string) => void;
+    onCat2Change: (val: string) => void;
+    onCat3Change: (val: string) => void;
+    options: CategoryOptions;
+  }) {
+    const cat2Options = useMemo(
+      () => buildCat2Options(cat1Filter, options),
+      [cat1Filter, options]
+    );
+
+    const cat3Options = useMemo(
+      () => buildCat3Options(cat1Filter, cat2Filter, options),
+      [cat1Filter, cat2Filter, options]
+    );
+
+    return (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <CardTitle className="text-base">{title}</CardTitle>
+
+        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-3 sm:gap-3">
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">Категория 1</Label>
+            <Select
+              value={cat1Filter}
+              onValueChange={(v) => {
+                onCat1Change(v);
+                onCat2Change(ALL_VALUE);
+                onCat3Change(ALL_VALUE);
+              }}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Все" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_VALUE}>Все категории</SelectItem>
+                {options.l1.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">Категория 2</Label>
+            <Select
+              value={cat2Filter}
+              onValueChange={(v) => {
+                onCat2Change(v);
+                onCat3Change(ALL_VALUE);
+              }}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Все" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_VALUE}>Все подкатегории</SelectItem>
+                {cat2Options.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">Категория 3</Label>
+            <Select value={cat3Filter} onValueChange={(v) => onCat3Change(v)}>
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Все" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_VALUE}>Все подкатегории</SelectItem>
+                {cat3Options.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Компонент таблицы транзакций
   function TransactionsTable({
@@ -731,20 +966,44 @@ export default function TransactionsPage() {
         {/* Фактические транзакции */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Фактические транзакции</CardTitle>
+            <CategoryFilters
+              title="Фактические транзакции"
+              cat1Filter={actualCat1Filter}
+              cat2Filter={actualCat2Filter}
+              cat3Filter={actualCat3Filter}
+              onCat1Change={setActualCat1Filter}
+              onCat2Change={setActualCat2Filter}
+              onCat3Change={setActualCat3Filter}
+              options={actualCategoryOptions}
+            />
           </CardHeader>
           <CardContent className="overflow-hidden">
-            <TransactionsTable transactions={actualTxs} totalAmount={actualTotalAmount} />
+            <TransactionsTable
+              transactions={actualFilteredTxs}
+              totalAmount={actualTotalAmount}
+            />
           </CardContent>
         </Card>
 
         {/* Плановые транзакции */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Плановые транзакции</CardTitle>
+            <CategoryFilters
+              title="Плановые транзакции"
+              cat1Filter={plannedCat1Filter}
+              cat2Filter={plannedCat2Filter}
+              cat3Filter={plannedCat3Filter}
+              onCat1Change={setPlannedCat1Filter}
+              onCat2Change={setPlannedCat2Filter}
+              onCat3Change={setPlannedCat3Filter}
+              options={plannedCategoryOptions}
+            />
           </CardHeader>
           <CardContent className="overflow-hidden">
-            <TransactionsTable transactions={plannedTxs} totalAmount={plannedTotalAmount} />
+            <TransactionsTable
+              transactions={plannedFilteredTxs}
+              totalAmount={plannedTotalAmount}
+            />
           </CardContent>
         </Card>
       </div>

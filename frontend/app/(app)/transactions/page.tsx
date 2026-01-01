@@ -747,6 +747,33 @@ export default function TransactionsPage() {
                     </div>
                   )}
                   <div className="grid gap-2">
+                    <Label>Тип транзакции</Label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTxType("ACTUAL")}
+                        className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                          txType === "ACTUAL"
+                            ? "bg-violet-100 text-violet-700 border-violet-200"
+                            : "bg-white text-muted-foreground border-input hover:bg-muted"
+                        }`}
+                      >
+                        Фактическая
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTxType("PLANNED")}
+                        className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                          txType === "PLANNED"
+                            ? "bg-violet-100 text-violet-700 border-violet-200"
+                            : "bg-white text-muted-foreground border-input hover:bg-muted"
+                        }`}
+                      >
+                        Плановая
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
                     <Label>Дата транзакции</Label>
                     <Input
                       type="date"
@@ -910,22 +937,6 @@ export default function TransactionsPage() {
                       </div>
                     </>
                   )}
-
-                  <div className="grid gap-2">
-                    <Label>Тип транзакции</Label>
-                    <Select
-                      value={txType}
-                      onValueChange={(v) => setTxType(v as "ACTUAL" | "PLANNED")}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ACTUAL">Фактическая</SelectItem>
-                        <SelectItem value="PLANNED">Плановая</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
 
                   <div className="grid gap-2">
                     <Label>Описание</Label>

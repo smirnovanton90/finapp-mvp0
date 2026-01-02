@@ -79,8 +79,9 @@ const CATEGORY_ICON_BY_L1: Record<string, ComponentType<{ className?: string; st
   };
 
 function formatAmount(valueInCents: number) {
+  const hasCents = Math.abs(valueInCents) % 100 !== 0;
   return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
+    minimumFractionDigits: hasCents ? 2 : 0,
     maximumFractionDigits: 2,
   }).format(valueInCents / 100);
 }
@@ -202,7 +203,13 @@ function TransactionCardRow({
 
   const mutedTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-600/80";
 
-  const amountClass = tx.isDeleted ? "text-slate-500" : "text-slate-900";
+  const amountClass = tx.isDeleted
+    ? "text-slate-500"
+    : isIncome
+      ? "text-emerald-700"
+      : isExpense
+        ? "text-rose-700"
+        : "text-slate-900";
 
   const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-700";
   const actionHoverClass = tx.isDeleted ? "" : "hover:text-slate-900";
@@ -354,6 +361,7 @@ export function TransactionsView({
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [showActive, setShowActive] = useState(true);
   const [showDeleted, setShowDeleted] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -503,9 +511,11 @@ export function TransactionsView({
   }, [txs]);
 
   const filteredTxs = useMemo(() => {
-    const active = isPlanningView
-      ? txs.filter((tx) => tx.transaction_type === "PLANNED")
-      : txs;
+    const active = showActive
+      ? isPlanningView
+        ? txs.filter((tx) => tx.transaction_type === "PLANNED")
+        : txs
+      : [];
     const deleted = showDeleted
       ? isPlanningView
         ? deletedTxs.filter((tx) => tx.transaction_type === "PLANNED")
@@ -567,6 +577,7 @@ export function TransactionsView({
     txs,
     deletedTxs,
     isPlanningView,
+    showActive,
     showDeleted,
     dateFrom,
     dateTo,
@@ -1092,21 +1103,13 @@ export function TransactionsView({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsItemsFilterOpen((prev) => !prev)}
-                    className="text-base font-semibold text-foreground"
-                  >
-                    Активы/обязательства
-                  </button>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                      onClick={() => setSelectedItemIds(new Set<number>())}
-                      disabled={selectedItemIds.size === 0}
+                      onClick={() => setIsItemsFilterOpen((prev) => !prev)}
+                      className="text-base font-semibold text-foreground"
                     >
-                      Сбросить
+                      Активы/обязательства
                     </button>
                     <button
                       type="button"
@@ -1119,6 +1122,16 @@ export function TransactionsView({
                           isItemsFilterOpen ? "rotate-0" : "-rotate-90"
                         }`}
                       />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedItemIds(new Set<number>())}
+                      disabled={selectedItemIds.size === 0}
+                    >
+                      Сбросить
                     </button>
                   </div>
                 </div>
@@ -1153,21 +1166,13 @@ export function TransactionsView({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsCategoryL1Open((prev) => !prev)}
-                    className="text-base font-semibold text-foreground"
-                  >
-                    Категория 1
-                  </button>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                      onClick={() => setSelectedCategoryL1(new Set<string>())}
-                      disabled={selectedCategoryL1.size === 0}
+                      onClick={() => setIsCategoryL1Open((prev) => !prev)}
+                      className="text-base font-semibold text-foreground"
                     >
-                      Сбросить
+                      Категория 1
                     </button>
                     <button
                       type="button"
@@ -1180,6 +1185,16 @@ export function TransactionsView({
                           isCategoryL1Open ? "rotate-0" : "-rotate-90"
                         }`}
                       />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedCategoryL1(new Set<string>())}
+                      disabled={selectedCategoryL1.size === 0}
+                    >
+                      Сбросить
                     </button>
                   </div>
                 </div>
@@ -1212,21 +1227,13 @@ export function TransactionsView({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsCategoryL2Open((prev) => !prev)}
-                    className="text-base font-semibold text-foreground"
-                  >
-                    Категория 2
-                  </button>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                      onClick={() => setSelectedCategoryL2(new Set<string>())}
-                      disabled={selectedCategoryL2.size === 0}
+                      onClick={() => setIsCategoryL2Open((prev) => !prev)}
+                      className="text-base font-semibold text-foreground"
                     >
-                      Сбросить
+                      Категория 2
                     </button>
                     <button
                       type="button"
@@ -1239,6 +1246,16 @@ export function TransactionsView({
                           isCategoryL2Open ? "rotate-0" : "-rotate-90"
                         }`}
                       />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedCategoryL2(new Set<string>())}
+                      disabled={selectedCategoryL2.size === 0}
+                    >
+                      Сбросить
                     </button>
                   </div>
                 </div>
@@ -1271,21 +1288,13 @@ export function TransactionsView({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsCategoryL3Open((prev) => !prev)}
-                    className="text-base font-semibold text-foreground"
-                  >
-                    Категория 3
-                  </button>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                      onClick={() => setSelectedCategoryL3(new Set<string>())}
-                      disabled={selectedCategoryL3.size === 0}
+                      onClick={() => setIsCategoryL3Open((prev) => !prev)}
+                      className="text-base font-semibold text-foreground"
                     >
-                      Сбросить
+                      Категория 3
                     </button>
                     <button
                       type="button"
@@ -1298,6 +1307,16 @@ export function TransactionsView({
                           isCategoryL3Open ? "rotate-0" : "-rotate-90"
                         }`}
                       />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedCategoryL3(new Set<string>())}
+                      disabled={selectedCategoryL3.size === 0}
+                    >
+                      Сбросить
                     </button>
                   </div>
                 </div>
@@ -1433,20 +1452,37 @@ export function TransactionsView({
                 </div>
               </div>
 
-              <div className="-mx-4 border-t-2 border-border/70" />
-
-              <button
-                type="button"
-                aria-pressed={showDeleted}
-                onClick={() => setShowDeleted((prev) => !prev)}
-                className={`inline-flex w-full items-center justify-center rounded-md border-2 border-border/70 px-4 py-2 text-sm font-medium transition-colors ${
-                  showDeleted
-                    ? "bg-violet-50 text-violet-700"
-                    : "bg-white text-muted-foreground hover:bg-white"
-                }`}
-              >
-                Показывать удаленные транзакции
-              </button>
+              <div className="space-y-3">
+                <div className="text-base font-semibold text-foreground">
+                  Статус транзакции
+                </div>
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                  <button
+                    type="button"
+                    aria-pressed={showActive}
+                    onClick={() => setShowActive((prev) => !prev)}
+                    className={`${segmentedButtonBase} ${
+                      showActive
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Активные
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={showDeleted}
+                    onClick={() => setShowDeleted((prev) => !prev)}
+                    className={`${segmentedButtonBase} ${
+                      showDeleted
+                        ? "bg-slate-100 text-slate-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Удаленные
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </aside>

@@ -270,6 +270,8 @@ function TransactionCardRow({
       : isExpense
         ? "text-rose-700"
         : "text-slate-900";
+  const transferNegativeClass = tx.isDeleted ? "text-slate-500" : "text-rose-700";
+  const transferPositiveClass = tx.isDeleted ? "text-slate-500" : "text-emerald-700";
 
   const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-700";
   const actionHoverClass = tx.isDeleted ? "" : "hover:text-slate-900";
@@ -291,7 +293,7 @@ function TransactionCardRow({
     <div
       className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardTone}`}
     >
-      <div className="flex flex-1 flex-wrap items-center gap-4 px-4 py-3 sm:flex-nowrap">
+      <div className="flex flex-1 flex-wrap items-center gap-3 px-3 py-3 sm:flex-nowrap">
         <input
           type="checkbox"
           className="h-5 w-5 accent-violet-600"
@@ -312,31 +314,33 @@ function TransactionCardRow({
 
         {isTransfer ? (
           <>
-            <div className="flex min-w-[280px] items-center gap-4">
-              <div className="min-w-[120px] text-center">
+            <div className="flex min-w-[240px] items-center gap-3">
+              <div className="min-w-[110px] text-center">
                 <div className={`truncate text-base font-semibold ${textClass}`}>
                   {itemName(tx.primary_item_id)}
                 </div>
-                <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
+                <div className={`text-xl font-semibold tabular-nums ${transferNegativeClass}`}>
                   -{amountValue}
                 </div>
                 <div className={`text-xs font-semibold ${mutedTextClass}`}>
                   {itemCurrencyCode(tx.primary_item_id)}
                 </div>
               </div>
-              <div className="flex flex-col items-center gap-1">
-                <ArrowRight className={`h-6 w-6 ${mutedTextClass}`} />
+              <div className="relative flex w-32 shrink-0 items-center justify-center self-stretch">
                 {conversionRate !== null && foreignCurrency && (
-                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                  <div
+                    className={`absolute left-0 top-1/2 -translate-y-1/2 text-left text-xs font-semibold ${mutedTextClass} z-10`}
+                  >
                     {formatRate(conversionRate)} RUB/{foreignCurrency}
                   </div>
                 )}
+                <ArrowRight className="pointer-events-none absolute right-0 top-1/2 h-24 w-24 -translate-y-1/2 text-white opacity-45" />
               </div>
-              <div className="min-w-[120px] text-center">
+              <div className="min-w-[110px] text-center">
                 <div className={`truncate text-base font-semibold ${textClass}`}>
                   {itemName(tx.counterparty_item_id)}
                 </div>
-                <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
+                <div className={`text-xl font-semibold tabular-nums ${transferPositiveClass}`}>
                   +{counterpartyAmountValue}
                 </div>
                 <div className={`text-xs font-semibold ${mutedTextClass}`}>
@@ -345,7 +349,7 @@ function TransactionCardRow({
               </div>
             </div>
 
-            <div className="min-w-[160px] flex-1">
+            <div className="min-w-[140px] flex-1">
               <div
                 className={`whitespace-normal text-xs font-semibold leading-tight ${mutedTextClass}`}
               >
@@ -355,7 +359,7 @@ function TransactionCardRow({
           </>
         ) : (
           <>
-            <div className="w-full min-w-[140px] text-center sm:w-40">
+            <div className="w-full min-w-[120px] text-center sm:w-36">
               <div className={`truncate text-base font-semibold ${textClass}`}>
                 {itemName(tx.primary_item_id)}
               </div>
@@ -374,7 +378,7 @@ function TransactionCardRow({
               )}
             </div>
 
-            <div className="w-full self-stretch sm:w-40">
+            <div className="w-full self-stretch sm:w-36">
               <div className="relative flex h-full flex-col items-start justify-center text-left">
                 <div
                   className={`relative z-10 space-y-0.5 text-xs font-semibold leading-tight ${mutedTextClass}`}
@@ -386,13 +390,13 @@ function TransactionCardRow({
                   <div>{categoryLines[2]}</div>
                 </div>
                 <CategoryIcon
-                  className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 text-white opacity-25"
+                  className="pointer-events-none absolute right-0 top-1/2 h-24 w-24 -translate-y-1/2 text-white opacity-45"
                   strokeWidth={1.5}
                 />
               </div>
             </div>
 
-            <div className="min-w-[160px] flex-1">
+            <div className="min-w-[140px] flex-1">
               <div
                 className={`whitespace-normal text-xs font-semibold leading-tight ${mutedTextClass}`}
               >

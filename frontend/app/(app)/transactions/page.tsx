@@ -1,19 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Plus, Trash2 } from "lucide-react";
+import { ArrowRight, Ban, Pencil, PiggyBank, Plus, Trash2 } from "lucide-react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -21,11 +14,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-
 import {
   Select,
   SelectContent,
@@ -33,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,19 +31,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
 import {
-  fetchItems,
-  fetchTransactions,
-  fetchDeletedTransactions,
   createTransaction,
   deleteTransaction,
+  fetchDeletedTransactions,
+  fetchItems,
+  fetchTransactions,
   ItemOut,
   TransactionOut,
 } from "@/lib/api";
 
+type TransactionsViewMode = "actual" | "planning";
 
-/* ------------ категории (временные справочники) ------------ */
+type TransactionCard = TransactionOut & { isDeleted?: boolean };
 
 const CATEGORY_L1 = ["Питание", "Транспорт", "Услуги"];
 
@@ -73,73 +60,42 @@ const CATEGORY_L3: Record<string, string[]> = {
   "Связь": ["Мобильная", "Интернет"],
 };
 
-/* ------------ helpers ------------ */
-
-const ALL_VALUE = "__ALL__";
-
-type CategoryOptions = {
-  l1: string[];
-  l2: Record<string, string[]>;
-  l3: Record<string, string[]>;
-};
-
-type TransactionsViewMode = "actual" | "planning";
-
-function buildCategoryOptions(txs: TransactionOut[]): CategoryOptions {
-  const l1 = new Set(CATEGORY_L1);
-  const l2 = new Map<string, Set<string>>();
-  const l3 = new Map<string, Set<string>>();
-
-  Object.entries(CATEGORY_L2).forEach(([level1, level2List]) => {
-    l2.set(level1, new Set(level2List));
-    level2List.forEach((level2) => {
-      const level3List = CATEGORY_L3[level2];
-      if (level3List) l3.set(level2, new Set(level3List));
-    });
-  });
-
-  txs.forEach((tx) => {
-    if (tx.category_l1) {
-      l1.add(tx.category_l1);
-      if (tx.category_l2) {
-        if (!l2.has(tx.category_l1)) l2.set(tx.category_l1, new Set());
-        l2.get(tx.category_l1)?.add(tx.category_l2);
-
-        if (tx.category_l3) {
-          if (!l3.has(tx.category_l2)) l3.set(tx.category_l2, new Set());
-          l3.get(tx.category_l2)?.add(tx.category_l3);
-        }
-      }
-    }
-  });
-
-  return {
-    l1: Array.from(l1).sort(),
-    l2: Object.fromEntries(
-      Array.from(l2.entries()).map(([key, value]) => [key, Array.from(value).sort()])
-    ),
-    l3: Object.fromEntries(
-      Array.from(l3.entries()).map(([key, value]) => [key, Array.from(value).sort()])
-    ),
-  };
-}
-
-function formatRub(valueInCents: number) {
+function formatAmount(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(valueInCents / 100);
 }
 
-function formatDirection(dir: TransactionOut["direction"]) {
-  if (dir === "INCOME") return "Доход";
-  if (dir === "EXPENSE") return "Расход";
-  return "Перевод";
+function formatDate(value: string) {
+  const parts = value.split("-");
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    if (year && month && day) return `${day}.${month}.${year}`;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("ru-RU");
 }
 
-// "1 234,56" -> 123456
+function formatTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function parseAmountFilter(value: string) {
+  const cleaned = value.trim().replace(/\s/g, "").replace(",", ".");
+  if (!cleaned) return null;
+  const num = Number(cleaned);
+  if (!Number.isFinite(num)) return null;
+  return Math.round(num * 100);
+}
+
 function parseRubToCents(input: string): number {
   const normalized = input.trim().replace(/\s/g, "").replace(",", ".");
   const value = Number(normalized);
@@ -147,7 +103,6 @@ function parseRubToCents(input: string): number {
   return Math.round(value * 100);
 }
 
-// ввод: разрешаем цифры + один разделитель, форматируем пробелы
 function formatRubInput(raw: string): string {
   if (!raw) return "";
 
@@ -180,7 +135,6 @@ function formatRubInput(raw: string): string {
   return formattedDec.length > 0 ? `${formattedInt},${formattedDec}` : formattedInt;
 }
 
-// blur: добиваем до ",00"
 function normalizeRubOnBlur(value: string): string {
   const v = value.trim();
   if (!v) return "";
@@ -197,7 +151,169 @@ function normalizeRubOnBlur(value: string): string {
   return `${intPart},${decPart.slice(0, 2)}`;
 }
 
-/* ------------ page ------------ */
+function TransactionCardRow({
+  tx,
+  itemName,
+  isSelected,
+  onToggleSelection,
+  onDelete,
+  isDeleting,
+}: {
+  tx: TransactionCard;
+  itemName: (id: number | null | undefined) => string;
+  isSelected: boolean;
+  onToggleSelection: (id: number, checked: boolean) => void;
+  onDelete: (id: number) => void;
+  isDeleting: boolean;
+}) {
+  const isTransfer = tx.direction === "TRANSFER";
+  const isExpense = tx.direction === "EXPENSE";
+  const isIncome = tx.direction === "INCOME";
+
+  const amountValue = formatAmount(tx.amount_rub);
+  const amountColor = isExpense
+    ? "text-rose-400"
+    : isIncome
+      ? "text-emerald-400"
+      : "text-violet-500";
+
+  const stripeColor = isExpense
+    ? "bg-rose-200"
+    : isIncome
+      ? "bg-emerald-200"
+      : "bg-violet-300";
+
+  const cardTone = tx.isDeleted
+    ? "bg-slate-100 border-border/70"
+    : "bg-white border-border/70";
+
+  const commentText = tx.comment?.trim() ? tx.comment : "-";
+
+  const categoryLines = [
+    tx.category_l1?.trim() ? tx.category_l1 : "-",
+    tx.category_l2?.trim() ? tx.category_l2 : "-",
+    tx.category_l3?.trim() ? tx.category_l3 : "-",
+  ];
+
+  const checkboxDisabled = tx.isDeleted || isDeleting;
+
+  return (
+    <div className={`flex items-stretch overflow-hidden rounded-lg border-2 ${cardTone}`}>
+      <div className={`w-2 shrink-0 ${stripeColor}`} />
+      <div className="flex flex-1 flex-wrap items-center gap-4 px-4 py-3 sm:flex-nowrap">
+        <input
+          type="checkbox"
+          className="h-5 w-5 accent-violet-600"
+          checked={isSelected}
+          onChange={(e) => onToggleSelection(tx.id, e.target.checked)}
+          disabled={checkboxDisabled}
+          aria-label={`Выбрать транзакцию ${tx.id}`}
+        />
+
+        <div className="w-24 shrink-0">
+          <div className="text-base font-semibold">{formatDate(tx.transaction_date)}</div>
+          <div className="text-xs text-muted-foreground">
+            {formatTime(tx.created_at)}
+          </div>
+        </div>
+
+        {isTransfer ? (
+          <>
+            <div className="flex min-w-[280px] items-center gap-4">
+              <div className="min-w-[120px] text-center">
+                <div className="truncate text-sm font-medium text-muted-foreground">
+                  {itemName(tx.primary_item_id)}
+                </div>
+                <div className={`text-lg font-semibold tabular-nums ${amountColor}`}>
+                  -{amountValue}
+                </div>
+                <div className="text-xs font-semibold text-muted-foreground">RUB</div>
+              </div>
+              <ArrowRight className="h-6 w-6 text-muted-foreground" />
+              <div className="min-w-[120px] text-center">
+                <div className="truncate text-sm font-medium text-muted-foreground">
+                  {itemName(tx.counterparty_item_id)}
+                </div>
+                <div className={`text-lg font-semibold tabular-nums ${amountColor}`}>
+                  +{amountValue}
+                </div>
+                <div className="text-xs font-semibold text-muted-foreground">RUB</div>
+              </div>
+            </div>
+
+            <div className="min-w-[160px] flex-1">
+              <div className="truncate text-sm font-medium text-foreground">
+                {commentText}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="w-full sm:w-32">
+              <div className="flex flex-col items-center gap-2 text-center">
+                <PiggyBank
+                  className={`h-8 w-8 ${
+                    isExpense ? "text-rose-300" : "text-emerald-300"
+                  }`}
+                />
+                <div className="space-y-0.5 text-xs leading-tight text-muted-foreground">
+                  <div className="font-medium text-foreground">{categoryLines[0]}</div>
+                  <div>{categoryLines[1]}</div>
+                  <div>{categoryLines[2]}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="w-full min-w-[140px] text-center sm:w-40">
+              <div className="truncate text-sm font-medium text-muted-foreground">
+                {itemName(tx.primary_item_id)}
+              </div>
+              <div className={`text-lg font-semibold tabular-nums ${amountColor}`}>
+                {isExpense ? "-" : "+"}
+                {amountValue}
+              </div>
+              <div className="text-xs font-semibold text-muted-foreground">RUB</div>
+            </div>
+
+            <div className="min-w-[160px] flex-1">
+              <div className="truncate text-sm font-medium text-foreground">
+                {commentText}
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="flex items-center gap-1">
+          {tx.isDeleted && (
+            <span className="inline-flex items-center text-slate-400" title="Удалено">
+              <Ban className="h-4 w-4" />
+            </span>
+          )}
+
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-foreground hover:bg-transparent"
+            aria-label="Редактировать"
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-rose-500 hover:bg-transparent"
+            onClick={() => onDelete(tx.id)}
+            aria-label="Удалить"
+            disabled={tx.isDeleted || isDeleting}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function TransactionsView({
   view = "actual",
@@ -209,31 +325,34 @@ export function TransactionsView({
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
+  const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
-  const [deletedLoading, setDeletedLoading] = useState(false);
-  const [deletedError, setDeletedError] = useState<string | null>(null);
-  const [showDeleted, setShowDeleted] = useState(false);
-
   const [isOpen, setIsOpen] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [commentFilter, setCommentFilter] = useState("");
+  const [amountFrom, setAmountFrom] = useState("");
+  const [amountTo, setAmountTo] = useState("");
+  const [selectedDirections, setSelectedDirections] = useState<
+    Set<TransactionOut["direction"]>
+  >(() => new Set());
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(
+    () => new Set()
+  );
 
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [direction, setDirection] = useState<"INCOME" | "EXPENSE" | "TRANSFER">(
     "EXPENSE"
   );
-
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
-
   const [amountStr, setAmountStr] = useState("");
-
   const [cat1, setCat1] = useState("Питание");
   const [cat2, setCat2] = useState("Продукты");
   const [cat3, setCat3] = useState("Супермаркет");
-
-  const [txType, setTxType] = useState<"ACTUAL" | "PLANNED">("ACTUAL");
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
 
@@ -241,236 +360,26 @@ export function TransactionsView({
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [actualCat1Filter, setActualCat1Filter] = useState<string>(ALL_VALUE);
-  const [actualCat2Filter, setActualCat2Filter] = useState<string>(ALL_VALUE);
-  const [actualCat3Filter, setActualCat3Filter] = useState<string>(ALL_VALUE);
+  const itemsById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items]
+  );
+  const sortedItems = useMemo(() => {
+    return [...items].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [items]);
 
+  const itemName = (id: number | null | undefined) => {
+    if (!id) return "-";
+    return itemsById.get(id)?.name ?? `#${id}`;
+  };
+
+  const isTransfer = direction === "TRANSFER";
+  const cat2Options = useMemo(() => CATEGORY_L2[cat1] ?? [], [cat1]);
+  const cat3Options = useMemo(() => CATEGORY_L3[cat2] ?? [], [cat2]);
   const segmentedButtonBase =
     "flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
 
-  const [plannedCat1Filter, setPlannedCat1Filter] = useState<string>(ALL_VALUE);
-  const [plannedCat2Filter, setPlannedCat2Filter] = useState<string>(ALL_VALUE);
-  const [plannedCat3Filter, setPlannedCat3Filter] = useState<string>(ALL_VALUE);
-  const [deletedActualCat1Filter, setDeletedActualCat1Filter] =
-    useState<string>(ALL_VALUE);
-  const [deletedActualCat2Filter, setDeletedActualCat2Filter] =
-    useState<string>(ALL_VALUE);
-  const [deletedActualCat3Filter, setDeletedActualCat3Filter] =
-    useState<string>(ALL_VALUE);
-  const [deletedPlannedCat1Filter, setDeletedPlannedCat1Filter] =
-    useState<string>(ALL_VALUE);
-  const [deletedPlannedCat2Filter, setDeletedPlannedCat2Filter] =
-    useState<string>(ALL_VALUE);
-  const [deletedPlannedCat3Filter, setDeletedPlannedCat3Filter] =
-    useState<string>(ALL_VALUE);
-
-  const isTransfer = direction === "TRANSFER";
-
-  const cat2Options = useMemo(() => CATEGORY_L2[cat1] ?? [], [cat1]);
-  const cat3Options = useMemo(() => CATEGORY_L3[cat2] ?? [], [cat2]);
-
-  const itemsById = useMemo(() => new Map(items.map((x) => [x.id, x])), [items]);
-  const selectedCount = selectedTxIds.size;
-  const deleteCount = deleteIds?.length ?? 0;
-  const isBulkDelete = deleteCount > 1;
-
-  // Разделяем транзакции по типам
-  const actualTxs = useMemo(
-    () => txs.filter((tx) => tx.transaction_type === "ACTUAL"),
-    [txs]
-  );
-
-  const plannedTxs = useMemo(
-    () => txs.filter((tx) => tx.transaction_type === "PLANNED"),
-    [txs]
-  );
-
-  const deletedActualTxs = useMemo(
-    () => deletedTxs.filter((tx) => tx.transaction_type === "ACTUAL"),
-    [deletedTxs]
-  );
-  const deletedPlannedTxs = useMemo(
-    () => deletedTxs.filter((tx) => tx.transaction_type === "PLANNED"),
-    [deletedTxs]
-  );
-
-  // Итоги для фактических транзакций
-  const actualCategoryOptions = useMemo(
-    () => buildCategoryOptions(actualTxs),
-    [actualTxs]
-  );
-
-  const plannedCategoryOptions = useMemo(
-    () => buildCategoryOptions(plannedTxs),
-    [plannedTxs]
-  );
-
-  const deletedActualCategoryOptions = useMemo(
-    () => buildCategoryOptions(deletedActualTxs),
-    [deletedActualTxs]
-  );
-  const deletedPlannedCategoryOptions = useMemo(
-    () => buildCategoryOptions(deletedPlannedTxs),
-    [deletedPlannedTxs]
-  );
-
-  const actualFilteredTxs = useMemo(() => {
-    return actualTxs.filter((tx) => {
-      if (actualCat1Filter !== ALL_VALUE && tx.category_l1 !== actualCat1Filter) {
-        return false;
-      }
-
-      if (actualCat2Filter !== ALL_VALUE && tx.category_l2 !== actualCat2Filter) {
-        return false;
-      }
-
-      if (actualCat3Filter !== ALL_VALUE && tx.category_l3 !== actualCat3Filter) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [actualCat1Filter, actualCat2Filter, actualCat3Filter, actualTxs]);
-
-  const plannedFilteredTxs = useMemo(() => {
-    return plannedTxs.filter((tx) => {
-      if (plannedCat1Filter !== ALL_VALUE && tx.category_l1 !== plannedCat1Filter) {
-        return false;
-      }
-
-      if (plannedCat2Filter !== ALL_VALUE && tx.category_l2 !== plannedCat2Filter) {
-        return false;
-      }
-
-      if (plannedCat3Filter !== ALL_VALUE && tx.category_l3 !== plannedCat3Filter) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [plannedCat1Filter, plannedCat2Filter, plannedCat3Filter, plannedTxs]);
-
-  const deletedActualFilteredTxs = useMemo(() => {
-    return deletedActualTxs.filter((tx) => {
-      if (
-        deletedActualCat1Filter !== ALL_VALUE &&
-        tx.category_l1 !== deletedActualCat1Filter
-      ) {
-        return false;
-      }
-
-      if (
-        deletedActualCat2Filter !== ALL_VALUE &&
-        tx.category_l2 !== deletedActualCat2Filter
-      ) {
-        return false;
-      }
-
-      if (
-        deletedActualCat3Filter !== ALL_VALUE &&
-        tx.category_l3 !== deletedActualCat3Filter
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [
-    deletedActualCat1Filter,
-    deletedActualCat2Filter,
-    deletedActualCat3Filter,
-    deletedActualTxs,
-  ]);
-  const deletedPlannedFilteredTxs = useMemo(() => {
-    return deletedPlannedTxs.filter((tx) => {
-      if (
-        deletedPlannedCat1Filter !== ALL_VALUE &&
-        tx.category_l1 !== deletedPlannedCat1Filter
-      ) {
-        return false;
-      }
-
-      if (
-        deletedPlannedCat2Filter !== ALL_VALUE &&
-        tx.category_l2 !== deletedPlannedCat2Filter
-      ) {
-        return false;
-      }
-
-      if (
-        deletedPlannedCat3Filter !== ALL_VALUE &&
-        tx.category_l3 !== deletedPlannedCat3Filter
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [
-    deletedPlannedCat1Filter,
-    deletedPlannedCat2Filter,
-    deletedPlannedCat3Filter,
-    deletedPlannedTxs,
-  ]);
-
-  const actualTotalAmount = useMemo(() => {
-    return actualFilteredTxs.reduce((sum, tx) => {
-      if (tx.direction === "EXPENSE") {
-        return sum - tx.amount_rub;
-      } else if (tx.direction === "INCOME") {
-        return sum + tx.amount_rub;
-      } else if (tx.direction === "TRANSFER") {
-        return sum + tx.amount_rub;
-      }
-      return sum;
-    }, 0);
-  }, [actualFilteredTxs]);
-
-  // Итоги для плановых транзакций
-  const plannedTotalAmount = useMemo(() => {
-    return plannedFilteredTxs.reduce((sum, tx) => {
-      if (tx.direction === "EXPENSE") {
-        return sum - tx.amount_rub;
-      } else if (tx.direction === "INCOME") {
-        return sum + tx.amount_rub;
-      } else if (tx.direction === "TRANSFER") {
-        return sum + tx.amount_rub;
-      }
-      return sum;
-    }, 0);
-  }, [plannedFilteredTxs]);
-
-  const deletedActualTotalAmount = useMemo(() => {
-    return deletedActualFilteredTxs.reduce((sum, tx) => {
-      if (tx.direction === "EXPENSE") {
-        return sum - tx.amount_rub;
-      } else if (tx.direction === "INCOME") {
-        return sum + tx.amount_rub;
-      } else if (tx.direction === "TRANSFER") {
-        return sum + tx.amount_rub;
-      }
-      return sum;
-    }, 0);
-  }, [deletedActualFilteredTxs]);
-  const deletedPlannedTotalAmount = useMemo(() => {
-    return deletedPlannedFilteredTxs.reduce((sum, tx) => {
-      if (tx.direction === "EXPENSE") {
-        return sum - tx.amount_rub;
-      } else if (tx.direction === "INCOME") {
-        return sum + tx.amount_rub;
-      } else if (tx.direction === "TRANSFER") {
-        return sum + tx.amount_rub;
-      }
-      return sum;
-    }, 0);
-  }, [deletedPlannedFilteredTxs]);
-
-  function itemName(id: number | null | undefined) {
-    if (!id) return "—";
-    return itemsById.get(id)?.name ?? `#${id}`;
-  }
-
-  function resetForm() {
+  const resetForm = () => {
     setDate(new Date().toISOString().slice(0, 10));
     setDirection("EXPENSE");
     setPrimaryItemId(null);
@@ -479,38 +388,26 @@ export function TransactionsView({
     setCat1("Питание");
     setCat2("Продукты");
     setCat3("Супермаркет");
-    setTxType("ACTUAL");
     setDescription("");
     setComment("");
-  }
+  };
 
   async function loadAll() {
     setLoading(true);
     setError(null);
     try {
-      const [itemsData, txData] = await Promise.all([
+      const [itemsData, txData, deletedData] = await Promise.all([
         fetchItems(),
         fetchTransactions(),
+        fetchDeletedTransactions(),
       ]);
       setItems(itemsData);
       setTxs(txData);
-    } catch (e: any) {
-      setError(e?.message ?? "Ошибка загрузки");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadDeleted() {
-    setDeletedLoading(true);
-    setDeletedError(null);
-    try {
-      const deletedData = await fetchDeletedTransactions();
       setDeletedTxs(deletedData);
     } catch (e: any) {
-      setDeletedError(e?.message ?? "Не удалось загрузить удаленные транзакции");
+      setError(e?.message ?? "Не удалось загрузить транзакции.");
     } finally {
-      setDeletedLoading(false);
+      setLoading(false);
     }
   }
 
@@ -535,37 +432,72 @@ export function TransactionsView({
     });
   }, [txs]);
 
-  const buildCat2Options = (
-    cat1Filter: string,
-    options: CategoryOptions
-  ): string[] => {
-    if (cat1Filter !== ALL_VALUE) return options.l2[cat1Filter] ?? [];
+  const filteredTxs = useMemo(() => {
+    const active = isPlanningView
+      ? txs.filter((tx) => tx.transaction_type === "PLANNED")
+      : txs;
+    const deleted = showDeleted
+      ? isPlanningView
+        ? deletedTxs.filter((tx) => tx.transaction_type === "PLANNED")
+        : deletedTxs
+      : [];
 
-    const merged = new Set<string>();
-    Object.values(options.l2).forEach((vals) => vals.forEach((v) => merged.add(v)));
-    return Array.from(merged).sort();
-  };
+    const combined = [
+      ...active.map((tx) => ({ ...tx })),
+      ...deleted.map((tx) => ({ ...tx, isDeleted: true })),
+    ];
 
-  const buildCat3Options = (
-    cat1Filter: string,
-    cat2Filter: string,
-    options: CategoryOptions
-  ): string[] => {
-    if (cat2Filter !== ALL_VALUE) return options.l3[cat2Filter] ?? [];
+    const commentQuery = commentFilter.trim().toLowerCase();
+    const minAmount = parseAmountFilter(amountFrom);
+    const maxAmount = parseAmountFilter(amountTo);
 
-    const merged = new Set<string>();
+    return combined.filter((tx) => {
+      if (dateFrom && tx.transaction_date < dateFrom) return false;
+      if (dateTo && tx.transaction_date > dateTo) return false;
+      if (commentQuery) {
+        const commentText = (tx.comment ?? "").toLowerCase();
+        if (!commentText.includes(commentQuery)) return false;
+      }
+      if (minAmount != null || maxAmount != null) {
+        const absAmount = Math.abs(tx.amount_rub);
+        if (minAmount != null && absAmount < minAmount) return false;
+        if (maxAmount != null && absAmount > maxAmount) return false;
+      }
+      if (selectedDirections.size > 0 && !selectedDirections.has(tx.direction)) {
+        return false;
+      }
+      if (selectedItemIds.size > 0) {
+        const hasPrimary = selectedItemIds.has(tx.primary_item_id);
+        const hasCounterparty =
+          tx.counterparty_item_id != null &&
+          selectedItemIds.has(tx.counterparty_item_id);
+        if (!hasPrimary && !hasCounterparty) return false;
+      }
+      return true;
+    });
+  }, [
+    txs,
+    deletedTxs,
+    isPlanningView,
+    showDeleted,
+    dateFrom,
+    dateTo,
+    commentFilter,
+    amountFrom,
+    amountTo,
+    selectedDirections,
+    selectedItemIds,
+  ]);
 
-    if (cat1Filter !== ALL_VALUE) {
-      const cat2List = options.l2[cat1Filter] ?? [];
-      cat2List.forEach((cat2Value) => {
-        (options.l3[cat2Value] ?? []).forEach((v) => merged.add(v));
+  const sortedTxs = useMemo(() => {
+    return filteredTxs
+      .slice()
+      .sort((a, b) => {
+        const dateDiff = b.transaction_date.localeCompare(a.transaction_date);
+        if (dateDiff !== 0) return dateDiff;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       });
-    } else {
-      Object.values(options.l3).forEach((vals) => vals.forEach((v) => merged.add(v)));
-    }
-
-    return Array.from(merged).sort();
-  };
+  }, [filteredTxs]);
 
   const toggleTxSelection = (id: number, checked: boolean) => {
     setSelectedTxIds((prev) => {
@@ -579,826 +511,602 @@ export function TransactionsView({
     });
   };
 
-  const toggleAllSelection = (ids: number[], checked: boolean) => {
-    setSelectedTxIds((prev) => {
-      const next = new Set(prev);
-      ids.forEach((id) => {
-        if (checked) {
-          next.add(id);
-        } else {
-          next.delete(id);
-        }
-      });
-      return next;
-    });
-  };
-
   const openDeleteDialog = (ids: number[]) => {
     if (ids.length === 0) return;
     setDeleteIds(ids);
   };
-
-  const handleToggleDeleted = () => {
-    const next = !showDeleted;
-    setShowDeleted(next);
-    if (next && !deletedLoading) {
-      loadDeleted();
-    }
+  const toggleItemSelection = (id: number, checked: boolean) => {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  };
+  const toggleDirectionFilter = (dir: TransactionOut["direction"]) => {
+    setSelectedDirections((prev) => {
+      const next = new Set(prev);
+      if (next.has(dir)) {
+        next.delete(dir);
+      } else {
+        next.add(dir);
+      }
+      return next;
+    });
   };
 
-  function CategoryFilters({
-    title,
-    cat1Filter,
-    cat2Filter,
-    cat3Filter,
-    onCat1Change,
-    onCat2Change,
-    onCat3Change,
-    options,
-  }: {
-    title: string;
-    cat1Filter: string;
-    cat2Filter: string;
-    cat3Filter: string;
-    onCat1Change: (val: string) => void;
-    onCat2Change: (val: string) => void;
-    onCat3Change: (val: string) => void;
-    options: CategoryOptions;
-  }) {
-    const cat2Options = useMemo(
-      () => buildCat2Options(cat1Filter, options),
-      [cat1Filter, options]
-    );
-
-    const cat3Options = useMemo(
-      () => buildCat3Options(cat1Filter, cat2Filter, options),
-      [cat1Filter, cat2Filter, options]
-    );
-
-    return (
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <CardTitle className="text-base">{title}</CardTitle>
-
-        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-3 sm:gap-3">
-          <div className="grid gap-1">
-            <Label className="text-xs text-muted-foreground">Категория 1</Label>
-            <Select
-              value={cat1Filter}
-              onValueChange={(v) => {
-                onCat1Change(v);
-                onCat2Change(ALL_VALUE);
-                onCat3Change(ALL_VALUE);
-              }}
-            >
-              <SelectTrigger className="h-9">
-                <SelectValue placeholder="Все" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_VALUE}>Все категории</SelectItem>
-                {options.l1.map((v) => (
-                  <SelectItem key={v} value={v}>
-                    {v}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-1">
-            <Label className="text-xs text-muted-foreground">Категория 2</Label>
-            <Select
-              value={cat2Filter}
-              onValueChange={(v) => {
-                onCat2Change(v);
-                onCat3Change(ALL_VALUE);
-              }}
-            >
-              <SelectTrigger className="h-9">
-                <SelectValue placeholder="Все" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_VALUE}>Все подкатегории</SelectItem>
-                {cat2Options.map((v) => (
-                  <SelectItem key={v} value={v}>
-                    {v}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-1">
-            <Label className="text-xs text-muted-foreground">Категория 3</Label>
-            <Select value={cat3Filter} onValueChange={(v) => onCat3Change(v)}>
-              <SelectTrigger className="h-9">
-                <SelectValue placeholder="Все" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_VALUE}>Все подкатегории</SelectItem>
-                {cat3Options.map((v) => (
-                  <SelectItem key={v} value={v}>
-                    {v}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Компонент таблицы транзакций
-  function TransactionsTable({
-    transactions,
-    totalAmount,
-    selectedIds,
-    onToggleSelection,
-    onToggleAll,
-    isDeleting,
-    readOnly = false,
-  }: {
-    transactions: TransactionOut[];
-    totalAmount: number;
-    selectedIds?: Set<number>;
-    onToggleSelection?: (id: number, checked: boolean) => void;
-    onToggleAll?: (ids: number[], checked: boolean) => void;
-    isDeleting?: boolean;
-    readOnly?: boolean;
-  }) {
-    const selectAllRef = useRef<HTMLInputElement | null>(null);
-    const selectionEnabled = !readOnly;
-    const safeSelectedIds = selectedIds ?? new Set<number>();
-    const noopToggleSelection = (_id: number, _checked: boolean) => {};
-    const noopToggleAll = (_ids: number[], _checked: boolean) => {};
-    const safeOnToggleSelection = onToggleSelection ?? noopToggleSelection;
-    const safeOnToggleAll = onToggleAll ?? noopToggleAll;
-    const safeIsDeleting = isDeleting ?? false;
-    const transactionIds = transactions.map((tx) => tx.id);
-    const selectedVisibleCount = selectionEnabled
-      ? transactionIds.reduce(
-          (count, id) => count + (safeSelectedIds.has(id) ? 1 : 0),
-          0
-        )
-      : 0;
-    const allSelected =
-      selectionEnabled &&
-      transactionIds.length > 0 &&
-      selectedVisibleCount === transactionIds.length;
-    const someSelected =
-      selectionEnabled && selectedVisibleCount > 0 && !allSelected;
-    const totalLabelSpan = selectionEnabled ? 3 : 2;
-    const totalTailSpan = selectionEnabled ? 5 : 4;
-    const emptyColSpan = selectionEnabled ? 9 : 7;
-
-    useEffect(() => {
-      if (!selectionEnabled) return;
-      if (selectAllRef.current) {
-        selectAllRef.current.indeterminate = someSelected;
-      }
-    }, [selectionEnabled, someSelected]);
-
-    return (
-      <div className="w-full overflow-hidden">
-        <Table>
-          <TableHeader className="bg-muted/40">
-            <TableRow>
-              {selectionEnabled && (
-                <TableHead className="w-[160px] min-w-[140px]">
-                <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    className="h-4 w-4 accent-violet-600"
-                    checked={allSelected}
-                    onChange={(e) => safeOnToggleAll(transactionIds, e.target.checked)}
-                    disabled={transactionIds.length === 0 || safeIsDeleting}
-                    aria-label="Выделить все"
-                  />
-                  <span>Выделить все</span>
-                </label>
-              </TableHead>
-              )}
-              <TableHead className="font-medium text-muted-foreground w-[100px] min-w-[100px]">
-                Дата
-              </TableHead>
-              <TableHead className="font-medium text-muted-foreground w-[120px] min-w-[100px]">Актив</TableHead>
-              <TableHead className="font-medium text-muted-foreground w-[100px] min-w-[100px] whitespace-nowrap">Сумма</TableHead>
-              <TableHead className="font-medium text-muted-foreground w-[120px] min-w-[100px]">
-                Корр. актив
-              </TableHead>
-              <TableHead className="font-medium text-muted-foreground w-[120px] min-w-[100px]">Категория</TableHead>
-              <TableHead className="font-medium text-muted-foreground min-w-0">Описание</TableHead>
-              <TableHead className="font-medium text-muted-foreground min-w-0">Комментарий</TableHead>
-              {selectionEnabled && (
-                <TableHead className="w-[50px] min-w-[50px]" />
-              )}
-            </TableRow>
-          </TableHeader>
-
-          <TableBody>
-            {transactions.map((tx) => {
-              const isExpense = tx.direction === "EXPENSE";
-              const isTxTransfer = tx.direction === "TRANSFER";
-              const isSelected = selectionEnabled && safeSelectedIds.has(tx.id);
-
-              const amountText = isExpense
-                ? `-${formatRub(tx.amount_rub)}`
-                : formatRub(tx.amount_rub);
-
-              // Определяем цвет фона строки в зависимости от характера транзакции
-              const rowBgClass = 
-                tx.direction === "EXPENSE" ? "bg-red-50 hover:!bg-red-100" :
-                tx.direction === "INCOME" ? "bg-green-50 hover:!bg-green-100" :
-                "bg-violet-50 hover:!bg-violet-100";
-
-              return (
-                <TableRow
-                  key={tx.id}
-                  className={rowBgClass}
-                  data-state={isSelected ? "selected" : undefined}
-                >
-                  {selectionEnabled && (
-                    <TableCell>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 accent-violet-600"
-                      checked={isSelected}
-                      onChange={(e) => safeOnToggleSelection(tx.id, e.target.checked)}
-                      disabled={safeIsDeleting}
-                      aria-label={`Выделить транзакцию ${tx.id}`}
-                    />
-                  </TableCell>
-                  )}
-                  <TableCell className="whitespace-nowrap text-xs">
-                    <div>{new Date(tx.transaction_date).toLocaleDateString("ru-RU")}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {new Date(tx.created_at).toLocaleTimeString("ru-RU", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="font-medium truncate" title={itemName(tx.primary_item_id)}>
-                      {itemName(tx.primary_item_id)}
-                    </div>
-                  </TableCell>
-
-                  <TableCell
-                    className={[
-                      "text-right font-semibold tabular-nums whitespace-nowrap",
-                      isExpense ? "text-red-600" : "",
-                    ].join(" ")}
-                  >
-                    {amountText}
-                  </TableCell>
-
-                  <TableCell>
-                    {isTxTransfer ? (
-                      <div className="font-medium truncate" title={itemName(tx.counterparty_item_id)}>
-                        {itemName(tx.counterparty_item_id)}
-                      </div>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-
-                  <TableCell className="text-xs">
-                    {isTxTransfer ? (
-                      "—"
-                    ) : (
-                      <div>
-                        <div className="truncate">{tx.category_l1 || "—"}</div>
-                        {(tx.category_l2 || tx.category_l3) && (
-                          <div className="text-xs text-muted-foreground truncate">
-                            {[tx.category_l2, tx.category_l3].filter(Boolean).join(" / ") || ""}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </TableCell>
-
-                  <TableCell className="text-xs">
-                    <div className="truncate" title={tx.description || undefined}>
-                      {tx.description || "—"}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    <div className="truncate" title={tx.comment || undefined}>
-                      {tx.comment || "—"}
-                    </div>
-                  </TableCell>
-
-                  {selectionEnabled && (
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-muted-foreground hover:text-violet-600 hover:bg-transparent"
-                        onClick={() => openDeleteDialog([tx.id])}
-                        aria-label="Удалить"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              );
-            })}
-
-            {transactions.length > 0 && (
-              <TableRow className="bg-muted/60 font-semibold">
-                <TableCell colSpan={totalLabelSpan}>Итого</TableCell>
-                <TableCell
-                  className={[
-                    "text-right font-semibold tabular-nums whitespace-nowrap",
-                    totalAmount < 0 ? "text-red-600" : "",
-                  ].join(" ")}
-                >
-                  {totalAmount < 0
-                    ? `-${formatRub(Math.abs(totalAmount))}`
-                    : formatRub(totalAmount)}
-                </TableCell>
-                <TableCell colSpan={totalTailSpan} />
-              </TableRow>
-            )}
-
-            {transactions.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={emptyColSpan} className="h-24 text-center text-muted-foreground">
-                  Пока нет записей
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    );
-  }
+  const deleteCount = deleteIds?.length ?? 0;
+  const isBulkDelete = deleteCount > 1;
+  const txType = isPlanningView ? "PLANNED" : "ACTUAL";
+  const isIncomeSelected = selectedDirections.has("INCOME");
+  const isExpenseSelected = selectedDirections.has("EXPENSE");
+  const isTransferSelected = selectedDirections.has("TRANSFER");
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8 overflow-x-hidden">
-      <div className="mb-6 flex items-center justify-end gap-2">
-        {selectedCount > 0 && (
-          <Button
-            className="bg-red-600 hover:bg-red-700 text-white"
-            onClick={() => openDeleteDialog(Array.from(selectedTxIds))}
-            disabled={isDeleting}
-          >
-            Удалить ({selectedCount})
-          </Button>
-        )}
-        <Button variant="outline" onClick={handleToggleDeleted}>
-          {showDeleted ? "Скрыть удаленные транзакции" : "Показать удаленные транзакции"}
-        </Button>
-        <Dialog
-          open={isOpen}
-          onOpenChange={(open) => {
-            setIsOpen(open);
-            setFormError(null);
-            if (open) resetForm();
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white">
-              <Plus className="mr-2 h-4 w-4" />
-              Добавить
-            </Button>
-          </DialogTrigger>
+    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+      {loading && <div className="mb-4 text-sm text-muted-foreground">Загрузка...</div>}
+      {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-              <DialogContent className="sm:max-w-[560px]">
-                <DialogHeader>
-                  <DialogTitle>Добавление транзакции</DialogTitle>
-                </DialogHeader>
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <aside className="w-full max-w-[380px] shrink-0">
+          <div className="rounded-lg border-2 border-border/70 bg-white p-4">
+            <div className="space-y-6">
+              <Dialog
+                open={isOpen}
+                onOpenChange={(open) => {
+                  setIsOpen(open);
+                  setFormError(null);
+                  if (open) resetForm();
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button className="w-full bg-violet-600 text-white hover:bg-violet-700">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Добавить
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[560px]">
+                  <DialogHeader>
+                    <DialogTitle>Добавить транзакцию</DialogTitle>
+                  </DialogHeader>
 
-                <form
-                  className="grid gap-4"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    setFormError(null);
+                  <form
+                    className="grid gap-4"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      setFormError(null);
 
-                    const cents = parseRubToCents(amountStr);
+                      const cents = parseRubToCents(amountStr);
 
-                    if (!primaryItemId) {
-                      setFormError("Выберите актив/обязательство");
-                      return;
-                    }
-                    if (!Number.isFinite(cents) || cents < 0) {
-                      setFormError("Сумма должна быть числом (например 1234,56)");
-                      return;
-                    }
-                    if (isTransfer && !counterpartyItemId) {
-                      setFormError("Для перевода выберите корреспондирующий актив");
-                      return;
-                    }
-                    if (txType === "PLANNED") {
-                      const today = new Date().toISOString().slice(0, 10);
-                      if (date < today) {
-                        setFormError("Плановая транзакция не может быть создана ранее текущего дня");
+                      if (!primaryItemId) {
+                        setFormError("Выберите актив/обязательство.");
                         return;
                       }
-                    }
+                      if (!Number.isFinite(cents) || cents < 0) {
+                        setFormError("Введите сумму в формате 1234,56.");
+                        return;
+                      }
+                      if (isTransfer && !counterpartyItemId) {
+                        setFormError("Выберите корреспондирующий актив.");
+                        return;
+                      }
+                      if (txType === "PLANNED") {
+                        const today = new Date().toISOString().slice(0, 10);
+                        if (date < today) {
+                          setFormError(
+                            "Плановая транзакция не может быть создана ранее текущего дня."
+                          );
+                          return;
+                        }
+                      }
 
-                    try {
-                      await createTransaction({
-                        transaction_date: date,
-                        primary_item_id: primaryItemId,
-                        counterparty_item_id: isTransfer ? counterpartyItemId : null,
-                        amount_rub: cents,
-                        direction,
-                        transaction_type: txType,
+                      try {
+                        await createTransaction({
+                          transaction_date: date,
+                          primary_item_id: primaryItemId,
+                          counterparty_item_id: isTransfer
+                            ? counterpartyItemId
+                            : null,
+                          amount_rub: cents,
+                          direction,
+                          transaction_type: txType,
+                          category_l1: isTransfer ? "" : cat1,
+                          category_l2: isTransfer ? "" : cat2,
+                          category_l3: isTransfer ? "" : cat3,
+                          description: description || null,
+                          comment: comment || null,
+                        });
 
-                        // для TRANSFER категории не используем
-                        category_l1: isTransfer ? "" : cat1,
-                        category_l2: isTransfer ? "" : cat2,
-                        category_l3: isTransfer ? "" : cat3,
+                        setIsOpen(false);
+                        await loadAll();
+                      } catch (e: any) {
+                        setFormError(e?.message ?? "Не удалось создать транзакцию.");
+                      }
+                    }}
+                  >
+                    {formError && (
+                      <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+                        {formError}
+                      </div>
+                    )}
 
-                        description: description || null,
-                        comment: comment || null,
-                      });
-
-                      setIsOpen(false);
-                      await loadAll();
-                    } catch (e: any) {
-                      setFormError(e?.message ?? "Ошибка создания транзакции");
-                    }
-                  }}
-                >
-                  {formError && (
-                    <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
-                      {formError}
+                    <div className="grid gap-2" role="group" aria-label="Характер транзакции">
+                      <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+                        <button
+                          type="button"
+                          aria-pressed={direction === "INCOME"}
+                          onClick={() => {
+                            setDirection("INCOME");
+                            setCounterpartyItemId(null);
+                            setCat1("Питание");
+                            setCat2("Продукты");
+                            setCat3("Супермаркет");
+                          }}
+                          className={`${segmentedButtonBase} ${
+                            direction === "INCOME"
+                              ? "bg-green-50 text-green-700"
+                              : "bg-white text-muted-foreground hover:bg-white"
+                          }`}
+                        >
+                          Доход
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={direction === "EXPENSE"}
+                          onClick={() => {
+                            setDirection("EXPENSE");
+                            setCounterpartyItemId(null);
+                            setCat1("Питание");
+                            setCat2("Продукты");
+                            setCat3("Супермаркет");
+                          }}
+                          className={`${segmentedButtonBase} ${
+                            direction === "EXPENSE"
+                              ? "bg-red-50 text-red-700"
+                              : "bg-white text-muted-foreground hover:bg-white"
+                          }`}
+                        >
+                          Расход
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={direction === "TRANSFER"}
+                          onClick={() => {
+                            setDirection("TRANSFER");
+                            setCounterpartyItemId(null);
+                            setCat1("");
+                            setCat2("");
+                            setCat3("");
+                          }}
+                          className={`${segmentedButtonBase} ${
+                            direction === "TRANSFER"
+                              ? "bg-violet-50 text-violet-700"
+                              : "bg-white text-muted-foreground hover:bg-white"
+                          }`}
+                        >
+                          Перевод
+                        </button>
+                      </div>
                     </div>
-                  )}
-                  <div className="grid gap-2" role="group" aria-label="Тип транзакции">
-                    <div className="inline-flex w-full items-stretch rounded-md border border-input bg-muted/60 p-0.5 overflow-hidden">
-                      <button
-                        type="button"
-                        aria-pressed={txType === "ACTUAL"}
-                        onClick={() => setTxType("ACTUAL")}
-                        className={`${segmentedButtonBase} ${
-                          txType === "ACTUAL"
-                            ? "bg-violet-50 text-violet-700"
-                            : "bg-white text-muted-foreground hover:bg-white"
-                        }`}
-                      >
-                        Фактическая
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={txType === "PLANNED"}
-                        onClick={() => setTxType("PLANNED")}
-                        className={`${segmentedButtonBase} ${
-                          txType === "PLANNED"
-                            ? "bg-violet-50 text-violet-700"
-                            : "bg-white text-muted-foreground hover:bg-white"
-                        }`}
-                      >
-                        Плановая
-                      </button>
-                    </div>
-                  </div>
 
-                  <div className="grid gap-2" role="group" aria-label="Характер транзакции">
-                    <div className="inline-flex w-full items-stretch rounded-md border border-input bg-muted/60 p-0.5 overflow-hidden">
-                      <button
-                        type="button"
-                        aria-pressed={direction === "INCOME"}
-                        onClick={() => {
-                          setDirection("INCOME");
-                          setCounterpartyItemId(null);
-                          setCat1("Питание");
-                          setCat2("Продукты");
-                          setCat3("Супермаркет");
-                        }}
-                        className={`${segmentedButtonBase} ${
-                          direction === "INCOME"
-                            ? "bg-green-50 text-green-700"
-                            : "bg-white text-muted-foreground hover:bg-white"
-                        }`}
-                      >
-                        Доход
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={direction === "EXPENSE"}
-                        onClick={() => {
-                          setDirection("EXPENSE");
-                          setCounterpartyItemId(null);
-                          setCat1("Питание");
-                          setCat2("Продукты");
-                          setCat3("Супермаркет");
-                        }}
-                        className={`${segmentedButtonBase} ${
-                          direction === "EXPENSE"
-                            ? "bg-red-50 text-red-700"
-                            : "bg-white text-muted-foreground hover:bg-white"
-                        }`}
-                      >
-                        Расход
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={direction === "TRANSFER"}
-                        onClick={() => {
-                          setDirection("TRANSFER");
-                          setCounterpartyItemId(null);
-                          setCat1("");
-                          setCat2("");
-                          setCat3("");
-                        }}
-                        className={`${segmentedButtonBase} ${
-                          direction === "TRANSFER"
-                            ? "bg-violet-50 text-violet-700"
-                            : "bg-white text-muted-foreground hover:bg-white"
-                        }`}
-                      >
-                        Перевод
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label>Дата транзакции</Label>
-                    <Input
-                      type="date"
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>Актив / обязательство</Label>
-                    <Select
-                      value={primaryItemId ? String(primaryItemId) : ""}
-                      onValueChange={(v) => setPrimaryItemId(Number(v))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Выберите" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {items.map((it) => (
-                          <SelectItem key={it.id} value={String(it.id)}>
-                            {it.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {isTransfer && (
                     <div className="grid gap-2">
-                      <Label>Корреспондирующий актив</Label>
+                      <Label>Дата транзакции</Label>
+                      <Input
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Актив / обязательство</Label>
                       <Select
-                        value={counterpartyItemId ? String(counterpartyItemId) : ""}
-                        onValueChange={(v) => setCounterpartyItemId(Number(v))}
+                        value={primaryItemId ? String(primaryItemId) : ""}
+                        onValueChange={(v) => setPrimaryItemId(Number(v))}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Выберите" />
                         </SelectTrigger>
                         <SelectContent>
-                          {items
-                            .filter((it) => it.id !== primaryItemId)
-                            .map((it) => (
-                              <SelectItem key={it.id} value={String(it.id)}>
-                                {it.name}
-                              </SelectItem>
-                            ))}
+                          {items.map((it) => (
+                            <SelectItem key={it.id} value={String(it.id)}>
+                              {it.name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
-                  )}
 
-                  <div className="grid gap-2">
-                    <Label>Сумма</Label>
-                    <Input
-                      value={amountStr}
-                      onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                      onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                      inputMode="decimal"
-                      placeholder="Например: 1 234,56"
-                    />
-                  </div>
-
-                  {/* ? КАТЕГОРИИ СКРЫВАЕМ ДЛЯ TRANSFER */}
-                  {!isTransfer && (
-                    <>
+                    {isTransfer && (
                       <div className="grid gap-2">
-                        <Label>Категория L1</Label>
+                        <Label>Корреспондирующий актив</Label>
                         <Select
-                          value={cat1}
-                          onValueChange={(v) => {
-                            setCat1(v);
-                            const first2 = (CATEGORY_L2[v] ?? [])[0] ?? "";
-                            setCat2(first2);
-                            const first3 = (CATEGORY_L3[first2] ?? [])[0] ?? "";
-                            setCat3(first3);
-                          }}
+                          value={
+                            counterpartyItemId ? String(counterpartyItemId) : ""
+                          }
+                          onValueChange={(v) =>
+                            setCounterpartyItemId(Number(v))
+                          }
                         >
                           <SelectTrigger>
-                            <SelectValue />
+                            <SelectValue placeholder="Выберите" />
                           </SelectTrigger>
                           <SelectContent>
-                            {CATEGORY_L1.map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
-                              </SelectItem>
-                            ))}
+                            {items
+                              .filter((it) => it.id !== primaryItemId)
+                              .map((it) => (
+                                <SelectItem key={it.id} value={String(it.id)}>
+                                  {it.name}
+                                </SelectItem>
+                              ))}
                           </SelectContent>
                         </Select>
                       </div>
+                    )}
 
-                      <div className="grid gap-2">
-                        <Label>Категория L2</Label>
-                        <Select
-                          value={cat2}
-                          onValueChange={(v) => {
-                            setCat2(v);
-                            const first3 = (CATEGORY_L3[v] ?? [])[0] ?? "";
-                            setCat3(first3);
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {cat2Options.map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    <div className="grid gap-2">
+                      <Label>Сумма</Label>
+                      <Input
+                        value={amountStr}
+                        onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+                        onBlur={() =>
+                          setAmountStr((prev) => normalizeRubOnBlur(prev))
+                        }
+                        inputMode="decimal"
+                        placeholder="Например: 1 234,56"
+                      />
+                    </div>
 
-                      <div className="grid gap-2">
-                        <Label>Категория L3</Label>
-                        <Select value={cat3} onValueChange={setCat3}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="—" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(cat3Options.length ? cat3Options : ["—"]).map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </>
+                    {!isTransfer && (
+                      <>
+                        <div className="grid gap-2">
+                          <Label>Категория L1</Label>
+                          <Select
+                            value={cat1}
+                            onValueChange={(v) => {
+                              setCat1(v);
+                              const first2 = (CATEGORY_L2[v] ?? [])[0] ?? "";
+                              setCat2(first2);
+                              const first3 = (CATEGORY_L3[first2] ?? [])[0] ?? "";
+                              setCat3(first3);
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CATEGORY_L1.map((c) => (
+                                <SelectItem key={c} value={c}>
+                                  {c}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label>Категория L2</Label>
+                          <Select
+                            value={cat2}
+                            onValueChange={(v) => {
+                              setCat2(v);
+                              const first3 = (CATEGORY_L3[v] ?? [])[0] ?? "";
+                              setCat3(first3);
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {cat2Options.map((c) => (
+                                <SelectItem key={c} value={c}>
+                                  {c}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label>Категория L3</Label>
+                          <Select value={cat3} onValueChange={setCat3}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="—" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(cat3Options.length ? cat3Options : ["—"]).map((c) => (
+                                <SelectItem key={c} value={c}>
+                                  {c}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="grid gap-2">
+                      <Label>Описание</Label>
+                      <Input
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        placeholder="Например: обед в кафе"
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Комментарий</Label>
+                      <Input
+                        value={comment}
+                        onChange={(e) => setComment(e.target.value)}
+                        placeholder="Например: с коллегами"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setIsOpen(false)}
+                      >
+                        Отмена
+                      </Button>
+                      <Button
+                        type="submit"
+                        className="bg-violet-600 text-white hover:bg-violet-700"
+                        disabled={loading}
+                      >
+                        Добавить
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+
+              <div className="-mx-4 border-t-2 border-border/70" />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-base font-semibold text-foreground">
+                    Вид транзакции
+                  </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() =>
+                      setSelectedDirections(
+                        new Set<TransactionOut["direction"]>()
+                      )
+                    }
+                    disabled={selectedDirections.size === 0}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                  <button
+                    type="button"
+                    aria-pressed={isIncomeSelected}
+                    onClick={() => toggleDirectionFilter("INCOME")}
+                    className={`${segmentedButtonBase} ${
+                      isIncomeSelected
+                        ? "bg-green-50 text-green-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Доход
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={isExpenseSelected}
+                    onClick={() => toggleDirectionFilter("EXPENSE")}
+                    className={`${segmentedButtonBase} ${
+                      isExpenseSelected
+                        ? "bg-red-50 text-red-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Расход
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={isTransferSelected}
+                    onClick={() => toggleDirectionFilter("TRANSFER")}
+                    className={`${segmentedButtonBase} ${
+                      isTransferSelected
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Перевод
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-base font-semibold text-foreground">
+                    Активы/обязательства
+                  </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() => setSelectedItemIds(new Set<number>())}
+                    disabled={selectedItemIds.size === 0}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {sortedItems.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">
+                      Нет активов или обязательств.
+                    </div>
+                  ) : (
+                    sortedItems.map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex items-center gap-3 text-base text-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5 accent-violet-600"
+                          checked={selectedItemIds.has(item.id)}
+                          onChange={(e) =>
+                            toggleItemSelection(item.id, e.target.checked)
+                          }
+                        />
+                        <span>{item.name}</span>
+                      </label>
+                    ))
                   )}
+                </div>
+              </div>
 
-                  <div className="grid gap-2">
-                    <Label>Описание</Label>
-                    <Input
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      placeholder="Например: обед в кафе"
-                    />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-base font-semibold text-foreground">
+                    Дата транзакции
                   </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() => {
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                    disabled={!dateFrom && !dateTo}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="date"
+                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none ${
+                      dateFrom ? "text-foreground" : "text-muted-foreground"
+                    }`}
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                  />
+                  <span className="text-sm text-muted-foreground">—</span>
+                  <Input
+                    type="date"
+                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none ${
+                      dateTo ? "text-foreground" : "text-muted-foreground"
+                    }`}
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                  />
+                </div>
+              </div>
 
-                  <div className="grid gap-2">
-                    <Label>Комментарий</Label>
-                    <Input
-                      value={comment}
-                      onChange={(e) => setComment(e.target.value)}
-                      placeholder="Например: с коллегами"
-                    />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-base font-semibold text-foreground">
+                    Комментарий
                   </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() => setCommentFilter("")}
+                    disabled={!commentFilter}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+                <Input
+                  type="text"
+                  className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
+                  placeholder="Введите текст"
+                  value={commentFilter}
+                  onChange={(e) => setCommentFilter(e.target.value)}
+                />
+              </div>
 
-                  <div className="flex justify-end gap-2 pt-2">
-                    <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
-                      Отмена
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="bg-violet-600 hover:bg-violet-700 text-white"
-                      disabled={loading}
-                    >
-                      Добавить
-                    </Button>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-base font-semibold text-foreground">
+                    Сумма транзакции
                   </div>
-                </form>
-              </DialogContent>
-            </Dialog>
-      </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() => {
+                      setAmountFrom("");
+                      setAmountTo("");
+                    }}
+                    disabled={!amountFrom && !amountTo}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
+                    placeholder="От"
+                    value={amountFrom}
+                    onChange={(e) => setAmountFrom(e.target.value)}
+                  />
+                  <span className="text-sm text-muted-foreground">—</span>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
+                    placeholder="До"
+                    value={amountTo}
+                    onChange={(e) => setAmountTo(e.target.value)}
+                  />
+                </div>
+              </div>
 
-      <div className="space-y-6">
-        {isPlanningView ? (
-          <Card>
-            <CardHeader>
-              <CategoryFilters
-                title="Плановые транзакции"
-                cat1Filter={plannedCat1Filter}
-                cat2Filter={plannedCat2Filter}
-                cat3Filter={plannedCat3Filter}
-                onCat1Change={setPlannedCat1Filter}
-                onCat2Change={setPlannedCat2Filter}
-                onCat3Change={setPlannedCat3Filter}
-                options={plannedCategoryOptions}
-              />
-            </CardHeader>
-            <CardContent className="overflow-hidden">
-              <TransactionsTable
-                transactions={plannedFilteredTxs}
-                totalAmount={plannedTotalAmount}
-                selectedIds={selectedTxIds}
-                onToggleSelection={toggleTxSelection}
-                onToggleAll={toggleAllSelection}
-                isDeleting={isDeleting}
-              />
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardHeader>
-              <CategoryFilters
-                title="Фактические транзакции"
-                cat1Filter={actualCat1Filter}
-                cat2Filter={actualCat2Filter}
-                cat3Filter={actualCat3Filter}
-                onCat1Change={setActualCat1Filter}
-                onCat2Change={setActualCat2Filter}
-                onCat3Change={setActualCat3Filter}
-                options={actualCategoryOptions}
-              />
-            </CardHeader>
-            <CardContent className="overflow-hidden">
-              <TransactionsTable
-                transactions={actualFilteredTxs}
-                totalAmount={actualTotalAmount}
-                selectedIds={selectedTxIds}
-                onToggleSelection={toggleTxSelection}
-                onToggleAll={toggleAllSelection}
-                isDeleting={isDeleting}
-              />
-            </CardContent>
-          </Card>
-        )}
+              <div className="-mx-4 border-t-2 border-border/70" />
 
-        {showDeleted && (
-          <Card>
-            <CardHeader>
-              <CategoryFilters
-                title={
-                  isPlanningView
-                    ? "Удаленные плановые транзакции"
-                    : "Удаленные фактические транзакции"
-                }
-                cat1Filter={
-                  isPlanningView ? deletedPlannedCat1Filter : deletedActualCat1Filter
-                }
-                cat2Filter={
-                  isPlanningView ? deletedPlannedCat2Filter : deletedActualCat2Filter
-                }
-                cat3Filter={
-                  isPlanningView ? deletedPlannedCat3Filter : deletedActualCat3Filter
-                }
-                onCat1Change={
-                  isPlanningView
-                    ? setDeletedPlannedCat1Filter
-                    : setDeletedActualCat1Filter
-                }
-                onCat2Change={
-                  isPlanningView
-                    ? setDeletedPlannedCat2Filter
-                    : setDeletedActualCat2Filter
-                }
-                onCat3Change={
-                  isPlanningView
-                    ? setDeletedPlannedCat3Filter
-                    : setDeletedActualCat3Filter
-                }
-                options={
-                  isPlanningView
-                    ? deletedPlannedCategoryOptions
-                    : deletedActualCategoryOptions
-                }
-              />
-            </CardHeader>
-            <CardContent className="overflow-hidden">
-              <TransactionsTable
-                transactions={
-                  isPlanningView ? deletedPlannedFilteredTxs : deletedActualFilteredTxs
-                }
-                totalAmount={
-                  isPlanningView ? deletedPlannedTotalAmount : deletedActualTotalAmount
-                }
-                readOnly
-              />
-            </CardContent>
-          </Card>
-        )}
-      </div>
-      {showDeleted && deletedError && (
-        <div className="mt-4 text-sm text-red-600">
-          Ошибка загрузки удаленных транзакций: {deletedError}
+              <button
+                type="button"
+                aria-pressed={showDeleted}
+                onClick={() => setShowDeleted((prev) => !prev)}
+                className={`inline-flex w-full items-center justify-center rounded-md border-2 border-border/70 px-4 py-2 text-sm font-medium transition-colors ${
+                  showDeleted
+                    ? "bg-violet-50 text-violet-700"
+                    : "bg-white text-muted-foreground hover:bg-white"
+                }`}
+              >
+                Показывать удаленные транзакции
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <div className="flex-1">
+          <div className="space-y-4">
+            {sortedTxs.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-muted-foreground">
+                Нет транзакций.
+              </div>
+            ) : (
+              sortedTxs.map((tx) => (
+                <TransactionCardRow
+                  key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
+                  tx={tx}
+                  itemName={itemName}
+                  isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
+                  onToggleSelection={toggleTxSelection}
+                  onDelete={(id) => openDeleteDialog([id])}
+                  isDeleting={isDeleting}
+                />
+              ))
+            )}
+          </div>
         </div>
-      )}
-      {error && <div className="mt-4 text-sm text-red-600">Ошибка: {error}</div>}
+      </div>
 
-      {/* AlertDialog удаления */}
       <AlertDialog
         open={deleteCount > 0}
         onOpenChange={(open) => {
@@ -1411,24 +1119,7 @@ export function TransactionsView({
               {isBulkDelete ? "Удалить выбранные транзакции?" : "Удалить транзакцию?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {isBulkDelete ? (
-                <>
-                  Будут удалены транзакции: {deleteCount}. Балансы активов будут
-                  пересчитаны.
-                  <br />
-                  <span className="font-medium text-foreground">
-                    Это действие нельзя отменить.
-                  </span>
-                </>
-              ) : (
-                <>
-                  Транзакция будет удалена, а балансы активов пересчитаны.
-                  <br />
-                  <span className="font-medium text-foreground">
-                    Это действие нельзя отменить.
-                  </span>
-                </>
-              )}
+              Транзакции будут перемещены в список удаленных.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -1452,11 +1143,8 @@ export function TransactionsView({
                   });
                   setDeleteIds(null);
                   await loadAll();
-                  if (showDeleted) {
-                    await loadDeleted();
-                  }
                 } catch (e: any) {
-                  setError(e?.message ?? "Ошибка удаления");
+                  setError(e?.message ?? "Не удалось удалить транзакции.");
                   setDeleteIds(null);
                 } finally {
                   setIsDeleting(false);
@@ -1475,4 +1163,3 @@ export function TransactionsView({
 export default function TransactionsPage() {
   return <TransactionsView view="actual" />;
 }
-

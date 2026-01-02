@@ -471,7 +471,7 @@ export default function Page() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="text-muted-foreground hover:text-violet-600 hover:bg-transparent"
+                          className="text-muted-foreground hover:text-rose-500 hover:bg-transparent"
                           onClick={() => onArchive(it.id)}
                           aria-label="Архивировать"
                         >

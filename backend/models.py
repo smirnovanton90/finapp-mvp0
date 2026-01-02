@@ -1,4 +1,4 @@
-from sqlalchemy import String, DateTime, BigInteger, CheckConstraint, func, ForeignKey, Date, Text
+from sqlalchemy import String, DateTime, BigInteger, CheckConstraint, func, ForeignKey, Date, Text, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db import Base
 from datetime import datetime, date
@@ -23,6 +23,22 @@ class User(Base):
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
 
 
+class Currency(Base):
+    __tablename__ = "currencies"
+
+    iso_char_code: Mapped[str] = mapped_column(String(3), primary_key=True)
+    iso_num_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    nominal: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    eng_name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    items: Mapped[list["Item"]] = relationship(back_populates="currency")
+
+
 class Item(Base):
     __tablename__ = "items"
 
@@ -34,6 +50,11 @@ class Item(Base):
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     type_code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    currency_code: Mapped[str] = mapped_column(
+        String(3), ForeignKey("currencies.iso_char_code"), nullable=False
+    )
+    currency: Mapped[Currency] = relationship(back_populates="items")
 
     initial_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)

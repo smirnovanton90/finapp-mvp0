@@ -7,6 +7,7 @@ export type ItemOut = {
   kind: ItemKind;
   type_code: string;
   name: string;
+  currency_code: string;
   initial_value_rub: number;
   current_value_rub: number;
   created_at: string;
@@ -17,7 +18,16 @@ export type ItemCreate = {
   kind: ItemKind;
   type_code: string;
   name: string;
+  currency_code: string;
   initial_value_rub: number;
+};
+
+export type CurrencyOut = {
+  iso_char_code: string;
+  iso_num_code: string;
+  nominal: number;
+  name: string;
+  eng_name: string;
 };
 
 export type TransactionDirection = "INCOME" | "EXPENSE" | "TRANSFER";
@@ -78,6 +88,12 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
 
 export async function fetchItems(): Promise<ItemOut[]> {
   const res = await authFetch(`${API_BASE}/items`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchCurrencies(): Promise<CurrencyOut[]> {
+  const res = await authFetch(`${API_BASE}/currencies`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

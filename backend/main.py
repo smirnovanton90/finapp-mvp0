@@ -4,8 +4,8 @@ from sqlalchemy import select
 from sqlalchemy import func
 
 from db import get_db
-from models import Item, User
-from schemas import ItemCreate, ItemOut
+from models import Item, User, Currency
+from schemas import ItemCreate, ItemOut, CurrencyOut
 from auth import get_current_user
 
 from transactions import router as transactions_router
@@ -44,6 +44,15 @@ def list_items(
     return list(db.execute(stmt).scalars())
 
 
+@app.get("/currencies", response_model=list[CurrencyOut])
+def list_currencies(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(Currency).order_by(Currency.iso_char_code.asc())
+    return list(db.execute(stmt).scalars())
+
+
 @app.post("/items", response_model=ItemOut)
 def create_item(
     payload: ItemCreate,
@@ -55,6 +64,7 @@ def create_item(
         kind=payload.kind,
         type_code=payload.type_code,
         name=payload.name,
+        currency_code=payload.currency_code,
         initial_value_rub=payload.initial_value_rub,
         current_value_rub=payload.initial_value_rub,
     )

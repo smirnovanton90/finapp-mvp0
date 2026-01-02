@@ -50,10 +50,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   fetchItems,
+  fetchCurrencies,
   createItem,
   archiveItem,
   ItemKind,
   ItemOut,
+  CurrencyOut,
 } from "@/lib/api";
 
 
@@ -119,12 +121,20 @@ function formatRub(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
+function formatAmount(valueInCents: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(valueInCents / 100);
+}
+
 /* ------------------ страница ------------------ */
 
 export default function Page() {
   const { data: session } = useSession();
 
   const [items, setItems] = useState<ItemOut[]>([]);
+  const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -134,6 +144,7 @@ export default function Page() {
   const [kind, setKind] = useState<ItemKind>("ASSET");
   const [allowedTypeCodes, setAllowedTypeCodes] = useState<string[]>(CASH_TYPES);
   const [typeCode, setTypeCode] = useState("");
+  const [currencyCode, setCurrencyCode] = useState("RUB");
   const [name, setName] = useState("");
   const [amountStr, setAmountStr] = useState(""); // строка: "1234.56" / "1 234,56"
 
@@ -141,6 +152,7 @@ export default function Page() {
     setName("");
     setAmountStr("");
     setTypeCode("");
+    setCurrencyCode("RUB");
   }  
 
   function parseRubToCents(input: string): number {
@@ -311,16 +323,35 @@ export default function Page() {
     }
   }
 
+  async function loadCurrencies() {
+    try {
+      const data = await fetchCurrencies();
+      setCurrencies(data);
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось загрузить список валют.");
+    }
+  }
+
   useEffect(() => {
     if (session) {
       loadItems();
+      loadCurrencies();
     }
   }, [session]);
+
+  useEffect(() => {
+    if (!currencies.length) return;
+    if (!currencyCode || !currencies.some((c) => c.iso_char_code === currencyCode)) {
+      const rub = currencies.find((c) => c.iso_char_code === "RUB");
+      setCurrencyCode(rub?.iso_char_code ?? currencies[0].iso_char_code);
+    }
+  }, [currencies, currencyCode]);
 
   const openCreateModal = (nextKind: ItemKind, nextTypeCodes: string[]) => {
     setKind(nextKind);
     setAllowedTypeCodes(nextTypeCodes);
     setTypeCode("");
+    setCurrencyCode("RUB");
     setName("");
     setAmountStr("");
     setFormError(null);
@@ -335,7 +366,12 @@ export default function Page() {
       setFormError("Название не может быть пустым");
       return;
     }
-  
+
+    if (!currencyCode) {
+      setFormError("Выберите валюту.");
+      return;
+    }
+
     const cents = parseRubToCents(amountStr);
     if (!Number.isFinite(cents) || cents < 0) {
       setFormError("Сумма должна быть числом (например 1234,56)");
@@ -348,6 +384,7 @@ export default function Page() {
         kind,
         type_code: typeCode,
         name: name.trim(),
+        currency_code: currencyCode,
         initial_value_rub: cents, // копейки
       });
   
@@ -423,8 +460,11 @@ export default function Page() {
                   <TableHead className="font-medium text-muted-foreground">
                     Название
                   </TableHead>
+                  <TableHead className="font-medium text-muted-foreground">
+                    Валюта
+                  </TableHead>
                   <TableHead className="text-right font-medium text-muted-foreground">
-                    Текущая сумма
+                    Текущая сумма в валюте актива / обязательства
                   </TableHead>
                   <TableHead className="text-right font-medium text-muted-foreground">
                     Дата добавления
@@ -438,6 +478,7 @@ export default function Page() {
                   const typeLabel = (it.kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES).find(
                     (t) => t.code === it.type_code
                   )?.label || it.type_code;
+                  const typeMeta = typeLabel;
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
 
                   return (
@@ -448,8 +489,12 @@ export default function Page() {
                           <span className="font-medium leading-tight">{it.name}</span>
                         </div>
                         <div className="text-xs text-muted-foreground leading-tight">
-                          {typeLabel}
+                          {typeMeta}
                         </div>
+                      </TableCell>
+
+                      <TableCell className="text-sm text-muted-foreground">
+                        {it.currency_code || "-"}
                       </TableCell>
 
                       <TableCell
@@ -459,8 +504,8 @@ export default function Page() {
                         ].join(" ")}
                       >
                         {isLiability
-                          ? `-${formatRub(it.current_value_rub)}`
-                          : formatRub(it.current_value_rub)}
+                          ? `-${formatAmount(it.current_value_rub)}`
+                          : formatAmount(it.current_value_rub)}
                       </TableCell>
 
                       <TableCell className="text-right text-sm text-muted-foreground">
@@ -486,16 +531,8 @@ export default function Page() {
               <TableFooter>
                 <TableRow className="bg-muted/30">
                   <TableCell className="font-medium">Итого</TableCell>
-                  <TableCell
-                    className={[
-                      "text-right font-semibold tabular-nums",
-                      isLiability ? "text-red-600" : "",
-                    ].join(" ")}
-                  >
-                    {isLiability
-                      ? `-${formatRub(total)}`
-                      : formatRub(total)}
-                  </TableCell>
+                  <TableCell />
+                  <TableCell />
                   <TableCell />
                   <TableCell />
                 </TableRow>
@@ -543,6 +580,26 @@ export default function Page() {
                   {typeOptions.map((t) => (
                     <SelectItem key={t.code} value={t.code}>
                       {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Валюта</Label>
+              <Select
+                value={currencyCode}
+                onValueChange={setCurrencyCode}
+                disabled={currencies.length === 0}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Выберите валюту" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencies.map((c) => (
+                    <SelectItem key={c.iso_char_code} value={c.iso_char_code}>
+                      {c.iso_char_code} — {c.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

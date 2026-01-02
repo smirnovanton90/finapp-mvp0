@@ -7,6 +7,7 @@ import {
   Wallet,
   ArrowLeftRight,
   LineChart,
+  BarChart3,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
@@ -32,6 +33,11 @@ const nav = [
     href: "/financial-planning",
     label: "\u041f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435",
     icon: LineChart,
+  },
+  {
+    href: "/reports",
+    label: "\u041e\u0442\u0447\u0435\u0442\u044b",
+    icon: BarChart3,
   },
 ];
 

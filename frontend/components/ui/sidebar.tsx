@@ -3,15 +3,26 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Wallet, ArrowLeftRight, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Wallet,
+  ArrowLeftRight,
+  ChevronLeft,
+  ChevronRight,
+  LayoutDashboard,
+} from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "./sidebar-context";
 
 const nav = [
-  { href: "/assets", label: "Активы и обязательства", icon: Wallet },
-  { href: "/transactions", label: "Транзакции", icon: ArrowLeftRight },
+  { href: "/dashboard", label: "\u0414\u044d\u0448\u0431\u043e\u0440\u0434", icon: LayoutDashboard },
+  {
+    href: "/assets",
+    label: "\u0410\u043a\u0442\u0438\u0432\u044b \u0438 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u0430",
+    icon: Wallet,
+  },
+  { href: "/transactions", label: "\u0422\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0438", icon: ArrowLeftRight },
 ];
 
 export function Sidebar() {
@@ -68,7 +79,9 @@ export function Sidebar() {
               )}
               title={isCollapsed ? item.label : undefined}
             >
-              <Icon className={cn("h-6 w-6 flex-shrink-0", active ? "text-white" : "text-white/90")} />
+              <Icon
+                className={cn("h-6 w-6 flex-shrink-0", active ? "text-white" : "text-white/90")}
+              />
               {!isCollapsed && <span>{item.label}</span>}
             </Link>
           );
@@ -82,10 +95,10 @@ export function Sidebar() {
             isCollapsed ? "px-0" : "px-4"
           )}
           onClick={() => signOut()}
-          title={isCollapsed ? "Выйти" : undefined}
+          title={isCollapsed ? "\u0412\u044b\u0439\u0442\u0438" : undefined}
         >
           <LogOut className={cn("h-4 w-4 flex-shrink-0", isCollapsed ? "" : "hidden")} />
-          {!isCollapsed && <span>Выйти</span>}
+          {!isCollapsed && <span>{"\u0412\u044b\u0439\u0442\u0438"}</span>}
         </Button>
       </div>
     </aside>

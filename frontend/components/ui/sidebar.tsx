@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   Wallet,
   ArrowLeftRight,
   LineChart,
   BarChart3,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
@@ -38,12 +40,27 @@ const nav = [
     href: "/reports",
     label: "\u041e\u0442\u0447\u0435\u0442\u044b",
     icon: BarChart3,
+    children: [
+      {
+        href: "/reports/assets-dynamics",
+        label: "\u0414\u0438\u043d\u0430\u043c\u0438\u043a\u0430 \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u0438 \u0430\u043a\u0442\u0438\u0432\u043e\u0432",
+      },
+    ],
   },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const { isCollapsed, toggleSidebar } = useSidebar();
+  const [isReportsOpen, setIsReportsOpen] = useState(
+    pathname === "/reports" || pathname.startsWith("/reports/")
+  );
+
+  useEffect(() => {
+    if (pathname === "/reports" || pathname.startsWith("/reports/")) {
+      setIsReportsOpen(true);
+    }
+  }, [pathname]);
 
   return (
     <aside
@@ -81,6 +98,67 @@ export function Sidebar() {
         {nav.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
+
+          if (item.children?.length) {
+            const showChildren = isReportsOpen && !isCollapsed;
+
+            return (
+              <div key={item.href} className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => setIsReportsOpen((prev) => !prev)}
+                  className={cn(
+                    "relative flex w-full items-center gap-3 py-2 text-base font-semibold transition-colors",
+                    isCollapsed ? "justify-center px-0" : "pl-7 pr-5",
+                    active
+                      ? "text-white before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-white before:content-['']"
+                      : "text-white/80 hover:text-white"
+                  )}
+                  title={isCollapsed ? item.label : undefined}
+                >
+                  <Icon
+                    className={cn(
+                      "h-6 w-6 flex-shrink-0",
+                      active ? "text-white" : "text-white/90"
+                    )}
+                  />
+                  {!isCollapsed && <span>{item.label}</span>}
+                  {!isCollapsed && (
+                    <ChevronDown
+                      className={cn(
+                        "ml-auto h-4 w-4 transition-transform",
+                        isReportsOpen ? "rotate-0" : "-rotate-90"
+                      )}
+                    />
+                  )}
+                </button>
+                {showChildren && (
+                  <div className="flex flex-col gap-1 pb-1 pl-12 pr-5">
+                    {item.children.map((child) => {
+                      const childActive =
+                        pathname === child.href ||
+                        pathname.startsWith(child.href + "/");
+
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className={cn(
+                            "rounded-md py-1.5 text-sm font-medium transition-colors",
+                            childActive
+                              ? "text-white"
+                              : "text-white/75 hover:text-white"
+                          )}
+                        >
+                          {child.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
 
           return (
             <Link

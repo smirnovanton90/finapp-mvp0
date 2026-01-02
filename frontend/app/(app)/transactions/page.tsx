@@ -464,6 +464,10 @@ export function TransactionsView({
   const [isCategoryL1Open, setIsCategoryL1Open] = useState(false);
   const [isCategoryL2Open, setIsCategoryL2Open] = useState(false);
   const [isCategoryL3Open, setIsCategoryL3Open] = useState(false);
+  const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
+  const [selectedCurrencyCodes, setSelectedCurrencyCodes] = useState<Set<string>>(
+    () => new Set()
+  );
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(
     () => new Set()
   );
@@ -526,6 +530,22 @@ export function TransactionsView({
     }
     return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
   }, [selectedCategoryL1, selectedCategoryL2]);
+  const currencyOptions = useMemo(() => {
+    const values = new Set<string>();
+    items.forEach((item) => {
+      if (item.currency_code) values.add(item.currency_code);
+    });
+    [...txs, ...deletedTxs].forEach((tx) => {
+      const primary = itemsById.get(tx.primary_item_id)?.currency_code;
+      if (primary) values.add(primary);
+      const counterparty =
+        tx.counterparty_item_id != null
+          ? itemsById.get(tx.counterparty_item_id)?.currency_code
+          : null;
+      if (counterparty) values.add(counterparty);
+    });
+    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [items, txs, deletedTxs, itemsById]);
 
   const itemName = (id: number | null | undefined) => {
     if (!id) return "-";
@@ -719,6 +739,17 @@ export function TransactionsView({
       ) {
         return false;
       }
+      if (selectedCurrencyCodes.size > 0) {
+        const primaryCurrency = itemsById.get(tx.primary_item_id)?.currency_code;
+        const counterpartyCurrency =
+          tx.counterparty_item_id != null
+            ? itemsById.get(tx.counterparty_item_id)?.currency_code
+            : null;
+        const hasCurrency =
+          (primaryCurrency && selectedCurrencyCodes.has(primaryCurrency)) ||
+          (counterpartyCurrency && selectedCurrencyCodes.has(counterpartyCurrency));
+        if (!hasCurrency) return false;
+      }
       if (selectedDirections.size > 0 && !selectedDirections.has(tx.direction)) {
         return false;
       }
@@ -745,8 +776,10 @@ export function TransactionsView({
     selectedCategoryL1,
     selectedCategoryL2,
     selectedCategoryL3,
+    selectedCurrencyCodes,
     selectedDirections,
     selectedItemIds,
+    itemsById,
   ]);
 
   const sortedTxs = useMemo(() => {
@@ -845,6 +878,17 @@ export function TransactionsView({
   };
   const toggleCategoryL3Selection = (value: string) => {
     setSelectedCategoryL3((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        next.delete(value);
+      } else {
+        next.add(value);
+      }
+      return next;
+    });
+  };
+  const toggleCurrencySelection = (value: string) => {
+    setSelectedCurrencyCodes((prev) => {
       const next = new Set(prev);
       if (next.has(value)) {
         next.delete(value);
@@ -1310,9 +1354,144 @@ export function TransactionsView({
                     Перевод
                   </button>
                 </div>
-              </div>
+              </div><div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-base font-semibold text-foreground">
+                    Сумма транзакции
+                  </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() => {
+                      setAmountFrom("");
+                      setAmountTo("");
+                    }}
+                    disabled={!amountFrom && !amountTo}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
+                    placeholder="От"
+                    value={amountFrom}
+                    onChange={(e) =>
+                      setAmountFrom(formatRubInput(e.target.value))
+                    }
+                    onBlur={() =>
+                      setAmountFrom((prev) => normalizeRubOnBlur(prev))
+                    }
+                  />
+                  <span className="text-sm text-muted-foreground">—</span>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
+                    placeholder="До"
+                    value={amountTo}
+                    onChange={(e) => setAmountTo(formatRubInput(e.target.value))}
+                    onBlur={() => setAmountTo((prev) => normalizeRubOnBlur(prev))}
+                  />
+                </div>
+              </div><div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-base font-semibold text-foreground">
+                    Дата транзакции
+                  </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() => {
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                    disabled={!dateFrom && !dateTo}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="date"
+                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none ${
+                      dateFrom ? "text-foreground" : "text-muted-foreground"
+                    }`}
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                  />
+                  <span className="text-sm text-muted-foreground">—</span>
+                  <Input
+                    type="date"
+                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none ${
+                      dateTo ? "text-foreground" : "text-muted-foreground"
+                    }`}
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                  />
+                </div>
+              </div><div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
+                      className="text-base font-semibold text-foreground"
+                    >
+                      Валюта
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Свернуть/развернуть"
+                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isCurrencyFilterOpen ? "rotate-0" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedCurrencyCodes(new Set<string>())}
+                      disabled={selectedCurrencyCodes.size === 0}
+                    >
+                      Сбросить
+                    </button>
+                  </div>
+                </div>
 
-              <div className="space-y-3">
+                {isCurrencyFilterOpen && (
+                  <div className="space-y-2">
+                    {currencyOptions.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        Нет валют.
+                      </div>
+                    ) : (
+                      currencyOptions.map((value) => (
+                        <label
+                          key={value}
+                          className="flex items-center gap-3 text-base text-foreground"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5 accent-violet-600"
+                            checked={selectedCurrencyCodes.has(value)}
+                            onChange={() => toggleCurrencySelection(value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1">
                     <button
@@ -1373,9 +1552,7 @@ export function TransactionsView({
                     )}
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-3">
+              </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1">
                     <button
@@ -1434,9 +1611,7 @@ export function TransactionsView({
                     )}
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-3">
+              </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1">
                     <button
@@ -1495,9 +1670,7 @@ export function TransactionsView({
                     )}
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-3">
+              </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1">
                     <button
@@ -1556,47 +1729,7 @@ export function TransactionsView({
                     )}
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-base font-semibold text-foreground">
-                    Дата транзакции
-                  </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setDateFrom("");
-                      setDateTo("");
-                    }}
-                    disabled={!dateFrom && !dateTo}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    type="date"
-                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none ${
-                      dateFrom ? "text-foreground" : "text-muted-foreground"
-                    }`}
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                  />
-                  <span className="text-sm text-muted-foreground">—</span>
-                  <Input
-                    type="date"
-                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none ${
-                      dateTo ? "text-foreground" : "text-muted-foreground"
-                    }`}
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3">
+              </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="text-base font-semibold text-foreground">
                     Комментарий
@@ -1622,50 +1755,19 @@ export function TransactionsView({
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="text-base font-semibold text-foreground">
-                    Сумма транзакции
+                    Статус транзакции
                   </div>
                   <button
                     type="button"
                     className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
                     onClick={() => {
-                      setAmountFrom("");
-                      setAmountTo("");
+                      setShowActive(true);
+                      setShowDeleted(false);
                     }}
-                    disabled={!amountFrom && !amountTo}
+                    disabled={showActive && !showDeleted}
                   >
                     Сбросить
                   </button>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
-                    placeholder="От"
-                    value={amountFrom}
-                    onChange={(e) =>
-                      setAmountFrom(formatRubInput(e.target.value))
-                    }
-                    onBlur={() =>
-                      setAmountFrom((prev) => normalizeRubOnBlur(prev))
-                    }
-                  />
-                  <span className="text-sm text-muted-foreground">—</span>
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
-                    placeholder="До"
-                    value={amountTo}
-                    onChange={(e) => setAmountTo(formatRubInput(e.target.value))}
-                    onBlur={() => setAmountTo((prev) => normalizeRubOnBlur(prev))}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="text-base font-semibold text-foreground">
-                  Статус транзакции
                 </div>
                 <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
                   <button
@@ -1694,6 +1796,24 @@ export function TransactionsView({
                   </button>
                 </div>
               </div>
+
+              
+
+              
+
+              
+
+              
+
+              
+
+              
+
+              
+
+              
+
+              
             </div>
           </div>
         </aside>

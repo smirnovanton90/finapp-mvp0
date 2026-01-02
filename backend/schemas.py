@@ -60,3 +60,10 @@ class CurrencyOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FxRateOut(BaseModel):
+    char_code: str
+    nominal: int
+    value: float
+    rate: float

@@ -1,16 +1,22 @@
 from fastapi import FastAPI, Depends, HTTPException
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+import requests
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sqlalchemy import func
 
 from db import get_db
 from models import Item, User, Currency
-from schemas import ItemCreate, ItemOut, CurrencyOut
+from schemas import ItemCreate, ItemOut, CurrencyOut, FxRateOut
 from auth import get_current_user
 
 from transactions import router as transactions_router
 
 app = FastAPI(title="FinApp API", version="0.1.0")
+
+_FX_CACHE: dict[str, tuple[datetime, list[FxRateOut]]] = {}
+_FX_CACHE_TTL = timedelta(hours=1)
 
 app.include_router(transactions_router)
 
@@ -23,6 +29,53 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _fetch_cbr_rates(date_req: str | None) -> list[FxRateOut]:
+    params = {"date_req": date_req} if date_req else None
+    response = requests.get("https://cbr.ru/scripts/XML_daily.asp", params=params, timeout=20)
+    response.raise_for_status()
+
+    root = ET.fromstring(response.content)
+    rates: list[FxRateOut] = []
+
+    for valute in root.findall("Valute"):
+        char_code = (valute.findtext("CharCode") or "").strip()
+        if not char_code:
+            continue
+
+        nominal_text = (valute.findtext("Nominal") or "").strip()
+        value_text = (valute.findtext("Value") or "").strip()
+
+        try:
+            nominal = int(nominal_text)
+        except ValueError:
+            nominal = 1
+
+        try:
+            value = float(value_text.replace(",", "."))
+        except ValueError:
+            value = 0.0
+
+        rate = value / nominal if nominal else 0.0
+        rates.append(FxRateOut(char_code=char_code, nominal=nominal, value=value, rate=rate))
+
+    rates.append(FxRateOut(char_code="RUB", nominal=1, value=1.0, rate=1.0))
+    rates.sort(key=lambda r: r.char_code)
+    return rates
+
+
+def _get_fx_rates(date_req: str | None) -> list[FxRateOut]:
+    cache_key = date_req or "latest"
+    cached = _FX_CACHE.get(cache_key)
+    now = datetime.utcnow()
+
+    if cached and (now - cached[0]) < _FX_CACHE_TTL:
+        return cached[1]
+
+    rates = _fetch_cbr_rates(date_req)
+    _FX_CACHE[cache_key] = (now, rates)
+    return rates
 
 @app.get("/health")
 def health():
@@ -51,6 +104,17 @@ def list_currencies(
 ):
     stmt = select(Currency).order_by(Currency.iso_char_code.asc())
     return list(db.execute(stmt).scalars())
+
+
+@app.get("/fx-rates", response_model=list[FxRateOut])
+def list_fx_rates(
+    date_req: str | None = None,
+    user: User = Depends(get_current_user),
+):
+    try:
+        return _get_fx_rates(date_req)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/items", response_model=ItemOut)

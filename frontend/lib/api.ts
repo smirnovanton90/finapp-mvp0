@@ -30,6 +30,13 @@ export type CurrencyOut = {
   eng_name: string;
 };
 
+export type FxRateOut = {
+  char_code: string;
+  nominal: number;
+  value: number;
+  rate: number;
+};
+
 export type TransactionDirection = "INCOME" | "EXPENSE" | "TRANSFER";
 export type TransactionType = "ACTUAL" | "PLANNED";
 
@@ -94,6 +101,13 @@ export async function fetchItems(): Promise<ItemOut[]> {
 
 export async function fetchCurrencies(): Promise<CurrencyOut[]> {
   const res = await authFetch(`${API_BASE}/currencies`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchFxRates(dateReq?: string): Promise<FxRateOut[]> {
+  const qs = dateReq ? `?date_req=${encodeURIComponent(dateReq)}` : "";
+  const res = await authFetch(`${API_BASE}/fx-rates${qs}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

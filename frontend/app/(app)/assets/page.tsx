@@ -51,11 +51,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   fetchItems,
   fetchCurrencies,
+  fetchFxRates,
   createItem,
   archiveItem,
   ItemKind,
   ItemOut,
   CurrencyOut,
+  FxRateOut,
 } from "@/lib/api";
 
 
@@ -128,6 +130,13 @@ function formatAmount(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
+function formatRate(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(value);
+}
+
 /* ------------------ страница ------------------ */
 
 export default function Page() {
@@ -135,6 +144,7 @@ export default function Page() {
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
+  const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -228,6 +238,21 @@ export default function Page() {
     return `${intPart},${decPart.slice(0, 2)}`;
   }  
 
+  const rateByCode = useMemo(() => {
+    const map: Record<string, number> = { RUB: 1 };
+    fxRates.forEach((rate) => {
+      map[rate.char_code] = rate.rate;
+    });
+    return map;
+  }, [fxRates]);
+
+  function getRubEquivalentCents(item: ItemOut): number | null {
+    const rate = rateByCode[item.currency_code];
+    if (!rate) return null;
+    const amount = item.current_value_rub / 100;
+    return Math.round(amount * rate * 100);
+  }
+
   const typeOptions = useMemo(() => {
     const base = kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES;
     if (!allowedTypeCodes.length) return base;
@@ -263,45 +288,46 @@ export default function Page() {
 
   // Итоги по категориям
   const cashTotal = useMemo(
-    () => cashItems.reduce((sum, x) => sum + x.current_value_rub, 0),
-    [cashItems]
+    () => cashItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [cashItems, rateByCode]
   );
 
   const financialInstrumentsTotal = useMemo(
-    () => financialInstrumentsItems.reduce((sum, x) => sum + x.current_value_rub, 0),
-    [financialInstrumentsItems]
+    () =>
+      financialInstrumentsItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [financialInstrumentsItems, rateByCode]
   );
 
   const propertyTotal = useMemo(
-    () => propertyItems.reduce((sum, x) => sum + x.current_value_rub, 0),
-    [propertyItems]
+    () => propertyItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [propertyItems, rateByCode]
   );
 
   const otherAssetTotal = useMemo(
-    () => otherAssetItems.reduce((sum, x) => sum + x.current_value_rub, 0),
-    [otherAssetItems]
+    () => otherAssetItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [otherAssetItems, rateByCode]
   );
 
   const liabilityTotal = useMemo(
-    () => liabilityItems.reduce((sum, x) => sum + x.current_value_rub, 0),
-    [liabilityItems]
+    () => liabilityItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [liabilityItems, rateByCode]
   );
 
   const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
     const assets = items
       .filter((x) => x.kind === "ASSET")
-      .reduce((sum, x) => sum + x.current_value_rub, 0);
+      .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
   
     const liabilities = items
       .filter((x) => x.kind === "LIABILITY")
-      .reduce((sum, x) => sum + x.current_value_rub, 0);
+      .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
   
     return {
       totalAssets: assets,
       totalLiabilities: liabilities,
       netTotal: assets - liabilities, // обязательства вычитаем
     };
-  }, [items]);
+  }, [items, rateByCode]);
 
   useEffect(() => {
     if (!isCreateOpen || typeOptions.length === 0) return;
@@ -332,10 +358,20 @@ export default function Page() {
     }
   }
 
+  async function loadFxRates() {
+    try {
+      const data = await fetchFxRates();
+      setFxRates(data);
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось загрузить курсы валют.");
+    }
+  }
+
   useEffect(() => {
     if (session) {
       loadItems();
       loadCurrencies();
+      loadFxRates();
     }
   }, [session]);
 
@@ -467,6 +503,12 @@ export default function Page() {
                     Текущая сумма в валюте актива / обязательства
                   </TableHead>
                   <TableHead className="text-right font-medium text-muted-foreground">
+                    Актуальный курс валюты
+                  </TableHead>
+                  <TableHead className="text-right font-medium text-muted-foreground">
+                    Текущая сумма актива / обязательства в рублевом эквиваленте
+                  </TableHead>
+                  <TableHead className="text-right font-medium text-muted-foreground">
                     Дата добавления
                   </TableHead>
                   <TableHead />
@@ -479,6 +521,8 @@ export default function Page() {
                     (t) => t.code === it.type_code
                   )?.label || it.type_code;
                   const typeMeta = typeLabel;
+                  const rate = rateByCode[it.currency_code];
+                  const rubEquivalent = getRubEquivalentCents(it);
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
 
                   return (
@@ -509,6 +553,23 @@ export default function Page() {
                       </TableCell>
 
                       <TableCell className="text-right text-sm text-muted-foreground">
+                        {rate ? formatRate(rate) : "-"}
+                      </TableCell>
+
+                      <TableCell
+                        className={[
+                          "text-right font-semibold tabular-nums",
+                          isLiability ? "text-red-600" : "",
+                        ].join(" ")}
+                      >
+                        {rubEquivalent === null
+                          ? "-"
+                          : isLiability
+                          ? `-${formatRub(rubEquivalent)}`
+                          : formatRub(rubEquivalent)}
+                      </TableCell>
+
+                      <TableCell className="text-right text-sm text-muted-foreground">
                         {new Date(it.created_at).toLocaleDateString("ru-RU")}
                       </TableCell>
 
@@ -531,6 +592,8 @@ export default function Page() {
               <TableFooter>
                 <TableRow className="bg-muted/30">
                   <TableCell className="font-medium">Итого</TableCell>
+                  <TableCell />
+                  <TableCell />
                   <TableCell />
                   <TableCell />
                   <TableCell />

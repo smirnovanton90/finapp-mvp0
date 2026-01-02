@@ -53,25 +53,15 @@ import {
   ItemOut,
   TransactionOut,
 } from "@/lib/api";
+import {
+  buildCategoryMaps,
+  DEFAULT_CATEGORIES,
+  readStoredCategories,
+} from "@/lib/categories";
 
 type TransactionsViewMode = "actual" | "planning";
 
 type TransactionCard = TransactionOut & { isDeleted?: boolean };
-
-const CATEGORY_L1 = ["Питание", "Транспорт", "Услуги"];
-
-const CATEGORY_L2: Record<string, string[]> = {
-  "Питание": ["Продукты", "Кафе", "Доставка"],
-  "Транспорт": ["Такси", "Метро", "Бензин"],
-  "Услуги": ["Связь", "Подписки", "Прочее"],
-};
-
-const CATEGORY_L3: Record<string, string[]> = {
-  "Продукты": ["Супермаркет", "Рынок"],
-  "Кафе": ["Кофе", "Ресторан"],
-  "Такси": ["Яндекс", "Uber"],
-  "Связь": ["Мобильная", "Интернет"],
-};
 
 const CATEGORY_ICON_BY_L1: Record<string, ComponentType<{ className?: string; strokeWidth?: number }>> =
   {
@@ -496,14 +486,29 @@ export function TransactionsView({
   const [amountStr, setAmountStr] = useState("");
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
   const [cat1, setCat1] = useState("Питание");
-  const [cat2, setCat2] = useState("Продукты");
-  const [cat3, setCat3] = useState("Супермаркет");
+  const [cat2, setCat2] = useState("Продукты питания");
+  const [cat3, setCat3] = useState("-");
+  const [categoryNodes, setCategoryNodes] = useState(() => DEFAULT_CATEGORIES);
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
 
   const [selectedTxIds, setSelectedTxIds] = useState<Set<number>>(() => new Set());
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    const stored = readStoredCategories();
+    setCategoryNodes(stored ?? DEFAULT_CATEGORIES);
+  }, []);
+
+  const categoryMaps = useMemo(
+    () => buildCategoryMaps(categoryNodes),
+    [categoryNodes]
+  );
+  const scopedCategoryMaps = useMemo(() => {
+    const scope = direction === "TRANSFER" ? undefined : direction;
+    return buildCategoryMaps(categoryNodes, scope);
+  }, [categoryNodes, direction]);
 
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
@@ -513,38 +518,38 @@ export function TransactionsView({
     return [...items].sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [items]);
   const categoryL1Options = useMemo(() => {
-    return [...CATEGORY_L1].sort((a, b) => a.localeCompare(b, "ru"));
-  }, []);
+    return [...categoryMaps.l1].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [categoryMaps]);
   const categoryL2Options = useMemo(() => {
     const values = new Set<string>();
     const keys =
       selectedCategoryL1.size > 0
         ? Array.from(selectedCategoryL1)
-        : Object.keys(CATEGORY_L2);
+        : categoryMaps.l1;
     keys.forEach((key) => {
-      (CATEGORY_L2[key] ?? []).forEach((val) => values.add(val));
+      (categoryMaps.l2[key] ?? []).forEach((val) => values.add(val));
     });
     return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [selectedCategoryL1]);
+  }, [selectedCategoryL1, categoryMaps]);
   const categoryL3Options = useMemo(() => {
     const values = new Set<string>();
     if (selectedCategoryL2.size > 0) {
       selectedCategoryL2.forEach((key) => {
-        (CATEGORY_L3[key] ?? []).forEach((val) => values.add(val));
+        (categoryMaps.l3[key] ?? []).forEach((val) => values.add(val));
       });
     } else {
       const l2Keys =
         selectedCategoryL1.size > 0
           ? Array.from(selectedCategoryL1).flatMap(
-              (key) => CATEGORY_L2[key] ?? []
+              (key) => categoryMaps.l2[key] ?? []
             )
-          : Object.keys(CATEGORY_L3);
+          : Object.keys(categoryMaps.l3);
       l2Keys.forEach((key) => {
-        (CATEGORY_L3[key] ?? []).forEach((val) => values.add(val));
+        (categoryMaps.l3[key] ?? []).forEach((val) => values.add(val));
       });
     }
     return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [selectedCategoryL1, selectedCategoryL2]);
+  }, [selectedCategoryL1, selectedCategoryL2, categoryMaps]);
   const currencyOptions = useMemo(() => {
     const values = new Set<string>();
     items.forEach((item) => {
@@ -604,8 +609,14 @@ export function TransactionsView({
     }
   }, [isCrossCurrencyTransfer]);
 
-  const cat2Options = useMemo(() => CATEGORY_L2[cat1] ?? [], [cat1]);
-  const cat3Options = useMemo(() => CATEGORY_L3[cat2] ?? [], [cat2]);
+  const cat2Options = useMemo(() => {
+    const options = scopedCategoryMaps.l2[cat1] ?? [];
+    return options.length ? options : ["-"];
+  }, [cat1, scopedCategoryMaps]);
+  const cat3Options = useMemo(
+    () => scopedCategoryMaps.l3[cat2] ?? [],
+    [cat2, scopedCategoryMaps]
+  );
   const segmentedButtonBase =
     "flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
 
@@ -617,8 +628,8 @@ export function TransactionsView({
     setAmountStr("");
     setAmountCounterpartyStr("");
     setCat1("Питание");
-    setCat2("Продукты");
-    setCat3("Супермаркет");
+    setCat2("Продукты питания");
+    setCat3("-");
     setDescription("");
     setComment("");
   };
@@ -1057,9 +1068,9 @@ export function TransactionsView({
                           onClick={() => {
                             setDirection("INCOME");
                             setCounterpartyItemId(null);
-                            setCat1("Питание");
-                            setCat2("Продукты");
-                            setCat3("Супермаркет");
+                            setCat1("Доход от основного места работы");
+                            setCat2("Гарантированные выплаты");
+                            setCat3("Аванс");
                           }}
                           className={`${segmentedButtonBase} ${
                             direction === "INCOME"
@@ -1076,8 +1087,8 @@ export function TransactionsView({
                             setDirection("EXPENSE");
                             setCounterpartyItemId(null);
                             setCat1("Питание");
-                            setCat2("Продукты");
-                            setCat3("Супермаркет");
+                            setCat2("Продукты питания");
+                            setCat3("-");
                           }}
                           className={`${segmentedButtonBase} ${
                             direction === "EXPENSE"
@@ -1229,9 +1240,9 @@ export function TransactionsView({
                             value={cat1}
                             onValueChange={(v) => {
                               setCat1(v);
-                              const first2 = (CATEGORY_L2[v] ?? [])[0] ?? "";
+                              const first2 = (scopedCategoryMaps.l2[v] ?? [])[0] ?? "-";
                               setCat2(first2);
-                              const first3 = (CATEGORY_L3[first2] ?? [])[0] ?? "";
+                              const first3 = (scopedCategoryMaps.l3[first2] ?? [])[0] ?? "-";
                               setCat3(first3);
                             }}
                           >
@@ -1239,7 +1250,7 @@ export function TransactionsView({
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {CATEGORY_L1.map((c) => (
+                              {scopedCategoryMaps.l1.map((c) => (
                                 <SelectItem key={c} value={c}>
                                   {c}
                                 </SelectItem>
@@ -1254,7 +1265,7 @@ export function TransactionsView({
                             value={cat2}
                             onValueChange={(v) => {
                               setCat2(v);
-                              const first3 = (CATEGORY_L3[v] ?? [])[0] ?? "";
+                              const first3 = (scopedCategoryMaps.l3[v] ?? [])[0] ?? "-";
                               setCat3(first3);
                             }}
                           >

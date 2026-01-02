@@ -351,7 +351,7 @@ function TransactionCardRow({
 
             <div className="min-w-[140px] flex-1">
               <div
-                className={`whitespace-normal text-xs font-semibold leading-tight ${mutedTextClass}`}
+                className={`whitespace-normal text-xs leading-tight ${mutedTextClass}`}
               >
                 {commentText}
               </div>
@@ -398,7 +398,7 @@ function TransactionCardRow({
 
             <div className="min-w-[140px] flex-1">
               <div
-                className={`whitespace-normal text-xs font-semibold leading-tight ${mutedTextClass}`}
+                className={`whitespace-normal text-xs leading-tight ${mutedTextClass}`}
               >
                 {commentText}
               </div>

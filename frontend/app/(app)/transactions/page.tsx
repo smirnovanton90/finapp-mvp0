@@ -126,6 +126,8 @@ function toCbrDate(value: string) {
 }
 
 function formatTime(value: string) {
+  const hasTime = /[T\s]\d{1,2}:\d{2}/.test(value);
+  if (!hasTime) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString("ru-RU", {
@@ -308,7 +310,7 @@ function TransactionCardRow({
             {formatDate(tx.transaction_date)}
           </div>
           <div className={`text-xs ${mutedTextClass}`}>
-            {formatTime(tx.created_at)}
+            {formatTime(tx.transaction_date)}
           </div>
         </div>
 

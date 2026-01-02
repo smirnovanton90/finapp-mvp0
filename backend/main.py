@@ -1,13 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as date_type
 import requests
 from sqlalchemy.orm import Session
-from sqlalchemy import select
-from sqlalchemy import func
+from sqlalchemy import select, delete, func
 
 from db import get_db
-from models import Item, User, Currency
+from models import Item, User, Currency, FxRate
 from schemas import ItemCreate, ItemOut, CurrencyOut, FxRateOut
 from auth import get_current_user
 
@@ -31,12 +30,31 @@ app.add_middleware(
 )
 
 
-def _fetch_cbr_rates(date_req: str | None) -> list[FxRateOut]:
+def _parse_date_req(date_req: str | None) -> date_type | None:
+    if not date_req:
+        return None
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(date_req, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _fetch_cbr_rates(date_req: str | None) -> tuple[date_type, list[FxRateOut]]:
     params = {"date_req": date_req} if date_req else None
     response = requests.get("https://cbr.ru/scripts/XML_daily.asp", params=params, timeout=20)
     response.raise_for_status()
 
     root = ET.fromstring(response.content)
+    response_date_text = (root.attrib.get("Date") or "").strip()
+    response_date = None
+    if response_date_text:
+        try:
+            response_date = datetime.strptime(response_date_text, "%d.%m.%Y").date()
+        except ValueError:
+            response_date = None
+
     rates: list[FxRateOut] = []
 
     for valute in root.findall("Valute"):
@@ -62,10 +80,45 @@ def _fetch_cbr_rates(date_req: str | None) -> list[FxRateOut]:
 
     rates.append(FxRateOut(char_code="RUB", nominal=1, value=1.0, rate=1.0))
     rates.sort(key=lambda r: r.char_code)
-    return rates
+    fallback_date = _parse_date_req(date_req) or datetime.utcnow().date()
+    return (response_date or fallback_date), rates
 
 
-def _get_fx_rates(date_req: str | None) -> list[FxRateOut]:
+def _load_fx_rates(date_req: date_type, db: Session) -> list[FxRateOut] | None:
+    rows = db.execute(
+        select(FxRate)
+        .where(FxRate.rate_date == date_req)
+        .order_by(FxRate.char_code.asc())
+    ).scalars().all()
+    if not rows:
+        return None
+    return [
+        FxRateOut(
+            char_code=row.char_code,
+            nominal=row.nominal,
+            value=row.value,
+            rate=row.rate,
+        )
+        for row in rows
+    ]
+
+
+def _store_fx_rates(date_req: date_type, rates: list[FxRateOut], db: Session) -> None:
+    db.execute(delete(FxRate).where(FxRate.rate_date == date_req))
+    for rate in rates:
+        db.add(
+            FxRate(
+                rate_date=date_req,
+                char_code=rate.char_code,
+                nominal=rate.nominal,
+                value=rate.value,
+                rate=rate.rate,
+            )
+        )
+    db.commit()
+
+
+def _get_fx_rates(date_req: str | None, db: Session) -> list[FxRateOut]:
     cache_key = date_req or "latest"
     cached = _FX_CACHE.get(cache_key)
     now = datetime.utcnow()
@@ -73,7 +126,23 @@ def _get_fx_rates(date_req: str | None) -> list[FxRateOut]:
     if cached and (now - cached[0]) < _FX_CACHE_TTL:
         return cached[1]
 
-    rates = _fetch_cbr_rates(date_req)
+    parsed_date = _parse_date_req(date_req)
+    if parsed_date:
+        stored = _load_fx_rates(parsed_date, db)
+        if stored:
+            _FX_CACHE[cache_key] = (now, stored)
+            return stored
+    else:
+        latest_date = db.execute(select(func.max(FxRate.rate_date))).scalar()
+        if latest_date:
+            stored = _load_fx_rates(latest_date, db)
+            if stored:
+                _FX_CACHE[cache_key] = (now, stored)
+                return stored
+
+    fetched_date, rates = _fetch_cbr_rates(date_req)
+    store_date = parsed_date or fetched_date
+    _store_fx_rates(store_date, rates, db)
     _FX_CACHE[cache_key] = (now, rates)
     return rates
 
@@ -109,10 +178,11 @@ def list_currencies(
 @app.get("/fx-rates", response_model=list[FxRateOut])
 def list_fx_rates(
     date_req: str | None = None,
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     try:
-        return _get_fx_rates(date_req)
+        return _get_fx_rates(date_req, db)
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

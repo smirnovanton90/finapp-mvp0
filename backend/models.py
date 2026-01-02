@@ -1,4 +1,4 @@
-from sqlalchemy import String, DateTime, BigInteger, CheckConstraint, func, ForeignKey, Date, Text, Integer
+from sqlalchemy import String, DateTime, BigInteger, CheckConstraint, func, ForeignKey, Date, Text, Integer, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db import Base
 from datetime import datetime, date
@@ -37,6 +37,23 @@ class Currency(Base):
     )
 
     items: Mapped[list["Item"]] = relationship(back_populates="currency")
+
+
+class FxRate(Base):
+    __tablename__ = "fx_rates"
+
+    rate_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    char_code: Mapped[str] = mapped_column(String(3), primary_key=True)
+    nominal: Mapped[int] = mapped_column(Integer, nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    rate: Mapped[float] = mapped_column(Float, nullable=False)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class Item(Base):

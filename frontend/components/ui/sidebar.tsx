@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   Wallet,
   ArrowLeftRight,
+  LineChart,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
@@ -22,7 +23,16 @@ const nav = [
     label: "\u0410\u043a\u0442\u0438\u0432\u044b \u0438 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u0430",
     icon: Wallet,
   },
-  { href: "/transactions", label: "\u0422\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0438", icon: ArrowLeftRight },
+  {
+    href: "/transactions",
+    label: "\u0422\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0438",
+    icon: ArrowLeftRight,
+  },
+  {
+    href: "/financial-planning",
+    label: "\u041f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435",
+    icon: LineChart,
+  },
 ];
 
 export function Sidebar() {

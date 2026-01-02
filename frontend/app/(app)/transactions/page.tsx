@@ -83,6 +83,8 @@ type CategoryOptions = {
   l3: Record<string, string[]>;
 };
 
+type TransactionsViewMode = "actual" | "planning";
+
 function buildCategoryOptions(txs: TransactionOut[]): CategoryOptions {
   const l1 = new Set(CATEGORY_L1);
   const l2 = new Map<string, Set<string>>();
@@ -197,8 +199,13 @@ function normalizeRubOnBlur(value: string): string {
 
 /* ------------ page ------------ */
 
-export default function TransactionsPage() {
+export function TransactionsView({
+  view = "actual",
+}: {
+  view?: TransactionsViewMode;
+}) {
   const { data: session } = useSession();
+  const isPlanningView = view === "planning";
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
@@ -282,7 +289,6 @@ export default function TransactionsPage() {
     () => deletedTxs.filter((tx) => tx.transaction_type === "ACTUAL"),
     [deletedTxs]
   );
-
   const deletedPlannedTxs = useMemo(
     () => deletedTxs.filter((tx) => tx.transaction_type === "PLANNED"),
     [deletedTxs]
@@ -303,7 +309,6 @@ export default function TransactionsPage() {
     () => buildCategoryOptions(deletedActualTxs),
     [deletedActualTxs]
   );
-
   const deletedPlannedCategoryOptions = useMemo(
     () => buildCategoryOptions(deletedPlannedTxs),
     [deletedPlannedTxs]
@@ -376,7 +381,6 @@ export default function TransactionsPage() {
     deletedActualCat3Filter,
     deletedActualTxs,
   ]);
-
   const deletedPlannedFilteredTxs = useMemo(() => {
     return deletedPlannedTxs.filter((tx) => {
       if (
@@ -448,7 +452,6 @@ export default function TransactionsPage() {
       return sum;
     }, 0);
   }, [deletedActualFilteredTxs]);
-
   const deletedPlannedTotalAmount = useMemo(() => {
     return deletedPlannedFilteredTxs.reduce((sum, tx) => {
       if (tx.direction === "EXPENSE") {
@@ -1282,104 +1285,110 @@ export default function TransactionsPage() {
       </div>
 
       <div className="space-y-6">
-        {/* Фактические транзакции */}
-        <Card>
-          <CardHeader>
-            <CategoryFilters
-              title="Фактические транзакции"
-              cat1Filter={actualCat1Filter}
-              cat2Filter={actualCat2Filter}
-              cat3Filter={actualCat3Filter}
-              onCat1Change={setActualCat1Filter}
-              onCat2Change={setActualCat2Filter}
-              onCat3Change={setActualCat3Filter}
-              options={actualCategoryOptions}
-            />
-          </CardHeader>
-          <CardContent className="overflow-hidden">
-            <TransactionsTable
-              transactions={actualFilteredTxs}
-              totalAmount={actualTotalAmount}
-              selectedIds={selectedTxIds}
-              onToggleSelection={toggleTxSelection}
-              onToggleAll={toggleAllSelection}
-              isDeleting={isDeleting}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Плановые транзакции */}
-        <Card>
-          <CardHeader>
-            <CategoryFilters
-              title="Плановые транзакции"
-              cat1Filter={plannedCat1Filter}
-              cat2Filter={plannedCat2Filter}
-              cat3Filter={plannedCat3Filter}
-              onCat1Change={setPlannedCat1Filter}
-              onCat2Change={setPlannedCat2Filter}
-              onCat3Change={setPlannedCat3Filter}
-              options={plannedCategoryOptions}
-            />
-          </CardHeader>
-          <CardContent className="overflow-hidden">
-            <TransactionsTable
-              transactions={plannedFilteredTxs}
-              totalAmount={plannedTotalAmount}
-              selectedIds={selectedTxIds}
-              onToggleSelection={toggleTxSelection}
-              onToggleAll={toggleAllSelection}
-              isDeleting={isDeleting}
-            />
-          </CardContent>
-        </Card>
+        {isPlanningView ? (
+          <Card>
+            <CardHeader>
+              <CategoryFilters
+                title="Плановые транзакции"
+                cat1Filter={plannedCat1Filter}
+                cat2Filter={plannedCat2Filter}
+                cat3Filter={plannedCat3Filter}
+                onCat1Change={setPlannedCat1Filter}
+                onCat2Change={setPlannedCat2Filter}
+                onCat3Change={setPlannedCat3Filter}
+                options={plannedCategoryOptions}
+              />
+            </CardHeader>
+            <CardContent className="overflow-hidden">
+              <TransactionsTable
+                transactions={plannedFilteredTxs}
+                totalAmount={plannedTotalAmount}
+                selectedIds={selectedTxIds}
+                onToggleSelection={toggleTxSelection}
+                onToggleAll={toggleAllSelection}
+                isDeleting={isDeleting}
+              />
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CategoryFilters
+                title="Фактические транзакции"
+                cat1Filter={actualCat1Filter}
+                cat2Filter={actualCat2Filter}
+                cat3Filter={actualCat3Filter}
+                onCat1Change={setActualCat1Filter}
+                onCat2Change={setActualCat2Filter}
+                onCat3Change={setActualCat3Filter}
+                options={actualCategoryOptions}
+              />
+            </CardHeader>
+            <CardContent className="overflow-hidden">
+              <TransactionsTable
+                transactions={actualFilteredTxs}
+                totalAmount={actualTotalAmount}
+                selectedIds={selectedTxIds}
+                onToggleSelection={toggleTxSelection}
+                onToggleAll={toggleAllSelection}
+                isDeleting={isDeleting}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         {showDeleted && (
-          <>
-            <Card>
-              <CardHeader>
-                <CategoryFilters
-                  title="Удаленные фактические транзакции"
-                  cat1Filter={deletedActualCat1Filter}
-                  cat2Filter={deletedActualCat2Filter}
-                  cat3Filter={deletedActualCat3Filter}
-                  onCat1Change={setDeletedActualCat1Filter}
-                  onCat2Change={setDeletedActualCat2Filter}
-                  onCat3Change={setDeletedActualCat3Filter}
-                  options={deletedActualCategoryOptions}
-                />
-              </CardHeader>
-              <CardContent className="overflow-hidden">
-                <TransactionsTable
-                  transactions={deletedActualFilteredTxs}
-                  totalAmount={deletedActualTotalAmount}
-                  readOnly
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CategoryFilters
-                  title="Удаленные плановые транзакции"
-                  cat1Filter={deletedPlannedCat1Filter}
-                  cat2Filter={deletedPlannedCat2Filter}
-                  cat3Filter={deletedPlannedCat3Filter}
-                  onCat1Change={setDeletedPlannedCat1Filter}
-                  onCat2Change={setDeletedPlannedCat2Filter}
-                  onCat3Change={setDeletedPlannedCat3Filter}
-                  options={deletedPlannedCategoryOptions}
-                />
-              </CardHeader>
-              <CardContent className="overflow-hidden">
-                <TransactionsTable
-                  transactions={deletedPlannedFilteredTxs}
-                  totalAmount={deletedPlannedTotalAmount}
-                  readOnly
-                />
-              </CardContent>
-            </Card>
-          </>
+          <Card>
+            <CardHeader>
+              <CategoryFilters
+                title={
+                  isPlanningView
+                    ? "Удаленные плановые транзакции"
+                    : "Удаленные фактические транзакции"
+                }
+                cat1Filter={
+                  isPlanningView ? deletedPlannedCat1Filter : deletedActualCat1Filter
+                }
+                cat2Filter={
+                  isPlanningView ? deletedPlannedCat2Filter : deletedActualCat2Filter
+                }
+                cat3Filter={
+                  isPlanningView ? deletedPlannedCat3Filter : deletedActualCat3Filter
+                }
+                onCat1Change={
+                  isPlanningView
+                    ? setDeletedPlannedCat1Filter
+                    : setDeletedActualCat1Filter
+                }
+                onCat2Change={
+                  isPlanningView
+                    ? setDeletedPlannedCat2Filter
+                    : setDeletedActualCat2Filter
+                }
+                onCat3Change={
+                  isPlanningView
+                    ? setDeletedPlannedCat3Filter
+                    : setDeletedActualCat3Filter
+                }
+                options={
+                  isPlanningView
+                    ? deletedPlannedCategoryOptions
+                    : deletedActualCategoryOptions
+                }
+              />
+            </CardHeader>
+            <CardContent className="overflow-hidden">
+              <TransactionsTable
+                transactions={
+                  isPlanningView ? deletedPlannedFilteredTxs : deletedActualFilteredTxs
+                }
+                totalAmount={
+                  isPlanningView ? deletedPlannedTotalAmount : deletedActualTotalAmount
+                }
+                readOnly
+              />
+            </CardContent>
+          </Card>
         )}
       </div>
       {showDeleted && deletedError && (
@@ -1461,5 +1470,9 @@ export default function TransactionsPage() {
       </AlertDialog>
     </main>
   );
+}
+
+export default function TransactionsPage() {
+  return <TransactionsView view="actual" />;
 }
 

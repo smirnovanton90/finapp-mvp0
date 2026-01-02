@@ -173,6 +173,7 @@ function normalizeRubOnBlur(value: string): string {
 function TransactionCardRow({
   tx,
   itemName,
+  itemCurrencyCode,
   isSelected,
   onToggleSelection,
   onDelete,
@@ -180,6 +181,7 @@ function TransactionCardRow({
 }: {
   tx: TransactionCard;
   itemName: (id: number | null | undefined) => string;
+  itemCurrencyCode: (id: number | null | undefined) => string;
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
   onDelete: (id: number) => void;
@@ -190,6 +192,7 @@ function TransactionCardRow({
   const isIncome = tx.direction === "INCOME";
 
   const amountValue = formatAmount(tx.amount_rub);
+  const counterpartyAmountValue = formatAmount(tx.amount_counterparty ?? tx.amount_rub);
 
   const cardTone = tx.isDeleted
     ? "bg-slate-100"
@@ -262,7 +265,9 @@ function TransactionCardRow({
                 <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
                   -{amountValue}
                 </div>
-                <div className={`text-xs font-semibold ${mutedTextClass}`}>RUB</div>
+                <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                  {itemCurrencyCode(tx.primary_item_id)}
+                </div>
               </div>
               <ArrowRight className={`h-6 w-6 ${mutedTextClass}`} />
               <div className="min-w-[120px] text-center">
@@ -270,9 +275,11 @@ function TransactionCardRow({
                   {itemName(tx.counterparty_item_id)}
                 </div>
                 <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
-                  +{amountValue}
+                  +{counterpartyAmountValue}
                 </div>
-                <div className={`text-xs font-semibold ${mutedTextClass}`}>RUB</div>
+                <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                  {itemCurrencyCode(tx.counterparty_item_id)}
+                </div>
               </div>
             </div>
 
@@ -292,7 +299,9 @@ function TransactionCardRow({
                 {isExpense ? "-" : "+"}
                 {amountValue}
               </div>
-              <div className={`text-xs font-semibold ${mutedTextClass}`}>RUB</div>
+              <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                {itemCurrencyCode(tx.primary_item_id)}
+              </div>
             </div>
 
             <div className="w-full sm:w-32">
@@ -395,6 +404,7 @@ export function TransactionsView({
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
   const [amountStr, setAmountStr] = useState("");
+  const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
   const [cat1, setCat1] = useState("Питание");
   const [cat2, setCat2] = useState("Продукты");
   const [cat3, setCat3] = useState("Супермаркет");
@@ -450,8 +460,30 @@ export function TransactionsView({
     if (!id) return "-";
     return itemsById.get(id)?.name ?? `#${id}`;
   };
+  const itemCurrencyCode = (id: number | null | undefined) => {
+    if (!id) return "-";
+    return itemsById.get(id)?.currency_code ?? "-";
+  };
 
   const isTransfer = direction === "TRANSFER";
+  const primaryCurrencyCode = primaryItemId
+    ? itemsById.get(primaryItemId)?.currency_code ?? null
+    : null;
+  const counterpartyCurrencyCode = counterpartyItemId
+    ? itemsById.get(counterpartyItemId)?.currency_code ?? null
+    : null;
+  const isCrossCurrencyTransfer =
+    isTransfer &&
+    primaryCurrencyCode &&
+    counterpartyCurrencyCode &&
+    primaryCurrencyCode !== counterpartyCurrencyCode;
+
+  useEffect(() => {
+    if (!isCrossCurrencyTransfer) {
+      setAmountCounterpartyStr("");
+    }
+  }, [isCrossCurrencyTransfer]);
+
   const cat2Options = useMemo(() => CATEGORY_L2[cat1] ?? [], [cat1]);
   const cat3Options = useMemo(() => CATEGORY_L3[cat2] ?? [], [cat2]);
   const segmentedButtonBase =
@@ -463,6 +495,7 @@ export function TransactionsView({
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
     setAmountStr("");
+    setAmountCounterpartyStr("");
     setCat1("Питание");
     setCat2("Продукты");
     setCat3("Супермаркет");
@@ -750,6 +783,7 @@ export function TransactionsView({
                       setFormError(null);
 
                       const cents = parseRubToCents(amountStr);
+                      let counterpartyCents: number | null = null;
 
                       if (!primaryItemId) {
                         setFormError("Выберите актив/обязательство.");
@@ -762,6 +796,14 @@ export function TransactionsView({
                       if (isTransfer && !counterpartyItemId) {
                         setFormError("Выберите корреспондирующий актив.");
                         return;
+                      }
+                      if (isTransfer && isCrossCurrencyTransfer) {
+                        const counterCents = parseRubToCents(amountCounterpartyStr);
+                        if (!Number.isFinite(counterCents) || counterCents < 0) {
+                          setFormError("Введите сумму зачисления в формате 1234,56.");
+                          return;
+                        }
+                        counterpartyCents = counterCents;
                       }
                       if (txType === "PLANNED") {
                         const today = new Date().toISOString().slice(0, 10);
@@ -781,6 +823,7 @@ export function TransactionsView({
                             ? counterpartyItemId
                             : null,
                           amount_rub: cents,
+                          amount_counterparty: isTransfer ? counterpartyCents : null,
                           direction,
                           transaction_type: txType,
                           category_l1: isTransfer ? "" : cat1,
@@ -918,19 +961,62 @@ export function TransactionsView({
                       </div>
                     )}
 
-                    <div className="grid gap-2">
-                      <Label>Сумма</Label>
-                      <Input
-                        className="border-2 border-border/70 bg-white shadow-none"
-                        value={amountStr}
-                        onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                        onBlur={() =>
-                          setAmountStr((prev) => normalizeRubOnBlur(prev))
-                        }
-                        inputMode="decimal"
-                        placeholder="Например: 1 234,56"
-                      />
-                    </div>
+                    {isTransfer && isCrossCurrencyTransfer ? (
+                      <>
+                        <div className="grid gap-2">
+                          <Label>
+                            {`Сумма списания (${primaryCurrencyCode ?? "-"})`}
+                          </Label>
+                          <Input
+                            className="border-2 border-border/70 bg-white shadow-none"
+                            value={amountStr}
+                            onChange={(e) =>
+                              setAmountStr(formatRubInput(e.target.value))
+                            }
+                            onBlur={() =>
+                              setAmountStr((prev) => normalizeRubOnBlur(prev))
+                            }
+                            inputMode="decimal"
+                            placeholder="Например: 1 234,56"
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>
+                            {`Сумма зачисления (${counterpartyCurrencyCode ?? "-"})`}
+                          </Label>
+                          <Input
+                            className="border-2 border-border/70 bg-white shadow-none"
+                            value={amountCounterpartyStr}
+                            onChange={(e) =>
+                              setAmountCounterpartyStr(formatRubInput(e.target.value))
+                            }
+                            onBlur={() =>
+                              setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev))
+                            }
+                            inputMode="decimal"
+                            placeholder="Например: 1 234,56"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="grid gap-2">
+                        <Label>
+                          {primaryCurrencyCode
+                            ? `Сумма (${primaryCurrencyCode})`
+                            : "Сумма"}
+                        </Label>
+                        <Input
+                          className="border-2 border-border/70 bg-white shadow-none"
+                          value={amountStr}
+                          onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+                          onBlur={() =>
+                            setAmountStr((prev) => normalizeRubOnBlur(prev))
+                          }
+                          inputMode="decimal"
+                          placeholder="Например: 1 234,56"
+                        />
+                      </div>
+                    )}
 
                     {!isTransfer && (
                       <>
@@ -1511,6 +1597,7 @@ export function TransactionsView({
                   key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
                   tx={tx}
                   itemName={itemName}
+                  itemCurrencyCode={itemCurrencyCode}
                   isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
                   onToggleSelection={toggleTxSelection}
                   onDelete={(id) => openDeleteDialog([id])}

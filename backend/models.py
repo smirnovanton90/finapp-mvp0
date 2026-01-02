@@ -87,6 +87,7 @@ class Transaction(Base):
     counterparty_item: Mapped[Optional["Item"]] = relationship(foreign_keys=[counterparty_item_id])
 
     amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)  # в копейках
+    amount_counterparty: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     direction: Mapped[str] = mapped_column(String(20), nullable=False)  # INCOME/EXPENSE/TRANSFER
     transaction_type: Mapped[str] = mapped_column(String(20), nullable=False)  # ACTUAL/PLANNED

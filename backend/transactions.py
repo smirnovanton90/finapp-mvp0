@@ -58,6 +58,7 @@ def create_transaction(
         raise HTTPException(status_code=400, detail="Invalid primary_item_id")
 
     counter = None
+    amount_counterparty = None
 
     # 2) Правила для TRANSFER
     if data.direction == "TRANSFER":
@@ -78,6 +79,24 @@ def create_transaction(
 
         if counter.id == primary.id:
             raise HTTPException(status_code=400, detail="Transfer items must be different")
+
+        if primary.currency_code != counter.currency_code:
+            if data.amount_counterparty is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="amount_counterparty is required for cross-currency transfer",
+                )
+            amount_counterparty = data.amount_counterparty
+        else:
+            if data.amount_counterparty is None:
+                amount_counterparty = data.amount_rub
+            elif data.amount_counterparty != data.amount_rub:
+                raise HTTPException(
+                    status_code=400,
+                    detail="amount_counterparty must match amount_rub for same-currency transfer",
+                )
+            else:
+                amount_counterparty = data.amount_counterparty
     else:
         # для INCOME/EXPENSE корр. актив не нужен
         if data.counterparty_item_id is not None:
@@ -93,6 +112,7 @@ def create_transaction(
         primary_item_id=data.primary_item_id,
         counterparty_item_id=data.counterparty_item_id,
         amount_rub=data.amount_rub,
+        amount_counterparty=amount_counterparty,
         direction=data.direction,
         transaction_type=data.transaction_type,
         category_l1=data.category_l1,
@@ -119,7 +139,8 @@ def create_transaction(
             if primary.current_value_rub < amt:
                 raise HTTPException(status_code=400, detail="Insufficient funds for transfer")
             primary.current_value_rub -= amt
-            counter.current_value_rub += amt
+            amt_counterparty = amount_counterparty or amt
+            counter.current_value_rub += amt_counterparty
 
     db.add(tx)
     db.commit()
@@ -172,6 +193,7 @@ def delete_transaction(
     # Откат балансов только для ACTUAL
     if tx.transaction_type == "ACTUAL":
         amt = tx.amount_rub
+        amt_counterparty = tx.amount_counterparty or amt
 
         if tx.direction == "INCOME":
             # откат дохода = минус
@@ -188,13 +210,13 @@ def delete_transaction(
 
         elif tx.direction == "TRANSFER":
             # откат перевода: вернуть в источник, забрать у получателя
-            if counter.current_value_rub < amt:
+            if counter.current_value_rub < amt_counterparty:
                 raise HTTPException(
                     status_code=409,
                     detail="Cannot delete: would make counterparty balance negative. Delete later transactions first.",
                 )
             primary.current_value_rub += amt
-            counter.current_value_rub -= amt
+            counter.current_value_rub -= amt_counterparty
 
     # soft delete
     tx.deleted_at = datetime.now(timezone.utc)

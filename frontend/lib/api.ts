@@ -48,6 +48,7 @@ export type TransactionOut = {
   counterparty_item_id: number | null;
 
   amount_rub: number; // в копейках
+  amount_counterparty: number | null;
   direction: TransactionDirection;
   transaction_type: TransactionType;
 
@@ -67,6 +68,7 @@ export type TransactionCreate = {
   counterparty_item_id?: number | null;
 
   amount_rub: number; // в копейках
+  amount_counterparty?: number | null;
   direction: TransactionDirection;
   transaction_type: TransactionType;
 

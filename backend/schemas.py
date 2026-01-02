@@ -31,7 +31,8 @@ class TransactionBase(BaseModel):
     transaction_date: date
     primary_item_id: int
     counterparty_item_id: int | None = None
-    amount_rub: int
+    amount_rub: int = Field(ge=0)
+    amount_counterparty: int | None = Field(default=None, ge=0)
     direction: str
     transaction_type: str
     category_l1: str

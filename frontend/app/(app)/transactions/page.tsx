@@ -302,7 +302,7 @@ function TransactionCardRow({
         />
 
         <div className="w-24 shrink-0">
-          <div className={`text-base font-semibold ${textClass}`}>
+          <div className={`text-sm font-medium ${mutedTextClass}`}>
             {formatDate(tx.transaction_date)}
           </div>
           <div className={`text-xs ${mutedTextClass}`}>
@@ -314,7 +314,7 @@ function TransactionCardRow({
           <>
             <div className="flex min-w-[280px] items-center gap-4">
               <div className="min-w-[120px] text-center">
-                <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
+                <div className={`truncate text-base font-semibold ${textClass}`}>
                   {itemName(tx.primary_item_id)}
                 </div>
                 <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
@@ -333,7 +333,7 @@ function TransactionCardRow({
                 )}
               </div>
               <div className="min-w-[120px] text-center">
-                <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
+                <div className={`truncate text-base font-semibold ${textClass}`}>
                   {itemName(tx.counterparty_item_id)}
                 </div>
                 <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
@@ -346,7 +346,9 @@ function TransactionCardRow({
             </div>
 
             <div className="min-w-[160px] flex-1">
-              <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
+              <div
+                className={`whitespace-normal text-xs font-semibold leading-tight ${mutedTextClass}`}
+              >
                 {commentText}
               </div>
             </div>
@@ -354,7 +356,7 @@ function TransactionCardRow({
         ) : (
           <>
             <div className="w-full min-w-[140px] text-center sm:w-40">
-              <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
+              <div className={`truncate text-base font-semibold ${textClass}`}>
                 {itemName(tx.primary_item_id)}
               </div>
               <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
@@ -372,24 +374,28 @@ function TransactionCardRow({
               )}
             </div>
 
-            <div className="w-full self-stretch sm:w-32">
-              <div className="relative flex h-full flex-col items-center justify-center text-center">
+            <div className="w-full self-stretch sm:w-40">
+              <div className="relative flex h-full flex-col items-start justify-center text-left">
                 <div
                   className={`relative z-10 space-y-0.5 text-xs font-semibold leading-tight ${mutedTextClass}`}
                 >
-                  <div className={textClass}>{categoryLines[0]}</div>
+                  <div className={`text-sm font-semibold ${textClass}`}>
+                    {categoryLines[0]}
+                  </div>
                   <div>{categoryLines[1]}</div>
                   <div>{categoryLines[2]}</div>
                 </div>
                 <CategoryIcon
-                  className="pointer-events-none absolute bottom-0 left-1/2 h-16 w-16 -translate-x-1/2 translate-y-1/2 text-white"
+                  className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 text-white opacity-25"
                   strokeWidth={1.5}
                 />
               </div>
             </div>
 
             <div className="min-w-[160px] flex-1">
-              <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
+              <div
+                className={`whitespace-normal text-xs font-semibold leading-tight ${mutedTextClass}`}
+              >
                 {commentText}
               </div>
             </div>

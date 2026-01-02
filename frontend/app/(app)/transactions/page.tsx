@@ -275,8 +275,6 @@ function TransactionCardRow({
   const actionHoverClass = tx.isDeleted ? "" : "hover:text-slate-900";
   const deleteHoverClass = tx.isDeleted ? "" : "hover:text-rose-500";
 
-  const iconClass = tx.isDeleted ? "text-slate-300" : "text-slate-700";
-
   const commentText = tx.comment?.trim() ? tx.comment : "-";
 
   const categoryLines = [
@@ -374,14 +372,19 @@ function TransactionCardRow({
               )}
             </div>
 
-            <div className="w-full sm:w-32">
-              <div className="flex flex-col items-center gap-2 text-center">
-                <CategoryIcon className={`h-8 w-8 ${iconClass}`} strokeWidth={1.5} />
-                <div className={`space-y-0.5 text-xs leading-tight ${mutedTextClass}`}>
-                  <div className={`font-medium ${textClass}`}>{categoryLines[0]}</div>
+            <div className="w-full self-stretch sm:w-32">
+              <div className="relative flex h-full flex-col items-center justify-center text-center">
+                <div
+                  className={`relative z-10 space-y-0.5 text-xs font-semibold leading-tight ${mutedTextClass}`}
+                >
+                  <div className={textClass}>{categoryLines[0]}</div>
                   <div>{categoryLines[1]}</div>
                   <div>{categoryLines[2]}</div>
                 </div>
+                <CategoryIcon
+                  className="pointer-events-none absolute bottom-0 left-1/2 h-16 w-16 -translate-x-1/2 translate-y-1/2 text-white"
+                  strokeWidth={1.5}
+                />
               </div>
             </div>
 

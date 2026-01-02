@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useSession } from "next-auth/react";
-import { ArrowRight, Ban, Pencil, PiggyBank, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowRight,
+  Ban,
+  Car,
+  ChevronDown,
+  Pencil,
+  PiggyBank,
+  Plus,
+  Trash2,
+  Utensils,
+  Wrench,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +70,13 @@ const CATEGORY_L3: Record<string, string[]> = {
   "Такси": ["Яндекс", "Uber"],
   "Связь": ["Мобильная", "Интернет"],
 };
+
+const CATEGORY_ICON_BY_L1: Record<string, ComponentType<{ className?: string; strokeWidth?: number }>> =
+  {
+    "Питание": Utensils,
+    "Транспорт": Car,
+    "Услуги": Wrench,
+  };
 
 function formatAmount(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
@@ -171,21 +189,26 @@ function TransactionCardRow({
   const isIncome = tx.direction === "INCOME";
 
   const amountValue = formatAmount(tx.amount_rub);
-  const amountColor = isExpense
-    ? "text-rose-400"
-    : isIncome
-      ? "text-emerald-400"
-      : "text-violet-500";
-
-  const stripeColor = isExpense
-    ? "bg-rose-200"
-    : isIncome
-      ? "bg-emerald-200"
-      : "bg-violet-300";
 
   const cardTone = tx.isDeleted
-    ? "bg-slate-100 border-border/70"
-    : "bg-white border-border/70";
+    ? "bg-slate-100"
+    : isExpense
+      ? "bg-[linear-gradient(270deg,_#FEF2F2_0%,_#FCA5A5_100%)]"
+      : isIncome
+        ? "bg-[linear-gradient(270deg,_#F4F2E9_0%,_#BDDFB2_100%)]"
+        : "bg-[linear-gradient(270deg,_#F5F3FF_0%,_#C4B5FD_100%)]";
+
+  const textClass = tx.isDeleted ? "text-slate-500" : "text-slate-900";
+
+  const mutedTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-600/80";
+
+  const amountClass = tx.isDeleted ? "text-slate-500" : "text-slate-900";
+
+  const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-700";
+  const actionHoverClass = tx.isDeleted ? "" : "hover:text-slate-900";
+  const deleteHoverClass = tx.isDeleted ? "" : "hover:text-rose-500";
+
+  const iconClass = tx.isDeleted ? "text-slate-300" : "text-slate-700";
 
   const commentText = tx.comment?.trim() ? tx.comment : "-";
 
@@ -194,12 +217,15 @@ function TransactionCardRow({
     tx.category_l2?.trim() ? tx.category_l2 : "-",
     tx.category_l3?.trim() ? tx.category_l3 : "-",
   ];
+  const categoryKey = tx.category_l1?.trim() ?? "";
+  const CategoryIcon = CATEGORY_ICON_BY_L1[categoryKey] ?? PiggyBank;
 
   const checkboxDisabled = tx.isDeleted || isDeleting;
 
   return (
-    <div className={`flex items-stretch overflow-hidden rounded-lg border-2 ${cardTone}`}>
-      <div className={`w-2 shrink-0 ${stripeColor}`} />
+    <div
+      className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardTone}`}
+    >
       <div className="flex flex-1 flex-wrap items-center gap-4 px-4 py-3 sm:flex-nowrap">
         <input
           type="checkbox"
@@ -211,8 +237,10 @@ function TransactionCardRow({
         />
 
         <div className="w-24 shrink-0">
-          <div className="text-base font-semibold">{formatDate(tx.transaction_date)}</div>
-          <div className="text-xs text-muted-foreground">
+          <div className={`text-base font-semibold ${textClass}`}>
+            {formatDate(tx.transaction_date)}
+          </div>
+          <div className={`text-xs ${mutedTextClass}`}>
             {formatTime(tx.created_at)}
           </div>
         </div>
@@ -221,62 +249,58 @@ function TransactionCardRow({
           <>
             <div className="flex min-w-[280px] items-center gap-4">
               <div className="min-w-[120px] text-center">
-                <div className="truncate text-sm font-medium text-muted-foreground">
+                <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
                   {itemName(tx.primary_item_id)}
                 </div>
-                <div className={`text-lg font-semibold tabular-nums ${amountColor}`}>
+                <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
                   -{amountValue}
                 </div>
-                <div className="text-xs font-semibold text-muted-foreground">RUB</div>
+                <div className={`text-xs font-semibold ${mutedTextClass}`}>RUB</div>
               </div>
-              <ArrowRight className="h-6 w-6 text-muted-foreground" />
+              <ArrowRight className={`h-6 w-6 ${mutedTextClass}`} />
               <div className="min-w-[120px] text-center">
-                <div className="truncate text-sm font-medium text-muted-foreground">
+                <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
                   {itemName(tx.counterparty_item_id)}
                 </div>
-                <div className={`text-lg font-semibold tabular-nums ${amountColor}`}>
+                <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
                   +{amountValue}
                 </div>
-                <div className="text-xs font-semibold text-muted-foreground">RUB</div>
+                <div className={`text-xs font-semibold ${mutedTextClass}`}>RUB</div>
               </div>
             </div>
 
             <div className="min-w-[160px] flex-1">
-              <div className="truncate text-sm font-medium text-foreground">
+              <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
                 {commentText}
               </div>
             </div>
           </>
         ) : (
           <>
+            <div className="w-full min-w-[140px] text-center sm:w-40">
+              <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
+                {itemName(tx.primary_item_id)}
+              </div>
+              <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
+                {isExpense ? "-" : "+"}
+                {amountValue}
+              </div>
+              <div className={`text-xs font-semibold ${mutedTextClass}`}>RUB</div>
+            </div>
+
             <div className="w-full sm:w-32">
               <div className="flex flex-col items-center gap-2 text-center">
-                <PiggyBank
-                  className={`h-8 w-8 ${
-                    isExpense ? "text-rose-300" : "text-emerald-300"
-                  }`}
-                />
-                <div className="space-y-0.5 text-xs leading-tight text-muted-foreground">
-                  <div className="font-medium text-foreground">{categoryLines[0]}</div>
+                <CategoryIcon className={`h-8 w-8 ${iconClass}`} strokeWidth={1.5} />
+                <div className={`space-y-0.5 text-xs leading-tight ${mutedTextClass}`}>
+                  <div className={`font-medium ${textClass}`}>{categoryLines[0]}</div>
                   <div>{categoryLines[1]}</div>
                   <div>{categoryLines[2]}</div>
                 </div>
               </div>
             </div>
 
-            <div className="w-full min-w-[140px] text-center sm:w-40">
-              <div className="truncate text-sm font-medium text-muted-foreground">
-                {itemName(tx.primary_item_id)}
-              </div>
-              <div className={`text-lg font-semibold tabular-nums ${amountColor}`}>
-                {isExpense ? "-" : "+"}
-                {amountValue}
-              </div>
-              <div className="text-xs font-semibold text-muted-foreground">RUB</div>
-            </div>
-
             <div className="min-w-[160px] flex-1">
-              <div className="truncate text-sm font-medium text-foreground">
+              <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
                 {commentText}
               </div>
             </div>
@@ -293,7 +317,7 @@ function TransactionCardRow({
           <Button
             variant="ghost"
             size="icon-sm"
-            className="text-muted-foreground hover:text-foreground hover:bg-transparent"
+            className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
             aria-label="Редактировать"
           >
             <Pencil className="h-4 w-4" />
@@ -302,7 +326,7 @@ function TransactionCardRow({
           <Button
             variant="ghost"
             size="icon-sm"
-            className="text-muted-foreground hover:text-rose-500 hover:bg-transparent"
+            className={`hover:bg-transparent ${actionTextClass} ${deleteHoverClass}`}
             onClick={() => onDelete(tx.id)}
             aria-label="Удалить"
             disabled={tx.isDeleted || isDeleting}
@@ -339,6 +363,19 @@ export function TransactionsView({
   const [selectedDirections, setSelectedDirections] = useState<
     Set<TransactionOut["direction"]>
   >(() => new Set());
+  const [selectedCategoryL1, setSelectedCategoryL1] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [selectedCategoryL2, setSelectedCategoryL2] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [selectedCategoryL3, setSelectedCategoryL3] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [isItemsFilterOpen, setIsItemsFilterOpen] = useState(false);
+  const [isCategoryL1Open, setIsCategoryL1Open] = useState(false);
+  const [isCategoryL2Open, setIsCategoryL2Open] = useState(false);
+  const [isCategoryL3Open, setIsCategoryL3Open] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(
     () => new Set()
   );
@@ -367,6 +404,39 @@ export function TransactionsView({
   const sortedItems = useMemo(() => {
     return [...items].sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [items]);
+  const categoryL1Options = useMemo(() => {
+    return [...CATEGORY_L1].sort((a, b) => a.localeCompare(b, "ru"));
+  }, []);
+  const categoryL2Options = useMemo(() => {
+    const values = new Set<string>();
+    const keys =
+      selectedCategoryL1.size > 0
+        ? Array.from(selectedCategoryL1)
+        : Object.keys(CATEGORY_L2);
+    keys.forEach((key) => {
+      (CATEGORY_L2[key] ?? []).forEach((val) => values.add(val));
+    });
+    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [selectedCategoryL1]);
+  const categoryL3Options = useMemo(() => {
+    const values = new Set<string>();
+    if (selectedCategoryL2.size > 0) {
+      selectedCategoryL2.forEach((key) => {
+        (CATEGORY_L3[key] ?? []).forEach((val) => values.add(val));
+      });
+    } else {
+      const l2Keys =
+        selectedCategoryL1.size > 0
+          ? Array.from(selectedCategoryL1).flatMap(
+              (key) => CATEGORY_L2[key] ?? []
+            )
+          : Object.keys(CATEGORY_L3);
+      l2Keys.forEach((key) => {
+        (CATEGORY_L3[key] ?? []).forEach((val) => values.add(val));
+      });
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [selectedCategoryL1, selectedCategoryL2]);
 
   const itemName = (id: number | null | undefined) => {
     if (!id) return "-";
@@ -463,6 +533,24 @@ export function TransactionsView({
         if (minAmount != null && absAmount < minAmount) return false;
         if (maxAmount != null && absAmount > maxAmount) return false;
       }
+      if (
+        selectedCategoryL1.size > 0 &&
+        !selectedCategoryL1.has(tx.category_l1)
+      ) {
+        return false;
+      }
+      if (
+        selectedCategoryL2.size > 0 &&
+        !selectedCategoryL2.has(tx.category_l2)
+      ) {
+        return false;
+      }
+      if (
+        selectedCategoryL3.size > 0 &&
+        !selectedCategoryL3.has(tx.category_l3)
+      ) {
+        return false;
+      }
       if (selectedDirections.size > 0 && !selectedDirections.has(tx.direction)) {
         return false;
       }
@@ -485,6 +573,9 @@ export function TransactionsView({
     commentFilter,
     amountFrom,
     amountTo,
+    selectedCategoryL1,
+    selectedCategoryL2,
+    selectedCategoryL3,
     selectedDirections,
     selectedItemIds,
   ]);
@@ -498,6 +589,28 @@ export function TransactionsView({
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       });
   }, [filteredTxs]);
+  const selectableIds = useMemo(
+    () => sortedTxs.filter((tx) => !tx.isDeleted).map((tx) => tx.id),
+    [sortedTxs]
+  );
+  const selectedVisibleCount = useMemo(
+    () =>
+      selectableIds.reduce(
+        (count, id) => count + (selectedTxIds.has(id) ? 1 : 0),
+        0
+      ),
+    [selectableIds, selectedTxIds]
+  );
+  const allSelected =
+    selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
+  const someSelected = selectedVisibleCount > 0 && !allSelected;
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected;
+    }
+  }, [someSelected]);
 
   const toggleTxSelection = (id: number, checked: boolean) => {
     setSelectedTxIds((prev) => {
@@ -522,6 +635,52 @@ export function TransactionsView({
         next.add(id);
       } else {
         next.delete(id);
+      }
+      return next;
+    });
+  };
+  const toggleAllSelection = (checked: boolean) => {
+    setSelectedTxIds((prev) => {
+      const next = new Set(prev);
+      selectableIds.forEach((id) => {
+        if (checked) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      });
+      return next;
+    });
+  };
+  const toggleCategoryL1Selection = (value: string) => {
+    setSelectedCategoryL1((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        next.delete(value);
+      } else {
+        next.add(value);
+      }
+      return next;
+    });
+  };
+  const toggleCategoryL2Selection = (value: string) => {
+    setSelectedCategoryL2((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        next.delete(value);
+      } else {
+        next.add(value);
+      }
+      return next;
+    });
+  };
+  const toggleCategoryL3Selection = (value: string) => {
+    setSelectedCategoryL3((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        next.delete(value);
+      } else {
+        next.add(value);
       }
       return next;
     });
@@ -696,6 +855,7 @@ export function TransactionsView({
                       <Label>Дата транзакции</Label>
                       <Input
                         type="date"
+                        className="border-2 border-border/70 bg-white shadow-none"
                         value={date}
                         onChange={(e) => setDate(e.target.value)}
                       />
@@ -707,7 +867,7 @@ export function TransactionsView({
                         value={primaryItemId ? String(primaryItemId) : ""}
                         onValueChange={(v) => setPrimaryItemId(Number(v))}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
                           <SelectValue placeholder="Выберите" />
                         </SelectTrigger>
                         <SelectContent>
@@ -731,7 +891,7 @@ export function TransactionsView({
                             setCounterpartyItemId(Number(v))
                           }
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
                             <SelectValue placeholder="Выберите" />
                           </SelectTrigger>
                           <SelectContent>
@@ -750,6 +910,7 @@ export function TransactionsView({
                     <div className="grid gap-2">
                       <Label>Сумма</Label>
                       <Input
+                        className="border-2 border-border/70 bg-white shadow-none"
                         value={amountStr}
                         onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                         onBlur={() =>
@@ -774,7 +935,7 @@ export function TransactionsView({
                               setCat3(first3);
                             }}
                           >
-                            <SelectTrigger>
+                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -797,7 +958,7 @@ export function TransactionsView({
                               setCat3(first3);
                             }}
                           >
-                            <SelectTrigger>
+                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -813,7 +974,7 @@ export function TransactionsView({
                         <div className="grid gap-2">
                           <Label>Категория L3</Label>
                           <Select value={cat3} onValueChange={setCat3}>
-                            <SelectTrigger>
+                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
                               <SelectValue placeholder="—" />
                             </SelectTrigger>
                             <SelectContent>
@@ -831,6 +992,7 @@ export function TransactionsView({
                     <div className="grid gap-2">
                       <Label>Описание</Label>
                       <Input
+                        className="border-2 border-border/70 bg-white shadow-none"
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         placeholder="Например: обед в кафе"
@@ -840,6 +1002,7 @@ export function TransactionsView({
                     <div className="grid gap-2">
                       <Label>Комментарий</Label>
                       <Input
+                        className="border-2 border-border/70 bg-white shadow-none"
                         value={comment}
                         onChange={(e) => setComment(e.target.value)}
                         placeholder="Например: с коллегами"
@@ -850,6 +1013,7 @@ export function TransactionsView({
                       <Button
                         type="button"
                         variant="outline"
+                        className="border-2 border-border/70 bg-white shadow-none"
                         onClick={() => setIsOpen(false)}
                       >
                         Отмена
@@ -928,43 +1092,240 @@ export function TransactionsView({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-base font-semibold text-foreground">
-                    Активы/обязательства
-                  </div>
                   <button
                     type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => setSelectedItemIds(new Set<number>())}
-                    disabled={selectedItemIds.size === 0}
+                    onClick={() => setIsItemsFilterOpen((prev) => !prev)}
+                    className="text-base font-semibold text-foreground"
                   >
-                    Сбросить
+                    Активы/обязательства
                   </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedItemIds(new Set<number>())}
+                      disabled={selectedItemIds.size === 0}
+                    >
+                      Сбросить
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Свернуть/развернуть"
+                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsItemsFilterOpen((prev) => !prev)}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isItemsFilterOpen ? "rotate-0" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  {sortedItems.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">
-                      Нет активов или обязательств.
-                    </div>
-                  ) : (
-                    sortedItems.map((item) => (
-                      <label
-                        key={item.id}
-                        className="flex items-center gap-3 text-base text-foreground"
-                      >
-                        <input
-                          type="checkbox"
-                          className="h-5 w-5 accent-violet-600"
-                          checked={selectedItemIds.has(item.id)}
-                          onChange={(e) =>
-                            toggleItemSelection(item.id, e.target.checked)
-                          }
-                        />
-                        <span>{item.name}</span>
-                      </label>
-                    ))
-                  )}
+                {isItemsFilterOpen && (
+                  <div className="space-y-2">
+                    {sortedItems.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        Нет активов или обязательств.
+                      </div>
+                    ) : (
+                      sortedItems.map((item) => (
+                        <label
+                          key={item.id}
+                          className="flex items-center gap-3 text-base text-foreground"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5 accent-violet-600"
+                            checked={selectedItemIds.has(item.id)}
+                            onChange={(e) =>
+                              toggleItemSelection(item.id, e.target.checked)
+                            }
+                          />
+                          <span>{item.name}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsCategoryL1Open((prev) => !prev)}
+                    className="text-base font-semibold text-foreground"
+                  >
+                    Категория 1
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedCategoryL1(new Set<string>())}
+                      disabled={selectedCategoryL1.size === 0}
+                    >
+                      Сбросить
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Свернуть/развернуть"
+                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsCategoryL1Open((prev) => !prev)}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isCategoryL1Open ? "rotate-0" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
+
+                {isCategoryL1Open && (
+                  <div className="space-y-2">
+                    {categoryL1Options.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        Нет категорий.
+                      </div>
+                    ) : (
+                      categoryL1Options.map((value) => (
+                        <label
+                          key={value}
+                          className="flex items-center gap-3 text-base text-foreground"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5 accent-violet-600"
+                            checked={selectedCategoryL1.has(value)}
+                            onChange={() => toggleCategoryL1Selection(value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsCategoryL2Open((prev) => !prev)}
+                    className="text-base font-semibold text-foreground"
+                  >
+                    Категория 2
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedCategoryL2(new Set<string>())}
+                      disabled={selectedCategoryL2.size === 0}
+                    >
+                      Сбросить
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Свернуть/развернуть"
+                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsCategoryL2Open((prev) => !prev)}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isCategoryL2Open ? "rotate-0" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {isCategoryL2Open && (
+                  <div className="space-y-2">
+                    {categoryL2Options.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        Нет категорий.
+                      </div>
+                    ) : (
+                      categoryL2Options.map((value) => (
+                        <label
+                          key={value}
+                          className="flex items-center gap-3 text-base text-foreground"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5 accent-violet-600"
+                            checked={selectedCategoryL2.has(value)}
+                            onChange={() => toggleCategoryL2Selection(value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsCategoryL3Open((prev) => !prev)}
+                    className="text-base font-semibold text-foreground"
+                  >
+                    Категория 3
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                      onClick={() => setSelectedCategoryL3(new Set<string>())}
+                      disabled={selectedCategoryL3.size === 0}
+                    >
+                      Сбросить
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Свернуть/развернуть"
+                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsCategoryL3Open((prev) => !prev)}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isCategoryL3Open ? "rotate-0" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {isCategoryL3Open && (
+                  <div className="space-y-2">
+                    {categoryL3Options.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        Нет категорий.
+                      </div>
+                    ) : (
+                      categoryL3Options.map((value) => (
+                        <label
+                          key={value}
+                          className="flex items-center gap-3 text-base text-foreground"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5 accent-violet-600"
+                            checked={selectedCategoryL3.has(value)}
+                            onChange={() => toggleCategoryL3Selection(value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-3">
@@ -1052,7 +1413,12 @@ export function TransactionsView({
                     className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
                     placeholder="От"
                     value={amountFrom}
-                    onChange={(e) => setAmountFrom(e.target.value)}
+                    onChange={(e) =>
+                      setAmountFrom(formatRubInput(e.target.value))
+                    }
+                    onBlur={() =>
+                      setAmountFrom((prev) => normalizeRubOnBlur(prev))
+                    }
                   />
                   <span className="text-sm text-muted-foreground">—</span>
                   <Input
@@ -1061,7 +1427,8 @@ export function TransactionsView({
                     className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
                     placeholder="До"
                     value={amountTo}
-                    onChange={(e) => setAmountTo(e.target.value)}
+                    onChange={(e) => setAmountTo(formatRubInput(e.target.value))}
+                    onBlur={() => setAmountTo((prev) => normalizeRubOnBlur(prev))}
                   />
                 </div>
               </div>
@@ -1086,6 +1453,18 @@ export function TransactionsView({
 
         <div className="flex-1">
           <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                className="h-5 w-5 accent-violet-600"
+                checked={allSelected}
+                onChange={(e) => toggleAllSelection(e.target.checked)}
+                disabled={selectableIds.length === 0}
+                aria-label="Выбрать все транзакции"
+              />
+              <span>Выбрать все</span>
+            </div>
             {sortedTxs.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-muted-foreground">
                 Нет транзакций.

@@ -510,7 +510,7 @@ export default function Page() {
   /* ------------------ основной UI ------------------ */
 
   return (
-    <main className="min-h-screen bg-muted/40 px-8 py-8">
+    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
       <Dialog
         open={isCreateOpen}
         onOpenChange={(open) => {

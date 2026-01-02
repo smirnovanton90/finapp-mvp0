@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
@@ -939,7 +939,7 @@ export function TransactionsView({
   }
 
   return (
-    <main className="min-h-screen bg-muted/40 px-8 py-8 overflow-x-hidden">
+    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8 overflow-x-hidden">
       <div className="mb-6 flex items-center justify-end gap-2">
         {selectedCount > 0 && (
           <Button
@@ -1180,7 +1180,7 @@ export function TransactionsView({
                     />
                   </div>
 
-                  {/* ✅ КАТЕГОРИИ СКРЫВАЕМ ДЛЯ TRANSFER */}
+                  {/* ? КАТЕГОРИИ СКРЫВАЕМ ДЛЯ TRANSFER */}
                   {!isTransfer && (
                     <>
                       <div className="grid gap-2">

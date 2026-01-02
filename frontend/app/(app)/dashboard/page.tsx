@@ -399,14 +399,14 @@ export default function DashboardPage() {
   };
 
   return (
-    <main className="min-h-screen bg-muted/40 px-8 py-8">
+    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Дэшборд</h1>
           <p className="text-sm text-muted-foreground">Ключевые метрики за последние дни.</p>
         </div>
 
-        <Card className="overflow-hidden border-white/70 shadow-md">
+        <Card className="overflow-hidden">
           <CardHeader className="pb-4">
             <CardTitle className="text-base text-slate-800">Динамика чистых активов</CardTitle>
           </CardHeader>

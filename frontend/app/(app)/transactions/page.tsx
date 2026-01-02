@@ -973,6 +973,13 @@ export function TransactionsView({
                         setFormError("Выберите актив/обязательство.");
                         return;
                       }
+                      const primaryItem = itemsById.get(primaryItemId);
+                      if (primaryItem?.start_date && date < primaryItem.start_date) {
+                        setFormError(
+                          "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
+                        );
+                        return;
+                      }
                       if (!Number.isFinite(cents) || cents < 0) {
                         setFormError("Введите сумму в формате 1234,56.");
                         return;
@@ -980,6 +987,18 @@ export function TransactionsView({
                       if (isTransfer && !counterpartyItemId) {
                         setFormError("Выберите корреспондирующий актив.");
                         return;
+                      }
+                      if (isTransfer && counterpartyItemId) {
+                        const counterpartyItem = itemsById.get(counterpartyItemId);
+                        if (
+                          counterpartyItem?.start_date &&
+                          date < counterpartyItem.start_date
+                        ) {
+                          setFormError(
+                            "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
+                          );
+                          return;
+                        }
                       }
                       if (isTransfer && isCrossCurrencyTransfer) {
                         const counterCents = parseRubToCents(amountCounterpartyStr);

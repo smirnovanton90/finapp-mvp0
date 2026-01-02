@@ -10,6 +10,7 @@ export type ItemOut = {
   currency_code: string;
   initial_value_rub: number;
   current_value_rub: number;
+  start_date: string;
   created_at: string;
   archived_at: string | null;
 };
@@ -20,6 +21,7 @@ export type ItemCreate = {
   name: string;
   currency_code: string;
   initial_value_rub: number;
+  start_date: string;
 };
 
 export type CurrencyOut = {

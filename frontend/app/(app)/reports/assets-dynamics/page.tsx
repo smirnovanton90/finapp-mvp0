@@ -211,7 +211,8 @@ export default function AssetsDynamicsPage() {
 
   const dateKeys = useMemo(() => {
     if (!selectedItem) return [];
-    const startKey = toDateKey(new Date(selectedItem.created_at));
+    const startKey =
+      selectedItem.start_date || toDateKey(new Date(selectedItem.created_at));
     const endKey = toDateKey(new Date());
     return buildDateRange(startKey, endKey);
   }, [selectedItem]);

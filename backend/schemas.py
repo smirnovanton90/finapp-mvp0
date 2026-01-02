@@ -1,7 +1,6 @@
-from datetime import datetime
-from pydantic import BaseModel, Field
+from datetime import datetime, date
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
-from datetime import date
 
 ItemKind = Literal["ASSET", "LIABILITY"]
 
@@ -12,6 +11,14 @@ class ItemCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     currency_code: str = Field(default="RUB", min_length=3, max_length=3)
     initial_value_rub: int = Field(ge=0)
+    start_date: date
+
+    @field_validator("start_date")
+    @classmethod
+    def validate_start_date(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Дата начала действия не может быть позже сегодняшней даты.")
+        return value
 
 class ItemOut(BaseModel):
     id: int
@@ -21,6 +28,7 @@ class ItemOut(BaseModel):
     currency_code: str
     initial_value_rub: int
     current_value_rub: int
+    start_date: date
     created_at: datetime
     archived_at: datetime | None
 

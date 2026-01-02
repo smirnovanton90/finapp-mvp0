@@ -137,6 +137,14 @@ function formatRate(value: number) {
   }).format(value);
 }
 
+function getTodayDateKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 /* ------------------ страница ------------------ */
 
 export default function Page() {
@@ -157,12 +165,14 @@ export default function Page() {
   const [currencyCode, setCurrencyCode] = useState("RUB");
   const [name, setName] = useState("");
   const [amountStr, setAmountStr] = useState(""); // строка: "1234.56" / "1 234,56"
+  const [startDate, setStartDate] = useState(() => getTodayDateKey());
 
   function resetCreateForm() {
     setName("");
     setAmountStr("");
     setTypeCode("");
     setCurrencyCode("RUB");
+    setStartDate(getTodayDateKey());
   }  
 
   function parseRubToCents(input: string): number {
@@ -390,6 +400,7 @@ export default function Page() {
     setCurrencyCode("RUB");
     setName("");
     setAmountStr("");
+    setStartDate(getTodayDateKey());
     setFormError(null);
     setIsCreateOpen(true);
   };
@@ -408,6 +419,17 @@ export default function Page() {
       return;
     }
 
+    if (!startDate) {
+      setFormError("Укажите дату начала действия.");
+      return;
+    }
+
+    const todayKey = getTodayDateKey();
+    if (startDate > todayKey) {
+      setFormError("Дата начала действия не может быть позже сегодняшней даты.");
+      return;
+    }
+
     const cents = parseRubToCents(amountStr);
     if (!Number.isFinite(cents) || cents < 0) {
       setFormError("Сумма должна быть числом (например 1234,56)");
@@ -422,6 +444,7 @@ export default function Page() {
         name: name.trim(),
         currency_code: currencyCode,
         initial_value_rub: cents, // копейки
+        start_date: startDate,
       });
   
       // очищаем форму и закрываем модалку
@@ -509,7 +532,7 @@ export default function Page() {
                     Текущая сумма актива / обязательства в рублевом эквиваленте
                   </TableHead>
                   <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
-                    Дата добавления
+                    Дата начала действия
                   </TableHead>
                   <TableHead />
                 </TableRow>
@@ -570,7 +593,7 @@ export default function Page() {
                       </TableCell>
 
                       <TableCell className="text-right text-sm text-muted-foreground">
-                        {new Date(it.created_at).toLocaleDateString("ru-RU")}
+                        {new Date(`${it.start_date}T00:00:00`).toLocaleDateString("ru-RU")}
                       </TableCell>
 
                       <TableCell className="text-right">
@@ -643,7 +666,7 @@ export default function Page() {
             <div className="grid gap-2">
               <Label>Вид</Label>
               <Select value={typeCode} onValueChange={setTypeCode}>
-                <SelectTrigger>
+                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
                   <SelectValue placeholder="Выберите вид" />
                 </SelectTrigger>
                 <SelectContent>
@@ -663,7 +686,7 @@ export default function Page() {
                 onValueChange={setCurrencyCode}
                 disabled={currencies.length === 0}
               >
-                <SelectTrigger>
+                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
                   <SelectValue placeholder="Выберите валюту" />
                 </SelectTrigger>
                 <SelectContent>
@@ -677,11 +700,24 @@ export default function Page() {
             </div>
 
             <div className="grid gap-2">
+              <Label>Дата начала действия актива/обязательства</Label>
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                max={getTodayDateKey()}
+                required
+                className="border-2 border-border/70 bg-white shadow-none"
+              />
+            </div>
+
+            <div className="grid gap-2">
               <Label>Название</Label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Например: Кошелек / Ипотека Газпромбанк"
+                className="border-2 border-border/70 bg-white shadow-none"
               />
             </div>
 
@@ -696,6 +732,7 @@ export default function Page() {
                 onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
                 inputMode="decimal"
                 placeholder="Например: 1 234 567,89"
+                className="border-2 border-border/70 bg-white shadow-none"
               />
             </div>
 

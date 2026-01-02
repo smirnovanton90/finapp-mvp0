@@ -57,6 +57,12 @@ def create_transaction(
     if not primary:
         raise HTTPException(status_code=400, detail="Invalid primary_item_id")
 
+    if data.transaction_date < primary.start_date:
+        raise HTTPException(
+            status_code=400,
+            detail="Дата транзакции не может быть раньше даты начала действия актива/обязательства.",
+        )
+
     counter = None
     amount_counterparty = None
 
@@ -79,6 +85,12 @@ def create_transaction(
 
         if counter.id == primary.id:
             raise HTTPException(status_code=400, detail="Transfer items must be different")
+
+        if data.transaction_date < counter.start_date:
+            raise HTTPException(
+                status_code=400,
+                detail="Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства.",
+            )
 
         if primary.currency_code != counter.currency_code:
             if data.amount_counterparty is None:

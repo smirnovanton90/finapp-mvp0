@@ -45,9 +45,11 @@ import {
 import {
   createTransaction,
   deleteTransaction,
+  fetchFxRates,
   fetchDeletedTransactions,
   fetchItems,
   fetchTransactions,
+  FxRateOut,
   ItemOut,
   TransactionOut,
 } from "@/lib/api";
@@ -86,6 +88,15 @@ function formatAmount(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
+function formatRub(valueInCents: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    style: "currency",
+    currency: "RUB",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(valueInCents / 100);
+}
+
 function formatDate(value: string) {
   const parts = value.split("-");
   if (parts.length === 3) {
@@ -96,6 +107,15 @@ function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString("ru-RU");
+}
+
+function toCbrDate(value: string) {
+  const parts = value.split("-");
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    if (year && month && day) return `${day}/${month}/${year}`;
+  }
+  return value;
 }
 
 function formatTime(value: string) {
@@ -174,6 +194,7 @@ function TransactionCardRow({
   tx,
   itemName,
   itemCurrencyCode,
+  getRubEquivalentCents,
   isSelected,
   onToggleSelection,
   onDelete,
@@ -182,6 +203,7 @@ function TransactionCardRow({
   tx: TransactionCard;
   itemName: (id: number | null | undefined) => string;
   itemCurrencyCode: (id: number | null | undefined) => string;
+  getRubEquivalentCents: (tx: TransactionCard, currencyCode: string) => number | null;
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
   onDelete: (id: number) => void;
@@ -193,6 +215,10 @@ function TransactionCardRow({
 
   const amountValue = formatAmount(tx.amount_rub);
   const counterpartyAmountValue = formatAmount(tx.amount_counterparty ?? tx.amount_rub);
+  const currencyCode = itemCurrencyCode(tx.primary_item_id);
+  const rubEquivalent = getRubEquivalentCents(tx, currencyCode);
+  const showRubEquivalent =
+    !isTransfer && currencyCode && currencyCode !== "RUB" && rubEquivalent !== null;
 
   const cardTone = tx.isDeleted
     ? "bg-slate-100"
@@ -300,8 +326,14 @@ function TransactionCardRow({
                 {amountValue}
               </div>
               <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                {itemCurrencyCode(tx.primary_item_id)}
+                {currencyCode}
               </div>
+              {showRubEquivalent && (
+                <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                  ≈ {isExpense ? "-" : "+"}
+                  {formatRub(rubEquivalent)}
+                </div>
+              )}
             </div>
 
             <div className="w-full sm:w-32">
@@ -366,6 +398,7 @@ export function TransactionsView({
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
+  const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -465,6 +498,20 @@ export function TransactionsView({
     return itemsById.get(id)?.currency_code ?? "-";
   };
 
+  const getFxRateForDate = (date: string, currencyCode: string) => {
+    if (!currencyCode || currencyCode === "RUB") return 1;
+    const rates = fxRatesByDate[date];
+    if (!rates) return null;
+    return rates.find((rate) => rate.char_code === currencyCode)?.rate ?? null;
+  };
+
+  const getRubEquivalentCents = (tx: TransactionCard, currencyCode: string) => {
+    const rate = getFxRateForDate(tx.transaction_date, currencyCode);
+    if (!rate) return null;
+    const amount = tx.amount_rub / 100;
+    return Math.round(amount * rate * 100);
+  };
+
   const isTransfer = direction === "TRANSFER";
   const primaryCurrencyCode = primaryItemId
     ? itemsById.get(primaryItemId)?.currency_code ?? null
@@ -525,6 +572,46 @@ export function TransactionsView({
   useEffect(() => {
     if (session) loadAll();
   }, [session]);
+
+  useEffect(() => {
+    const dates = new Set<string>();
+    [...txs, ...deletedTxs].forEach((tx) => {
+      if (tx.transaction_date) dates.add(tx.transaction_date);
+    });
+
+    const missingDates = Array.from(dates).filter(
+      (date) => !fxRatesByDate[date]
+    );
+    if (missingDates.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        missingDates.map(async (date) => {
+          try {
+            const rates = await fetchFxRates(toCbrDate(date));
+            return [date, rates] as const;
+          } catch {
+            return [date, null] as const;
+          }
+        })
+      );
+
+      if (cancelled) return;
+
+      setFxRatesByDate((prev) => {
+        const next = { ...prev };
+        entries.forEach(([date, rates]) => {
+          if (rates && rates.length) next[date] = rates;
+        });
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [txs, deletedTxs, fxRatesByDate]);
 
   useEffect(() => {
     setSelectedTxIds((prev) => {
@@ -1598,6 +1685,7 @@ export function TransactionsView({
                   tx={tx}
                   itemName={itemName}
                   itemCurrencyCode={itemCurrencyCode}
+                  getRubEquivalentCents={getRubEquivalentCents}
                   isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
                   onToggleSelection={toggleTxSelection}
                   onDelete={(id) => openDeleteDialog([id])}

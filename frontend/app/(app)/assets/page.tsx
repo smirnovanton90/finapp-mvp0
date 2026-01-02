@@ -493,22 +493,22 @@ export default function Page() {
             <Table>
               <TableHeader className="bg-muted/40">
                 <TableRow>
-                  <TableHead className="font-medium text-muted-foreground">
+                  <TableHead className="font-medium text-muted-foreground whitespace-normal">
                     Название
                   </TableHead>
-                  <TableHead className="font-medium text-muted-foreground">
+                  <TableHead className="font-medium text-muted-foreground whitespace-normal">
                     Валюта
                   </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground">
+                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
                     Текущая сумма в валюте актива / обязательства
                   </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground">
+                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
                     Актуальный курс валюты
                   </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground">
+                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
                     Текущая сумма актива / обязательства в рублевом эквиваленте
                   </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground">
+                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
                     Дата добавления
                   </TableHead>
                   <TableHead />

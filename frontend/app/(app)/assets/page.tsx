@@ -595,7 +595,14 @@ export default function Page() {
                   <TableCell />
                   <TableCell />
                   <TableCell />
-                  <TableCell />
+                  <TableCell
+                    className={[
+                      "text-right font-semibold tabular-nums",
+                      isLiability ? "text-red-600" : "",
+                    ].join(" ")}
+                  >
+                    {isLiability ? `-${formatRub(total)}` : formatRub(total)}
+                  </TableCell>
                   <TableCell />
                   <TableCell />
                 </TableRow>

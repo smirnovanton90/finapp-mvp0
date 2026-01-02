@@ -97,6 +97,13 @@ function formatRub(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
+function formatRate(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(value);
+}
+
 function formatDate(value: string) {
   const parts = value.split("-");
   if (parts.length === 3) {
@@ -219,6 +226,30 @@ function TransactionCardRow({
   const rubEquivalent = getRubEquivalentCents(tx, currencyCode);
   const showRubEquivalent =
     !isTransfer && currencyCode && currencyCode !== "RUB" && rubEquivalent !== null;
+  const primaryCurrency = itemCurrencyCode(tx.primary_item_id);
+  const counterpartyCurrency = itemCurrencyCode(tx.counterparty_item_id);
+  const primaryAmountCents = tx.amount_rub;
+  const counterpartyAmountCents = tx.amount_counterparty ?? tx.amount_rub;
+  const isCrossWithRub =
+    isTransfer &&
+    ((primaryCurrency === "RUB" &&
+      counterpartyCurrency &&
+      counterpartyCurrency !== "RUB" &&
+      counterpartyCurrency !== "-") ||
+      (counterpartyCurrency === "RUB" &&
+        primaryCurrency &&
+        primaryCurrency !== "RUB" &&
+        primaryCurrency !== "-"));
+  const rubAmountCents =
+    primaryCurrency === "RUB" ? primaryAmountCents : counterpartyAmountCents;
+  const foreignAmountCents =
+    primaryCurrency === "RUB" ? counterpartyAmountCents : primaryAmountCents;
+  const foreignCurrency =
+    primaryCurrency === "RUB" ? counterpartyCurrency : primaryCurrency;
+  const conversionRate =
+    isCrossWithRub && foreignAmountCents > 0
+      ? rubAmountCents / foreignAmountCents
+      : null;
 
   const cardTone = tx.isDeleted
     ? "bg-slate-100"
@@ -295,7 +326,14 @@ function TransactionCardRow({
                   {itemCurrencyCode(tx.primary_item_id)}
                 </div>
               </div>
-              <ArrowRight className={`h-6 w-6 ${mutedTextClass}`} />
+              <div className="flex flex-col items-center gap-1">
+                <ArrowRight className={`h-6 w-6 ${mutedTextClass}`} />
+                {conversionRate !== null && foreignCurrency && (
+                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                    {formatRate(conversionRate)} RUB/{foreignCurrency}
+                  </div>
+                )}
+              </div>
               <div className="min-w-[120px] text-center">
                 <div className={`truncate text-sm font-medium ${mutedTextClass}`}>
                   {itemName(tx.counterparty_item_id)}

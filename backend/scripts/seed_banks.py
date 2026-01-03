@@ -26,6 +26,7 @@ LOGO_BY_OGRN = {
     "1020280000190": "https://i.taplink.st/a/7/8/c/0/63e95d.jpg?2",
     "1027739176563": "https://rukodi.com/upload/iblock/250/7bnv25mhrahudf0zx3jdzy6bbxeyq2cy/otp_banklogo.png",
     "1027739082106": "https://sun9-28.userapi.com/impg/ysknqnJeTfoSUBXGRstGOIouVuOQ5GHfJXAkxA/tAmDH3_LoV8.jpg?size=425x425&quality=95&sign=1e42e1d6811c36bb3f95b611d33aba3e&type=album",
+    "1227700133792": "https://upload.wikimedia.org/wikipedia/commons/f/f2/%D0%9B%D0%BE%D0%B3%D0%BE%D1%82%D0%B8%D0%BF_Ozon_%D0%B1%D0%B0%D0%BD%D0%BA.jpg",
     "1027700342890": "https://krainov-vrn.ru/upload/iblock/1e0/j49jwhnhbuo7b6nttn0v0qvm9e3jr9ig.png",
 }
 

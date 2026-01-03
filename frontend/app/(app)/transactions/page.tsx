@@ -45,10 +45,12 @@ import {
 import {
   createTransaction,
   deleteTransaction,
+  fetchBanks,
   fetchFxRates,
   fetchDeletedTransactions,
   fetchItems,
   fetchTransactions,
+  BankOut,
   FxRateOut,
   ItemOut,
   TransactionOut,
@@ -194,6 +196,8 @@ function TransactionCardRow({
   tx,
   itemName,
   itemCurrencyCode,
+  itemBankLogoUrl,
+  itemBankName,
   getRubEquivalentCents,
   isSelected,
   onToggleSelection,
@@ -204,6 +208,8 @@ function TransactionCardRow({
   tx: TransactionCard;
   itemName: (id: number | null | undefined) => string;
   itemCurrencyCode: (id: number | null | undefined) => string;
+  itemBankLogoUrl: (id: number | null | undefined) => string | null;
+  itemBankName: (id: number | null | undefined) => string;
   getRubEquivalentCents: (tx: TransactionCard, currencyCode: string) => number | null;
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
@@ -223,6 +229,10 @@ function TransactionCardRow({
     !isTransfer && currencyCode && currencyCode !== "RUB" && rubEquivalent !== null;
   const primaryCurrency = itemCurrencyCode(tx.primary_item_id);
   const counterpartyCurrency = itemCurrencyCode(tx.counterparty_item_id);
+  const primaryBankLogo = itemBankLogoUrl(tx.primary_item_id);
+  const primaryBankName = itemBankName(tx.primary_item_id);
+  const counterpartyBankLogo = itemBankLogoUrl(tx.counterparty_item_id);
+  const counterpartyBankName = itemBankName(tx.counterparty_item_id);
   const primaryAmountCents = tx.amount_rub;
   const counterpartyAmountCents = tx.amount_counterparty ?? tx.amount_rub;
   const isCrossWithRub =
@@ -311,6 +321,16 @@ function TransactionCardRow({
           <>
             <div className="flex min-w-[240px] items-center gap-3">
               <div className="min-w-[110px] text-center">
+                {primaryBankLogo && (
+                  <div className="mb-1 flex justify-center">
+                    <img
+                      src={primaryBankLogo}
+                      alt={primaryBankName || ""}
+                      className="h-6 w-6 rounded border border-white/70 bg-white object-contain"
+                      loading="lazy"
+                    />
+                  </div>
+                )}
                 <div className={`truncate text-base font-semibold ${textClass}`}>
                   {itemName(tx.primary_item_id)}
                 </div>
@@ -332,6 +352,16 @@ function TransactionCardRow({
                 <ArrowRight className="pointer-events-none absolute right-0 top-1/2 h-24 w-24 -translate-y-1/2 text-white opacity-45" />
               </div>
               <div className="min-w-[110px] text-center">
+                {counterpartyBankLogo && (
+                  <div className="mb-1 flex justify-center">
+                    <img
+                      src={counterpartyBankLogo}
+                      alt={counterpartyBankName || ""}
+                      className="h-6 w-6 rounded border border-white/70 bg-white object-contain"
+                      loading="lazy"
+                    />
+                  </div>
+                )}
                 <div className={`truncate text-base font-semibold ${textClass}`}>
                   {itemName(tx.counterparty_item_id)}
                 </div>
@@ -355,6 +385,16 @@ function TransactionCardRow({
         ) : (
           <>
             <div className="w-full min-w-[120px] text-center sm:w-36">
+              {primaryBankLogo && (
+                <div className="mb-1 flex justify-center">
+                  <img
+                    src={primaryBankLogo}
+                    alt={primaryBankName || ""}
+                    className="h-6 w-6 rounded border border-white/70 bg-white object-contain"
+                    loading="lazy"
+                  />
+                </div>
+              )}
               <div className={`truncate text-base font-semibold ${textClass}`}>
                 {itemName(tx.primary_item_id)}
               </div>
@@ -444,6 +484,7 @@ export function TransactionsView({
   const isPlanningView = view === "planning";
 
   const [items, setItems] = useState<ItemOut[]>([]);
+  const [banks, setBanks] = useState<BankOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
@@ -520,6 +561,10 @@ export function TransactionsView({
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
+  const banksById = useMemo(
+    () => new Map(banks.map((bank) => [bank.id, bank])),
+    [banks]
+  );
   const sortedItems = useMemo(() => {
     return [...items].sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [items]);
@@ -581,6 +626,15 @@ export function TransactionsView({
     if (!id) return "-";
     return itemsById.get(id)?.currency_code ?? "-";
   };
+  const itemBank = (id: number | null | undefined) => {
+    if (!id) return null;
+    const bankId = itemsById.get(id)?.bank_id;
+    if (!bankId) return null;
+    return banksById.get(bankId) ?? null;
+  };
+  const itemBankLogoUrl = (id: number | null | undefined) =>
+    itemBank(id)?.logo_url ?? null;
+  const itemBankName = (id: number | null | undefined) => itemBank(id)?.name ?? "";
 
   const getFxRateForDate = (date: string, currencyCode: string) => {
     if (!currencyCode || currencyCode === "RUB") return 1;
@@ -688,14 +742,16 @@ export function TransactionsView({
     setLoading(true);
     setError(null);
     try {
-      const [itemsData, txData, deletedData] = await Promise.all([
+      const [itemsData, txData, deletedData, banksData] = await Promise.all([
         fetchItems(),
         fetchTransactions(),
         fetchDeletedTransactions(),
+        fetchBanks().catch(() => []),
       ]);
       setItems(itemsData);
       setTxs(txData);
       setDeletedTxs(deletedData);
+      setBanks(banksData);
     } catch (e: any) {
       setError(e?.message ?? "Не удалось загрузить транзакции.");
     } finally {
@@ -1948,6 +2004,8 @@ export function TransactionsView({
                   tx={tx}
                   itemName={itemName}
                   itemCurrencyCode={itemCurrencyCode}
+                  itemBankLogoUrl={itemBankLogoUrl}
+                  itemBankName={itemBankName}
                   getRubEquivalentCents={getRubEquivalentCents}
                   isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
                   onToggleSelection={toggleTxSelection}

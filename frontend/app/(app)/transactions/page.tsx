@@ -499,7 +499,7 @@ function TransactionCardRow({
     <div
       className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardTone}`}
     >
-      <div className="flex flex-1 flex-wrap items-center gap-3 px-3 py-3 sm:flex-nowrap">
+      <div className="flex flex-1 flex-wrap items-center gap-3 px-3 py-3 lg:grid lg:grid-cols-[auto_6rem_12rem_12rem_minmax(14rem,1fr)_auto] lg:items-center">
         <input
           type="checkbox"
           className="h-5 w-5 accent-violet-600"
@@ -520,8 +520,8 @@ function TransactionCardRow({
 
         {isTransfer ? (
           <>
-            <div className="flex min-w-[240px] items-center gap-3">
-              <div className="min-w-[110px] text-center">
+            <div className="flex min-w-[240px] items-center gap-3 lg:col-span-2">
+              <div className="w-[110px] shrink-0 text-center">
                 {primaryBankLogo && (
                   <div className="mb-1 flex justify-center">
                     <img
@@ -532,10 +532,12 @@ function TransactionCardRow({
                     />
                   </div>
                 )}
-                <div className={`truncate text-base font-semibold ${textClass}`}>
+                <div
+                  className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
+                >
                   {itemName(tx.primary_item_id)}
                 </div>
-                <div className={`text-xl font-semibold tabular-nums ${transferNegativeClass}`}>
+                <div className={`text-sm font-semibold tabular-nums ${transferNegativeClass}`}>
                   -{amountValue}
                 </div>
                 <div className={`text-xs font-semibold ${mutedTextClass}`}>
@@ -552,7 +554,7 @@ function TransactionCardRow({
                 )}
                 <ArrowRight className="pointer-events-none absolute right-0 top-1/2 h-24 w-24 -translate-y-1/2 text-white opacity-45" />
               </div>
-              <div className="min-w-[110px] text-center">
+              <div className="w-[110px] shrink-0 text-center">
                 {counterpartyBankLogo && (
                   <div className="mb-1 flex justify-center">
                     <img
@@ -563,10 +565,12 @@ function TransactionCardRow({
                     />
                   </div>
                 )}
-                <div className={`truncate text-base font-semibold ${textClass}`}>
+                <div
+                  className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
+                >
                   {itemName(tx.counterparty_item_id)}
                 </div>
-                <div className={`text-xl font-semibold tabular-nums ${transferPositiveClass}`}>
+                <div className={`text-sm font-semibold tabular-nums ${transferPositiveClass}`}>
                   +{counterpartyAmountValue}
                 </div>
                 <div className={`text-xs font-semibold ${mutedTextClass}`}>
@@ -577,7 +581,7 @@ function TransactionCardRow({
 
             <div className="min-w-[140px] flex-1">
               <div
-                className={`whitespace-normal text-xs leading-tight ${mutedTextClass}`}
+                className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
               >
                 {commentText}
               </div>
@@ -585,7 +589,7 @@ function TransactionCardRow({
           </>
         ) : (
           <>
-            <div className="w-full min-w-[120px] text-center sm:w-36">
+            <div className="w-full min-w-[120px] text-center sm:w-36 lg:w-full">
               {primaryBankLogo && (
                 <div className="mb-1 flex justify-center">
                   <img
@@ -596,10 +600,12 @@ function TransactionCardRow({
                   />
                 </div>
               )}
-              <div className={`truncate text-base font-semibold ${textClass}`}>
+              <div
+                className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
+              >
                 {itemName(tx.primary_item_id)}
               </div>
-              <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
+              <div className={`text-sm font-semibold tabular-nums ${amountClass}`}>
                 {isExpense ? "-" : "+"}
                 {amountValue}
               </div>
@@ -614,12 +620,14 @@ function TransactionCardRow({
               )}
             </div>
 
-            <div className="w-full self-stretch sm:w-36">
+            <div className="w-full self-stretch sm:w-36 lg:w-full">
               <div className="relative flex h-full flex-col items-start justify-center text-left">
                 <div
-                  className={`relative z-10 space-y-0.5 text-xs font-semibold leading-tight ${mutedTextClass}`}
+                  className={`relative z-10 space-y-0.5 pr-10 text-xs font-semibold leading-tight break-words whitespace-normal ${mutedTextClass}`}
                 >
-                  <div className={`text-sm font-semibold ${textClass}`}>
+                  <div
+                    className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
+                  >
                     {categoryLines[0]}
                   </div>
                   <div>{categoryLines[1]}</div>
@@ -634,7 +642,7 @@ function TransactionCardRow({
 
             <div className="min-w-[140px] flex-1">
               <div
-                className={`whitespace-normal text-xs leading-tight ${mutedTextClass}`}
+                className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
               >
                 {commentText}
               </div>
@@ -917,7 +925,7 @@ export function TransactionsView({
     [cat2, scopedCategoryMaps]
   );
   const segmentedButtonBase =
-    "flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+    "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
   const isDialogOpen = dialogMode !== null;
   const isEditMode = dialogMode === "edit";
   const isBulkEdit = dialogMode === "bulk-edit";
@@ -1876,7 +1884,7 @@ export function TransactionsView({
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        <aside className="w-full max-w-[380px] shrink-0">
+        <aside className="w-full max-w-[340px] shrink-0">
           <div className="rounded-lg border-2 border-border/70 bg-white p-4">
             <div className="space-y-6">
               <Dialog
@@ -2388,7 +2396,7 @@ export function TransactionsView({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-base font-semibold text-foreground">
+                  <div className="text-sm font-semibold text-foreground">
                     Вид транзакции
                   </div>
                   <button
@@ -2444,7 +2452,7 @@ export function TransactionsView({
                 </div>
               </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-base font-semibold text-foreground">
+                  <div className="text-sm font-semibold text-foreground">
                     Сумма транзакции
                   </div>
                   <button
@@ -2486,7 +2494,7 @@ export function TransactionsView({
                 </div>
               </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-base font-semibold text-foreground">
+                  <div className="text-sm font-semibold text-foreground">
                     Дата транзакции
                   </div>
                   <button
@@ -2526,7 +2534,7 @@ export function TransactionsView({
                     <button
                       type="button"
                       onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
-                      className="text-base font-semibold text-foreground"
+                      className="text-sm font-semibold text-foreground"
                     >
                       Валюта
                     </button>
@@ -2565,7 +2573,7 @@ export function TransactionsView({
                       currencyOptions.map((value) => (
                         <label
                           key={value}
-                          className="flex items-center gap-3 text-base text-foreground"
+                          className="flex items-center gap-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -2585,7 +2593,7 @@ export function TransactionsView({
                     <button
                       type="button"
                       onClick={() => setIsItemsFilterOpen((prev) => !prev)}
-                      className="text-base font-semibold text-foreground"
+                      className="text-sm font-semibold text-foreground"
                     >
                       Активы/обязательства
                     </button>
@@ -2627,7 +2635,7 @@ export function TransactionsView({
                         return (
                           <label
                             key={item.id}
-                            className="flex items-center gap-3 text-base text-foreground"
+                            className="flex items-center gap-3 text-sm text-foreground"
                           >
                             <input
                               type="checkbox"
@@ -2658,7 +2666,7 @@ export function TransactionsView({
                     <button
                       type="button"
                       onClick={() => setIsCategoryL1Open((prev) => !prev)}
-                      className="text-base font-semibold text-foreground"
+                      className="text-sm font-semibold text-foreground"
                     >
                       Категория 1
                     </button>
@@ -2697,7 +2705,7 @@ export function TransactionsView({
                       categoryL1Options.map((value) => (
                         <label
                           key={value}
-                          className="flex items-center gap-3 text-base text-foreground"
+                          className="flex items-center gap-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -2717,7 +2725,7 @@ export function TransactionsView({
                     <button
                       type="button"
                       onClick={() => setIsCategoryL2Open((prev) => !prev)}
-                      className="text-base font-semibold text-foreground"
+                      className="text-sm font-semibold text-foreground"
                     >
                       Категория 2
                     </button>
@@ -2756,7 +2764,7 @@ export function TransactionsView({
                       categoryL2Options.map((value) => (
                         <label
                           key={value}
-                          className="flex items-center gap-3 text-base text-foreground"
+                          className="flex items-center gap-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -2776,7 +2784,7 @@ export function TransactionsView({
                     <button
                       type="button"
                       onClick={() => setIsCategoryL3Open((prev) => !prev)}
-                      className="text-base font-semibold text-foreground"
+                      className="text-sm font-semibold text-foreground"
                     >
                       Категория 3
                     </button>
@@ -2815,7 +2823,7 @@ export function TransactionsView({
                       categoryL3Options.map((value) => (
                         <label
                           key={value}
-                          className="flex items-center gap-3 text-base text-foreground"
+                          className="flex items-center gap-3 text-sm text-foreground"
                         >
                           <input
                             type="checkbox"
@@ -2831,7 +2839,7 @@ export function TransactionsView({
                 )}
               </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-base font-semibold text-foreground">
+                  <div className="text-sm font-semibold text-foreground">
                     Комментарий
                   </div>
                   <button
@@ -2854,7 +2862,7 @@ export function TransactionsView({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-base font-semibold text-foreground">
+                  <div className="text-sm font-semibold text-foreground">
                     Статус подтверждения
                   </div>
                   <button
@@ -2899,7 +2907,7 @@ export function TransactionsView({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-base font-semibold text-foreground">
+                  <div className="text-sm font-semibold text-foreground">
                     Статус транзакции
                   </div>
                   <button

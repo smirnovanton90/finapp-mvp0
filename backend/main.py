@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, delete, func
 
 from db import get_db
-from models import Item, User, Currency, FxRate
-from schemas import ItemCreate, ItemOut, CurrencyOut, FxRateOut
+from models import Item, User, Currency, FxRate, Bank
+from schemas import ItemCreate, ItemOut, CurrencyOut, FxRateOut, BankOut
 from auth import get_current_user
 
 from transactions import router as transactions_router
@@ -16,6 +16,18 @@ app = FastAPI(title="FinApp API", version="0.1.0")
 
 _FX_CACHE: dict[str, tuple[datetime, list[FxRateOut]]] = {}
 _FX_CACHE_TTL = timedelta(hours=1)
+_BANK_LICENSE_STATUSES = ("Действующая", "Отозванная")
+_BANK_TYPE_CODES = {
+    "bank_account",
+    "bank_card",
+    "deposit",
+    "savings_account",
+    "brokerage",
+    "credit_card_debt",
+    "consumer_loan",
+    "mortgage",
+    "car_loan",
+}
 
 app.include_router(transactions_router)
 
@@ -175,6 +187,19 @@ def list_currencies(
     return list(db.execute(stmt).scalars())
 
 
+@app.get("/banks", response_model=list[BankOut])
+def list_banks(
+    q: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(Bank).where(Bank.license_status.in_(_BANK_LICENSE_STATUSES))
+    if q:
+        stmt = stmt.where(Bank.name.ilike(f"%{q}%"))
+    stmt = stmt.order_by(Bank.name.asc())
+    return list(db.execute(stmt).scalars())
+
+
 @app.get("/fx-rates", response_model=list[FxRateOut])
 def list_fx_rates(
     date_req: str | None = None,
@@ -193,12 +218,25 @@ def create_item(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    bank_id = None
+    if payload.bank_id is not None:
+        if payload.type_code not in _BANK_TYPE_CODES:
+            raise HTTPException(
+                status_code=400,
+                detail="bank_id is only allowed for bank-related item types.",
+            )
+        bank = db.get(Bank, payload.bank_id)
+        if not bank:
+            raise HTTPException(status_code=400, detail="Invalid bank_id")
+        bank_id = bank.id
+
     item = Item(
         user_id=user.id,
         kind=payload.kind,
         type_code=payload.type_code,
         name=payload.name,
         currency_code=payload.currency_code,
+        bank_id=bank_id,
         initial_value_rub=payload.initial_value_rub,
         current_value_rub=payload.initial_value_rub,
         start_date=payload.start_date,

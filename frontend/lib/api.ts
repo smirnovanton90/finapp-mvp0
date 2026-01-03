@@ -8,6 +8,7 @@ export type ItemOut = {
   type_code: string;
   name: string;
   currency_code: string;
+  bank_id: number | null;
   initial_value_rub: number;
   current_value_rub: number;
   start_date: string;
@@ -20,8 +21,17 @@ export type ItemCreate = {
   type_code: string;
   name: string;
   currency_code: string;
+  bank_id?: number | null;
   initial_value_rub: number;
   start_date: string;
+};
+
+export type BankOut = {
+  id: number;
+  ogrn: string;
+  name: string;
+  license_status: string;
+  logo_url: string | null;
 };
 
 export type CurrencyOut = {
@@ -99,6 +109,13 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
 
 export async function fetchItems(): Promise<ItemOut[]> {
   const res = await authFetch(`${API_BASE}/items`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchBanks(query?: string): Promise<BankOut[]> {
+  const qs = query ? `?q=${encodeURIComponent(query)}` : "";
+  const res = await authFetch(`${API_BASE}/banks${qs}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

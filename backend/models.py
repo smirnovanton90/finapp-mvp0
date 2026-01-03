@@ -56,6 +56,22 @@ class FxRate(Base):
     )
 
 
+class Bank(Base):
+    __tablename__ = "banks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ogrn: Mapped[str] = mapped_column(String(13), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    license_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    items: Mapped[list["Item"]] = relationship(back_populates="bank")
+
+
 class Item(Base):
     __tablename__ = "items"
 
@@ -72,6 +88,9 @@ class Item(Base):
         String(3), ForeignKey("currencies.iso_char_code"), nullable=False
     )
     currency: Mapped[Currency] = relationship(back_populates="items")
+
+    bank_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("banks.id"), nullable=True)
+    bank: Mapped[Optional["Bank"]] = relationship(back_populates="items")
 
     initial_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)

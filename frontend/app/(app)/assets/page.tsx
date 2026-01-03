@@ -50,12 +50,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   fetchItems,
+  fetchBanks,
   fetchCurrencies,
   fetchFxRates,
   createItem,
   archiveItem,
   ItemKind,
   ItemOut,
+  BankOut,
   CurrencyOut,
   FxRateOut,
 } from "@/lib/api";
@@ -94,6 +96,17 @@ const CASH_TYPES = ["cash", "bank_account", "bank_card"];
 const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "savings_account", "brokerage", "securities"];
 const PROPERTY_TYPES = ["real_estate", "car"];
 const OTHER_ASSET_TYPES = ["other_asset"];
+const BANK_TYPE_CODES = [
+  "bank_account",
+  "bank_card",
+  "deposit",
+  "savings_account",
+  "brokerage",
+  "credit_card_debt",
+  "consumer_loan",
+  "mortgage",
+  "car_loan",
+];
 
 const TYPE_ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string }>> = {
   cash: Banknote,
@@ -168,6 +181,12 @@ export default function Page() {
   const [name, setName] = useState("");
   const [amountStr, setAmountStr] = useState(""); // строка: "1234.56" / "1 234,56"
   const [startDate, setStartDate] = useState(() => getTodayDateKey());
+  const [banks, setBanks] = useState<BankOut[]>([]);
+  const [bankId, setBankId] = useState<number | null>(null);
+  const [bankSearch, setBankSearch] = useState("");
+  const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
+  const [bankLoading, setBankLoading] = useState(false);
+  const [bankError, setBankError] = useState<string | null>(null);
 
   function resetCreateForm() {
     setName("");
@@ -175,6 +194,10 @@ export default function Page() {
     setTypeCode("");
     setCurrencyCode("RUB");
     setStartDate(getTodayDateKey());
+    setBankId(null);
+    setBankSearch("");
+    setBankDropdownOpen(false);
+    setBankError(null);
   }  
 
   function parseRubToCents(input: string): number {
@@ -271,6 +294,25 @@ export default function Page() {
     const allowed = new Set(allowedTypeCodes);
     return base.filter((option) => allowed.has(option.code));
   }, [kind, allowedTypeCodes]);
+
+  const showBankField = useMemo(
+    () => BANK_TYPE_CODES.includes(typeCode),
+    [typeCode]
+  );
+
+  const filteredBanks = useMemo(() => {
+    const query = bankSearch.trim().toLowerCase();
+    const list = query
+      ? banks.filter((bank) => bank.name.toLowerCase().includes(query))
+      : banks.slice();
+    return list.sort((a, b) => {
+      const aHasLogo = Boolean(a.logo_url);
+      const bHasLogo = Boolean(b.logo_url);
+      if (aHasLogo !== bHasLogo) return aHasLogo ? -1 : 1;
+      return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+    });
+  }, [banks, bankSearch]);
+
 
   // Фильтрация по категориям
   const cashItems = useMemo(
@@ -370,6 +412,19 @@ export default function Page() {
     }
   }
 
+  async function loadBanks() {
+    setBankLoading(true);
+    setBankError(null);
+    try {
+      const data = await fetchBanks();
+      setBanks(data);
+    } catch (e: any) {
+      setBankError(e?.message ?? "Не удалось загрузить список банков.");
+    } finally {
+      setBankLoading(false);
+    }
+  }
+
   async function loadFxRates() {
     try {
       const data = await fetchFxRates();
@@ -388,6 +443,20 @@ export default function Page() {
   }, [session]);
 
   useEffect(() => {
+    if (!isCreateOpen || !showBankField || banks.length || bankLoading) return;
+    loadBanks();
+  }, [isCreateOpen, showBankField, banks.length, bankLoading]);
+
+  useEffect(() => {
+    if (showBankField) return;
+    if (bankId || bankSearch) {
+      setBankId(null);
+      setBankSearch("");
+    }
+    setBankDropdownOpen(false);
+  }, [showBankField]);
+
+  useEffect(() => {
     if (!currencies.length) return;
     if (!currencyCode || !currencies.some((c) => c.iso_char_code === currencyCode)) {
       const rub = currencies.find((c) => c.iso_char_code === "RUB");
@@ -403,6 +472,10 @@ export default function Page() {
     setName("");
     setAmountStr("");
     setStartDate(getTodayDateKey());
+    setBankId(null);
+    setBankSearch("");
+    setBankDropdownOpen(false);
+    setBankError(null);
     setFormError(null);
     setIsCreateOpen(true);
   };
@@ -445,6 +518,7 @@ export default function Page() {
         type_code: typeCode,
         name: name.trim(),
         currency_code: currencyCode,
+        bank_id: showBankField ? bankId : null,
         initial_value_rub: cents, // копейки
         start_date: startDate,
       });
@@ -680,6 +754,78 @@ export default function Page() {
                 </SelectContent>
               </Select>
             </div>
+
+            {showBankField && (
+              <div className="grid gap-2">
+                <Label>Банк</Label>
+                <div className="relative">
+                  <Input
+                    value={bankSearch}
+                    onChange={(e) => {
+                      setBankSearch(e.target.value);
+                      setBankId(null);
+                      setBankDropdownOpen(true);
+                    }}
+                    onFocus={() => setBankDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setBankDropdownOpen(false), 150)}
+                    placeholder="Начните вводить название банка"
+                    className="border-2 border-border/70 bg-white shadow-none"
+                  />
+                  {bankDropdownOpen && (
+                    <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
+                      {bankLoading && (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          Загрузка...
+                        </div>
+                      )}
+                      {!bankLoading && bankError && (
+                        <div className="px-3 py-2 text-sm text-red-600">{bankError}</div>
+                      )}
+                      {!bankLoading && !bankError && filteredBanks.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          Нет совпадений
+                        </div>
+                      )}
+                      {!bankLoading &&
+                        !bankError &&
+                        filteredBanks.map((bank) => (
+                          <button
+                            key={bank.id}
+                            type="button"
+                            className={[
+                              "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50",
+                              bankId === bank.id ? "bg-slate-50" : "",
+                            ].join(" ")}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              setBankId(bank.id);
+                              setBankSearch(bank.name);
+                              setBankDropdownOpen(false);
+                            }}
+                          >
+                            {bank.logo_url ? (
+                              <img
+                                src={bank.logo_url}
+                                alt=""
+                                className="h-8 w-8 rounded border border-border/60 object-contain bg-white"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="h-8 w-8 rounded border border-border/60 bg-slate-100" />
+                            )}
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium">{bank.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {bank.license_status}
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label>Валюта</Label>

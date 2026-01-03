@@ -10,6 +10,7 @@ class ItemCreate(BaseModel):
     type_code: str = Field(min_length=1, max_length=50)
     name: str = Field(min_length=1, max_length=200)
     currency_code: str = Field(default="RUB", min_length=3, max_length=3)
+    bank_id: int | None = None
     initial_value_rub: int = Field(ge=0)
     start_date: date
 
@@ -26,6 +27,7 @@ class ItemOut(BaseModel):
     type_code: str
     name: str
     currency_code: str
+    bank_id: int | None
     initial_value_rub: int
     current_value_rub: int
     start_date: date
@@ -76,3 +78,14 @@ class FxRateOut(BaseModel):
     nominal: int
     value: float
     rate: float
+
+
+class BankOut(BaseModel):
+    id: int
+    ogrn: str
+    name: str
+    license_status: str
+    logo_url: str | None
+
+    class Config:
+        from_attributes = True

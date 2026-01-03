@@ -125,6 +125,11 @@ function formatDateLabel(dateKey: string) {
   return `${day}.${month}.${year}`;
 }
 
+function transferDelta(kind: ItemKind, isPrimary: boolean, amount: number) {
+  if (kind === "LIABILITY") return isPrimary ? amount : -amount;
+  return isPrimary ? -amount : amount;
+}
+
 function buildDailyNetAssets(items: ItemOut[], txs: TransactionOut[]): DailyPoint[] {
   const actualTxs = txs.filter((tx) => tx.transaction_type === "ACTUAL");
   if (items.length === 0 && actualTxs.length === 0) return [];
@@ -167,12 +172,22 @@ function buildDailyNetAssets(items: ItemOut[], txs: TransactionOut[]): DailyPoin
     let primaryDelta = 0;
     if (tx.direction === "INCOME") primaryDelta = tx.amount_rub;
     if (tx.direction === "EXPENSE") primaryDelta = -tx.amount_rub;
-    if (tx.direction === "TRANSFER") primaryDelta = -tx.amount_rub;
+    if (tx.direction === "TRANSFER") {
+      const primaryKind = itemKindById.get(tx.primary_item_id);
+      primaryDelta = primaryKind
+        ? transferDelta(primaryKind, true, tx.amount_rub)
+        : -tx.amount_rub;
+    }
 
     addDelta(dateKey, tx.primary_item_id, primaryDelta);
 
     if (tx.direction === "TRANSFER" && tx.counterparty_item_id) {
-      addDelta(dateKey, tx.counterparty_item_id, tx.amount_rub);
+      const counterKind = itemKindById.get(tx.counterparty_item_id);
+      const counterAmount = tx.amount_counterparty ?? tx.amount_rub;
+      const counterDelta = counterKind
+        ? transferDelta(counterKind, false, counterAmount)
+        : counterAmount;
+      addDelta(dateKey, tx.counterparty_item_id, counterDelta);
     }
   });
 

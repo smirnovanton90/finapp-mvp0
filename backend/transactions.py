@@ -10,6 +10,11 @@ from datetime import datetime, timezone
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
+def transfer_delta(kind: str, is_primary: bool, amount: int) -> int:
+    if kind == "LIABILITY":
+        return amount if is_primary else -amount
+    return -amount if is_primary else amount
+
 
 @router.get("", response_model=list[TransactionOut])
 def list_transactions(
@@ -148,11 +153,15 @@ def create_transaction(
 
         elif data.direction == "TRANSFER":
             # counter уже проверен выше
-            if primary.current_value_rub < amt:
-                raise HTTPException(status_code=400, detail="Insufficient funds for transfer")
-            primary.current_value_rub -= amt
             amt_counterparty = amount_counterparty or amt
-            counter.current_value_rub += amt_counterparty
+            primary_delta = transfer_delta(primary.kind, True, amt)
+            counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
+            if primary_delta < 0 and primary.current_value_rub < -primary_delta:
+                raise HTTPException(status_code=400, detail="Insufficient funds for transfer")
+            if counter_delta < 0 and counter.current_value_rub < -counter_delta:
+                raise HTTPException(status_code=400, detail="Insufficient funds for transfer")
+            primary.current_value_rub += primary_delta
+            counter.current_value_rub += counter_delta
 
     db.add(tx)
     db.commit()
@@ -280,8 +289,10 @@ def update_transaction(
         elif tx.direction == "TRANSFER":
             if not old_counter:
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
-            add_delta(old_primary.id, old_amt)
-            add_delta(old_counter.id, -old_counter_amt)
+            old_primary_delta = transfer_delta(old_primary.kind, True, old_amt)
+            old_counter_delta = transfer_delta(old_counter.kind, False, old_counter_amt)
+            add_delta(old_primary.id, -old_primary_delta)
+            add_delta(old_counter.id, -old_counter_delta)
 
     if data.transaction_type == "ACTUAL":
         new_amt = data.amount_rub
@@ -296,8 +307,10 @@ def update_transaction(
         elif data.direction == "TRANSFER":
             if not new_counter:
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
-            add_delta(new_primary.id, -new_amt)
-            add_delta(new_counter.id, new_counter_amt)
+            new_primary_delta = transfer_delta(new_primary.kind, True, new_amt)
+            new_counter_delta = transfer_delta(new_counter.kind, False, new_counter_amt)
+            add_delta(new_primary.id, new_primary_delta)
+            add_delta(new_counter.id, new_counter_delta)
 
     for item_id, delta in deltas.items():
         item = items_by_id.get(item_id)
@@ -392,13 +405,20 @@ def delete_transaction(
 
         elif tx.direction == "TRANSFER":
             # откат перевода: вернуть в источник, забрать у получателя
-            if counter.current_value_rub < amt_counterparty:
+            primary_delta = -transfer_delta(primary.kind, True, amt)
+            counter_delta = -transfer_delta(counter.kind, False, amt_counterparty)
+            if primary.current_value_rub + primary_delta < 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete: would make balance negative. Delete later transactions first.",
+                )
+            if counter.current_value_rub + counter_delta < 0:
                 raise HTTPException(
                     status_code=409,
                     detail="Cannot delete: would make counterparty balance negative. Delete later transactions first.",
                 )
-            primary.current_value_rub += amt
-            counter.current_value_rub -= amt_counterparty
+            primary.current_value_rub += primary_delta
+            counter.current_value_rub += counter_delta
 
     # soft delete
     tx.deleted_at = datetime.now(timezone.utc)

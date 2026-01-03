@@ -111,15 +111,28 @@ function buildTxsByDate(txs: TransactionOut[], itemId: number) {
   return map;
 }
 
-function computeDayDelta(txs: TransactionOut[], itemId: number) {
+function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number) {
+  if (kind === "LIABILITY") return isPrimary ? amount : -amount;
+  return isPrimary ? -amount : amount;
+}
+
+function computeDayDelta(
+  txs: TransactionOut[],
+  itemId: number,
+  itemKind: ItemOut["kind"]
+) {
   let delta = 0;
   for (const tx of txs) {
     if (tx.direction === "TRANSFER") {
       if (tx.primary_item_id === itemId) {
-        delta -= tx.amount_rub;
+        delta += transferDelta(itemKind, true, tx.amount_rub);
       }
       if (tx.counterparty_item_id === itemId) {
-        delta += tx.amount_counterparty ?? tx.amount_rub;
+        delta += transferDelta(
+          itemKind,
+          false,
+          tx.amount_counterparty ?? tx.amount_rub
+        );
       }
       continue;
     }
@@ -260,7 +273,7 @@ export default function AssetsDynamicsPage() {
 
     return dateKeys.map((dateKey) => {
       const dayTxs = txsByDate.get(dateKey) ?? [];
-      balance += computeDayDelta(dayTxs, selectedItem.id);
+      balance += computeDayDelta(dayTxs, selectedItem.id, selectedItem.kind);
       const rate = getRateForDate(
         fxRatesByDate,
         dateKey,

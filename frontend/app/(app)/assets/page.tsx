@@ -363,6 +363,10 @@ export default function Page() {
     () => banks.find((bank) => bank.id === bankId) ?? null,
     [banks, bankId]
   );
+  const banksById = useMemo(
+    () => new Map(banks.map((bank) => [bank.id, bank])),
+    [banks]
+  );
   const assetItems = useMemo(
     () => items.filter((item) => item.kind === "ASSET"),
     [items]
@@ -540,6 +544,7 @@ export default function Page() {
       loadItems();
       loadCurrencies();
       loadFxRates();
+      loadBanks();
     }
   }, [session]);
 
@@ -852,6 +857,9 @@ export default function Page() {
                   <TableHead className="font-medium text-muted-foreground whitespace-normal">
                     Название
                   </TableHead>
+                  <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
+                    Банк
+                  </TableHead>
                   <TableHead className="font-medium text-muted-foreground whitespace-normal">
                     Валюта
                   </TableHead>
@@ -879,6 +887,9 @@ export default function Page() {
                   const typeMeta = typeLabel;
                   const rate = rateByCode[it.currency_code];
                   const rubEquivalent = getRubEquivalentCents(it);
+                  const bank = it.bank_id ? banksById.get(it.bank_id) ?? null : null;
+                  const bankLogoUrl = bank?.logo_url ?? null;
+                  const bankName = bank?.name ?? "";
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
 
                   return (
@@ -891,6 +902,19 @@ export default function Page() {
                         <div className="text-xs text-muted-foreground leading-tight">
                           {typeMeta}
                         </div>
+                      </TableCell>
+
+                      <TableCell className="text-center text-sm text-muted-foreground">
+                        {bankLogoUrl ? (
+                          <img
+                            src={bankLogoUrl}
+                            alt={bankName}
+                            className="mx-auto h-5 w-5 rounded object-contain bg-white"
+                            loading="lazy"
+                          />
+                        ) : (
+                          "-"
+                        )}
                       </TableCell>
 
                       <TableCell className="text-sm text-muted-foreground">
@@ -951,6 +975,7 @@ export default function Page() {
                   <TableCell />
                   <TableCell />
                   <TableCell />
+                  <TableCell />
                   <TableCell
                     className={[
                       "text-right font-semibold tabular-nums",
@@ -1001,7 +1026,7 @@ export default function Page() {
               <DialogTitle>Добавление актива/обязательства</DialogTitle>
             </DialogHeader>
 
-            <form onSubmit={onCreate} className="grid gap-4">
+            <form onSubmit={onCreate} noValidate className="grid gap-4">
             {formError && (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
                 {formError}
@@ -1107,7 +1132,6 @@ export default function Page() {
                   }}
                   inputMode="numeric"
                   maxLength={7}
-                  pattern="\\d{7}"
                   placeholder="Например: 1234567"
                   className="border-2 border-border/70 bg-white shadow-none"
                 />
@@ -1126,7 +1150,6 @@ export default function Page() {
                     }}
                     inputMode="numeric"
                     maxLength={4}
-                    pattern="\\d{4}"
                     placeholder="Например: 1234"
                     className="border-2 border-border/70 bg-white shadow-none"
                   />
@@ -1318,7 +1341,6 @@ export default function Page() {
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 max={getTodayDateKey()}
-                required
                 className="border-2 border-border/70 bg-white shadow-none"
               />
             </div>

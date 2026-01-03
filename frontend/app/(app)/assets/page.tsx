@@ -109,7 +109,10 @@ const BANK_TYPE_CODES = [
   "car_loan",
 ];
 
-const TYPE_ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string }>> = {
+const TYPE_ICON_BY_CODE: Record<
+  string,
+  React.ComponentType<{ className?: string; strokeWidth?: number }>
+> = {
   cash: Banknote,
   bank_account: Landmark,
   bank_card: CreditCard,
@@ -835,14 +838,16 @@ export default function Page() {
     items: ItemOut[];
     total: number;
     isLiability?: boolean;
-    icon?: React.ComponentType<{ className?: string }>;
+    icon?: React.ComponentType<{ className?: string; strokeWidth?: number }>;
     onAdd?: () => void;
   }) {
     return (
-      <Card>
+      <Card className="pb-0">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-base flex items-center gap-2">
-            {Icon && <Icon className="h-5 w-5 text-violet-600" />}
+            {Icon && (
+              <Icon className="h-7 w-7 text-violet-600" strokeWidth={1.5} />
+            )}
             {title}
           </CardTitle>
           {onAdd && (
@@ -857,16 +862,16 @@ export default function Page() {
             </Button>
           )}
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-0">
           {categoryItems.length === 0 ? (
-            <div className="h-24 flex items-center justify-center text-muted-foreground">
+            <div className="h-24 px-4 flex items-center justify-center text-muted-foreground">
               Пока нет записей
             </div>
           ) : (
             <Table className="table-fixed">
-              <TableHeader className="bg-muted/40">
-                <TableRow>
-                  <TableHead className="w-40 min-w-40 font-medium text-muted-foreground whitespace-normal">
+              <TableHeader className="[&_tr]:border-b-2 [&_tr]:border-border/70">
+                <TableRow className="border-b-2 border-border/70">
+                  <TableHead className="w-40 min-w-40 pl-6 font-medium text-muted-foreground whitespace-normal">
                     Название
                   </TableHead>
                   <TableHead className="w-10 min-w-10 font-medium text-muted-foreground text-center whitespace-normal">
@@ -887,7 +892,7 @@ export default function Page() {
                   <TableHead className="w-28 min-w-28 text-right font-medium text-muted-foreground whitespace-normal">
                     Дата начала действия
                   </TableHead>
-                  <TableHead className="w-12 min-w-12" />
+                  <TableHead className="w-12 min-w-12 pr-6" />
                 </TableRow>
               </TableHeader>
 
@@ -906,14 +911,21 @@ export default function Page() {
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
 
                   return (
-                    <TableRow key={it.id}>
-                      <TableCell className="w-40 min-w-40 whitespace-normal break-words">
+                    <TableRow key={it.id} className="border-b-2 border-border/70">
+                      <TableCell className="w-40 min-w-40 pl-6 whitespace-normal break-words">
                         <div className="flex items-center gap-2">
-                          {TypeIcon && <TypeIcon className="h-5 w-5 text-violet-600" />}
-                          <span className="font-medium leading-tight">{it.name}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground leading-tight">
-                          {typeMeta}
+                          {TypeIcon && (
+                            <TypeIcon
+                              className="h-7 w-7 shrink-0 text-violet-600"
+                              strokeWidth={1.5}
+                            />
+                          )}
+                          <div className="flex flex-col gap-1">
+                            <span className="font-medium leading-tight">{it.name}</span>
+                            <span className="text-xs text-muted-foreground leading-tight">
+                              {typeMeta}
+                            </span>
+                          </div>
                         </div>
                       </TableCell>
 
@@ -975,7 +987,7 @@ export default function Page() {
                         {new Date(`${it.start_date}T00:00:00`).toLocaleDateString("ru-RU")}
                       </TableCell>
 
-                      <TableCell className="w-12 min-w-12 text-right">
+                      <TableCell className="w-12 min-w-12 pr-6 text-right">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -991,9 +1003,9 @@ export default function Page() {
                 })}
               </TableBody>
 
-              <TableFooter>
-                <TableRow className="bg-muted/30">
-                  <TableCell className="font-medium">Итого</TableCell>
+              <TableFooter className="border-t-2 border-border/70">
+                <TableRow className="bg-violet-50/70 border-b-0">
+                  <TableCell className="pl-6 font-medium">Итого</TableCell>
                   <TableCell />
                   <TableCell />
                   <TableCell />
@@ -1007,7 +1019,7 @@ export default function Page() {
                     {isLiability ? `-${formatRub(total)}` : formatRub(total)}
                   </TableCell>
                   <TableCell />
-                  <TableCell />
+                  <TableCell className="pr-6" />
                 </TableRow>
               </TableFooter>
             </Table>
@@ -1415,37 +1427,39 @@ export default function Page() {
 
       <div className="space-y-6">
         {/* Общая итоговая плашка */}
-        <Card>
+        <Card className="pb-0">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <Calculator className="h-5 w-5 text-violet-600" />
+              <Calculator className="h-7 w-7 text-violet-600" strokeWidth={1.5} />
               ИТОГО
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-0">
             <div className="space-y-2">
-              <div className="flex justify-between items-center">
+              <div className="px-6 flex justify-between items-center">
                 <span className="text-muted-foreground">Активы:</span>
                 <span className="font-semibold tabular-nums">{formatRub(totalAssets)}</span>
               </div>
-              <div className="flex justify-between items-center">
+              <div className="px-6 flex justify-between items-center">
                 <span className="text-muted-foreground">Обязательства:</span>
                 <span className="font-semibold tabular-nums text-red-600">
                   -{formatRub(totalLiabilities)}
                 </span>
               </div>
-              <div className="pt-2 border-t flex justify-between items-center">
-                <span className="font-medium">Чистые активы:</span>
-                <span
-                  className={[
-                    "font-semibold tabular-nums",
-                    netTotal < 0 ? "text-red-600" : "",
-                  ].join(" ")}
-                >
-                  {netTotal < 0
-                    ? `-${formatRub(Math.abs(netTotal))}`
-                    : formatRub(netTotal)}
-                </span>
+              <div className="border-t-2 border-border/70 bg-violet-50/70">
+                <div className="px-6 py-2 flex justify-between items-center">
+                  <span className="font-medium">Чистые активы:</span>
+                  <span
+                    className={[
+                      "font-semibold tabular-nums",
+                      netTotal < 0 ? "text-red-600" : "",
+                    ].join(" ")}
+                  >
+                    {netTotal < 0
+                      ? `-${formatRub(Math.abs(netTotal))}`
+                      : formatRub(netTotal)}
+                  </span>
+                </div>
               </div>
             </div>
           </CardContent>

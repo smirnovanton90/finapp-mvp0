@@ -78,6 +78,20 @@ type TransactionsViewMode = "actual" | "planning";
 
 type TransactionCard = TransactionOut & { isDeleted?: boolean };
 
+type BulkEditBaseline = {
+  date: string;
+  direction: TransactionOut["direction"];
+  primaryItemId: number | null;
+  counterpartyItemId: number | null;
+  amountStr: string;
+  amountCounterpartyStr: string;
+  cat1: string;
+  cat2: string;
+  cat3: string;
+  description: string;
+  comment: string;
+};
+
 const CATEGORY_ICON_BY_L1: Record<string, ComponentType<{ className?: string; strokeWidth?: number }>> =
   {
     "Питание": Utensils,
@@ -698,8 +712,16 @@ export function TransactionsView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [dialogMode, setDialogMode] = useState<"create" | "edit" | null>(null);
+  const [dialogMode, setDialogMode] = useState<
+    "create" | "edit" | "bulk-edit" | null
+  >(null);
   const [editingTx, setEditingTx] = useState<TransactionOut | null>(null);
+  const [bulkEditIds, setBulkEditIds] = useState<number[] | null>(null);
+  const [bulkEditBaseline, setBulkEditBaseline] = useState<BulkEditBaseline | null>(
+    null
+  );
+  const [isBulkEditConfirmOpen, setIsBulkEditConfirmOpen] = useState(false);
+  const [isBulkEditing, setIsBulkEditing] = useState(false);
   const [showActive, setShowActive] = useState(true);
   const [showDeleted, setShowDeleted] = useState(false);
   const [showConfirmed, setShowConfirmed] = useState(true);
@@ -758,6 +780,7 @@ export function TransactionsView({
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmingTxId, setConfirmingTxId] = useState<number | null>(null);
+  const [isBulkConfirming, setIsBulkConfirming] = useState(false);
 
   useEffect(() => {
     const stored = readStoredCategories();
@@ -897,6 +920,7 @@ export function TransactionsView({
     "flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
   const isDialogOpen = dialogMode !== null;
   const isEditMode = dialogMode === "edit";
+  const isBulkEdit = dialogMode === "bulk-edit";
 
   const resetForm = () => {
     setDate(new Date().toISOString().slice(0, 10));
@@ -924,11 +948,18 @@ export function TransactionsView({
     setDialogMode(null);
     setEditingTx(null);
     setFormError(null);
+    setBulkEditIds(null);
+    setBulkEditBaseline(null);
+    setIsBulkEditConfirmOpen(false);
+    setIsBulkEditing(false);
   };
 
   const openCreateDialog = () => {
     setFormError(null);
     setEditingTx(null);
+    setBulkEditIds(null);
+    setBulkEditBaseline(null);
+    setIsBulkEditConfirmOpen(false);
     resetForm();
     setDialogMode("create");
   };
@@ -936,6 +967,9 @@ export function TransactionsView({
   const openEditDialog = (tx: TransactionCard) => {
     setFormError(null);
     setEditingTx(tx);
+    setBulkEditIds(null);
+    setBulkEditBaseline(null);
+    setIsBulkEditConfirmOpen(false);
     setDialogMode("edit");
     setDate(normalizeDateInput(tx.transaction_date));
     setDirection(tx.direction);
@@ -952,6 +986,50 @@ export function TransactionsView({
     setCat3(tx.category_l3 || "");
     setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
+  };
+
+  const openBulkEditDialog = () => {
+    const selectedTxs = sortedTxs.filter(
+      (tx) => !tx.isDeleted && selectedTxIds.has(tx.id)
+    );
+    if (selectedTxs.length < 2) return;
+
+    const baselineTx = selectedTxs[0];
+    const baseline = {
+      date: normalizeDateInput(baselineTx.transaction_date),
+      direction: baselineTx.direction,
+      primaryItemId: baselineTx.primary_item_id,
+      counterpartyItemId: baselineTx.counterparty_item_id,
+      amountStr: formatCentsForInput(baselineTx.amount_rub),
+      amountCounterpartyStr:
+        baselineTx.direction === "TRANSFER" &&
+        baselineTx.amount_counterparty != null
+          ? formatCentsForInput(baselineTx.amount_counterparty)
+          : "",
+      cat1: baselineTx.category_l1 || "",
+      cat2: baselineTx.category_l2 || "",
+      cat3: baselineTx.category_l3 || "",
+      description: baselineTx.description ?? "",
+      comment: baselineTx.comment ?? "",
+    };
+
+    setFormError(null);
+    setEditingTx(null);
+    setDialogMode("bulk-edit");
+    setBulkEditIds(selectedTxs.map((tx) => tx.id));
+    setBulkEditBaseline(baseline);
+    setIsBulkEditConfirmOpen(false);
+    setDate(baseline.date);
+    setDirection(baseline.direction);
+    setPrimaryItemId(baseline.primaryItemId);
+    setCounterpartyItemId(baseline.counterpartyItemId);
+    setAmountStr(baseline.amountStr);
+    setAmountCounterpartyStr(baseline.amountCounterpartyStr);
+    setCat1(baseline.cat1);
+    setCat2(baseline.cat2);
+    setCat3(baseline.cat3);
+    setDescription(baseline.description);
+    setComment(baseline.comment);
   };
 
   const handleConfirmStatus = async (tx: TransactionCard) => {
@@ -974,6 +1052,305 @@ export function TransactionsView({
       setError(e?.message ?? "Не удалось подтвердить транзакцию.");
     } finally {
       setConfirmingTxId(null);
+    }
+  };
+
+  const getBulkEditChanges = () => {
+    if (!bulkEditBaseline) return null;
+    return {
+      hasDateChanged: date !== bulkEditBaseline.date,
+      hasDirectionChanged: direction !== bulkEditBaseline.direction,
+      hasPrimaryItemChanged: primaryItemId !== bulkEditBaseline.primaryItemId,
+      hasCounterpartyItemChanged:
+        counterpartyItemId !== bulkEditBaseline.counterpartyItemId,
+      hasAmountChanged: amountStr !== bulkEditBaseline.amountStr,
+      hasAmountCounterpartyChanged:
+        amountCounterpartyStr !== bulkEditBaseline.amountCounterpartyStr,
+      hasCat1Changed: cat1 !== bulkEditBaseline.cat1,
+      hasCat2Changed: cat2 !== bulkEditBaseline.cat2,
+      hasCat3Changed: cat3 !== bulkEditBaseline.cat3,
+      hasDescriptionChanged: description !== bulkEditBaseline.description,
+      hasCommentChanged: comment !== bulkEditBaseline.comment,
+    };
+  };
+
+  const validateBulkEdit = () => {
+    if (!bulkEditIds || bulkEditIds.length === 0 || !bulkEditBaseline) {
+      return "Выберите транзакции для редактирования.";
+    }
+
+    const changes = getBulkEditChanges();
+    if (!changes) return "Не удалось подготовить изменения.";
+
+    if (changes.hasDateChanged && !date) {
+      return "Выберите дату транзакции.";
+    }
+    if (changes.hasPrimaryItemChanged && !primaryItemId) {
+      return "Выберите актив/обязательство.";
+    }
+    if (changes.hasDirectionChanged && direction === "TRANSFER" && !counterpartyItemId) {
+      return "Выберите корреспондирующий актив.";
+    }
+
+    if (changes.hasAmountChanged) {
+      const cents = parseRubToCents(amountStr);
+      if (!Number.isFinite(cents) || cents < 0) {
+        return "Введите сумму в формате 1234,56.";
+      }
+    }
+
+    let counterpartyCents: number | null = null;
+    if (changes.hasAmountCounterpartyChanged) {
+      const counterCents = parseRubToCents(amountCounterpartyStr);
+      if (!Number.isFinite(counterCents) || counterCents < 0) {
+        return "Введите сумму зачисления в формате 1234,56.";
+      }
+      counterpartyCents = counterCents;
+    }
+
+    const targets = txs.filter((tx) => bulkEditIds.includes(tx.id));
+    if (targets.length === 0) {
+      return "Выберите транзакции для редактирования.";
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    for (const tx of targets) {
+      const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
+      const nextDate = changes.hasDateChanged
+        ? date
+        : normalizeDateInput(tx.transaction_date);
+      const nextPrimaryItemId = changes.hasPrimaryItemChanged
+        ? primaryItemId
+        : tx.primary_item_id;
+      const resolvedPrimaryItemId = nextPrimaryItemId ?? tx.primary_item_id;
+      const nextCounterpartyItemId =
+        nextDirection === "TRANSFER"
+          ? changes.hasCounterpartyItemChanged
+            ? counterpartyItemId
+            : tx.counterparty_item_id
+          : null;
+
+      if (!resolvedPrimaryItemId) {
+        return "Выберите актив/обязательство.";
+      }
+      if (nextDirection === "TRANSFER" && !nextCounterpartyItemId) {
+        return "Выберите корреспондирующий актив.";
+      }
+
+      if (changes.hasDateChanged && tx.transaction_type === "PLANNED") {
+        if (nextDate < today) {
+          return "Плановая транзакция не может быть создана ранее текущего дня.";
+        }
+      }
+
+      if (changes.hasDateChanged || changes.hasPrimaryItemChanged) {
+        const primaryItem = itemsById.get(resolvedPrimaryItemId);
+        if (primaryItem?.start_date && nextDate < primaryItem.start_date) {
+          return "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства.";
+        }
+      }
+
+      if (
+        nextDirection === "TRANSFER" &&
+        (changes.hasDateChanged ||
+          changes.hasCounterpartyItemChanged ||
+          changes.hasDirectionChanged)
+      ) {
+        if (nextCounterpartyItemId) {
+          const counterpartyItem = itemsById.get(nextCounterpartyItemId);
+          if (counterpartyItem?.start_date && nextDate < counterpartyItem.start_date) {
+            return "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства.";
+          }
+        }
+      }
+
+      const primaryCurrency =
+        resolvedPrimaryItemId != null
+          ? itemsById.get(resolvedPrimaryItemId)?.currency_code
+          : null;
+      const counterpartyCurrency =
+        nextCounterpartyItemId != null
+          ? itemsById.get(nextCounterpartyItemId)?.currency_code
+          : null;
+      const isCrossCurrencyTransfer =
+        nextDirection === "TRANSFER" &&
+        primaryCurrency &&
+        counterpartyCurrency &&
+        primaryCurrency !== counterpartyCurrency;
+
+      if (isCrossCurrencyTransfer) {
+        const nextCounterpartyAmount = changes.hasAmountCounterpartyChanged
+          ? counterpartyCents
+          : tx.amount_counterparty;
+        if (nextCounterpartyAmount == null) {
+          return "Введите сумму зачисления в формате 1234,56.";
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const applyBulkEdit = async () => {
+    if (!bulkEditBaseline || !bulkEditIds || bulkEditIds.length === 0) return;
+
+    const validationError = validateBulkEdit();
+    if (validationError) {
+      setFormError(validationError);
+      setIsBulkEditConfirmOpen(false);
+      return;
+    }
+
+    const changes = getBulkEditChanges();
+    if (!changes) return;
+
+    const amountCents = changes.hasAmountChanged
+      ? parseRubToCents(amountStr)
+      : null;
+    const counterpartyCents = changes.hasAmountCounterpartyChanged
+      ? parseRubToCents(amountCounterpartyStr)
+      : null;
+
+    const targets = txs.filter((tx) => bulkEditIds.includes(tx.id));
+
+    setIsBulkEditing(true);
+    setFormError(null);
+
+    try {
+      const results = await Promise.allSettled(
+        targets.map((tx) => {
+          const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
+          const nextDate = changes.hasDateChanged
+            ? date
+            : normalizeDateInput(tx.transaction_date);
+          const nextPrimaryItemId = changes.hasPrimaryItemChanged
+            ? primaryItemId
+            : tx.primary_item_id;
+          const resolvedPrimaryItemId = nextPrimaryItemId ?? tx.primary_item_id;
+          const nextCounterpartyItemId =
+            nextDirection === "TRANSFER"
+              ? changes.hasCounterpartyItemChanged
+                ? counterpartyItemId
+                : tx.counterparty_item_id
+              : null;
+
+          const primaryCurrency =
+            resolvedPrimaryItemId != null
+              ? itemsById.get(resolvedPrimaryItemId)?.currency_code
+              : null;
+          const counterpartyCurrency =
+            nextCounterpartyItemId != null
+              ? itemsById.get(nextCounterpartyItemId)?.currency_code
+              : null;
+          const isCrossCurrencyTransfer =
+            nextDirection === "TRANSFER" &&
+            primaryCurrency &&
+            counterpartyCurrency &&
+            primaryCurrency !== counterpartyCurrency;
+
+          const nextAmountCounterparty =
+            nextDirection !== "TRANSFER"
+              ? null
+              : isCrossCurrencyTransfer
+                ? changes.hasAmountCounterpartyChanged
+                  ? counterpartyCents
+                  : tx.amount_counterparty ?? null
+                : null;
+
+          const payload: TransactionCreate = {
+            transaction_date: nextDate,
+            primary_item_id: resolvedPrimaryItemId ?? tx.primary_item_id,
+            counterparty_item_id: nextCounterpartyItemId,
+            amount_rub: changes.hasAmountChanged
+              ? (amountCents as number)
+              : tx.amount_rub,
+            amount_counterparty: nextAmountCounterparty,
+            direction: nextDirection,
+            transaction_type: tx.transaction_type,
+            category_l1:
+              nextDirection === "TRANSFER"
+                ? ""
+                : changes.hasCat1Changed
+                  ? cat1
+                  : tx.category_l1 || "",
+            category_l2:
+              nextDirection === "TRANSFER"
+                ? ""
+                : changes.hasCat2Changed
+                  ? cat2
+                  : tx.category_l2 || "",
+            category_l3:
+              nextDirection === "TRANSFER"
+                ? ""
+                : changes.hasCat3Changed
+                  ? cat3
+                  : tx.category_l3 || "",
+            description: changes.hasDescriptionChanged
+              ? description || null
+              : tx.description ?? null,
+            comment: changes.hasCommentChanged ? comment || null : tx.comment ?? null,
+          };
+
+          return updateTransaction(tx.id, payload);
+        })
+      );
+
+      const hasErrors = results.some((result) => result.status === "rejected");
+      await loadAll();
+      if (hasErrors) {
+        setFormError("Не удалось обновить часть выбранных транзакций.");
+        return;
+      }
+      closeDialog();
+    } catch (e: any) {
+      setFormError(e?.message ?? "Не удалось обновить выбранные транзакции.");
+    } finally {
+      setIsBulkEditing(false);
+      setIsBulkEditConfirmOpen(false);
+    }
+  };
+
+  const handleBulkConfirm = async () => {
+    if (selectedConfirmableIds.length === 0) return;
+    setIsBulkConfirming(true);
+    setError(null);
+    const idsToConfirm = [...selectedConfirmableIds];
+    try {
+      const results = await Promise.allSettled(
+        idsToConfirm.map((id) => updateTransactionStatus(id, "CONFIRMED"))
+      );
+      const confirmedIds = new Set<number>();
+      let hasErrors = false;
+
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          confirmedIds.add(idsToConfirm[index]);
+        } else {
+          hasErrors = true;
+        }
+      });
+
+      if (confirmedIds.size > 0) {
+        setTxs((prev) =>
+          prev.map((item) =>
+            confirmedIds.has(item.id) ? { ...item, status: "CONFIRMED" } : item
+          )
+        );
+        setDeletedTxs((prev) =>
+          prev.map((item) =>
+            confirmedIds.has(item.id) ? { ...item, status: "CONFIRMED" } : item
+          )
+        );
+      }
+
+      if (hasErrors) {
+        setError("Не удалось подтвердить часть выбранных транзакций.");
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось подтвердить выбранные транзакции.");
+    } finally {
+      setIsBulkConfirming(false);
     }
   };
 
@@ -1357,13 +1734,26 @@ export function TransactionsView({
     () => sortedTxs.filter((tx) => !tx.isDeleted).map((tx) => tx.id),
     [sortedTxs]
   );
-  const selectedVisibleCount = useMemo(
-    () =>
-      selectableIds.reduce(
-        (count, id) => count + (selectedTxIds.has(id) ? 1 : 0),
-        0
-      ),
+  const selectedVisibleIds = useMemo(
+    () => selectableIds.filter((id) => selectedTxIds.has(id)),
     [selectableIds, selectedTxIds]
+  );
+  const selectedVisibleCount = selectedVisibleIds.length;
+  const selectedConfirmableIds = useMemo(
+    () =>
+      sortedTxs
+        .filter(
+          (tx) =>
+            !tx.isDeleted &&
+            selectedTxIds.has(tx.id) &&
+            tx.status !== "CONFIRMED"
+        )
+        .map((tx) => tx.id),
+    [sortedTxs, selectedTxIds]
+  );
+  const selectedConfirmableIdSet = useMemo(
+    () => new Set(selectedConfirmableIds),
+    [selectedConfirmableIds]
   );
   const allSelected =
     selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
@@ -1493,7 +1883,8 @@ export function TransactionsView({
                 open={isDialogOpen}
                 onOpenChange={(open) => {
                   if (open) {
-                    if (dialogMode !== "edit") openCreateDialog();
+                    if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                    openCreateDialog();
                   } else {
                     closeDialog();
                   }
@@ -1508,8 +1899,12 @@ export function TransactionsView({
                 <DialogContent className="sm:max-w-[560px]">
                   <DialogHeader>
                     <DialogTitle>
-                      {isEditMode ? "Редактировать транзакцию" : "Добавить транзакцию"}
-                    </DialogTitle>
+  {isBulkEdit
+    ? "Редактировать транзакции"
+    : isEditMode
+      ? "Редактировать транзакцию"
+      : "Добавить транзакцию"}
+</DialogTitle>
                   </DialogHeader>
 
                   <form
@@ -1517,6 +1912,16 @@ export function TransactionsView({
                     onSubmit={async (e) => {
                       e.preventDefault();
                       setFormError(null);
+
+                      if (isBulkEdit) {
+                        const validationError = validateBulkEdit();
+                        if (validationError) {
+                          setFormError(validationError);
+                          return;
+                        }
+                        setIsBulkEditConfirmOpen(true);
+                        return;
+                      }
 
                       const cents = parseRubToCents(amountStr);
                       let counterpartyCents: number | null = null;
@@ -1879,9 +2284,9 @@ export function TransactionsView({
                       <Button
                         type="submit"
                         className="bg-violet-600 text-white hover:bg-violet-700"
-                        disabled={loading}
+                        disabled={loading || isBulkEditing}
                       >
-                        {isEditMode ? "Сохранить изменения" : "Добавить"}
+                        {isEditMode || isBulkEdit ? "Сохранить изменения" : "Добавить транзакцию"}
                       </Button>
                     </div>
                   </form>
@@ -2216,22 +2621,34 @@ export function TransactionsView({
                         Нет активов или обязательств.
                       </div>
                     ) : (
-                      sortedItems.map((item) => (
-                        <label
-                          key={item.id}
-                          className="flex items-center gap-3 text-base text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5 accent-violet-600"
-                            checked={selectedItemIds.has(item.id)}
-                            onChange={(e) =>
-                              toggleItemSelection(item.id, e.target.checked)
-                            }
-                          />
-                          <span>{item.name}</span>
-                        </label>
-                      ))
+                      sortedItems.map((item) => {
+                        const bankLogo = itemBankLogoUrl(item.id);
+                        const bankName = itemBankName(item.id);
+                        return (
+                          <label
+                            key={item.id}
+                            className="flex items-center gap-3 text-base text-foreground"
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-5 w-5 accent-violet-600"
+                              checked={selectedItemIds.has(item.id)}
+                              onChange={(e) =>
+                                toggleItemSelection(item.id, e.target.checked)
+                              }
+                            />
+                            {bankLogo && (
+                              <img
+                                src={bankLogo}
+                                alt={bankName || ""}
+                                className="h-5 w-5 rounded border border-white/70 bg-white object-contain"
+                                loading="lazy"
+                              />
+                            )}
+                            <span>{item.name}</span>
+                          </label>
+                        );
+                      })
                     )}
                   </div>
                 )}
@@ -2548,19 +2965,58 @@ export function TransactionsView({
 
         <div className="flex-1">
           <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                ref={selectAllRef}
-                type="checkbox"
-                className="h-5 w-5 accent-violet-600"
-                checked={allSelected}
-                onChange={(e) => toggleAllSelection(e.target.checked)}
-                disabled={selectableIds.length === 0}
-                aria-label="Выбрать все транзакции"
-              />
-              <span>Выбрать все</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  className="h-5 w-5 accent-violet-600"
+                  checked={allSelected}
+                  onChange={(e) => toggleAllSelection(e.target.checked)}
+                  disabled={selectableIds.length === 0}
+                  aria-label="Выбрать все транзакции"
+                />
+                <span>Выбрать все</span>
+              </div>
+              {selectedVisibleCount > 1 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    className="bg-violet-600 text-white hover:bg-violet-700"
+                    onClick={handleBulkConfirm}
+                    disabled={
+                      isBulkConfirming ||
+                      isBulkEditing ||
+                      selectedConfirmableIds.length === 0
+                    }
+                  >
+                    Подтвердить
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-2 border-violet-200 bg-white text-violet-700 shadow-none hover:bg-violet-50"
+                    onClick={openBulkEditDialog}
+                    disabled={isBulkEditing || isBulkConfirming}
+                  >
+                    Редактировать транзакции
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-red-600 text-white hover:bg-red-700"
+                    onClick={() => openDeleteDialog(selectedVisibleIds)}
+                    disabled={isDeleting || isBulkEditing || isBulkConfirming}
+                  >
+                    Удалить выбранные
+                  </Button>
+                </div>
+              )}
             </div>
             {sortedTxs.length === 0 ? (
+
+
+
+
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-muted-foreground">
                 Нет транзакций.
               </div>
@@ -2580,13 +3036,45 @@ export function TransactionsView({
                   onDelete={(id) => openDeleteDialog([id])}
                   isDeleting={isDeleting}
                   onConfirm={handleConfirmStatus}
-                  isConfirming={confirmingTxId === tx.id}
+                  isConfirming={
+                    confirmingTxId === tx.id ||
+                    (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
+                  }
                 />
               ))
             )}
           </div>
         </div>
       </div>
+
+      <AlertDialog
+        open={isBulkEditConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) setIsBulkEditConfirmOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Применить изменения ко всем выбранным транзакциям?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Изменения из формы будут применены ко всем выбранным транзакциям.
+              Подтвердите действие перед сохранением.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBulkEditing}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-violet-600 text-white hover:bg-violet-700"
+              disabled={isBulkEditing}
+              onClick={applyBulkEdit}
+            >
+              Подтвердить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={deleteCount > 0}

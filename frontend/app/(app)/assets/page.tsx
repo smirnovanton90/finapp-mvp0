@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 
 import {
@@ -187,6 +187,9 @@ export default function Page() {
   const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
   const [bankLoading, setBankLoading] = useState(false);
   const [bankError, setBankError] = useState<string | null>(null);
+  const [logoOverlayHeight, setLogoOverlayHeight] = useState(0);
+  const logoNaturalSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const dialogContentRef = useRef<HTMLDivElement | null>(null);
 
   function resetCreateForm() {
     setName("");
@@ -312,6 +315,44 @@ export default function Page() {
       return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
     });
   }, [banks, bankSearch]);
+
+  const selectedBank = useMemo(
+    () => banks.find((bank) => bank.id === bankId) ?? null,
+    [banks, bankId]
+  );
+
+  const logoLayerStyle = useMemo(() => {
+    if (!showBankField || !selectedBank?.logo_url) return undefined;
+    const mask = "linear-gradient(to bottom, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0) 100%)";
+    return {
+      backgroundImage: `url("${selectedBank.logo_url}")`,
+      backgroundRepeat: "no-repeat",
+      backgroundPosition: "top center",
+      backgroundSize: "100% auto",
+      maskImage: mask,
+      maskRepeat: "no-repeat",
+      maskSize: "100% 100%",
+      WebkitMaskImage: mask,
+      WebkitMaskRepeat: "no-repeat",
+      WebkitMaskSize: "100% 100%",
+    } as React.CSSProperties;
+  }, [showBankField, selectedBank?.logo_url]);
+
+  const updateLogoOverlayHeight = useCallback(() => {
+    const size = logoNaturalSizeRef.current;
+    const container = dialogContentRef.current;
+    if (!size || !container || !size.width) {
+      setLogoOverlayHeight(0);
+      return;
+    }
+    const width = container.getBoundingClientRect().width;
+    if (!width) {
+      setLogoOverlayHeight(0);
+      return;
+    }
+    const scaledHeight = (size.height * width) / size.width;
+    setLogoOverlayHeight(Math.round(scaledHeight));
+  }, []);
 
 
   // Фильтрация по категориям
@@ -455,6 +496,40 @@ export default function Page() {
     }
     setBankDropdownOpen(false);
   }, [showBankField]);
+
+  useEffect(() => {
+    if (!selectedBank?.logo_url || !isCreateOpen) {
+      logoNaturalSizeRef.current = null;
+      setLogoOverlayHeight(0);
+      return;
+    }
+
+    let cancelled = false;
+    const image = new Image();
+    image.onload = () => {
+      if (cancelled) return;
+      logoNaturalSizeRef.current = {
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      };
+      updateLogoOverlayHeight();
+    };
+    image.onerror = () => {
+      if (!cancelled) setLogoOverlayHeight(0);
+    };
+    image.src = selectedBank.logo_url;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBank?.logo_url, isCreateOpen, updateLogoOverlayHeight]);
+
+  useEffect(() => {
+    if (!selectedBank?.logo_url || !isCreateOpen) return;
+    const handleResize = () => updateLogoOverlayHeight();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [selectedBank?.logo_url, isCreateOpen, updateLogoOverlayHeight]);
 
   useEffect(() => {
     if (!currencies.length) return;
@@ -727,12 +802,24 @@ export default function Page() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[520px]">
-          <DialogHeader>
-            <DialogTitle>Добавление актива/обязательства</DialogTitle>
-          </DialogHeader>
+        <DialogContent
+          ref={dialogContentRef}
+          className="overflow-hidden sm:max-w-[520px]"
+        >
+          {selectedBank?.logo_url && logoOverlayHeight > 0 && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 z-0"
+              style={{ height: `${logoOverlayHeight}px`, ...logoLayerStyle }}
+            />
+          )}
 
-          <form onSubmit={onCreate} className="grid gap-4">
+          <div className="relative z-10 grid gap-4">
+            <DialogHeader>
+              <DialogTitle>Добавление актива/обязательства</DialogTitle>
+            </DialogHeader>
+
+            <form onSubmit={onCreate} className="grid gap-4">
             {formError && (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
                 {formError}
@@ -900,7 +987,8 @@ export default function Page() {
                 {loading ? "Добавляем..." : "Добавить"}
               </Button>
             </div>
-          </form>
+            </form>
+          </div>
         </DialogContent>
       </Dialog>
 

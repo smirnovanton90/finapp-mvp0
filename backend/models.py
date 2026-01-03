@@ -92,6 +92,9 @@ class Item(Base):
     bank_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("banks.id"), nullable=True)
     bank: Mapped[Optional["Bank"]] = relationship(back_populates="items")
 
+    account_last7: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    contract_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     initial_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
 

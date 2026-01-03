@@ -237,6 +237,8 @@ def create_item(
         name=payload.name,
         currency_code=payload.currency_code,
         bank_id=bank_id,
+        account_last7=payload.account_last7,
+        contract_number=payload.contract_number,
         initial_value_rub=payload.initial_value_rub,
         current_value_rub=payload.initial_value_rub,
         start_date=payload.start_date,

@@ -56,6 +56,7 @@ import {
   createItem,
   archiveItem,
   ItemKind,
+  ItemCreate,
   ItemOut,
   BankOut,
   CurrencyOut,
@@ -187,6 +188,8 @@ export default function Page() {
   const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
   const [bankLoading, setBankLoading] = useState(false);
   const [bankError, setBankError] = useState<string | null>(null);
+  const [accountLast7, setAccountLast7] = useState("");
+  const [contractNumber, setContractNumber] = useState("");
   const [logoOverlayHeight, setLogoOverlayHeight] = useState(0);
   const logoNaturalSizeRef = useRef<{ width: number; height: number } | null>(null);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
@@ -201,6 +204,8 @@ export default function Page() {
     setBankSearch("");
     setBankDropdownOpen(false);
     setBankError(null);
+    setAccountLast7("");
+    setContractNumber("");
   }  
 
   function parseRubToCents(input: string): number {
@@ -302,6 +307,7 @@ export default function Page() {
     () => BANK_TYPE_CODES.includes(typeCode),
     [typeCode]
   );
+  const showBankAccountFields = useMemo(() => typeCode === "bank_account", [typeCode]);
 
   const filteredBanks = useMemo(() => {
     const query = bankSearch.trim().toLowerCase();
@@ -498,6 +504,14 @@ export default function Page() {
   }, [showBankField]);
 
   useEffect(() => {
+    if (showBankAccountFields) return;
+    if (accountLast7 || contractNumber) {
+      setAccountLast7("");
+      setContractNumber("");
+    }
+  }, [showBankAccountFields, accountLast7, contractNumber]);
+
+  useEffect(() => {
     if (!selectedBank?.logo_url || !isCreateOpen) {
       logoNaturalSizeRef.current = null;
       setLogoOverlayHeight(0);
@@ -551,6 +565,8 @@ export default function Page() {
     setBankSearch("");
     setBankDropdownOpen(false);
     setBankError(null);
+    setAccountLast7("");
+    setContractNumber("");
     setFormError(null);
     setIsCreateOpen(true);
   };
@@ -580,6 +596,14 @@ export default function Page() {
       return;
     }
 
+    const trimmedAccountLast7 = accountLast7.trim();
+    const trimmedContractNumber = contractNumber.trim();
+
+    if (showBankAccountFields && trimmedAccountLast7 && !/^\d{7}$/.test(trimmedAccountLast7)) {
+      setFormError("Последние 7 цифр номера счета должны содержать ровно 7 цифр.");
+      return;
+    }
+
     const cents = parseRubToCents(amountStr);
     if (!Number.isFinite(cents) || cents < 0) {
       setFormError("Сумма должна быть числом (например 1234,56)");
@@ -588,7 +612,7 @@ export default function Page() {
   
     setLoading(true);
     try {
-      await createItem({
+      const payload: ItemCreate = {
         kind,
         type_code: typeCode,
         name: name.trim(),
@@ -596,7 +620,14 @@ export default function Page() {
         bank_id: showBankField ? bankId : null,
         initial_value_rub: cents, // копейки
         start_date: startDate,
-      });
+      };
+
+      if (showBankAccountFields) {
+        if (trimmedAccountLast7) payload.account_last7 = trimmedAccountLast7;
+        if (trimmedContractNumber) payload.contract_number = trimmedContractNumber;
+      }
+
+      await createItem(payload);
   
       // очищаем форму и закрываем модалку
       setName("");
@@ -913,6 +944,37 @@ export default function Page() {
                 </div>
               </div>
             )}
+
+            {showBankAccountFields && (
+              <>
+                <div className="grid gap-2">
+                  <Label>Последние 7 цифр номера счета</Label>
+                  <Input
+                    value={accountLast7}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "").slice(0, 7);
+                      setAccountLast7(digits);
+                    }}
+                    inputMode="numeric"
+                    maxLength={7}
+                    pattern="\\d{7}"
+                    placeholder="Например: 1234567"
+                    className="border-2 border-border/70 bg-white shadow-none"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Номер договора</Label>
+                  <Input
+                    value={contractNumber}
+                    onChange={(e) => setContractNumber(e.target.value)}
+                    placeholder="Например: 01-2025/123"
+                    className="border-2 border-border/70 bg-white shadow-none"
+                  />
+                </div>
+              </>
+            )}
+
 
             <div className="grid gap-2">
               <Label>Валюта</Label>

@@ -9,6 +9,8 @@ export type ItemOut = {
   name: string;
   currency_code: string;
   bank_id: number | null;
+  account_last7: string | null;
+  contract_number: string | null;
   initial_value_rub: number;
   current_value_rub: number;
   start_date: string;
@@ -22,6 +24,8 @@ export type ItemCreate = {
   name: string;
   currency_code: string;
   bank_id?: number | null;
+  account_last7?: string | null;
+  contract_number?: string | null;
   initial_value_rub: number;
   start_date: string;
 };

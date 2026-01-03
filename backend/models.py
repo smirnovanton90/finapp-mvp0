@@ -1,4 +1,16 @@
-from sqlalchemy import String, DateTime, BigInteger, CheckConstraint, func, ForeignKey, Date, Text, Integer, Float
+from sqlalchemy import (
+    String,
+    DateTime,
+    BigInteger,
+    CheckConstraint,
+    func,
+    ForeignKey,
+    Date,
+    Text,
+    Integer,
+    Float,
+    Boolean,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db import Base
 from datetime import datetime, date
@@ -94,6 +106,19 @@ class Item(Base):
 
     account_last7: Mapped[str | None] = mapped_column(String(7), nullable=True)
     contract_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    open_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    card_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    card_account_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    deposit_term_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deposit_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    interest_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interest_payout_order: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    interest_capitalization: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    interest_payout_account_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
 
     initial_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)

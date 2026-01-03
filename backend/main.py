@@ -230,6 +230,39 @@ def create_item(
             raise HTTPException(status_code=400, detail="Invalid bank_id")
         bank_id = bank.id
 
+    card_account_id = None
+    if payload.card_account_id is not None:
+        if payload.type_code != "bank_card":
+            raise HTTPException(
+                status_code=400,
+                detail="card_account_id is only allowed for bank_card.",
+            )
+        linked = db.get(Item, payload.card_account_id)
+        if (
+            not linked
+            or linked.user_id != user.id
+            or linked.kind != "ASSET"
+            or linked.type_code != "bank_account"
+        ):
+            raise HTTPException(status_code=400, detail="Invalid card_account_id")
+        card_account_id = linked.id
+
+    interest_payout_account_id = None
+    if payload.interest_payout_account_id is not None:
+        if payload.type_code not in {"deposit", "savings_account"}:
+            raise HTTPException(
+                status_code=400,
+                detail="interest_payout_account_id is only allowed for deposit or savings_account.",
+            )
+        payout = db.get(Item, payload.interest_payout_account_id)
+        if not payout or payout.user_id != user.id or payout.kind != "ASSET":
+            raise HTTPException(status_code=400, detail="Invalid interest_payout_account_id")
+        interest_payout_account_id = payout.id
+
+    deposit_end_date = None
+    if payload.type_code == "deposit" and payload.open_date and payload.deposit_term_days:
+        deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
+
     item = Item(
         user_id=user.id,
         kind=payload.kind,
@@ -237,8 +270,17 @@ def create_item(
         name=payload.name,
         currency_code=payload.currency_code,
         bank_id=bank_id,
+        open_date=payload.open_date,
         account_last7=payload.account_last7,
         contract_number=payload.contract_number,
+        card_last4=payload.card_last4,
+        card_account_id=card_account_id,
+        deposit_term_days=payload.deposit_term_days,
+        deposit_end_date=deposit_end_date,
+        interest_rate=payload.interest_rate,
+        interest_payout_order=payload.interest_payout_order,
+        interest_capitalization=payload.interest_capitalization,
+        interest_payout_account_id=interest_payout_account_id,
         initial_value_rub=payload.initial_value_rub,
         current_value_rub=payload.initial_value_rub,
         start_date=payload.start_date,

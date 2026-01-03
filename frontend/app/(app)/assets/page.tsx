@@ -69,7 +69,7 @@ import {
 const ASSET_TYPES = [
   { code: "cash", label: "Наличные" },
   { code: "bank_account", label: "Банковский счёт" },
-  { code: "bank_card", label: "Карта" },
+  { code: "bank_card", label: "Дебетовая карта" },
   { code: "deposit", label: "Вклад" },
   { code: "savings_account", label: "Накопительный счёт" },
   { code: "brokerage", label: "Брокерский счёт" },
@@ -190,6 +190,14 @@ export default function Page() {
   const [bankError, setBankError] = useState<string | null>(null);
   const [accountLast7, setAccountLast7] = useState("");
   const [contractNumber, setContractNumber] = useState("");
+  const [openDate, setOpenDate] = useState("");
+  const [cardLast4, setCardLast4] = useState("");
+  const [cardAccountId, setCardAccountId] = useState("");
+  const [depositTermDays, setDepositTermDays] = useState("");
+  const [interestRate, setInterestRate] = useState("");
+  const [interestPayoutOrder, setInterestPayoutOrder] = useState("");
+  const [interestCapitalization, setInterestCapitalization] = useState("");
+  const [interestPayoutAccountId, setInterestPayoutAccountId] = useState("");
   const [logoOverlayHeight, setLogoOverlayHeight] = useState(0);
   const logoNaturalSizeRef = useRef<{ width: number; height: number } | null>(null);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
@@ -206,6 +214,14 @@ export default function Page() {
     setBankError(null);
     setAccountLast7("");
     setContractNumber("");
+    setOpenDate("");
+    setCardLast4("");
+    setCardAccountId("");
+    setDepositTermDays("");
+    setInterestRate("");
+    setInterestPayoutOrder("");
+    setInterestCapitalization("");
+    setInterestPayoutAccountId("");
   }  
 
   function parseRubToCents(input: string): number {
@@ -307,7 +323,28 @@ export default function Page() {
     () => BANK_TYPE_CODES.includes(typeCode),
     [typeCode]
   );
-  const showBankAccountFields = useMemo(() => typeCode === "bank_account", [typeCode]);
+  const showBankAccountFields = useMemo(
+    () => typeCode === "bank_account" || typeCode === "savings_account",
+    [typeCode]
+  );
+  const showBankCardFields = useMemo(() => typeCode === "bank_card", [typeCode]);
+  const showDepositFields = useMemo(() => typeCode === "deposit", [typeCode]);
+  const showInterestFields = useMemo(
+    () => typeCode === "deposit" || typeCode === "savings_account",
+    [typeCode]
+  );
+  const showOpenDateField = useMemo(
+    () => typeCode === "bank_account" || typeCode === "deposit" || typeCode === "savings_account",
+    [typeCode]
+  );
+  const showContractNumberField = useMemo(
+    () =>
+      typeCode === "bank_account" ||
+      typeCode === "bank_card" ||
+      typeCode === "deposit" ||
+      typeCode === "savings_account",
+    [typeCode]
+  );
 
   const filteredBanks = useMemo(() => {
     const query = bankSearch.trim().toLowerCase();
@@ -326,6 +363,23 @@ export default function Page() {
     () => banks.find((bank) => bank.id === bankId) ?? null,
     [banks, bankId]
   );
+  const assetItems = useMemo(
+    () => items.filter((item) => item.kind === "ASSET"),
+    [items]
+  );
+  const bankAccountItems = useMemo(
+    () => assetItems.filter((item) => item.type_code === "bank_account"),
+    [assetItems]
+  );
+  const depositEndDateText = useMemo(() => {
+    if (!openDate || !depositTermDays) return "";
+    const days = Number(depositTermDays);
+    if (!Number.isFinite(days) || days <= 0) return "";
+    const baseDate = new Date(`${openDate}T00:00:00`);
+    if (Number.isNaN(baseDate.getTime())) return "";
+    baseDate.setDate(baseDate.getDate() + days);
+    return baseDate.toLocaleDateString("ru-RU");
+  }, [openDate, depositTermDays]);
 
   const logoLayerStyle = useMemo(() => {
     if (!showBankField || !selectedBank?.logo_url) return undefined;
@@ -505,11 +559,43 @@ export default function Page() {
 
   useEffect(() => {
     if (showBankAccountFields) return;
-    if (accountLast7 || contractNumber) {
-      setAccountLast7("");
-      setContractNumber("");
-    }
-  }, [showBankAccountFields, accountLast7, contractNumber]);
+    if (accountLast7) setAccountLast7("");
+  }, [showBankAccountFields, accountLast7]);
+
+  useEffect(() => {
+    if (showContractNumberField) return;
+    if (contractNumber) setContractNumber("");
+  }, [showContractNumberField, contractNumber]);
+
+  useEffect(() => {
+    if (showOpenDateField) return;
+    if (openDate) setOpenDate("");
+  }, [showOpenDateField, openDate]);
+
+  useEffect(() => {
+    if (showBankCardFields) return;
+    if (cardLast4) setCardLast4("");
+    if (cardAccountId) setCardAccountId("");
+  }, [showBankCardFields, cardLast4, cardAccountId]);
+
+  useEffect(() => {
+    if (showDepositFields) return;
+    if (depositTermDays) setDepositTermDays("");
+  }, [showDepositFields, depositTermDays]);
+
+  useEffect(() => {
+    if (showInterestFields) return;
+    if (interestRate) setInterestRate("");
+    if (interestPayoutOrder) setInterestPayoutOrder("");
+    if (interestCapitalization) setInterestCapitalization("");
+    if (interestPayoutAccountId) setInterestPayoutAccountId("");
+  }, [
+    showInterestFields,
+    interestRate,
+    interestPayoutOrder,
+    interestCapitalization,
+    interestPayoutAccountId,
+  ]);
 
   useEffect(() => {
     if (!selectedBank?.logo_url || !isCreateOpen) {
@@ -567,6 +653,14 @@ export default function Page() {
     setBankError(null);
     setAccountLast7("");
     setContractNumber("");
+    setOpenDate("");
+    setCardLast4("");
+    setCardAccountId("");
+    setDepositTermDays("");
+    setInterestRate("");
+    setInterestPayoutOrder("");
+    setInterestCapitalization("");
+    setInterestPayoutAccountId("");
     setFormError(null);
     setIsCreateOpen(true);
   };
@@ -598,10 +692,41 @@ export default function Page() {
 
     const trimmedAccountLast7 = accountLast7.trim();
     const trimmedContractNumber = contractNumber.trim();
+    const trimmedCardLast4 = cardLast4.trim();
+    const trimmedInterestRate = interestRate.trim();
 
     if (showBankAccountFields && trimmedAccountLast7 && !/^\d{7}$/.test(trimmedAccountLast7)) {
       setFormError("Последние 7 цифр номера счета должны содержать ровно 7 цифр.");
       return;
+    }
+
+    if (showBankCardFields && trimmedCardLast4 && !/^\d{4}$/.test(trimmedCardLast4)) {
+      setFormError("Последние 4 цифры номера карты должны содержать ровно 4 цифры.");
+      return;
+    }
+
+    let depositTermDaysValue: number | null = null;
+    if (showDepositFields && depositTermDays.trim()) {
+      const parsed = Number(depositTermDays);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setFormError("Срок вклада должен быть положительным числом.");
+        return;
+      }
+      if (!openDate) {
+        setFormError("Дата открытия вклада обязательна при заполнении срока вклада.");
+        return;
+      }
+      depositTermDaysValue = Math.trunc(parsed);
+    }
+
+    let interestRateValue: number | null = null;
+    if (showInterestFields && trimmedInterestRate) {
+      const parsed = Number(trimmedInterestRate.replace(",", "."));
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setFormError("Процентная ставка должна быть числом.");
+        return;
+      }
+      interestRateValue = parsed;
     }
 
     const cents = parseRubToCents(amountStr);
@@ -622,9 +747,35 @@ export default function Page() {
         start_date: startDate,
       };
 
+      if (showOpenDateField && openDate) payload.open_date = openDate;
+
       if (showBankAccountFields) {
         if (trimmedAccountLast7) payload.account_last7 = trimmedAccountLast7;
-        if (trimmedContractNumber) payload.contract_number = trimmedContractNumber;
+      }
+
+      if (showContractNumberField && trimmedContractNumber) {
+        payload.contract_number = trimmedContractNumber;
+      }
+
+      if (showBankCardFields) {
+        if (trimmedCardLast4) payload.card_last4 = trimmedCardLast4;
+        if (cardAccountId) payload.card_account_id = Number(cardAccountId);
+      }
+
+      if (showDepositFields && depositTermDaysValue !== null) {
+        payload.deposit_term_days = depositTermDaysValue;
+      }
+
+      if (showInterestFields) {
+        if (interestRateValue !== null) payload.interest_rate = interestRateValue;
+        if (interestPayoutOrder) {
+          payload.interest_payout_order = interestPayoutOrder as "END_OF_TERM" | "MONTHLY";
+        }
+        if (interestCapitalization === "true") payload.interest_capitalization = true;
+        if (interestCapitalization === "false") payload.interest_capitalization = false;
+        if (interestPayoutAccountId) {
+          payload.interest_payout_account_id = Number(interestPayoutAccountId);
+        }
       }
 
       await createItem(payload);
@@ -946,31 +1097,195 @@ export default function Page() {
             )}
 
             {showBankAccountFields && (
+              <div className="grid gap-2">
+                <Label>Последние 7 цифр номера счета</Label>
+                <Input
+                  value={accountLast7}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "").slice(0, 7);
+                    setAccountLast7(digits);
+                  }}
+                  inputMode="numeric"
+                  maxLength={7}
+                  pattern="\\d{7}"
+                  placeholder="Например: 1234567"
+                  className="border-2 border-border/70 bg-white shadow-none"
+                />
+              </div>
+            )}
+
+            {showBankCardFields && (
               <>
                 <div className="grid gap-2">
-                  <Label>Последние 7 цифр номера счета</Label>
+                  <Label>Последние 4 цифры номера карты</Label>
                   <Input
-                    value={accountLast7}
+                    value={cardLast4}
                     onChange={(e) => {
-                      const digits = e.target.value.replace(/\D/g, "").slice(0, 7);
-                      setAccountLast7(digits);
+                      const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
+                      setCardLast4(digits);
                     }}
                     inputMode="numeric"
-                    maxLength={7}
-                    pattern="\\d{7}"
-                    placeholder="Например: 1234567"
+                    maxLength={4}
+                    pattern="\\d{4}"
+                    placeholder="Например: 1234"
                     className="border-2 border-border/70 bg-white shadow-none"
                   />
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Номер договора</Label>
+                  <Label>Привязка дебетовой карты к счету</Label>
+                  <Select
+                    value={cardAccountId}
+                    onValueChange={(value) =>
+                      setCardAccountId(value === "__none" ? "" : value)
+                    }
+                  >
+                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                      <SelectValue placeholder="Выберите счет" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Не выбрано</SelectItem>
+                      {bankAccountItems.map((item) => (
+                        <SelectItem key={item.id} value={String(item.id)}>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium">{item.name}</span>
+                            {item.account_last7 && (
+                              <span className="text-xs text-muted-foreground">
+                                Последние 7 цифр: {item.account_last7}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
+
+            {showContractNumberField && (
+              <div className="grid gap-2">
+                <Label>Номер договора</Label>
+                <Input
+                  value={contractNumber}
+                  onChange={(e) => setContractNumber(e.target.value)}
+                  placeholder="Например: 01-2025/123"
+                  className="border-2 border-border/70 bg-white shadow-none"
+                />
+              </div>
+            )}
+
+            {showOpenDateField && (
+              <div className="grid gap-2">
+                <Label>Дата открытия</Label>
+                <Input
+                  type="date"
+                  value={openDate}
+                  onChange={(e) => setOpenDate(e.target.value)}
+                  className="border-2 border-border/70 bg-white shadow-none"
+                />
+              </div>
+            )}
+
+            {showDepositFields && (
+              <div className="grid gap-2">
+                <Label>Срок вклада в днях</Label>
+                <div className="flex items-center gap-3">
                   <Input
-                    value={contractNumber}
-                    onChange={(e) => setContractNumber(e.target.value)}
-                    placeholder="Например: 01-2025/123"
+                    value={depositTermDays}
+                    onChange={(e) => setDepositTermDays(e.target.value.replace(/\D/g, ""))}
+                    inputMode="numeric"
+                    placeholder="Например: 365"
                     className="border-2 border-border/70 bg-white shadow-none"
                   />
+                  <div className="text-sm text-muted-foreground min-w-[140px]">
+                    {depositEndDateText
+                      ? `Окончание: ${depositEndDateText}`
+                      : "Окончание: —"}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showInterestFields && (
+              <>
+                <div className="grid gap-2">
+                  <Label>Процентная ставка</Label>
+                  <Input
+                    value={interestRate}
+                    onChange={(e) => setInterestRate(e.target.value.replace(/[^\d.,]/g, ""))}
+                    inputMode="decimal"
+                    placeholder="Например: 8,5"
+                    className="border-2 border-border/70 bg-white shadow-none"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Порядок выплаты процентов</Label>
+                  <Select
+                    value={interestPayoutOrder}
+                    onValueChange={(value) =>
+                      setInterestPayoutOrder(value === "__none" ? "" : value)
+                    }
+                  >
+                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                      <SelectValue placeholder="Выберите вариант" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Не выбрано</SelectItem>
+                      <SelectItem value="END_OF_TERM">В конце срока</SelectItem>
+                      <SelectItem value="MONTHLY">Ежемесячно</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Капитализация процентов</Label>
+                  <Select
+                    value={interestCapitalization}
+                    onValueChange={(value) =>
+                      setInterestCapitalization(value === "__none" ? "" : value)
+                    }
+                  >
+                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                      <SelectValue placeholder="Выберите вариант" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Не выбрано</SelectItem>
+                      <SelectItem value="true">Да</SelectItem>
+                      <SelectItem value="false">Нет</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Счет выплаты процентов</Label>
+                  <Select
+                    value={interestPayoutAccountId}
+                    onValueChange={(value) =>
+                      setInterestPayoutAccountId(value === "__none" ? "" : value)
+                    }
+                  >
+                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                      <SelectValue placeholder="Выберите счет" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Не выбрано</SelectItem>
+                      {assetItems.map((item) => {
+                        const typeLabel =
+                          ASSET_TYPES.find((t) => t.code === item.type_code)?.label ||
+                          item.type_code;
+                        return (
+                          <SelectItem key={item.id} value={String(item.id)}>
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium">{item.name}</span>
+                              <span className="text-xs text-muted-foreground">{typeLabel}</span>
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
                 </div>
               </>
             )}

@@ -159,6 +159,9 @@ class Transaction(Base):
 
     direction: Mapped[str] = mapped_column(String(20), nullable=False)  # INCOME/EXPENSE/TRANSFER
     transaction_type: Mapped[str] = mapped_column(String(20), nullable=False)  # ACTUAL/PLANNED
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="CONFIRMED"
+    )
 
     category_l1: Mapped[str] = mapped_column(String(100), nullable=False)
     category_l2: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -176,5 +179,6 @@ class Transaction(Base):
     __table_args__ = (
         CheckConstraint("direction in ('INCOME','EXPENSE','TRANSFER')", name="ck_transactions_direction"),
         CheckConstraint("transaction_type in ('ACTUAL','PLANNED')", name="ck_transactions_type"),
+        CheckConstraint("status in ('CONFIRMED','UNCONFIRMED')", name="ck_transactions_status"),
         CheckConstraint("amount_rub >= 0", name="ck_transactions_amount_non_negative"),
     )

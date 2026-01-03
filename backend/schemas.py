@@ -4,6 +4,7 @@ from typing import Literal
 
 ItemKind = Literal["ASSET", "LIABILITY"]
 InterestPayoutOrder = Literal["END_OF_TERM", "MONTHLY"]
+TransactionStatus = Literal["CONFIRMED", "UNCONFIRMED"]
 
 
 class ItemCreate(BaseModel):
@@ -123,14 +124,18 @@ class TransactionBase(BaseModel):
     comment: str | None = None
 
 class TransactionCreate(TransactionBase):
-    pass
+    status: TransactionStatus | None = None
 
 class TransactionOut(TransactionBase):
     id: int
+    status: TransactionStatus
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+class TransactionStatusUpdate(BaseModel):
+    status: TransactionStatus
 
 
 class CurrencyOut(BaseModel):

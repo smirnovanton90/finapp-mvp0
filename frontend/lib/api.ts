@@ -72,6 +72,7 @@ export type FxRateOut = {
 
 export type TransactionDirection = "INCOME" | "EXPENSE" | "TRANSFER";
 export type TransactionType = "ACTUAL" | "PLANNED";
+export type TransactionStatus = "CONFIRMED" | "UNCONFIRMED";
 
 export type TransactionOut = {
   id: number;
@@ -84,6 +85,7 @@ export type TransactionOut = {
   amount_counterparty: number | null;
   direction: TransactionDirection;
   transaction_type: TransactionType;
+  status: TransactionStatus;
 
   category_l1: string;
   category_l2: string;
@@ -104,6 +106,7 @@ export type TransactionCreate = {
   amount_counterparty?: number | null;
   direction: TransactionDirection;
   transaction_type: TransactionType;
+  status?: TransactionStatus;
 
   category_l1: string;
   category_l2: string;
@@ -213,6 +216,18 @@ export async function updateTransaction(
   const res = await authFetch(`${API_BASE}/transactions/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateTransactionStatus(
+  id: number,
+  status: TransactionStatus
+): Promise<TransactionOut> {
+  const res = await authFetch(`${API_BASE}/transactions/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

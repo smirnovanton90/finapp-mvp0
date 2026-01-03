@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from db import get_db
 from auth import get_current_user
 from models import Transaction, Item, User
-from schemas import TransactionCreate, TransactionOut
+from schemas import TransactionCreate, TransactionOut, TransactionStatusUpdate
 from sqlalchemy import select
 from datetime import datetime, timezone
 
@@ -123,6 +123,8 @@ def create_transaction(
             )
 
     # 3) Создаём транзакцию
+    status_value = data.status or "CONFIRMED"
+
     tx = Transaction(
         user_id=user.id,
         transaction_date=data.transaction_date,
@@ -132,6 +134,7 @@ def create_transaction(
         amount_counterparty=amount_counterparty,
         direction=data.direction,
         transaction_type=data.transaction_type,
+        status=status_value,
         category_l1=data.category_l1,
         category_l2=data.category_l2,
         category_l3=data.category_l3,
@@ -332,6 +335,8 @@ def update_transaction(
     tx.amount_counterparty = amount_counterparty if data.direction == "TRANSFER" else None
     tx.direction = data.direction
     tx.transaction_type = data.transaction_type
+    if data.status is not None:
+        tx.status = data.status
     tx.category_l1 = data.category_l1
     tx.category_l2 = data.category_l2
     tx.category_l3 = data.category_l3
@@ -340,6 +345,31 @@ def update_transaction(
 
     db.commit()
     db.refresh(tx)
+    return tx
+
+
+@router.patch("/{tx_id}/status", response_model=TransactionOut)
+def update_transaction_status(
+    tx_id: int,
+    data: TransactionStatusUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    tx = (
+        db.query(Transaction)
+        .filter(Transaction.id == tx_id, Transaction.user_id == user.id)
+        .with_for_update()
+        .first()
+    )
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if tx.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot update deleted transaction")
+
+    if tx.status != data.status:
+        tx.status = data.status
+        db.commit()
+        db.refresh(tx)
     return tx
 
 @router.delete("/{tx_id}")

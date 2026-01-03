@@ -1,12 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type FormEvent,
+} from "react";
 import { useSession } from "next-auth/react";
 import {
   ArrowRight,
   Ban,
   Car,
   ChevronDown,
+  CheckCircle2,
+  CircleDashed,
   Pencil,
   PiggyBank,
   Plus,
@@ -14,6 +23,7 @@ import {
   Utensils,
   Wrench,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,8 +63,10 @@ import {
   BankOut,
   FxRateOut,
   ItemOut,
+  TransactionCreate,
   TransactionOut,
   updateTransaction,
+  updateTransactionStatus,
 } from "@/lib/api";
 import {
   buildCategoryMaps,
@@ -127,6 +139,164 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+const IMPORT_HEADERS = [
+  "Дата операции",
+  "Сумма платежа",
+  "Категория",
+  "Описание",
+];
+
+function normalizeHeader(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+}
+
+function normalizeCategory(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+}
+
+function parseDateFromString(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isoMatch =
+    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(
+      trimmed
+    );
+  if (isoMatch) {
+    const [, y, m, d, hh = "0", mm = "0", ss = "0"] = isoMatch;
+    return new Date(
+      Number(y),
+      Number(m) - 1,
+      Number(d),
+      Number(hh),
+      Number(mm),
+      Number(ss)
+    );
+  }
+
+  const ruMatch =
+    /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})(?:[,\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(
+      trimmed
+    );
+  if (ruMatch) {
+    const [, d, m, y, hh = "0", mm = "0", ss = "0"] = ruMatch;
+    const year = y.length === 2 ? Number(`20${y}`) : Number(y);
+    return new Date(
+      year,
+      Number(m) - 1,
+      Number(d),
+      Number(hh),
+      Number(mm),
+      Number(ss)
+    );
+  }
+
+  const parsed = new Date(trimmed);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+
+  return null;
+}
+
+function parseExcelDate(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (!parsed) return null;
+    return new Date(
+      parsed.y,
+      parsed.m - 1,
+      parsed.d,
+      parsed.H,
+      parsed.M,
+      parsed.S
+    );
+  }
+  if (typeof value === "string") {
+    return parseDateFromString(value);
+  }
+  return null;
+}
+
+function formatDateForApi(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseAmountCell(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const cleaned = value
+      .trim()
+      .replace(/\s/g, "")
+      .replace(",", ".")
+      .replace(/[^\d.-]/g, "");
+    if (!cleaned) return null;
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+function levenshteinDistance(a: string, b: string) {
+  if (a === b) return 0;
+  const aLen = a.length;
+  const bLen = b.length;
+  if (aLen === 0) return bLen;
+  if (bLen === 0) return aLen;
+
+  const dp = Array.from({ length: aLen + 1 }, () => new Array(bLen + 1).fill(0));
+  for (let i = 0; i <= aLen; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= bLen; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i <= aLen; i += 1) {
+    for (let j = 1; j <= bLen; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dp[aLen][bLen];
+}
+
+function findClosestCategory(input: string, options: string[]) {
+  const normalizedInput = normalizeCategory(input);
+  if (!normalizedInput || options.length === 0) return null;
+
+  let best: string | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  options.forEach((option) => {
+    const normalizedOption = normalizeCategory(option);
+    if (!normalizedOption) return;
+    let score = 0;
+    if (
+      normalizedInput === normalizedOption ||
+      normalizedInput.includes(normalizedOption) ||
+      normalizedOption.includes(normalizedInput)
+    ) {
+      score = Math.abs(normalizedInput.length - normalizedOption.length);
+    } else {
+      score = levenshteinDistance(normalizedInput, normalizedOption);
+    }
+    if (score < bestScore) {
+      bestScore = score;
+      best = option;
+    }
+  });
+
+  return best;
 }
 
 function parseAmountFilter(value: string) {
@@ -204,6 +374,8 @@ function TransactionCardRow({
   onEdit,
   onDelete,
   isDeleting,
+  onConfirm,
+  isConfirming,
 }: {
   tx: TransactionCard;
   itemName: (id: number | null | undefined) => string;
@@ -216,6 +388,8 @@ function TransactionCardRow({
   onEdit: (tx: TransactionCard) => void;
   onDelete: (id: number) => void;
   isDeleting: boolean;
+  onConfirm: (tx: TransactionCard) => void;
+  isConfirming: boolean;
 }) {
   const isTransfer = tx.direction === "TRANSFER";
   const isExpense = tx.direction === "EXPENSE";
@@ -281,6 +455,19 @@ function TransactionCardRow({
   const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-700";
   const actionHoverClass = tx.isDeleted ? "" : "hover:text-slate-900";
   const deleteHoverClass = tx.isDeleted ? "" : "hover:text-rose-500";
+
+  const isConfirmed = tx.status === "CONFIRMED";
+  const StatusIcon = isConfirmed ? CheckCircle2 : CircleDashed;
+  const statusBaseClass = tx.isDeleted
+    ? "text-slate-400"
+    : isConfirmed
+      ? "text-emerald-600"
+      : "text-amber-600";
+  const statusHoverClass = tx.isDeleted
+    ? ""
+    : isConfirmed
+      ? "hover:text-emerald-700"
+      : "hover:text-amber-700";
 
   const commentText = tx.comment?.trim() ? tx.comment : "-";
 
@@ -451,6 +638,26 @@ function TransactionCardRow({
           <Button
             variant="ghost"
             size="icon-sm"
+            className={`hover:bg-transparent ${statusBaseClass} ${statusHoverClass}`}
+            aria-label={
+              isConfirmed
+                ? "Подтвержденная транзакция"
+                : "Неподтвержденная транзакция. Нажмите для подтверждения"
+            }
+            title={
+              isConfirmed
+                ? "Подтвержденная"
+                : "Неподтвержденная. Нажмите, чтобы подтвердить"
+            }
+            onClick={() => onConfirm(tx)}
+            disabled={tx.isDeleted || isDeleting || isConfirming || isConfirmed}
+          >
+            <StatusIcon className="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon-sm"
             className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
             aria-label="Редактировать"
             onClick={() => onEdit(tx)}
@@ -495,6 +702,8 @@ export function TransactionsView({
   const [editingTx, setEditingTx] = useState<TransactionOut | null>(null);
   const [showActive, setShowActive] = useState(true);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [showConfirmed, setShowConfirmed] = useState(true);
+  const [showUnconfirmed, setShowUnconfirmed] = useState(true);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [commentFilter, setCommentFilter] = useState("");
@@ -538,10 +747,17 @@ export function TransactionsView({
   const [categoryNodes, setCategoryNodes] = useState(() => DEFAULT_CATEGORIES);
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importItemId, setImportItemId] = useState<number | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importConfirmed, setImportConfirmed] = useState(false);
 
   const [selectedTxIds, setSelectedTxIds] = useState<Set<number>>(() => new Set());
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmingTxId, setConfirmingTxId] = useState<number | null>(null);
 
   useEffect(() => {
     const stored = readStoredCategories();
@@ -738,6 +954,214 @@ export function TransactionsView({
     setComment(tx.comment ?? "");
   };
 
+  const handleConfirmStatus = async (tx: TransactionCard) => {
+    if (tx.status === "CONFIRMED") return;
+    setConfirmingTxId(tx.id);
+    setError(null);
+    try {
+      const updated = await updateTransactionStatus(tx.id, "CONFIRMED");
+      setTxs((prev) =>
+        prev.map((item) =>
+          item.id === tx.id ? { ...item, status: updated.status } : item
+        )
+      );
+      setDeletedTxs((prev) =>
+        prev.map((item) =>
+          item.id === tx.id ? { ...item, status: updated.status } : item
+        )
+      );
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось подтвердить транзакцию.");
+    } finally {
+      setConfirmingTxId(null);
+    }
+  };
+
+  const resetImportForm = () => {
+    setImportFile(null);
+    setImportItemId(null);
+    setImportError(null);
+    setImportConfirmed(false);
+    if (importInputRef.current) {
+      importInputRef.current.value = "";
+    }
+  };
+
+  const handleImportOpenChange = (open: boolean) => {
+    setIsImportDialogOpen(open);
+    if (!open) {
+      resetImportForm();
+      return;
+    }
+    setImportError(null);
+  };
+
+  const handleImportSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setImportError(null);
+
+    if (!importFile) {
+      setImportError("Выберите файл .xlsx для импорта.");
+      return;
+    }
+    if (!importFile.name.toLowerCase().endsWith(".xlsx")) {
+      setImportError("Формат файла должен быть .xlsx.");
+      return;
+    }
+    if (importItemId == null) {
+      setImportError("Выберите счет, на который импортируются транзакции.");
+      return;
+    }
+    const selectedImportItemId = importItemId;
+    const item = itemsById.get(selectedImportItemId);
+    if (!item) {
+      setImportError("Выбранный счет недоступен.");
+      return;
+    }
+    if (categoryMaps.l1.length === 0) {
+      setImportError("Нет доступных категорий для сопоставления.");
+      return;
+    }
+    const importTxType = isPlanningView ? "PLANNED" : "ACTUAL";
+
+    let rowsToImport: Array<{ rowNumber: number; payload: TransactionCreate }> = [];
+
+    try {
+      const arrayBuffer = await importFile.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
+      if (workbook.SheetNames.length !== 1) {
+        throw new Error("Файл должен содержать один лист.");
+      }
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        blankrows: false,
+        defval: "",
+      }) as unknown[][];
+
+      if (rows.length < 2) {
+        throw new Error("Файл не содержит данных для импорта.");
+      }
+
+      const headerRow = rows[0] ?? [];
+      const normalizedHeader = headerRow.map((cell) =>
+        normalizeHeader(String(cell ?? ""))
+      );
+      const expectedHeader = IMPORT_HEADERS.map(normalizeHeader);
+
+      const isHeaderValid =
+        normalizedHeader.length === expectedHeader.length &&
+        expectedHeader.every((value, index) => value === normalizedHeader[index]);
+
+      if (!isHeaderValid) {
+        throw new Error(
+          `Неверный формат заголовков. Ожидаются столбцы: ${IMPORT_HEADERS.join(
+            ", "
+          )}.`
+        );
+      }
+
+      for (let i = 1; i < rows.length; i += 1) {
+        const row = rows[i] ?? [];
+        const rowNumber = i + 1;
+        const hasValues = row.some((cell) => String(cell ?? "").trim() !== "");
+        if (!hasValues) {
+          continue;
+        }
+
+        if (
+          row.slice(IMPORT_HEADERS.length).some((cell) => String(cell ?? "").trim() !== "")
+        ) {
+          throw new Error(`Строка ${rowNumber}: должно быть 4 столбца.`);
+        }
+
+        const [rawDate, rawAmount, rawCategory, rawComment] = row;
+
+        const parsedDate = parseExcelDate(rawDate);
+        if (!parsedDate) {
+          throw new Error(`Строка ${rowNumber}: не удалось распознать дату операции.`);
+        }
+        const transactionDate = formatDateForApi(parsedDate);
+        if (importTxType === "PLANNED") {
+          const today = new Date().toISOString().slice(0, 10);
+          if (transactionDate < today) {
+            throw new Error(
+              `Строка ${rowNumber}: плановая транзакция не может быть раньше текущего дня.`
+            );
+          }
+        }
+        if (item.start_date && transactionDate < item.start_date) {
+          throw new Error(
+            `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
+          );
+        }
+
+        const amountValue = parseAmountCell(rawAmount);
+        if (amountValue == null || !Number.isFinite(amountValue)) {
+          throw new Error(`Строка ${rowNumber}: не удалось распознать сумму.`);
+        }
+        const direction = amountValue < 0 ? "EXPENSE" : "INCOME";
+        const amountCents = Math.round(Math.abs(amountValue) * 100);
+
+        const categoryValue = String(rawCategory ?? "").trim();
+        if (!categoryValue) {
+          throw new Error(`Строка ${rowNumber}: категория не указана.`);
+        }
+        const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
+        if (!categoryL1) {
+          throw new Error(
+            `Строка ${rowNumber}: не удалось сопоставить категорию первого уровня.`
+          );
+        }
+
+        const commentValue = String(rawComment ?? "").trim();
+
+        rowsToImport.push({
+          rowNumber,
+          payload: {
+            transaction_date: transactionDate,
+            primary_item_id: selectedImportItemId,
+            amount_rub: amountCents,
+            direction,
+            transaction_type: importTxType,
+            status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
+            category_l1: categoryL1,
+            category_l2: "-",
+            category_l3: "-",
+            description: null,
+            comment: commentValue ? commentValue : null,
+          },
+        });
+      }
+
+      if (rowsToImport.length === 0) {
+        throw new Error("Файл не содержит строк для импорта.");
+      }
+    } catch (err: any) {
+      setImportError(err?.message ?? "Не удалось подготовить файл к импорту.");
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      for (const row of rowsToImport) {
+        try {
+          await createTransaction(row.payload);
+        } catch (err: any) {
+          const message = err?.message ?? "Не удалось импортировать транзакцию.";
+          throw new Error(`Строка ${row.rowNumber}: ${message}`);
+        }
+      }
+      handleImportOpenChange(false);
+      await loadAll();
+    } catch (err: any) {
+      setImportError(err?.message ?? "Не удалось импортировать транзакции.");
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   async function loadAll() {
     setLoading(true);
     setError(null);
@@ -842,6 +1266,10 @@ export function TransactionsView({
     const maxAmount = parseAmountFilter(amountTo);
 
     return combined.filter((tx) => {
+      const matchesConfirmation =
+        (showConfirmed && tx.status === "CONFIRMED") ||
+        (showUnconfirmed && tx.status === "UNCONFIRMED");
+      if (!matchesConfirmation) return false;
       if (dateFrom && tx.transaction_date < dateFrom) return false;
       if (dateTo && tx.transaction_date > dateTo) return false;
       if (commentQuery) {
@@ -900,6 +1328,8 @@ export function TransactionsView({
     isPlanningView,
     showActive,
     showDeleted,
+    showConfirmed,
+    showUnconfirmed,
     dateFrom,
     dateTo,
     commentFilter,
@@ -938,6 +1368,7 @@ export function TransactionsView({
   const allSelected =
     selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
   const someSelected = selectedVisibleCount > 0 && !allSelected;
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -1457,6 +1888,97 @@ export function TransactionsView({
                 </DialogContent>
               </Dialog>
 
+              <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full border-2 border-border/70 bg-white shadow-none"
+                  >
+                    Импорт из Excel
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[520px]">
+                  <DialogHeader>
+                    <DialogTitle>Импорт из Excel</DialogTitle>
+                  </DialogHeader>
+                  <form className="grid gap-4" onSubmit={handleImportSubmit}>
+                    <div className="grid gap-2">
+                      <Label>Файл .xlsx</Label>
+                      <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
+                        Ожидаемые столбцы: {IMPORT_HEADERS.join(", ")}. Один лист,
+                        ровно 4 столбца.
+                      </div>
+                      <Input
+                        ref={importInputRef}
+                        type="file"
+                        accept=".xlsx"
+                        className="border-2 border-border/70 bg-white shadow-none"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] ?? null;
+                          setImportFile(file);
+                          setImportError(null);
+                        }}
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Счет</Label>
+                      <Select
+                        value={importItemId ? String(importItemId) : ""}
+                        onValueChange={(v) => {
+                          setImportItemId(Number(v));
+                          setImportError(null);
+                        }}
+                      >
+                        <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                          <SelectValue placeholder="Выберите счет" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {items.map((it) => (
+                            <SelectItem key={it.id} value={String(it.id)}>
+                              {it.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <label className="flex items-center gap-3 px-3 py-2 text-xs text-foreground">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-violet-600"
+                        checked={importConfirmed}
+                        onChange={(e) => setImportConfirmed(e.target.checked)}
+                      />
+                      Импортировать транзакции сразу в статусе "Подтвержденная"
+                    </label>
+
+                    {importError && (
+                      <div className="text-sm text-red-600">{importError}</div>
+                    )}
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="border-2 border-border/70 bg-white shadow-none"
+                        onClick={() => handleImportOpenChange(false)}
+                        disabled={isImporting}
+                      >
+                        Отмена
+                      </Button>
+                      <Button
+                        type="submit"
+                        className="bg-violet-600 text-white hover:bg-violet-700"
+                        disabled={isImporting}
+                      >
+                        Импортировать
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+
               <div className="-mx-4 border-t-2 border-border/70" />
 
               <div className="space-y-3">
@@ -1916,6 +2438,51 @@ export function TransactionsView({
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="text-base font-semibold text-foreground">
+                    Статус подтверждения
+                  </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() => {
+                      setShowConfirmed(true);
+                      setShowUnconfirmed(true);
+                    }}
+                    disabled={showConfirmed && showUnconfirmed}
+                  >
+                    Сбросить
+                  </button>
+                </div>
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                  <button
+                    type="button"
+                    aria-pressed={showConfirmed}
+                    onClick={() => setShowConfirmed((prev) => !prev)}
+                    className={`${segmentedButtonBase} ${
+                      showConfirmed
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Подтвержденные
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={showUnconfirmed}
+                    onClick={() => setShowUnconfirmed((prev) => !prev)}
+                    className={`${segmentedButtonBase} ${
+                      showUnconfirmed
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Неподтвержденные
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-base font-semibold text-foreground">
                     Статус транзакции
                   </div>
                   <button
@@ -2012,6 +2579,8 @@ export function TransactionsView({
                   onEdit={openEditDialog}
                   onDelete={(id) => openDeleteDialog([id])}
                   isDeleting={isDeleting}
+                  onConfirm={handleConfirmStatus}
+                  isConfirming={confirmingTxId === tx.id}
                 />
               ))
             )}

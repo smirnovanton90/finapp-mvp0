@@ -757,6 +757,43 @@ export default function Page() {
       </Dialog>
 
       <div className="space-y-6">
+        {/* Общая итоговая плашка */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Calculator className="h-5 w-5 text-violet-600" />
+              ИТОГО
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Активы:</span>
+                <span className="font-semibold tabular-nums">{formatRub(totalAssets)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Обязательства:</span>
+                <span className="font-semibold tabular-nums text-red-600">
+                  -{formatRub(totalLiabilities)}
+                </span>
+              </div>
+              <div className="pt-2 border-t flex justify-between items-center">
+                <span className="font-medium">Чистые активы:</span>
+                <span
+                  className={[
+                    "font-semibold tabular-nums",
+                    netTotal < 0 ? "text-red-600" : "",
+                  ].join(" ")}
+                >
+                  {netTotal < 0
+                    ? `-${formatRub(Math.abs(netTotal))}`
+                    : formatRub(netTotal)}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <CategoryTable
           title="Денежные средства"
           items={cashItems}
@@ -797,43 +834,6 @@ export default function Page() {
           icon={AlertCircle}
           onAdd={() => openCreateModal("LIABILITY", LIABILITY_TYPE_CODES)}
         />
-
-        {/* Общая итоговая плашка */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Calculator className="h-5 w-5 text-violet-600" />
-              ИТОГО
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Активы:</span>
-                <span className="font-semibold tabular-nums">{formatRub(totalAssets)}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Обязательства:</span>
-                <span className="font-semibold tabular-nums text-red-600">
-                  -{formatRub(totalLiabilities)}
-                </span>
-              </div>
-              <div className="pt-2 border-t flex justify-between items-center">
-                <span className="font-medium">Чистые активы:</span>
-                <span
-                  className={[
-                    "font-semibold tabular-nums",
-                    netTotal < 0 ? "text-red-600" : "",
-                  ].join(" ")}
-                >
-                  {netTotal < 0
-                    ? `-${formatRub(Math.abs(netTotal))}`
-                    : formatRub(netTotal)}
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {error && (

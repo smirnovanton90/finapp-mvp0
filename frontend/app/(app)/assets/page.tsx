@@ -68,6 +68,7 @@ const ASSET_TYPES = [
   { code: "bank_account", label: "Банковский счёт" },
   { code: "bank_card", label: "Карта" },
   { code: "deposit", label: "Вклад" },
+  { code: "savings_account", label: "Накопительный счёт" },
   { code: "brokerage", label: "Брокерский счёт" },
   { code: "securities", label: "Ценные бумаги" },
   { code: "real_estate", label: "Недвижимость" },
@@ -76,8 +77,8 @@ const ASSET_TYPES = [
 ];
 
 const LIABILITY_TYPES = [
-  { code: "credit_card_debt", label: "Долг по кредитке" },
-  { code: "consumer_loan", label: "Потребкредит" },
+  { code: "credit_card_debt", label: "Задолженность по кредитной карте" },
+  { code: "consumer_loan", label: "Потребительский кредит" },
   { code: "mortgage", label: "Ипотека" },
   { code: "car_loan", label: "Автокредит" },
   { code: "microloan", label: "МФО" },
@@ -90,7 +91,7 @@ const LIABILITY_TYPE_CODES = LIABILITY_TYPES.map((type) => type.code);
 
 // Категории активов
 const CASH_TYPES = ["cash", "bank_account", "bank_card"];
-const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "brokerage", "securities"];
+const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "savings_account", "brokerage", "securities"];
 const PROPERTY_TYPES = ["real_estate", "car"];
 const OTHER_ASSET_TYPES = ["other_asset"];
 
@@ -99,6 +100,7 @@ const TYPE_ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string
   bank_account: Landmark,
   bank_card: CreditCard,
   deposit: PiggyBank,
+  savings_account: Wallet,
   brokerage: LineChart,
   securities: BarChart3,
   real_estate: Home,

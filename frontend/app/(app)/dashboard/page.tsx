@@ -28,13 +28,13 @@ type DailyPoint = {
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const CASH_TYPES = ["cash", "bank_account", "bank_card"];
-const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "brokerage", "securities"];
+const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "savings_account", "brokerage", "securities"];
 const PROPERTY_TYPES = ["real_estate", "car"];
 const OTHER_ASSET_TYPES = ["other_asset"];
 
 const LIABILITY_TYPES = [
-  { code: "credit_card_debt", label: "Долг по кредитке" },
-  { code: "consumer_loan", label: "Потребкредит" },
+  { code: "credit_card_debt", label: "Задолженность по кредитной карте" },
+  { code: "consumer_loan", label: "Потребительский кредит" },
   { code: "mortgage", label: "Ипотека" },
   { code: "car_loan", label: "Автокредит" },
   { code: "microloan", label: "МФО" },

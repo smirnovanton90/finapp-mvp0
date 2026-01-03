@@ -167,3 +167,15 @@ export async function deleteTransaction(id: number): Promise<void> {
   });
   if (!res.ok) throw new Error(await readError(res));
 }
+
+export async function updateTransaction(
+  id: number,
+  payload: TransactionCreate
+): Promise<TransactionOut> {
+  const res = await authFetch(`${API_BASE}/transactions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}

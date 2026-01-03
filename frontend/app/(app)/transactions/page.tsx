@@ -52,6 +52,7 @@ import {
   FxRateOut,
   ItemOut,
   TransactionOut,
+  updateTransaction,
 } from "@/lib/api";
 import {
   buildCategoryMaps,
@@ -196,6 +197,7 @@ function TransactionCardRow({
   getRubEquivalentCents,
   isSelected,
   onToggleSelection,
+  onEdit,
   onDelete,
   isDeleting,
 }: {
@@ -205,6 +207,7 @@ function TransactionCardRow({
   getRubEquivalentCents: (tx: TransactionCard, currencyCode: string) => number | null;
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
+  onEdit: (tx: TransactionCard) => void;
   onDelete: (id: number) => void;
   isDeleting: boolean;
 }) {
@@ -410,6 +413,8 @@ function TransactionCardRow({
             size="icon-sm"
             className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
             aria-label="Редактировать"
+            onClick={() => onEdit(tx)}
+            disabled={tx.isDeleted || isDeleting}
           >
             <Pencil className="h-4 w-4" />
           </Button>
@@ -445,7 +450,8 @@ export function TransactionsView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<"create" | "edit" | null>(null);
+  const [editingTx, setEditingTx] = useState<TransactionOut | null>(null);
   const [showActive, setShowActive] = useState(true);
   const [showDeleted, setShowDeleted] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
@@ -619,6 +625,8 @@ export function TransactionsView({
   );
   const segmentedButtonBase =
     "flex-1 rounded-sm px-4 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+  const isDialogOpen = dialogMode !== null;
+  const isEditMode = dialogMode === "edit";
 
   const resetForm = () => {
     setDate(new Date().toISOString().slice(0, 10));
@@ -632,6 +640,48 @@ export function TransactionsView({
     setCat3("-");
     setDescription("");
     setComment("");
+  };
+
+  const formatCentsForInput = (cents?: number | null) => {
+    if (cents == null) return "";
+    const raw = (cents / 100).toFixed(2).replace(".", ",");
+    return formatRubInput(raw);
+  };
+
+  const normalizeDateInput = (value: string) => (value ? value.slice(0, 10) : "");
+
+  const closeDialog = () => {
+    setDialogMode(null);
+    setEditingTx(null);
+    setFormError(null);
+  };
+
+  const openCreateDialog = () => {
+    setFormError(null);
+    setEditingTx(null);
+    resetForm();
+    setDialogMode("create");
+  };
+
+  const openEditDialog = (tx: TransactionCard) => {
+    setFormError(null);
+    setEditingTx(tx);
+    setDialogMode("edit");
+    setDate(normalizeDateInput(tx.transaction_date));
+    setDirection(tx.direction);
+    setPrimaryItemId(tx.primary_item_id);
+    setCounterpartyItemId(tx.counterparty_item_id);
+    setAmountStr(formatCentsForInput(tx.amount_rub));
+    setAmountCounterpartyStr(
+      tx.direction === "TRANSFER" && tx.amount_counterparty != null
+        ? formatCentsForInput(tx.amount_counterparty)
+        : ""
+    );
+    setCat1(tx.category_l1 || "");
+    setCat2(tx.category_l2 || "");
+    setCat3(tx.category_l3 || "");
+    setDescription(tx.description ?? "");
+    setComment(tx.comment ?? "");
   };
 
   async function loadAll() {
@@ -953,11 +1003,13 @@ export function TransactionsView({
           <div className="rounded-lg border-2 border-border/70 bg-white p-4">
             <div className="space-y-6">
               <Dialog
-                open={isOpen}
+                open={isDialogOpen}
                 onOpenChange={(open) => {
-                  setIsOpen(open);
-                  setFormError(null);
-                  if (open) resetForm();
+                  if (open) {
+                    if (dialogMode !== "edit") openCreateDialog();
+                  } else {
+                    closeDialog();
+                  }
                 }}
               >
                 <DialogTrigger asChild>
@@ -968,7 +1020,9 @@ export function TransactionsView({
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[560px]">
                   <DialogHeader>
-                    <DialogTitle>Добавить транзакцию</DialogTitle>
+                    <DialogTitle>
+                      {isEditMode ? "Редактировать транзакцию" : "Добавить транзакцию"}
+                    </DialogTitle>
                   </DialogHeader>
 
                   <form
@@ -1030,7 +1084,7 @@ export function TransactionsView({
                       }
 
                       try {
-                        await createTransaction({
+                        const payload = {
                           transaction_date: date,
                           primary_item_id: primaryItemId,
                           counterparty_item_id: isTransfer
@@ -1039,15 +1093,21 @@ export function TransactionsView({
                           amount_rub: cents,
                           amount_counterparty: isTransfer ? counterpartyCents : null,
                           direction,
-                          transaction_type: txType,
+                          transaction_type: editingTx?.transaction_type ?? txType,
                           category_l1: isTransfer ? "" : cat1,
                           category_l2: isTransfer ? "" : cat2,
                           category_l3: isTransfer ? "" : cat3,
                           description: description || null,
                           comment: comment || null,
-                        });
+                        };
 
-                        setIsOpen(false);
+                        if (isEditMode && editingTx) {
+                          await updateTransaction(editingTx.id, payload);
+                        } else {
+                          await createTransaction(payload);
+                        }
+
+                        closeDialog();
                         await loadAll();
                       } catch (e: any) {
                         setFormError(e?.message ?? "Не удалось создать транзакцию.");
@@ -1325,7 +1385,7 @@ export function TransactionsView({
                         type="button"
                         variant="outline"
                         className="border-2 border-border/70 bg-white shadow-none"
-                        onClick={() => setIsOpen(false)}
+                        onClick={closeDialog}
                       >
                         Отмена
                       </Button>
@@ -1334,7 +1394,7 @@ export function TransactionsView({
                         className="bg-violet-600 text-white hover:bg-violet-700"
                         disabled={loading}
                       >
-                        Добавить
+                        {isEditMode ? "Сохранить изменения" : "Добавить"}
                       </Button>
                     </div>
                   </form>
@@ -1891,6 +1951,7 @@ export function TransactionsView({
                   getRubEquivalentCents={getRubEquivalentCents}
                   isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
                   onToggleSelection={toggleTxSelection}
+                  onEdit={openEditDialog}
                   onDelete={(id) => openDeleteDialog([id])}
                   isDeleting={isDeleting}
                 />

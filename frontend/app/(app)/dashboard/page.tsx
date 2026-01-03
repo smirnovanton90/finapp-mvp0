@@ -2,8 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
+import { Calculator } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { fetchItems, fetchTransactions, ItemKind, ItemOut, TransactionOut } from "@/lib/api";
+import {
+  fetchFxRates,
+  fetchItems,
+  fetchTransactions,
+  FxRateOut,
+  ItemKind,
+  ItemOut,
+  TransactionOut,
+} from "@/lib/api";
 
 type ChartPoint = {
   x: number;
@@ -17,6 +26,22 @@ type DailyPoint = {
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const CASH_TYPES = ["cash", "bank_account", "bank_card"];
+const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "brokerage", "securities"];
+const PROPERTY_TYPES = ["real_estate", "car"];
+const OTHER_ASSET_TYPES = ["other_asset"];
+
+const LIABILITY_TYPES = [
+  { code: "credit_card_debt", label: "Долг по кредитке" },
+  { code: "consumer_loan", label: "Потребкредит" },
+  { code: "mortgage", label: "Ипотека" },
+  { code: "car_loan", label: "Автокредит" },
+  { code: "microloan", label: "МФО" },
+  { code: "tax_debt", label: "Налоги / штрафы" },
+  { code: "private_loan", label: "Частный заём" },
+  { code: "other_liability", label: "Другое" },
+];
 
 function toDateKey(date: Date) {
   const year = date.getFullYear();
@@ -248,6 +273,7 @@ export default function DashboardPage() {
   const { data: session } = useSession();
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
+  const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -266,11 +292,13 @@ export default function DashboardPage() {
     Promise.all([
       fetchItems({ includeArchived: true }),
       fetchTransactions(),
+      fetchFxRates().catch(() => [] as FxRateOut[]),
     ])
-      .then(([itemsData, txData]) => {
+      .then(([itemsData, txData, fxRatesData]) => {
         if (!active) return;
         setItems(itemsData);
         setTxs(txData);
+        setFxRates(fxRatesData);
       })
       .catch((e: any) => {
         if (!active) return;
@@ -284,6 +312,105 @@ export default function DashboardPage() {
       active = false;
     };
   }, [session]);
+
+  const rateByCode = useMemo(() => {
+    const map: Record<string, number> = { RUB: 1 };
+    fxRates.forEach((rate) => {
+      map[rate.char_code] = rate.rate;
+    });
+    return map;
+  }, [fxRates]);
+
+  function getRubEquivalentCents(item: ItemOut): number | null {
+    const rate = rateByCode[item.currency_code];
+    if (!rate) return null;
+    const amount = item.current_value_rub / 100;
+    return Math.round(amount * rate * 100);
+  }
+
+  const activeItems = useMemo(
+    () => items.filter((item) => !item.archived_at),
+    [items]
+  );
+
+  const cashItems = useMemo(
+    () => activeItems.filter((x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code)),
+    [activeItems]
+  );
+
+  const financialInstrumentsItems = useMemo(
+    () =>
+      activeItems.filter(
+        (x) => x.kind === "ASSET" && FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)
+      ),
+    [activeItems]
+  );
+
+  const propertyItems = useMemo(
+    () => activeItems.filter((x) => x.kind === "ASSET" && PROPERTY_TYPES.includes(x.type_code)),
+    [activeItems]
+  );
+
+  const otherAssetItems = useMemo(
+    () => activeItems.filter((x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code)),
+    [activeItems]
+  );
+
+  const liabilityItems = useMemo(
+    () => activeItems.filter((x) => x.kind === "LIABILITY"),
+    [activeItems]
+  );
+
+  const cashTotal = useMemo(
+    () => cashItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [cashItems, rateByCode]
+  );
+
+  const financialInstrumentsTotal = useMemo(
+    () =>
+      financialInstrumentsItems.reduce(
+        (sum, x) => sum + (getRubEquivalentCents(x) ?? 0),
+        0
+      ),
+    [financialInstrumentsItems, rateByCode]
+  );
+
+  const propertyTotal = useMemo(
+    () => propertyItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [propertyItems, rateByCode]
+  );
+
+  const otherAssetTotal = useMemo(
+    () => otherAssetItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [otherAssetItems, rateByCode]
+  );
+
+  const liabilityTotalsByType = useMemo(() => {
+    const totals: Record<string, number> = {};
+    LIABILITY_TYPES.forEach((type) => {
+      totals[type.code] = 0;
+    });
+    liabilityItems.forEach((item) => {
+      totals[item.type_code] = (totals[item.type_code] ?? 0) + (getRubEquivalentCents(item) ?? 0);
+    });
+    return totals;
+  }, [liabilityItems, rateByCode]);
+
+  const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
+    const assets = activeItems
+      .filter((x) => x.kind === "ASSET")
+      .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
+
+    const liabilities = activeItems
+      .filter((x) => x.kind === "LIABILITY")
+      .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
+
+    return {
+      totalAssets: assets,
+      totalLiabilities: liabilities,
+      netTotal: assets - liabilities,
+    };
+  }, [activeItems, rateByCode]);
 
   const dailySeries = useMemo(() => buildDailyNetAssets(items, txs), [items, txs]);
 
@@ -406,157 +533,229 @@ export default function DashboardPage() {
           <p className="text-sm text-muted-foreground">Ключевые метрики за последние дни.</p>
         </div>
 
-        <Card className="overflow-hidden">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-base text-slate-800">Динамика чистых активов</CardTitle>
-          </CardHeader>
-          <CardContent className="px-0">
-            <div className="relative py-6">
-              {loading && (
-                <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-                  Загрузка данных...</div>
-              )}
-
-              {!loading && error && (
-                <div className="flex h-64 items-center justify-center text-sm text-red-600">
-                  {error}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Calculator className="h-5 w-5 text-violet-600" />
+                ИТОГО
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Активы:</span>
+                  <span className="font-semibold tabular-nums">{formatRub(totalAssets)}</span>
                 </div>
-              )}
-
-              {!loading && !error && chartData.length === 0 && (
-                <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-                  Нет данных для построения графика.</div>
-              )}
-
-              {!loading && !error && chartData.length > 0 && (
-                <>
-                  <div ref={chartRef} className="relative h-64 w-full">
-                    {hoverPoint && hoverData && (
-                      <div
-                        ref={tooltipRef}
-                        className="pointer-events-none absolute z-20 rounded-2xl bg-gradient-to-r from-[#7F5CFF] via-[#8B6CFF] to-[#9B7CFF] px-4 py-2 text-white shadow-lg"
-                        style={{
-                          left: tooltipLeft !== null ? `${tooltipLeft}px` : `${hoverPoint.x}px`,
-                          top: `${(hoverPoint.y / height) * 100}%`,
-                          transform: "translate(-50%, -120%)",
-                        }}
-                      >
-                        <div className="text-xs opacity-80">
-                          {formatDateLabel(hoverData.date)}
-                        </div>
-                        <div className="text-sm font-semibold">
-                          {formatRub(hoverData.valueCents)}
-                        </div>
-                      </div>
-                    )}
-                    <svg
-                      ref={svgRef}
-                      viewBox={`0 0 ${width} ${height}`}
-                      className="h-full w-full"
-                      role="img"
-                      aria-label="Динамика чистых активов"
-                      onMouseMove={handlePointerMove}
-                      onMouseLeave={() => setHoverIndex(null)}
-                    >
-                      <defs>
-                        <linearGradient id="netArea" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#8D63FF" stopOpacity="0.35" />
-                          <stop offset="100%" stopColor="#8D63FF" stopOpacity="0" />
-                        </linearGradient>
-                        <linearGradient id="netLine" x1="0" y1="0" x2="1" y2="0">
-                          <stop offset="0%" stopColor="#7F5CFF" />
-                          <stop offset="100%" stopColor="#A089FF" />
-                        </linearGradient>
-                        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-                          <feDropShadow
-                            dx="0"
-                            dy="10"
-                            stdDeviation="8"
-                            floodColor="#8D63FF"
-                            floodOpacity="0.25"
-                          />
-                        </filter>
-                      </defs>
-
-                      <g>
-                        {ticks.map((tick) => {
-                          const ratio = (tick - chartMin) / (chartMax - chartMin || 1);
-                          const y = padding.top + innerHeight - innerHeight * ratio;
-                          return (
-                            <g key={tick}>
-                              <line
-                                x1={padding.left}
-                                x2={width - padding.right}
-                                y1={y}
-                                y2={y}
-                                stroke="#DED8FF"
-                                strokeDasharray="4 8"
-                              />
-                              <text
-                                x={padding.left - 12}
-                                y={y + 4}
-                                textAnchor="end"
-                                fontSize="12"
-                                fill="#9A93BF"
-                              >
-                                {formatTick(tick)}
-                              </text>
-                            </g>
-                          );
-                        })}
-                      </g>
-
-                      {areaPath && <path d={areaPath} fill="url(#netArea)" />}
-                      {linePath && (
-                        <path
-                          d={linePath}
-                          fill="none"
-                          stroke="url(#netLine)"
-                          strokeWidth="3"
-                          strokeLinecap="round"
-                          filter="url(#glow)"
-                        />
-                      )}
-                      {hoverPoint && (
-                        <>
-                          <line
-                            x1={hoverPoint.x}
-                            x2={hoverPoint.x}
-                            y1={padding.top}
-                            y2={padding.top + innerHeight}
-                            stroke="#CFC5FF"
-                            strokeDasharray="4 6"
-                          />
-                          <circle
-                            cx={hoverPoint.x}
-                            cy={hoverPoint.y}
-                            r="6"
-                            fill="#7F5CFF"
-                            stroke="#F3EDFF"
-                            strokeWidth="4"
-                          />
-                        </>
-                      )}
-                      {dayMarks.map((mark) => (
-                        <text
-                          key={`${mark.label}-${mark.x}`}
-                          x={mark.x}
-                          y={height - 12}
-                          textAnchor="middle"
-                          fontSize="12"
-                          fill="#6F67B3"
-                          fontWeight={500}
-                        >
-                          {mark.label}
-                        </text>
-                      ))}
-                    </svg>
+                <div className="space-y-1 pl-3">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Денежные средства</span>
+                    <span className="tabular-nums">{formatRub(cashTotal)}</span>
                   </div>
-                </>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Финансовые инструменты</span>
+                    <span className="tabular-nums">{formatRub(financialInstrumentsTotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Имущество</span>
+                    <span className="tabular-nums">{formatRub(propertyTotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Другие активы</span>
+                    <span className="tabular-nums">{formatRub(otherAssetTotal)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Обязательства:</span>
+                  <span className="font-semibold tabular-nums text-red-600">
+                    -{formatRub(totalLiabilities)}
+                  </span>
+                </div>
+                <div className="space-y-1 pl-3">
+                  {LIABILITY_TYPES.map((type) => {
+                    const value = liabilityTotalsByType[type.code] ?? 0;
+                    const formatted = value > 0 ? `-${formatRub(value)}` : formatRub(0);
+                    return (
+                      <div key={type.code} className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">{type.label}</span>
+                        <span className="tabular-nums text-red-600">{formatted}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="pt-2 border-t flex justify-between items-center">
+                <span className="font-medium">Чистые активы:</span>
+                <span
+                  className={[
+                    "font-semibold tabular-nums",
+                    netTotal < 0 ? "text-red-600" : "",
+                  ].join(" ")}
+                >
+                  {netTotal < 0
+                    ? `-${formatRub(Math.abs(netTotal))}`
+                    : formatRub(netTotal)}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base text-slate-800">Динамика чистых активов</CardTitle>
+            </CardHeader>
+            <CardContent className="px-0">
+              <div className="relative py-6">
+                {loading && (
+                  <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+                    Загрузка данных...</div>
+                )}
+
+                {!loading && error && (
+                  <div className="flex h-64 items-center justify-center text-sm text-red-600">
+                    {error}
+                  </div>
+                )}
+
+                {!loading && !error && chartData.length === 0 && (
+                  <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+                    Нет данных для построения графика.</div>
+                )}
+
+                {!loading && !error && chartData.length > 0 && (
+                  <>
+                    <div ref={chartRef} className="relative h-64 w-full">
+                      {hoverPoint && hoverData && (
+                        <div
+                          ref={tooltipRef}
+                          className="pointer-events-none absolute z-20 rounded-2xl bg-gradient-to-r from-[#7F5CFF] via-[#8B6CFF] to-[#9B7CFF] px-4 py-2 text-white shadow-lg"
+                          style={{
+                            left: tooltipLeft !== null ? `${tooltipLeft}px` : `${hoverPoint.x}px`,
+                            top: `${(hoverPoint.y / height) * 100}%`,
+                            transform: "translate(-50%, -120%)",
+                          }}
+                        >
+                          <div className="text-xs opacity-80">
+                            {formatDateLabel(hoverData.date)}
+                          </div>
+                          <div className="text-sm font-semibold">
+                            {formatRub(hoverData.valueCents)}
+                          </div>
+                        </div>
+                      )}
+                      <svg
+                        ref={svgRef}
+                        viewBox={`0 0 ${width} ${height}`}
+                        className="h-full w-full"
+                        role="img"
+                        aria-label="Динамика чистых активов"
+                        onMouseMove={handlePointerMove}
+                        onMouseLeave={() => setHoverIndex(null)}
+                      >
+                        <defs>
+                          <linearGradient id="netArea" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#8D63FF" stopOpacity="0.35" />
+                            <stop offset="100%" stopColor="#8D63FF" stopOpacity="0" />
+                          </linearGradient>
+                          <linearGradient id="netLine" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor="#7F5CFF" />
+                            <stop offset="100%" stopColor="#A089FF" />
+                          </linearGradient>
+                          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                            <feDropShadow
+                              dx="0"
+                              dy="10"
+                              stdDeviation="8"
+                              floodColor="#8D63FF"
+                              floodOpacity="0.25"
+                            />
+                          </filter>
+                        </defs>
+
+                        <g>
+                          {ticks.map((tick) => {
+                            const ratio = (tick - chartMin) / (chartMax - chartMin || 1);
+                            const y = padding.top + innerHeight - innerHeight * ratio;
+                            return (
+                              <g key={tick}>
+                                <line
+                                  x1={padding.left}
+                                  x2={width - padding.right}
+                                  y1={y}
+                                  y2={y}
+                                  stroke="#DED8FF"
+                                  strokeDasharray="4 8"
+                                />
+                                <text
+                                  x={padding.left - 12}
+                                  y={y + 4}
+                                  textAnchor="end"
+                                  fontSize="12"
+                                  fill="#9A93BF"
+                                >
+                                  {formatTick(tick)}
+                                </text>
+                              </g>
+                            );
+                          })}
+                        </g>
+
+                        {areaPath && <path d={areaPath} fill="url(#netArea)" />}
+                        {linePath && (
+                          <path
+                            d={linePath}
+                            fill="none"
+                            stroke="url(#netLine)"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            filter="url(#glow)"
+                          />
+                        )}
+                        {hoverPoint && (
+                          <>
+                            <line
+                              x1={hoverPoint.x}
+                              x2={hoverPoint.x}
+                              y1={padding.top}
+                              y2={padding.top + innerHeight}
+                              stroke="#CFC5FF"
+                              strokeDasharray="4 6"
+                            />
+                            <circle
+                              cx={hoverPoint.x}
+                              cy={hoverPoint.y}
+                              r="6"
+                              fill="#7F5CFF"
+                              stroke="#F3EDFF"
+                              strokeWidth="4"
+                            />
+                          </>
+                        )}
+                        {dayMarks.map((mark) => (
+                          <text
+                            key={`${mark.label}-${mark.x}`}
+                            x={mark.x}
+                            y={height - 12}
+                            textAnchor="middle"
+                            fontSize="12"
+                            fill="#6F67B3"
+                            fontWeight={500}
+                          >
+                            {mark.label}
+                          </text>
+                        ))}
+                      </svg>
+                    </div>
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </main>
   );

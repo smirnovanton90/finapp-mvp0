@@ -130,6 +130,18 @@ const TYPE_ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string
   other_liability: AlertCircle,
 };
 
+const CURRENCY_BADGE_CLASSES: Record<string, string> = {
+  RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
+  USD: "bg-[#2E7D32]/20 text-[#2E7D32]",
+  EUR: "bg-[#003399]/20 text-[#003399]",
+  JPY: "bg-[#BC002D]/20 text-[#BC002D]",
+  CNY: "bg-[#DE2910]/20 text-[#DE2910]",
+};
+
+function getCurrencyBadgeClass(code: string) {
+  return CURRENCY_BADGE_CLASSES[code] ?? "bg-slate-100/20 text-slate-600";
+}
+
 function formatRub(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
     style: "currency",
@@ -851,31 +863,31 @@ export default function Page() {
               Пока нет записей
             </div>
           ) : (
-            <Table>
+            <Table className="table-fixed">
               <TableHeader className="bg-muted/40">
                 <TableRow>
-                  <TableHead className="font-medium text-muted-foreground whitespace-normal">
+                  <TableHead className="w-40 min-w-40 font-medium text-muted-foreground whitespace-normal">
                     Название
                   </TableHead>
-                  <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
-                    Банк
+                  <TableHead className="w-10 min-w-10 font-medium text-muted-foreground text-center whitespace-normal">
+                    
                   </TableHead>
-                  <TableHead className="font-medium text-muted-foreground whitespace-normal">
-                    Валюта
+                  <TableHead className="w-16 min-w-16 font-medium text-muted-foreground text-center whitespace-normal">
+                    
                   </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
-                    Текущая сумма в валюте актива / обязательства
+                  <TableHead className="w-36 min-w-36 text-right font-medium text-muted-foreground whitespace-normal">
+                    Текущая сумма в валюте
                   </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
+                  <TableHead className="w-24 min-w-24 text-right font-medium text-muted-foreground whitespace-normal">
                     Актуальный курс валюты
                   </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
-                    Текущая сумма актива / обязательства в рублевом эквиваленте
+                  <TableHead className="w-36 min-w-36 text-right font-medium text-muted-foreground whitespace-normal">
+                    Текущая сумма в руб. экв.
                   </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
+                  <TableHead className="w-28 min-w-28 text-right font-medium text-muted-foreground whitespace-normal">
                     Дата начала действия
                   </TableHead>
-                  <TableHead />
+                  <TableHead className="w-12 min-w-12" />
                 </TableRow>
               </TableHeader>
 
@@ -887,6 +899,7 @@ export default function Page() {
                   const typeMeta = typeLabel;
                   const rate = rateByCode[it.currency_code];
                   const rubEquivalent = getRubEquivalentCents(it);
+                  const currencyCode = it.currency_code || "";
                   const bank = it.bank_id ? banksById.get(it.bank_id) ?? null : null;
                   const bankLogoUrl = bank?.logo_url ?? null;
                   const bankName = bank?.name ?? "";
@@ -894,7 +907,7 @@ export default function Page() {
 
                   return (
                     <TableRow key={it.id}>
-                      <TableCell>
+                      <TableCell className="w-40 min-w-40 whitespace-normal break-words">
                         <div className="flex items-center gap-2">
                           {TypeIcon && <TypeIcon className="h-5 w-5 text-violet-600" />}
                           <span className="font-medium leading-tight">{it.name}</span>
@@ -904,7 +917,7 @@ export default function Page() {
                         </div>
                       </TableCell>
 
-                      <TableCell className="text-center text-sm text-muted-foreground">
+                      <TableCell className="w-10 min-w-10 text-center text-sm text-muted-foreground">
                         {bankLogoUrl ? (
                           <img
                             src={bankLogoUrl}
@@ -912,18 +925,27 @@ export default function Page() {
                             className="mx-auto h-5 w-5 rounded object-contain bg-white"
                             loading="lazy"
                           />
+                        ) : null}
+                      </TableCell>
+
+                      <TableCell className="w-16 min-w-16 text-center text-sm text-muted-foreground">
+                        {currencyCode ? (
+                          <span
+                            className={[
+                              "inline-flex min-w-10 items-center justify-center rounded-full px-1.5 py-[1px] text-[11px] font-semibold uppercase",
+                              getCurrencyBadgeClass(currencyCode),
+                            ].join(" ")}
+                          >
+                            {currencyCode}
+                          </span>
                         ) : (
                           "-"
                         )}
                       </TableCell>
 
-                      <TableCell className="text-sm text-muted-foreground">
-                        {it.currency_code || "-"}
-                      </TableCell>
-
                       <TableCell
                         className={[
-                          "text-right font-semibold tabular-nums",
+                          "w-36 min-w-36 text-right font-semibold tabular-nums",
                           isLiability ? "text-red-600" : "",
                         ].join(" ")}
                       >
@@ -932,13 +954,13 @@ export default function Page() {
                           : formatAmount(it.current_value_rub)}
                       </TableCell>
 
-                      <TableCell className="text-right text-sm text-muted-foreground">
+                      <TableCell className="w-24 min-w-24 text-right text-sm text-muted-foreground">
                         {rate ? formatRate(rate) : "-"}
                       </TableCell>
 
                       <TableCell
                         className={[
-                          "text-right font-semibold tabular-nums",
+                          "w-36 min-w-36 text-right font-semibold tabular-nums",
                           isLiability ? "text-red-600" : "",
                         ].join(" ")}
                       >
@@ -949,11 +971,11 @@ export default function Page() {
                           : formatRub(rubEquivalent)}
                       </TableCell>
 
-                      <TableCell className="text-right text-sm text-muted-foreground">
+                      <TableCell className="w-28 min-w-28 text-right text-sm text-muted-foreground">
                         {new Date(`${it.start_date}T00:00:00`).toLocaleDateString("ru-RU")}
                       </TableCell>
 
-                      <TableCell className="text-right">
+                      <TableCell className="w-12 min-w-12 text-right">
                         <Button
                           variant="ghost"
                           size="icon"

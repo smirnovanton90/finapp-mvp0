@@ -399,7 +399,7 @@ function TransactionCardRow({
   getRubEquivalentCents: (tx: TransactionCard, currencyCode: string) => number | null;
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
-  onEdit: (tx: TransactionCard) => void;
+  onEdit: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
   onDelete: (id: number) => void;
   isDeleting: boolean;
   onConfirm: (tx: TransactionCard) => void;
@@ -527,7 +527,7 @@ function TransactionCardRow({
                     <img
                       src={primaryBankLogo}
                       alt={primaryBankName || ""}
-                      className="h-6 w-6 rounded border border-white/70 bg-white object-contain"
+                      className="h-6 w-6 rounded bg-white object-contain"
                       loading="lazy"
                     />
                   </div>
@@ -560,7 +560,7 @@ function TransactionCardRow({
                     <img
                       src={counterpartyBankLogo}
                       alt={counterpartyBankName || ""}
-                      className="h-6 w-6 rounded border border-white/70 bg-white object-contain"
+                      className="h-6 w-6 rounded bg-white object-contain"
                       loading="lazy"
                     />
                   </div>
@@ -595,7 +595,7 @@ function TransactionCardRow({
                   <img
                     src={primaryBankLogo}
                     alt={primaryBankName || ""}
-                    className="h-6 w-6 rounded border border-white/70 bg-white object-contain"
+                    className="h-6 w-6 rounded bg-white object-contain"
                     loading="lazy"
                   />
                 </div>
@@ -682,7 +682,7 @@ function TransactionCardRow({
             size="icon-sm"
             className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
             aria-label="Редактировать"
-            onClick={() => onEdit(tx)}
+            onClick={(event) => onEdit(tx, event.currentTarget)}
             disabled={tx.isDeleted || isDeleting}
           >
             <Pencil className="h-4 w-4" />
@@ -963,6 +963,7 @@ export function TransactionsView({
   };
 
   const openCreateDialog = () => {
+    lastActiveElementRef.current = null;
     setFormError(null);
     setEditingTx(null);
     setBulkEditIds(null);
@@ -972,7 +973,9 @@ export function TransactionsView({
     setDialogMode("create");
   };
 
-  const openEditDialog = (tx: TransactionCard) => {
+  const openEditDialog = (tx: TransactionCard, trigger?: HTMLElement | null) => {
+    lastActiveElementRef.current =
+      trigger ?? (document.activeElement as HTMLElement | null);
     setFormError(null);
     setEditingTx(tx);
     setBulkEditIds(null);
@@ -997,6 +1000,7 @@ export function TransactionsView({
   };
 
   const openBulkEditDialog = () => {
+    lastActiveElementRef.current = document.activeElement as HTMLElement | null;
     const selectedTxs = sortedTxs.filter(
       (tx) => !tx.isDeleted && selectedTxIds.has(tx.id)
     );
@@ -1768,6 +1772,7 @@ export function TransactionsView({
   const someSelected = selectedVisibleCount > 0 && !allSelected;
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const lastActiveElementRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -1904,7 +1909,18 @@ export function TransactionsView({
                     Добавить
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-[560px]">
+                <DialogContent
+                  className="sm:max-w-[560px]"
+                  onCloseAutoFocus={(event) => {
+                    const lastActive = lastActiveElementRef.current;
+                    if (!lastActive) return;
+                    event.preventDefault();
+                    if (lastActive.isConnected) {
+                      lastActive.focus({ preventScroll: true });
+                    }
+                    lastActiveElementRef.current = null;
+                  }}
+                >
                   <DialogHeader>
                     <DialogTitle>
   {isBulkEdit

@@ -19,7 +19,7 @@ LOGO_BY_OGRN = {
     "1027739642281": "https://storage.yandexcloud.net/ds-ods/files/media/hub/icon/fb09031f0dd5/09e29ce880fb_T-BANK__shield_yellow.png",
     "1027700167110": "https://pic.rutubelist.ru/user/7d/20/7d20f1a6daad4f0361b5b364614a7841.jpg",
     "1027739326449": "https://yt3.googleusercontent.com/o9JsuwkZCt8UMaAywTOnqiSJkEMQYBNBfQ204BXl3vW4cdEAwOMCFWq28FG3aWVRirSkPmm1dYE=s900-c-k-c0x00ffffff-no-rj",
-    "1027739019142": "https://s3-alpha.figma.com/hub/file/5608662633/fe3c1da5-9386-4771-b6af-5bd66970e134-cover.png",
+    "1027739019142": "/bank-logos/ogrn-1027739019142.png",
     "1027739053704": "https://facultetus.ru/images/logos/cbb2cba0ada85e496b6b1d1bcb55552f.jpg",
     "1144400000425": "https://p0.zoon.ru/preview/zqzkELAwJCe-P7o9nPZCxA/2400x1500x75/1/9/6/original_54102eb140c0886e078d51df_63c7bce98704d4.72246386.jpg",
     "1023200000010": "https://xn--29-6kca7ah3bxn0b9a.xn--p1ai/upload/iblock/a9f/a9fb9734307456a5d987681a0b4aa6e1.png",

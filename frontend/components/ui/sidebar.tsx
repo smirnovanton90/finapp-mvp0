@@ -33,14 +33,14 @@ const nav = [
     icon: ArrowLeftRight,
   },
   {
-    href: "/categories",
-    label: "\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438",
-    icon: Folder,
-  },
-  {
     href: "/financial-planning",
     label: "\u041f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435",
     icon: LineChart,
+  },
+  {
+    href: "/categories",
+    label: "\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438",
+    icon: Folder,
   },
   {
     href: "/reports",

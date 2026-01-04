@@ -176,7 +176,42 @@ export async function archiveItem(id: number): Promise<ItemOut> {
 
 async function readError(res: Response) {
   const text = await res.text();
-  return `HTTP ${res.status}: ${text || res.statusText}`;
+  if (!text) return res.statusText || "Request failed";
+
+  const tryParseJson = () => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  };
+
+  let data: unknown = null;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    data = tryParseJson();
+  } else {
+    const trimmed = text.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      data = tryParseJson();
+    }
+  }
+
+  if (data && typeof data === "object") {
+    const detail = (data as { detail?: unknown }).detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail) && detail.length > 0) {
+      const first = detail[0] as { msg?: unknown };
+      if (typeof first?.msg === "string") return first.msg;
+    }
+    const message = (data as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+    const error = (data as { error?: unknown }).error;
+    if (typeof error === "string") return error;
+  }
+
+  if (typeof data === "string") return data;
+  return text;
 }
 
 export async function fetchTransactions(): Promise<TransactionOut[]> {

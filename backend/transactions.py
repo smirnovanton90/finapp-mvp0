@@ -16,6 +16,15 @@ def transfer_delta(kind: str, is_primary: bool, amount: int) -> int:
     return -amount if is_primary else amount
 
 
+def insufficient_funds_detail(amount: int, balance: int, item_name: str, tx_date) -> str:
+    date_label = tx_date.isoformat()
+    return (
+        f"Недостаточно средств для добавления транзакции по счету \"{item_name}\". "
+        f"Сумма: {amount}, остаток на дату {date_label}: {balance}. "
+        "Добавление транзакции приведет к отрицательному остатку."
+    )
+
+
 @router.get("", response_model=list[TransactionOut])
 def list_transactions(
     db: Session = Depends(get_db),
@@ -151,7 +160,15 @@ def create_transaction(
 
         elif data.direction == "EXPENSE":
             if primary.current_value_rub < amt:
-                raise HTTPException(status_code=400, detail="Insufficient funds")
+                raise HTTPException(
+                    status_code=400,
+                    detail=insufficient_funds_detail(
+                        amount=amt,
+                        balance=primary.current_value_rub,
+                        item_name=primary.name,
+                        tx_date=data.transaction_date,
+                    ),
+                )
             primary.current_value_rub -= amt
 
         elif data.direction == "TRANSFER":
@@ -160,9 +177,25 @@ def create_transaction(
             primary_delta = transfer_delta(primary.kind, True, amt)
             counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
             if primary_delta < 0 and primary.current_value_rub < -primary_delta:
-                raise HTTPException(status_code=400, detail="Insufficient funds for transfer")
+                raise HTTPException(
+                    status_code=400,
+                    detail=insufficient_funds_detail(
+                        amount=-primary_delta,
+                        balance=primary.current_value_rub,
+                        item_name=primary.name,
+                        tx_date=data.transaction_date,
+                    ),
+                )
             if counter_delta < 0 and counter.current_value_rub < -counter_delta:
-                raise HTTPException(status_code=400, detail="Insufficient funds for transfer")
+                raise HTTPException(
+                    status_code=400,
+                    detail=insufficient_funds_detail(
+                        amount=-counter_delta,
+                        balance=counter.current_value_rub,
+                        item_name=counter.name,
+                        tx_date=data.transaction_date,
+                    ),
+                )
             primary.current_value_rub += primary_delta
             counter.current_value_rub += counter_delta
 

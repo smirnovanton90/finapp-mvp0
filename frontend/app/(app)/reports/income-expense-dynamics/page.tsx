@@ -22,7 +22,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { CATEGORY_ICON_BY_L1, CATEGORY_ICON_FALLBACK } from "@/lib/category-icons";
+import {
+  CATEGORY_ICON_BY_L1,
+  CATEGORY_ICON_BY_NAME,
+  CATEGORY_ICON_FALLBACK,
+} from "@/lib/category-icons";
+import { CategoryNode, readStoredCategories } from "@/lib/categories";
 import { cn } from "@/lib/utils";
 
 type CategoryRow = {
@@ -338,6 +343,7 @@ function CategorySectionBody({
   monthKeys,
   emptyLabel,
   accent,
+  l1IconByName,
 }: {
   sectionId: string;
   title: string;
@@ -346,6 +352,7 @@ function CategorySectionBody({
   monthKeys: string[];
   emptyLabel: string;
   accent: string;
+  l1IconByName: Map<string, string>;
 }) {
   const {
     l1HasChildren,
@@ -394,9 +401,14 @@ function CategorySectionBody({
                 ? expandedL2.has(l2Key)
                 : true;
           const indentClass = row.level === 1 ? "" : row.level === 2 ? "pl-4" : "pl-8";
+          const iconName = row.level === 1 ? l1IconByName.get(row.l1) : null;
           const CategoryIcon =
             row.level === 1
-              ? CATEGORY_ICON_BY_L1[row.l1] ?? CATEGORY_ICON_FALLBACK
+              ? iconName === "none"
+                ? CATEGORY_ICON_FALLBACK
+                : (iconName ? CATEGORY_ICON_BY_NAME[iconName] : undefined) ??
+                  CATEGORY_ICON_BY_L1[row.l1] ??
+                  CATEGORY_ICON_FALLBACK
               : null;
           return (
             <TableRow key={`${sectionId}:${row.id}`}>
@@ -459,6 +471,7 @@ function CategoryTable({
   emptyLabel,
   summaryLabel,
   summaryTotals,
+  l1IconByName,
 }: {
   title: string;
   monthKeys: string[];
@@ -473,6 +486,7 @@ function CategoryTable({
   emptyLabel: string;
   summaryLabel?: string;
   summaryTotals?: Record<string, number>;
+  l1IconByName: Map<string, string>;
 }) {
   const hasAnyRows = sections.some((section) => section.rows.length > 0);
 
@@ -508,6 +522,7 @@ function CategoryTable({
                     monthKeys={monthKeys}
                     emptyLabel={section.emptyLabel}
                     accent={section.accent}
+                    l1IconByName={l1IconByName}
                   />
                 ))}
               </TableBody>
@@ -543,9 +558,15 @@ export default function IncomeExpenseDynamicsPage() {
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
     {}
   );
+  const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [ratesLoading, setRatesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const stored = readStoredCategories();
+    if (stored) setCategoryNodes(stored);
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -579,6 +600,13 @@ export default function IncomeExpenseDynamicsPage() {
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
+  const l1IconByName = useMemo(() => {
+    const map = new Map<string, string>();
+    categoryNodes.forEach((node) => {
+      if (node.icon) map.set(node.name, node.icon);
+    });
+    return map;
+  }, [categoryNodes]);
 
   const actualTxs = useMemo(
     () =>
@@ -755,6 +783,7 @@ export default function IncomeExpenseDynamicsPage() {
               emptyLabel="Пока нет фактических доходов и расходов."
               summaryLabel="Итого"
               summaryTotals={saldoTotals}
+              l1IconByName={l1IconByName}
             />
           </div>
         )}

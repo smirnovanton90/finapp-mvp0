@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentType,
   type FormEvent,
 } from "react";
 import { useSession } from "next-auth/react";
@@ -73,11 +74,13 @@ import {
 } from "@/lib/api";
 import {
   buildCategoryMaps,
+  CategoryNode,
   DEFAULT_CATEGORIES,
   readStoredCategories,
 } from "@/lib/categories";
 import {
   CATEGORY_ICON_BY_L1,
+  CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
 
@@ -204,6 +207,10 @@ function formatCategoryPath(l1: string, l2: string, l3: string) {
     .map((value) => value?.trim())
     .filter((value) => value && value !== CATEGORY_PLACEHOLDER);
   return parts.join(CATEGORY_PATH_SEPARATOR);
+}
+
+function makeCategoryPathKey(l1?: string, l2?: string, l3?: string) {
+  return [l1, l2, l3].map((value) => value?.trim() ?? "").join("||");
 }
 
 function parseDateFromString(value: string) {
@@ -437,6 +444,7 @@ function TransactionCardRow({
   itemCurrencyCode,
   itemBankLogoUrl,
   itemBankName,
+  categoryIconFor,
   getRubEquivalentCents,
   isSelected,
   onToggleSelection,
@@ -452,6 +460,11 @@ function TransactionCardRow({
   itemCurrencyCode: (id: number | null | undefined) => string;
   itemBankLogoUrl: (id: number | null | undefined) => string | null;
   itemBankName: (id: number | null | undefined) => string;
+  categoryIconFor: (
+    l1?: string | null,
+    l2?: string | null,
+    l3?: string | null
+  ) => ComponentType<{ className?: string; strokeWidth?: number }>;
   getRubEquivalentCents: (tx: TransactionCard, currencyCode: string) => number | null;
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
@@ -550,8 +563,11 @@ function TransactionCardRow({
     tx.category_l2?.trim() ? tx.category_l2 : "-",
     tx.category_l3?.trim() ? tx.category_l3 : "-",
   ];
-  const categoryKey = tx.category_l1?.trim() ?? "";
-  const CategoryIcon = CATEGORY_ICON_BY_L1[categoryKey] ?? CATEGORY_ICON_FALLBACK;
+  const CategoryIcon = categoryIconFor(
+    tx.category_l1,
+    tx.category_l2,
+    tx.category_l3
+  );
 
   const checkboxDisabled = tx.isDeleted || isDeleting;
 
@@ -944,6 +960,49 @@ export function TransactionsView({
       path.searchKey.includes(normalizedCategoryQuery)
     );
   }, [categoryPaths, normalizedCategoryQuery]);
+
+  const categoryIconByPath = useMemo(() => {
+    const map = new Map<string, string>();
+    const walk = (nodes: CategoryNode[], trail: string[]) => {
+      nodes.forEach((node) => {
+        const nextTrail = [...trail, node.name];
+        const [l1, l2, l3] = nextTrail;
+        const key = makeCategoryPathKey(l1, l2, l3);
+        if (typeof node.icon === "string" && node.icon.trim().length > 0) {
+          map.set(key, node.icon);
+        }
+        if (node.children && node.children.length > 0) {
+          walk(node.children, nextTrail);
+        }
+      });
+    };
+    walk(categoryNodes, []);
+    return map;
+  }, [categoryNodes]);
+
+  const resolveCategoryIcon = (
+    l1?: string | null,
+    l2?: string | null,
+    l3?: string | null
+  ) => {
+    const l1Key = l1?.trim() ?? "";
+    if (!l1Key) return CATEGORY_ICON_FALLBACK;
+    const l2Key = l2?.trim() ?? "";
+    const l3Key = l3?.trim() ?? "";
+    const iconName =
+      (l3Key && categoryIconByPath.get(makeCategoryPathKey(l1Key, l2Key, l3Key))) ??
+      (l2Key && categoryIconByPath.get(makeCategoryPathKey(l1Key, l2Key))) ??
+      categoryIconByPath.get(makeCategoryPathKey(l1Key));
+    if (iconName) {
+      if (iconName === "none") return CATEGORY_ICON_FALLBACK;
+      return (
+        CATEGORY_ICON_BY_NAME[iconName] ??
+        CATEGORY_ICON_BY_L1[l1Key] ??
+        CATEGORY_ICON_FALLBACK
+      );
+    }
+    return CATEGORY_ICON_BY_L1[l1Key] ?? CATEGORY_ICON_FALLBACK;
+  };
 
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
@@ -3483,6 +3542,7 @@ export function TransactionsView({
                   itemCurrencyCode={itemCurrencyCode}
                   itemBankLogoUrl={itemBankLogoUrl}
                   itemBankName={itemBankName}
+                  categoryIconFor={resolveCategoryIcon}
                   getRubEquivalentCents={getRubEquivalentCents}
                   isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
                   onToggleSelection={toggleTxSelection}

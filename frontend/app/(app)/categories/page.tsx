@@ -32,6 +32,12 @@ import {
   readStoredCategories,
   writeStoredCategories,
 } from "@/lib/categories";
+import {
+  CATEGORY_ICON_BY_L1,
+  CATEGORY_ICON_BY_NAME,
+  CATEGORY_ICON_OPTIONS,
+  CATEGORY_ICON_NAME_BY_L1,
+} from "@/lib/category-icons";
 import { cn } from "@/lib/utils";
 import { fetchTransactions, TransactionDirection, TransactionOut } from "@/lib/api";
 import { Folder, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -163,6 +169,7 @@ function mergeCategoryTrees(
     );
     return {
       ...node,
+      icon: node.icon ?? incomingNode.icon,
       children: mergedChildren.length ? mergedChildren : undefined,
     };
   });
@@ -187,6 +194,28 @@ function updateNodeScope(
     }
     if (node.children) {
       return { ...node, children: updateNodeScope(node.children, id, scope) };
+    }
+    return node;
+  });
+}
+
+function updateNodeIcon(
+  nodes: CategoryNode[],
+  id: string,
+  icon?: string
+): CategoryNode[] {
+  return nodes.map((node) => {
+    if (node.id === id) {
+      const next = { ...node };
+      if (icon) {
+        next.icon = icon;
+      } else {
+        delete next.icon;
+      }
+      return next;
+    }
+    if (node.children) {
+      return { ...node, children: updateNodeIcon(node.children, id, icon) };
     }
     return node;
   });
@@ -258,12 +287,14 @@ function CategoryTree({
   onAddChild,
   onDelete,
   onScopeChange,
+  onIconChange,
 }: {
   nodes: CategoryNode[];
   depth: number;
   onAddChild: (node: CategoryNode, depth: number) => void;
   onDelete: (node: CategoryNode) => void;
   onScopeChange: (id: string, scope: CategoryScope) => void;
+  onIconChange: (id: string, icon?: string) => void;
 }) {
   if (nodes.length === 0) return null;
   return (
@@ -272,12 +303,47 @@ function CategoryTree({
         const scopeMeta =
           SCOPE_OPTIONS.find((option) => option.value === node.scope) ??
           SCOPE_OPTIONS[2];
+        const iconName = node.icon === "none" ? undefined : node.icon;
+        const defaultIconName =
+          depth === 1 ? CATEGORY_ICON_NAME_BY_L1[node.name] : undefined;
+        const resolvedIconName = node.icon === undefined ? defaultIconName : node.icon;
+        const PreviewIcon =
+          (iconName ? CATEGORY_ICON_BY_NAME[iconName] : undefined) ??
+          (node.icon === undefined ? CATEGORY_ICON_BY_L1[node.name] : undefined) ??
+          Folder;
         return (
           <div key={node.id}>
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm sm:flex-nowrap">
               <div className="flex min-w-0 flex-1 items-center gap-2">
-                <Folder className="h-4 w-4 text-violet-600" />
+                <PreviewIcon className="h-4 w-4 text-violet-600" />
                 <span className="truncate font-medium text-slate-900">{node.name}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={
+                    resolvedIconName && resolvedIconName.trim().length > 0
+                      ? resolvedIconName
+                      : "none"
+                  }
+                  onValueChange={(value) =>
+                    onIconChange(node.id, value === "none" ? "none" : value)
+                  }
+                >
+                  <SelectTrigger className="h-8 w-[160px] border-2 border-border/70 bg-white text-xs shadow-none">
+                    <SelectValue placeholder="Иконка" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Без иконки</SelectItem>
+                    {CATEGORY_ICON_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        <span className="flex items-center gap-2">
+                          <option.Icon className="h-4 w-4 text-slate-600" />
+                          <span>{option.label}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex items-center gap-2">
                 <span className={cn("h-2 w-2 rounded-full", scopeMeta.dotClass)} />
@@ -330,6 +396,7 @@ function CategoryTree({
                   onAddChild={onAddChild}
                   onDelete={onDelete}
                   onScopeChange={onScopeChange}
+                  onIconChange={onIconChange}
                 />
               </div>
             )}
@@ -342,8 +409,10 @@ function CategoryTree({
 
 export default function CategoriesPage() {
   const { data: session } = useSession();
-  const [categories, setCategories] = useState<CategoryNode[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState<CategoryNode[]>(
+    () => readStoredCategories() ?? DEFAULT_CATEGORIES
+  );
+  const loading = false;
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -352,28 +421,13 @@ export default function CategoriesPage() {
   const [addParentDepth, setAddParentDepth] = useState(0);
   const [newName, setNewName] = useState("");
   const [newScope, setNewScope] = useState<CategoryScope>("BOTH");
+  const [newIcon, setNewIcon] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const [hasHydrated, setHasHydrated] = useState(false);
 
   useEffect(() => {
-    if (!session) return;
-    const stored = readStoredCategories();
-    if (stored !== null) {
-      setCategories(stored);
-      setLoading(false);
-      setHasHydrated(true);
-      return;
-    }
-    setCategories(DEFAULT_CATEGORIES);
-    setLoading(false);
-    setHasHydrated(true);
-  }, [session]);
-
-  useEffect(() => {
-    if (!hasHydrated) return;
     writeStoredCategories(categories);
-  }, [categories, hasHydrated]);
+  }, [categories]);
 
   const totalCount = useMemo(() => countNodes(categories), [categories]);
 
@@ -387,6 +441,7 @@ export default function CategoriesPage() {
     setAddParentDepth(parentDepth);
     setNewName("");
     setNewScope("BOTH");
+    setNewIcon("");
     setFormError(null);
     setIsAddOpen(true);
   };
@@ -411,6 +466,7 @@ export default function CategoriesPage() {
       id: createId(),
       name: trimmed,
       scope: newScope,
+      icon: newIcon ? newIcon : undefined,
     };
 
     setCategories((prev) => sortNodes(addNode(prev, addParentId, nextNode)));
@@ -425,6 +481,10 @@ export default function CategoriesPage() {
 
   const handleScopeChange = (id: string, scope: CategoryScope) => {
     setCategories((prev) => updateNodeScope(prev, id, scope));
+  };
+
+  const handleIconChange = (id: string, icon?: string) => {
+    setCategories((prev) => updateNodeIcon(prev, id, icon));
   };
 
   const handleSync = async () => {
@@ -452,6 +512,7 @@ export default function CategoriesPage() {
             setFormError(null);
             setNewName("");
             setNewScope("BOTH");
+            setNewIcon("");
           }
         }}
       >
@@ -495,6 +556,29 @@ export default function CategoriesPage() {
                   {SCOPE_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Иконка</Label>
+              <Select
+                value={newIcon || "none"}
+                onValueChange={(value) => setNewIcon(value === "none" ? "" : value)}
+              >
+                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                  <SelectValue placeholder="Без иконки" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Без иконки</SelectItem>
+                  {CATEGORY_ICON_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <span className="flex items-center gap-2">
+                        <option.Icon className="h-4 w-4 text-slate-600" />
+                        <span>{option.label}</span>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -608,6 +692,7 @@ export default function CategoriesPage() {
                       })
                     }
                     onScopeChange={handleScopeChange}
+                    onIconChange={handleIconChange}
                   />
                 )}
               </div>

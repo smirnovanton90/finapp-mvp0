@@ -671,7 +671,7 @@ export default function AssetsDynamicsPage() {
 
   const width = chartSize.width;
   const height = chartSize.height;
-  const padding = { top: 24, right: 24, bottom: 44, left: 52 };
+  const padding = { top: 24, right: 0, bottom: 44, left: 52 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
 
@@ -1109,19 +1109,27 @@ export default function AssetsDynamicsPage() {
                         />
                       </>
                     )}
-                    {dayMarks.map((mark) => (
+                    {dayMarks.map((mark, index) => {
+                      const anchor =
+                        index === 0
+                          ? "start"
+                          : index === dayMarks.length - 1
+                          ? "end"
+                          : "middle";
+                      return (
                       <text
                         key={`${mark.label}-${mark.x}`}
                         x={mark.x}
                         y={height - 12}
-                        textAnchor="middle"
+                        textAnchor={anchor}
                         fontSize="12"
                         fill="#6F67B3"
                         fontWeight={500}
                       >
                         {mark.label}
                       </text>
-                    ))}
+                      );
+                    })}
                   </svg>
                 </div>
               )}

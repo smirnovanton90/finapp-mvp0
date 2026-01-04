@@ -102,6 +102,14 @@ type BulkEditBaseline = {
   comment: string;
 };
 
+type CategoryPathOption = {
+  l1: string;
+  l2: string;
+  l3: string;
+  label: string;
+  searchKey: string;
+};
+
 const CATEGORY_ICON_BY_L1: Record<string, ComponentType<{ className?: string; strokeWidth?: number }>> =
   {
     "Питание": Utensils,
@@ -194,6 +202,16 @@ function normalizeHeader(value: string) {
 
 function normalizeCategory(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+}
+
+const CATEGORY_PLACEHOLDER = "-";
+const CATEGORY_PATH_SEPARATOR = " / ";
+
+function formatCategoryPath(l1: string, l2: string, l3: string) {
+  const parts = [l1, l2, l3]
+    .map((value) => value?.trim())
+    .filter((value) => value && value !== CATEGORY_PLACEHOLDER);
+  return parts.join(CATEGORY_PATH_SEPARATOR);
 }
 
 function parseDateFromString(value: string) {
@@ -864,6 +882,8 @@ export function TransactionsView({
   const [cat1, setCat1] = useState("Питание");
   const [cat2, setCat2] = useState("Продукты питания");
   const [cat3, setCat3] = useState("-");
+  const [categoryQuery, setCategoryQuery] = useState("");
+  const [isCategorySearchOpen, setIsCategorySearchOpen] = useState(false);
   const [categoryNodes, setCategoryNodes] = useState(() => DEFAULT_CATEGORIES);
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
@@ -893,6 +913,45 @@ export function TransactionsView({
     const scope = direction === "TRANSFER" ? undefined : direction;
     return buildCategoryMaps(categoryNodes, scope);
   }, [categoryNodes, direction]);
+
+  const categoryPaths = useMemo(() => {
+    const paths: CategoryPathOption[] = [];
+    const addPath = (l1: string, l2: string, l3: string) => {
+      const label = formatCategoryPath(l1, l2, l3);
+      if (!label) return;
+      paths.push({
+        l1,
+        l2,
+        l3,
+        label,
+        searchKey: normalizeCategory(label),
+      });
+    };
+
+    scopedCategoryMaps.l1.forEach((l1) => {
+      addPath(l1, CATEGORY_PLACEHOLDER, CATEGORY_PLACEHOLDER);
+      const l2List = scopedCategoryMaps.l2[l1] ?? [];
+      l2List.forEach((l2) => {
+        addPath(l1, l2, CATEGORY_PLACEHOLDER);
+        const l3List = scopedCategoryMaps.l3[l2] ?? [];
+        l3List.forEach((l3) => {
+          addPath(l1, l2, l3);
+        });
+      });
+    });
+    return paths;
+  }, [scopedCategoryMaps]);
+
+  const normalizedCategoryQuery = useMemo(
+    () => normalizeCategory(categoryQuery),
+    [categoryQuery]
+  );
+  const filteredCategoryPaths = useMemo(() => {
+    if (!normalizedCategoryQuery) return categoryPaths;
+    return categoryPaths.filter((path) =>
+      path.searchKey.includes(normalizedCategoryQuery)
+    );
+  }, [categoryPaths, normalizedCategoryQuery]);
 
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
@@ -1043,19 +1102,18 @@ export function TransactionsView({
     }
   }, [isCrossCurrencyTransfer]);
 
-  const cat2Options = useMemo(() => {
-    const options = scopedCategoryMaps.l2[cat1] ?? [];
-    return options.length ? options : ["-"];
-  }, [cat1, scopedCategoryMaps]);
-  const cat3Options = useMemo(
-    () => scopedCategoryMaps.l3[cat2] ?? [],
-    [cat2, scopedCategoryMaps]
-  );
   const segmentedButtonBase =
     "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
   const isDialogOpen = dialogMode !== null;
   const isEditMode = dialogMode === "edit";
   const isBulkEdit = dialogMode === "bulk-edit";
+
+  const applyCategorySelection = (l1: string, l2: string, l3: string) => {
+    setCat1(l1);
+    setCat2(l2);
+    setCat3(l3);
+    setCategoryQuery(formatCategoryPath(l1, l2, l3));
+  };
 
   const resetForm = () => {
     setDate(new Date().toISOString().slice(0, 10));
@@ -1067,9 +1125,8 @@ export function TransactionsView({
     setAmountCounterpartyStr("");
     setLoanTotalStr("");
     setLoanInterestStr("");
-    setCat1("Питание");
-    setCat2("Продукты питания");
-    setCat3("-");
+    setIsCategorySearchOpen(false);
+    applyCategorySelection("", "", "");
     setDescription("");
     setComment("");
   };
@@ -1088,6 +1145,7 @@ export function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setIsBulkEditing(false);
+    setIsCategorySearchOpen(false);
   };
 
   const openCreateDialog = () => {
@@ -1107,6 +1165,7 @@ export function TransactionsView({
     setFormError(null);
     setEditingTx(tx);
     setFormMode("STANDARD");
+    setIsCategorySearchOpen(false);
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
@@ -1121,9 +1180,11 @@ export function TransactionsView({
         ? formatCentsForInput(tx.amount_counterparty)
         : ""
     );
-    setCat1(tx.category_l1 || "");
-    setCat2(tx.category_l2 || "");
-    setCat3(tx.category_l3 || "");
+    applyCategorySelection(
+      tx.category_l1 || "",
+      tx.category_l2 || "",
+      tx.category_l3 || ""
+    );
     setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
   };
@@ -1137,6 +1198,7 @@ export function TransactionsView({
     setFormError(null);
     setEditingTx(null);
     setFormMode("STANDARD");
+    setIsCategorySearchOpen(false);
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
@@ -1153,9 +1215,11 @@ export function TransactionsView({
         ? formatCentsForInput(tx.amount_counterparty)
         : ""
     );
-    setCat1(tx.category_l1 || "");
-    setCat2(tx.category_l2 || "");
-    setCat3(tx.category_l3 || "");
+    applyCategorySelection(
+      tx.category_l1 || "",
+      tx.category_l2 || "",
+      tx.category_l3 || ""
+    );
     setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
   };
@@ -1189,6 +1253,7 @@ export function TransactionsView({
     setFormError(null);
     setEditingTx(null);
     setFormMode("STANDARD");
+    setIsCategorySearchOpen(false);
     setDialogMode("bulk-edit");
     setBulkEditIds(selectedTxs.map((tx) => tx.id));
     setBulkEditBaseline(baseline);
@@ -1199,9 +1264,7 @@ export function TransactionsView({
     setCounterpartyItemId(baseline.counterpartyItemId);
     setAmountStr(baseline.amountStr);
     setAmountCounterpartyStr(baseline.amountCounterpartyStr);
-    setCat1(baseline.cat1);
-    setCat2(baseline.cat2);
-    setCat3(baseline.cat3);
+    applyCategorySelection(baseline.cat1, baseline.cat2, baseline.cat3);
     setDescription(baseline.description);
     setComment(baseline.comment);
   };
@@ -2333,9 +2396,11 @@ export function TransactionsView({
                             setFormMode("STANDARD");
                             setDirection("INCOME");
                             setCounterpartyItemId(null);
-                            setCat1("Доход от основного места работы");
-                            setCat2("Гарантированные выплаты");
-                            setCat3("Аванс");
+                            applyCategorySelection(
+                              "Доход от основного места работы",
+                              "Гарантированные выплаты",
+                              "Аванс"
+                            );
                           }}
                           className={`${segmentedButtonBase} ${
                             !isLoanRepayment && direction === "INCOME"
@@ -2352,9 +2417,7 @@ export function TransactionsView({
                             setFormMode("STANDARD");
                             setDirection("EXPENSE");
                             setCounterpartyItemId(null);
-                            setCat1("Питание");
-                            setCat2("Продукты питания");
-                            setCat3("-");
+                            applyCategorySelection("Питание", "Продукты питания", "-");
                           }}
                           className={`${segmentedButtonBase} ${
                             !isLoanRepayment && direction === "EXPENSE"
@@ -2371,9 +2434,7 @@ export function TransactionsView({
                             setFormMode("STANDARD");
                             setDirection("TRANSFER");
                             setCounterpartyItemId(null);
-                            setCat1("");
-                            setCat2("");
-                            setCat3("");
+                            applyCategorySelection("", "", "");
                           }}
                           className={`${segmentedButtonBase} ${
                             !isLoanRepayment && direction === "TRANSFER"
@@ -2390,9 +2451,7 @@ export function TransactionsView({
                             onClick={() => {
                               setFormMode("LOAN_REPAYMENT");
                               setDirection("EXPENSE");
-                              setCat1("Расходы");
-                              setCat2("Продукты питания");
-                              setCat3("-");
+                              applyCategorySelection("Расходы", "Продукты питания", "-");
                             }}
                             className={`${segmentedButtonBase} whitespace-normal leading-tight ${
                               isLoanRepayment
@@ -2576,72 +2635,79 @@ export function TransactionsView({
                         />
                       </div>
                     )}
-{!isTransfer && (
-                      <>
-                        <div className="grid gap-2">
-                          <Label>Категория L1</Label>
-                          <Select
-                            value={cat1}
-                            onValueChange={(v) => {
-                              setCat1(v);
-                              const first2 = (scopedCategoryMaps.l2[v] ?? [])[0] ?? "-";
-                              setCat2(first2);
-                              const first3 = (scopedCategoryMaps.l3[first2] ?? [])[0] ?? "-";
-                              setCat3(first3);
+                    {!isTransfer && (
+                      <div className="grid gap-2">
+                        <Label>Категория</Label>
+                        <div className="relative">
+                          <Input
+                            className="border-2 border-border/70 bg-white shadow-none"
+                            value={categoryQuery}
+                            onChange={(e) => {
+                              setCategoryQuery(e.target.value);
+                              setIsCategorySearchOpen(true);
                             }}
-                          >
-                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {scopedCategoryMaps.l1.map((c) => (
-                                <SelectItem key={c} value={c}>
-                                  {c}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="grid gap-2">
-                          <Label>Категория L2</Label>
-                          <Select
-                            value={cat2}
-                            onValueChange={(v) => {
-                              setCat2(v);
-                              const first3 = (scopedCategoryMaps.l3[v] ?? [])[0] ?? "-";
-                              setCat3(first3);
+                            onFocus={() => setIsCategorySearchOpen(true)}
+                            onBlur={() => {
+                              setIsCategorySearchOpen(false);
+                              setCategoryQuery(formatCategoryPath(cat1, cat2, cat3));
                             }}
-                          >
-                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {cat2Options.map((c) => (
-                                <SelectItem key={c} value={c}>
-                                  {c}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            onKeyDown={(event) => {
+                              if (
+                                event.key === "Enter" &&
+                                isCategorySearchOpen &&
+                                categoryQuery.trim()
+                              ) {
+                                const first = filteredCategoryPaths[0];
+                                if (first) {
+                                  event.preventDefault();
+                                  applyCategorySelection(first.l1, first.l2, first.l3);
+                                  setIsCategorySearchOpen(false);
+                                }
+                              }
+                            }}
+                            placeholder="Поиск категории"
+                            type="text"
+                          />
+                          {isCategorySearchOpen && categoryQuery.trim() ? (
+                            <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
+                              {filteredCategoryPaths.length === 0 ? (
+                                <div className="px-2 py-1 text-sm text-muted-foreground">
+                                  Нет совпадений
+                                </div>
+                              ) : (
+                                filteredCategoryPaths.map((option) => {
+                                  const isSelected =
+                                    option.l1 === cat1 &&
+                                    option.l2 === cat2 &&
+                                    option.l3 === cat3;
+                                  return (
+                                    <button
+                                      key={`${option.l1}||${option.l2}||${option.l3}`}
+                                      type="button"
+                                      className={`flex w-full items-start rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+                                        isSelected
+                                          ? "bg-violet-50 text-violet-700"
+                                          : "text-slate-700 hover:bg-slate-100"
+                                      }`}
+                                      onMouseDown={(event) => {
+                                        event.preventDefault();
+                                        applyCategorySelection(
+                                          option.l1,
+                                          option.l2,
+                                          option.l3
+                                        );
+                                        setIsCategorySearchOpen(false);
+                                      }}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          ) : null}
                         </div>
-
-                        <div className="grid gap-2">
-                          <Label>Категория L3</Label>
-                          <Select value={cat3} onValueChange={setCat3}>
-                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                              <SelectValue placeholder="—" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(cat3Options.length ? cat3Options : ["—"]).map((c) => (
-                                <SelectItem key={c} value={c}>
-                                  {c}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </>
+                      </div>
                     )}
 
                     <div className="grid gap-2">

@@ -122,16 +122,10 @@ function buildTicks(minValue: number, maxValue: number) {
 }
 
 function formatTick(value: number) {
-  const absValue = Math.abs(value);
-  if (absValue >= 1_000_000) {
-    const val = (value / 1_000_000).toFixed(absValue >= 10_000_000 ? 0 : 1);
-    return `${val}m`;
-  }
-  if (absValue >= 1_000) {
-    const val = (value / 1_000).toFixed(absValue >= 10_000 ? 0 : 1);
-    return `${val}k`;
-  }
-  return `${value}`;
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function buildDayMarks(
@@ -156,7 +150,7 @@ function buildDayMarks(
   for (let dayIndex = 0; dayIndex <= totalDays; dayIndex += step) {
     const date = addDays(startDate, dayIndex);
     marks.push({
-      label: String(date.getDate()),
+      label: formatChartDate(date),
       x: padding.left + (innerWidth * dayIndex) / totalDays,
       dayIndex,
     });
@@ -165,13 +159,20 @@ function buildDayMarks(
   if (marks[marks.length - 1]?.dayIndex !== totalDays) {
     const date = addDays(startDate, totalDays);
     marks.push({
-      label: String(date.getDate()),
+      label: formatChartDate(date),
       x: padding.left + innerWidth,
       dayIndex: totalDays,
     });
   }
 
   return marks;
+}
+
+function formatChartDate(date: Date) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear()).slice(-2);
+  return `${day}.${month}.${year}`;
 }
 
 function buildDateRange(startKey: string, endKey: string) {
@@ -789,7 +790,7 @@ export default function AssetsDynamicsPage() {
 
   return (
     <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">
             Динамика стоимости активов
@@ -928,31 +929,31 @@ export default function AssetsDynamicsPage() {
           <CardContent className="px-0">
             <div className="relative py-6">
               {loading && (
-                <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+                <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Загружаем данные...
                 </div>
               )}
 
               {!loading && error && (
-                <div className="flex h-64 items-center justify-center text-sm text-red-600">
+                <div className="flex h-80 items-center justify-center text-sm text-red-600">
                   {error}
                 </div>
               )}
 
               {!loading && !error && selectedItems.length === 0 && (
-                <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+                <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Выберите активы или обязательства для построения отчета.
                 </div>
               )}
 
               {!loading && !error && selectedItems.length > 0 && chartData.length === 0 && (
-                <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+                <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Нет данных для выбранного периода.
                 </div>
               )}
 
               {!loading && !error && selectedItems.length > 0 && chartData.length > 0 && (
-                <div ref={chartRef} className="relative h-64 w-full">
+                <div ref={chartRef} className="relative h-80 w-full">
                   {hoverPoint && hoverData && (
                     <div
                       ref={tooltipRef}

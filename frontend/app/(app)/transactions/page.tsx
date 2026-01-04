@@ -16,6 +16,7 @@ import {
   ChevronDown,
   CheckCircle2,
   CircleDashed,
+  MoreVertical,
   Pencil,
   PiggyBank,
   Plus,
@@ -35,6 +36,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -420,6 +428,7 @@ function TransactionCardRow({
   getRubEquivalentCents,
   isSelected,
   onToggleSelection,
+  onCreateFrom,
   onEdit,
   onDelete,
   isDeleting,
@@ -434,6 +443,7 @@ function TransactionCardRow({
   getRubEquivalentCents: (tx: TransactionCard, currencyCode: string) => number | null;
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
+  onCreateFrom: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
   onEdit: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
   onDelete: (id: number) => void;
   isDeleting: boolean;
@@ -504,7 +514,9 @@ function TransactionCardRow({
 
   const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-700";
   const actionHoverClass = tx.isDeleted ? "" : "hover:text-slate-900";
-  const deleteHoverClass = tx.isDeleted ? "" : "hover:text-rose-500";
+  const isEditDisabled = tx.isDeleted || isDeleting;
+  const isDeleteDisabled = tx.isDeleted || isDeleting;
+  const isCreateDisabled = isDeleting;
 
   const isConfirmed = tx.status === "CONFIRMED";
   const StatusIcon = isConfirmed ? CheckCircle2 : CircleDashed;
@@ -729,27 +741,48 @@ function TransactionCardRow({
             <StatusIcon className="h-4 w-4" />
           </Button>
 
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
-            aria-label="Редактировать"
-            onClick={(event) => onEdit(tx, event.currentTarget)}
-            disabled={tx.isDeleted || isDeleting}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className={`hover:bg-transparent ${actionTextClass} ${deleteHoverClass}`}
-            onClick={() => onDelete(tx.id)}
-            aria-label="Удалить"
-            disabled={tx.isDeleted || isDeleting}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
+                aria-label="Открыть меню действий"
+                disabled={isDeleting}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  onCreateFrom(tx, event.currentTarget as HTMLElement);
+                }}
+                disabled={isCreateDisabled}
+              >
+                <Plus className="h-4 w-4" />
+                Создать на основе
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  onEdit(tx, event.currentTarget as HTMLElement);
+                }}
+                disabled={isEditDisabled}
+              >
+                <Pencil className="h-4 w-4" />
+                Редактировать
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => onDelete(tx.id)}
+                disabled={isDeleteDisabled}
+              >
+                <Trash2 className="h-4 w-4" />
+                Удалить
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </div>
@@ -1038,6 +1071,37 @@ export function TransactionsView({
     setDirection(tx.direction);
     setPrimaryItemId(tx.primary_item_id);
     setCounterpartyItemId(tx.counterparty_item_id);
+    setAmountStr(formatCentsForInput(tx.amount_rub));
+    setAmountCounterpartyStr(
+      tx.direction === "TRANSFER" && tx.amount_counterparty != null
+        ? formatCentsForInput(tx.amount_counterparty)
+        : ""
+    );
+    setCat1(tx.category_l1 || "");
+    setCat2(tx.category_l2 || "");
+    setCat3(tx.category_l3 || "");
+    setDescription(tx.description ?? "");
+    setComment(tx.comment ?? "");
+  };
+
+  const openCreateFromDialog = (
+    tx: TransactionCard,
+    trigger?: HTMLElement | null
+  ) => {
+    lastActiveElementRef.current =
+      trigger ?? (document.activeElement as HTMLElement | null);
+    setFormError(null);
+    setEditingTx(null);
+    setBulkEditIds(null);
+    setBulkEditBaseline(null);
+    setIsBulkEditConfirmOpen(false);
+    setDialogMode("create");
+    setDate(getDateKey(tx.transaction_date));
+    setDirection(tx.direction);
+    setPrimaryItemId(tx.primary_item_id);
+    setCounterpartyItemId(
+      tx.direction === "TRANSFER" ? tx.counterparty_item_id : null
+    );
     setAmountStr(formatCentsForInput(tx.amount_rub));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
@@ -3112,6 +3176,7 @@ export function TransactionsView({
                   getRubEquivalentCents={getRubEquivalentCents}
                   isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
                   onToggleSelection={toggleTxSelection}
+                  onCreateFrom={openCreateFromDialog}
                   onEdit={openEditDialog}
                   onDelete={(id) => openDeleteDialog([id])}
                   isDeleting={isDeleting}

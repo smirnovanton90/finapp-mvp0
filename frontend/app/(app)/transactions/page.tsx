@@ -86,6 +86,8 @@ type TransactionsViewMode = "actual" | "planning";
 
 type TransactionCard = TransactionOut & { isDeleted?: boolean };
 
+type TransactionFormMode = "STANDARD" | "LOAN_REPAYMENT";
+
 type BulkEditBaseline = {
   date: string;
   direction: TransactionOut["direction"];
@@ -852,10 +854,13 @@ export function TransactionsView({
   const [direction, setDirection] = useState<"INCOME" | "EXPENSE" | "TRANSFER">(
     "EXPENSE"
   );
+  const [formMode, setFormMode] = useState<TransactionFormMode>("STANDARD");
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
   const [amountStr, setAmountStr] = useState("");
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
+  const [loanTotalStr, setLoanTotalStr] = useState("");
+  const [loanInterestStr, setLoanInterestStr] = useState("");
   const [cat1, setCat1] = useState("Питание");
   const [cat2, setCat2] = useState("Продукты питания");
   const [cat3, setCat3] = useState("-");
@@ -900,6 +905,14 @@ export function TransactionsView({
   const sortedItems = useMemo(() => {
     return [...items].sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [items]);
+  const assetItems = useMemo(
+    () => items.filter((item) => item.kind === "ASSET"),
+    [items]
+  );
+  const liabilityItems = useMemo(
+    () => items.filter((item) => item.kind === "LIABILITY"),
+    [items]
+  );
   const categoryL1Options = useMemo(() => {
     return [...categoryMaps.l1].sort((a, b) => a.localeCompare(b, "ru"));
   }, [categoryMaps]);
@@ -985,6 +998,10 @@ export function TransactionsView({
   };
 
   const isTransfer = direction === "TRANSFER";
+  const isLoanRepayment = formMode === "LOAN_REPAYMENT";
+  const showCounterpartySelect = isTransfer || isLoanRepayment;
+  const primarySelectItems = isLoanRepayment ? assetItems : items;
+  const counterpartySelectItems = isLoanRepayment ? liabilityItems : items;
   const primaryCurrencyCode = primaryItemId
     ? itemsById.get(primaryItemId)?.currency_code ?? null
     : null;
@@ -996,6 +1013,29 @@ export function TransactionsView({
     primaryCurrencyCode &&
     counterpartyCurrencyCode &&
     primaryCurrencyCode !== counterpartyCurrencyCode;
+  const loanTotals = useMemo(() => {
+    const totalCents = loanTotalStr.trim()
+      ? parseRubToCents(loanTotalStr)
+      : null;
+    const interestCents = loanInterestStr.trim()
+      ? parseRubToCents(loanInterestStr)
+      : null;
+    const total =
+      totalCents != null && Number.isFinite(totalCents) ? totalCents : null;
+    const interest =
+      interestCents != null && Number.isFinite(interestCents)
+        ? interestCents
+        : null;
+    const principal =
+      total != null && interest != null ? total - interest : null;
+    return { total, interest, principal };
+  }, [loanTotalStr, loanInterestStr]);
+  const loanPrincipalLabel =
+    loanTotals.principal == null
+      ? "-"
+      : `${formatAmount(loanTotals.principal)}${
+          primaryCurrencyCode ? ` ${primaryCurrencyCode}` : ""
+        }`;
 
   useEffect(() => {
     if (!isCrossCurrencyTransfer) {
@@ -1020,10 +1060,13 @@ export function TransactionsView({
   const resetForm = () => {
     setDate(new Date().toISOString().slice(0, 10));
     setDirection("EXPENSE");
+    setFormMode("STANDARD");
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
     setAmountStr("");
     setAmountCounterpartyStr("");
+    setLoanTotalStr("");
+    setLoanInterestStr("");
     setCat1("Питание");
     setCat2("Продукты питания");
     setCat3("-");
@@ -1063,6 +1106,7 @@ export function TransactionsView({
       trigger ?? (document.activeElement as HTMLElement | null);
     setFormError(null);
     setEditingTx(tx);
+    setFormMode("STANDARD");
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
@@ -1092,6 +1136,7 @@ export function TransactionsView({
       trigger ?? (document.activeElement as HTMLElement | null);
     setFormError(null);
     setEditingTx(null);
+    setFormMode("STANDARD");
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
@@ -1143,6 +1188,7 @@ export function TransactionsView({
 
     setFormError(null);
     setEditingTx(null);
+    setFormMode("STANDARD");
     setDialogMode("bulk-edit");
     setBulkEditIds(selectedTxs.map((tx) => tx.id));
     setBulkEditBaseline(baseline);
@@ -2063,6 +2109,128 @@ export function TransactionsView({
                         return;
                       }
 
+                      if (isLoanRepayment) {
+                        if (!primaryItemId) {
+                          setFormError("Выберите актив, с которого производится погашение.");
+                          return;
+                        }
+                        if (!counterpartyItemId) {
+                          setFormError("Выберите обязательство.");
+                          return;
+                        }
+                        const primaryItem = itemsById.get(primaryItemId);
+                        if (primaryItem?.start_date && date < primaryItem.start_date) {
+                          setFormError(
+                            "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
+                          );
+                          return;
+                        }
+                        const counterpartyItem = itemsById.get(counterpartyItemId);
+                        if (
+                          counterpartyItem?.start_date &&
+                          date < counterpartyItem.start_date
+                        ) {
+                          setFormError(
+                            "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
+                          );
+                          return;
+                        }
+                        if (
+                          primaryItem?.currency_code &&
+                          counterpartyItem?.currency_code &&
+                          primaryItem.currency_code !== counterpartyItem.currency_code
+                        ) {
+                          setFormError(
+                            "Для погашения кредита выберите актив и обязательство в одной валюте."
+                          );
+                          return;
+                        }
+                        if (!loanTotalStr.trim()) {
+                          setFormError("Укажите общую сумму платежа.");
+                          return;
+                        }
+                        const totalCents = parseRubToCents(loanTotalStr);
+                        if (!Number.isFinite(totalCents) || totalCents < 0) {
+                          setFormError(
+                            "Введите корректную общую сумму платежа в формате 1234,56."
+                          );
+                          return;
+                        }
+                        if (!loanInterestStr.trim()) {
+                          setFormError("Укажите сумму в погашение процентов.");
+                          return;
+                        }
+                        const interestCents = parseRubToCents(loanInterestStr);
+                        if (!Number.isFinite(interestCents) || interestCents < 0) {
+                          setFormError(
+                            "Введите корректную сумму в погашение процентов в формате 1234,56."
+                          );
+                          return;
+                        }
+                        const principalCents = totalCents - interestCents;
+                        if (principalCents < 0) {
+                          setFormError(
+                            "Сумма в погашение процентов не может превышать общую сумму платежа."
+                          );
+                          return;
+                        }
+                        if (txType === "PLANNED") {
+                          const today = new Date().toISOString().slice(0, 10);
+                          if (date < today) {
+                            setFormError(
+                              "Плановая транзакция не может быть создана ранее текущего дня."
+                            );
+                            return;
+                          }
+                        }
+
+                        try {
+                          const transactionDate =
+                            isEditMode && editingTx
+                              ? mergeDateWithTime(date, editingTx.transaction_date)
+                              : date;
+                          const basePayload = {
+                            transaction_date: transactionDate,
+                            primary_item_id: primaryItemId,
+                            transaction_type: editingTx?.transaction_type ?? txType,
+                            description: description || null,
+                            comment: comment || null,
+                          };
+                          const expensePayload = {
+                            ...basePayload,
+                            counterparty_item_id: null,
+                            amount_rub: interestCents,
+                            amount_counterparty: null,
+                            direction: "EXPENSE" as const,
+                            category_l1: cat1,
+                            category_l2: cat2,
+                            category_l3: cat3,
+                          };
+                          const transferPayload = {
+                            ...basePayload,
+                            counterparty_item_id: counterpartyItemId,
+                            amount_rub: principalCents,
+                            amount_counterparty: null,
+                            direction: "TRANSFER" as const,
+                            category_l1: "",
+                            category_l2: "",
+                            category_l3: "",
+                          };
+
+                          await Promise.all([
+                            createTransaction(expensePayload),
+                            createTransaction(transferPayload),
+                          ]);
+                          closeDialog();
+                          await loadAll();
+                        } catch (e: any) {
+                          setFormError(
+                            e?.message ?? "Не удалось создать транзакции."
+                          );
+                        }
+                        return;
+                      }
+
                       const cents = parseRubToCents(amountStr);
                       let counterpartyCents: number | null = null;
 
@@ -2160,8 +2328,9 @@ export function TransactionsView({
                       <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
                         <button
                           type="button"
-                          aria-pressed={direction === "INCOME"}
+                          aria-pressed={!isLoanRepayment && direction === "INCOME"}
                           onClick={() => {
+                            setFormMode("STANDARD");
                             setDirection("INCOME");
                             setCounterpartyItemId(null);
                             setCat1("Доход от основного места работы");
@@ -2169,7 +2338,7 @@ export function TransactionsView({
                             setCat3("Аванс");
                           }}
                           className={`${segmentedButtonBase} ${
-                            direction === "INCOME"
+                            !isLoanRepayment && direction === "INCOME"
                               ? "bg-green-50 text-green-700"
                               : "bg-white text-muted-foreground hover:bg-white"
                           }`}
@@ -2178,8 +2347,9 @@ export function TransactionsView({
                         </button>
                         <button
                           type="button"
-                          aria-pressed={direction === "EXPENSE"}
+                          aria-pressed={!isLoanRepayment && direction === "EXPENSE"}
                           onClick={() => {
+                            setFormMode("STANDARD");
                             setDirection("EXPENSE");
                             setCounterpartyItemId(null);
                             setCat1("Питание");
@@ -2187,7 +2357,7 @@ export function TransactionsView({
                             setCat3("-");
                           }}
                           className={`${segmentedButtonBase} ${
-                            direction === "EXPENSE"
+                            !isLoanRepayment && direction === "EXPENSE"
                               ? "bg-red-50 text-red-700"
                               : "bg-white text-muted-foreground hover:bg-white"
                           }`}
@@ -2196,8 +2366,9 @@ export function TransactionsView({
                         </button>
                         <button
                           type="button"
-                          aria-pressed={direction === "TRANSFER"}
+                          aria-pressed={!isLoanRepayment && direction === "TRANSFER"}
                           onClick={() => {
+                            setFormMode("STANDARD");
                             setDirection("TRANSFER");
                             setCounterpartyItemId(null);
                             setCat1("");
@@ -2205,13 +2376,37 @@ export function TransactionsView({
                             setCat3("");
                           }}
                           className={`${segmentedButtonBase} ${
-                            direction === "TRANSFER"
+                            !isLoanRepayment && direction === "TRANSFER"
                               ? "bg-violet-50 text-violet-700"
                               : "bg-white text-muted-foreground hover:bg-white"
                           }`}
                         >
                           Перевод
                         </button>
+                        {!isEditMode && !isBulkEdit && (
+                          <button
+                            type="button"
+                            aria-pressed={isLoanRepayment}
+                            onClick={() => {
+                              setFormMode("LOAN_REPAYMENT");
+                              setDirection("EXPENSE");
+                              setCat1("Расходы");
+                              setCat2("Продукты питания");
+                              setCat3("-");
+                            }}
+                            className={`${segmentedButtonBase} whitespace-normal leading-tight ${
+                              isLoanRepayment
+                                ? "bg-amber-50 text-amber-700"
+                                : "bg-white text-muted-foreground hover:bg-white"
+                            }`}
+                          >
+                            <span>
+                              Погашение
+                              <br />
+                              кредитов
+                            </span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -2226,7 +2421,11 @@ export function TransactionsView({
                     </div>
 
                     <div className="grid gap-2">
-                      <Label>Актив / обязательство</Label>
+                      <Label>
+                        {isLoanRepayment
+                          ? "Актив, с которого производится погашение"
+                          : "Актив / обязательство"}
+                      </Label>
                       <Select
                         value={primaryItemId ? String(primaryItemId) : ""}
                         onValueChange={(v) => setPrimaryItemId(Number(v))}
@@ -2235,7 +2434,7 @@ export function TransactionsView({
                           <SelectValue placeholder="Выберите" />
                         </SelectTrigger>
                         <SelectContent>
-                          {items.map((it) => (
+                          {primarySelectItems.map((it) => (
                             <SelectItem key={it.id} value={String(it.id)}>
                               {it.name}
                             </SelectItem>
@@ -2244,9 +2443,13 @@ export function TransactionsView({
                       </Select>
                     </div>
 
-                    {isTransfer && (
+                    {showCounterpartySelect && (
                       <div className="grid gap-2">
-                        <Label>Корреспондирующий актив</Label>
+                        <Label>
+                          {isLoanRepayment
+                            ? "Обязательство"
+                            : "Корреспондирующий актив"}
+                        </Label>
                         <Select
                           value={
                             counterpartyItemId ? String(counterpartyItemId) : ""
@@ -2259,7 +2462,7 @@ export function TransactionsView({
                             <SelectValue placeholder="Выберите" />
                           </SelectTrigger>
                           <SelectContent>
-                            {items
+                            {counterpartySelectItems
                               .filter((it) => it.id !== primaryItemId)
                               .map((it) => (
                                 <SelectItem key={it.id} value={String(it.id)}>
@@ -2271,7 +2474,51 @@ export function TransactionsView({
                       </div>
                     )}
 
-                    {isTransfer && isCrossCurrencyTransfer ? (
+                    {isLoanRepayment ? (
+                      <>
+                        <div className="grid gap-2">
+                          <Label>
+                            {primaryCurrencyCode
+                              ? `Общая сумма платежа (${primaryCurrencyCode})`
+                              : "Общая сумма платежа"}
+                          </Label>
+                          <Input
+                            className="border-2 border-border/70 bg-white shadow-none"
+                            value={loanTotalStr}
+                            onChange={(e) =>
+                              setLoanTotalStr(formatRubInput(e.target.value))
+                            }
+                            onBlur={() =>
+                              setLoanTotalStr((prev) => normalizeRubOnBlur(prev))
+                            }
+                            inputMode="decimal"
+                            placeholder="Например: 1 234,56"
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>
+                            {primaryCurrencyCode
+                              ? `Сумма в погашение процентов (${primaryCurrencyCode})`
+                              : "Сумма в погашение процентов"}
+                          </Label>
+                          <Input
+                            className="border-2 border-border/70 bg-white shadow-none"
+                            value={loanInterestStr}
+                            onChange={(e) =>
+                              setLoanInterestStr(formatRubInput(e.target.value))
+                            }
+                            onBlur={() =>
+                              setLoanInterestStr((prev) => normalizeRubOnBlur(prev))
+                            }
+                            inputMode="decimal"
+                            placeholder="Например: 1 234,56"
+                          />
+                          <div className="text-xs text-muted-foreground">
+                            Сумма в погашение основного долга: {loanPrincipalLabel}
+                          </div>
+                        </div>
+                      </>
+                    ) : isTransfer && isCrossCurrencyTransfer ? (
                       <>
                         <div className="grid gap-2">
                           <Label>
@@ -2292,7 +2539,7 @@ export function TransactionsView({
                         </div>
                         <div className="grid gap-2">
                           <Label>
-                            {`Сумма зачисления (${counterpartyCurrencyCode ?? "-"})`}
+                            {`Сумма поступления (${counterpartyCurrencyCode ?? "-"})`}
                           </Label>
                           <Input
                             className="border-2 border-border/70 bg-white shadow-none"
@@ -2301,7 +2548,9 @@ export function TransactionsView({
                               setAmountCounterpartyStr(formatRubInput(e.target.value))
                             }
                             onBlur={() =>
-                              setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev))
+                              setAmountCounterpartyStr((prev) =>
+                                normalizeRubOnBlur(prev)
+                              )
                             }
                             inputMode="decimal"
                             placeholder="Например: 1 234,56"
@@ -2327,8 +2576,7 @@ export function TransactionsView({
                         />
                       </div>
                     )}
-
-                    {!isTransfer && (
+{!isTransfer && (
                       <>
                         <div className="grid gap-2">
                           <Label>Категория L1</Label>
@@ -2430,7 +2678,11 @@ export function TransactionsView({
                         className="bg-violet-600 text-white hover:bg-violet-700"
                         disabled={loading || isBulkEditing}
                       >
-                        {isEditMode || isBulkEdit ? "Сохранить изменения" : "Добавить транзакцию"}
+                        {isEditMode || isBulkEdit
+                          ? "Сохранить изменения"
+                          : isLoanRepayment
+                            ? "Добавить транзакции"
+                            : "Добавить транзакцию"}
                       </Button>
                     </div>
                   </form>

@@ -108,12 +108,11 @@ function formatAmount(valueInCents: number) {
 }
 
 function formatRub(valueInCents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
+  const formatted = new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(valueInCents / 100);
+  return `${formatted} RUB`;
 }
 
 function formatRate(value: number) {
@@ -123,16 +122,30 @@ function formatRate(value: number) {
   }).format(value);
 }
 
+function getDateKey(value: string) {
+  return value ? value.slice(0, 10) : "";
+}
+
 function formatDate(value: string) {
-  const parts = value.split("-");
+  const dateKey = getDateKey(value);
+  const parts = dateKey ? dateKey.split("-") : [];
   if (parts.length === 3) {
     const [year, month, day] = parts;
-    if (year && month && day) return `${day}.${month}.${year}`;
+    if (year && month && day) {
+      const dd = day.padStart(2, "0");
+      const mm = month.padStart(2, "0");
+      const yy = year.slice(-2);
+      return `${dd}.${mm}.${yy}`;
+    }
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("ru-RU");
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  });
 }
 
 function toCbrDate(value: string) {
@@ -149,6 +162,9 @@ function formatTime(value: string) {
   if (!hasTime) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
+  if (date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0) {
+    return "";
+  }
   return date.toLocaleTimeString("ru-RU", {
     hour: "2-digit",
     minute: "2-digit",
@@ -240,6 +256,25 @@ function formatDateForApi(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatDateTimeForApi(date: Date) {
+  const dateKey = formatDateForApi(date);
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const seconds = date.getSeconds();
+  if (hours === 0 && minutes === 0 && seconds === 0) return dateKey;
+  const hh = String(hours).padStart(2, "0");
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  return `${dateKey}T${hh}:${mm}:${ss}`;
+}
+
+function mergeDateWithTime(dateValue: string, existingDate?: string | null) {
+  if (!existingDate) return dateValue;
+  const match = /[T\s](\d{1,2}:\d{2}(?::\d{2})?)/.exec(existingDate);
+  if (!match) return dateValue;
+  return `${dateValue}T${match[1]}`;
 }
 
 function parseAmountCell(value: unknown) {
@@ -443,6 +478,7 @@ function TransactionCardRow({
     isCrossWithRub && foreignAmountCents > 0
       ? rubAmountCents / foreignAmountCents
       : null;
+  const timeValue = formatTime(tx.transaction_date);
 
   const cardTone = tx.isDeleted
     ? "bg-slate-100"
@@ -499,7 +535,7 @@ function TransactionCardRow({
     <div
       className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardTone}`}
     >
-      <div className="flex flex-1 flex-wrap items-center gap-3 px-3 py-3 lg:grid lg:grid-cols-[auto_6rem_12rem_12rem_minmax(14rem,1fr)_auto] lg:items-center">
+      <div className="flex flex-1 flex-wrap items-center gap-3 px-3 py-3 lg:grid lg:grid-cols-[auto_4.5rem_8.5rem_6rem_8.5rem_minmax(10rem,1fr)_auto] lg:items-center lg:gap-2">
         <input
           type="checkbox"
           className="h-5 w-5 accent-violet-600"
@@ -509,77 +545,89 @@ function TransactionCardRow({
           aria-label={`Выбрать транзакцию ${tx.id}`}
         />
 
-        <div className="w-24 shrink-0">
+        <div className="w-16 shrink-0">
           <div className={`text-sm font-medium ${mutedTextClass}`}>
             {formatDate(tx.transaction_date)}
           </div>
-          <div className={`text-xs ${mutedTextClass}`}>
-            {formatTime(tx.transaction_date)}
-          </div>
+          {timeValue && (
+            <div className={`text-xs ${mutedTextClass}`}>{timeValue}</div>
+          )}
         </div>
 
         {isTransfer ? (
           <>
-            <div className="flex min-w-[240px] items-center gap-3 lg:col-span-2">
-              <div className="w-[110px] shrink-0 text-center">
-                {primaryBankLogo && (
-                  <div className="mb-1 flex justify-center">
-                    <img
-                      src={primaryBankLogo}
-                      alt={primaryBankName || ""}
-                      className="h-6 w-6 rounded bg-white object-contain"
-                      loading="lazy"
-                    />
+            <div className="flex h-full w-full min-w-[112px] flex-col self-stretch text-left sm:w-36 lg:w-full">
+              <div className="flex flex-1 flex-col items-start justify-end">
+                <div className="flex items-baseline gap-1">
+                  <div
+                    className={`text-xl font-semibold tabular-nums ${transferNegativeClass}`}
+                  >
+                    -{amountValue}
                   </div>
+                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                    {itemCurrencyCode(tx.primary_item_id)}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-1 items-start gap-2">
+                {primaryBankLogo && (
+                  <img
+                    src={primaryBankLogo}
+                    alt={primaryBankName || ""}
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded bg-white object-contain"
+                    loading="lazy"
+                  />
                 )}
                 <div
                   className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
                 >
                   {itemName(tx.primary_item_id)}
                 </div>
-                <div className={`text-sm font-semibold tabular-nums ${transferNegativeClass}`}>
-                  -{amountValue}
-                </div>
-                <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                  {itemCurrencyCode(tx.primary_item_id)}
-                </div>
               </div>
-              <div className="relative flex w-32 shrink-0 items-center justify-center self-stretch">
-                {conversionRate !== null && foreignCurrency && (
+            </div>
+
+            <div className="relative flex w-24 shrink-0 items-center justify-center self-stretch">
+              {conversionRate !== null && foreignCurrency && (
+                <div
+                  className={`absolute left-0 top-1/2 -translate-y-1/2 text-left text-xs font-semibold ${mutedTextClass} z-10`}
+                >
+                  {formatRate(conversionRate)} RUB/{foreignCurrency}
+                </div>
+              )}
+              <ArrowRight className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 text-white opacity-45" />
+            </div>
+
+            <div className="flex h-full w-full min-w-[112px] flex-col self-stretch text-left sm:w-36 lg:w-full">
+              <div className="flex flex-1 flex-col items-start justify-end">
+                <div className="flex items-baseline gap-1">
                   <div
-                    className={`absolute left-0 top-1/2 -translate-y-1/2 text-left text-xs font-semibold ${mutedTextClass} z-10`}
+                    className={`text-xl font-semibold tabular-nums ${transferPositiveClass}`}
                   >
-                    {formatRate(conversionRate)} RUB/{foreignCurrency}
+                    +{counterpartyAmountValue}
                   </div>
-                )}
-                <ArrowRight className="pointer-events-none absolute right-0 top-1/2 h-24 w-24 -translate-y-1/2 text-white opacity-45" />
+                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                    {itemCurrencyCode(tx.counterparty_item_id)}
+                  </div>
+                </div>
               </div>
-              <div className="w-[110px] shrink-0 text-center">
+              <div className="flex flex-1 items-start gap-2">
                 {counterpartyBankLogo && (
-                  <div className="mb-1 flex justify-center">
-                    <img
-                      src={counterpartyBankLogo}
-                      alt={counterpartyBankName || ""}
-                      className="h-6 w-6 rounded bg-white object-contain"
-                      loading="lazy"
-                    />
-                  </div>
+                  <img
+                    src={counterpartyBankLogo}
+                    alt={counterpartyBankName || ""}
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded bg-white object-contain"
+                    loading="lazy"
+                  />
                 )}
                 <div
                   className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
                 >
                   {itemName(tx.counterparty_item_id)}
                 </div>
-                <div className={`text-sm font-semibold tabular-nums ${transferPositiveClass}`}>
-                  +{counterpartyAmountValue}
-                </div>
-                <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                  {itemCurrencyCode(tx.counterparty_item_id)}
-                </div>
               </div>
             </div>
 
-            <div className="min-w-[140px] flex-1">
+            <div className="min-w-[120px] flex-1">
               <div
                 className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
               >
@@ -589,58 +637,62 @@ function TransactionCardRow({
           </>
         ) : (
           <>
-            <div className="w-full min-w-[120px] text-center sm:w-36 lg:w-full">
-              {primaryBankLogo && (
-                <div className="mb-1 flex justify-center">
+            <div className="flex h-full w-full min-w-[112px] flex-col self-stretch text-left sm:w-36 lg:w-full">
+              <div className="flex flex-1 flex-col items-start justify-end">
+                <div className="flex items-baseline gap-1">
+                  <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
+                    {isExpense ? "-" : "+"}
+                    {amountValue}
+                  </div>
+                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                    {currencyCode}
+                  </div>
+                </div>
+                {showRubEquivalent && (
+                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
+                    {formatRub(rubEquivalent)}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-1 items-start gap-2">
+                {primaryBankLogo && (
                   <img
                     src={primaryBankLogo}
                     alt={primaryBankName || ""}
-                    className="h-6 w-6 rounded bg-white object-contain"
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded bg-white object-contain"
                     loading="lazy"
                   />
-                </div>
-              )}
-              <div
-                className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
-              >
-                {itemName(tx.primary_item_id)}
-              </div>
-              <div className={`text-sm font-semibold tabular-nums ${amountClass}`}>
-                {isExpense ? "-" : "+"}
-                {amountValue}
-              </div>
-              <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                {currencyCode}
-              </div>
-              {showRubEquivalent && (
-                <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                  ≈ {isExpense ? "-" : "+"}
-                  {formatRub(rubEquivalent)}
-                </div>
-              )}
-            </div>
-
-            <div className="w-full self-stretch sm:w-36 lg:w-full">
-              <div className="relative flex h-full flex-col items-start justify-center text-left">
+                )}
                 <div
-                  className={`relative z-10 space-y-0.5 pr-10 text-xs font-semibold leading-tight break-words whitespace-normal ${mutedTextClass}`}
+                  className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
                 >
-                  <div
-                    className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
-                  >
-                    {categoryLines[0]}
-                  </div>
-                  <div>{categoryLines[1]}</div>
-                  <div>{categoryLines[2]}</div>
+                  {itemName(tx.primary_item_id)}
                 </div>
-                <CategoryIcon
-                  className="pointer-events-none absolute right-0 top-1/2 h-24 w-24 -translate-y-1/2 text-white opacity-45"
-                  strokeWidth={1.5}
-                />
               </div>
             </div>
 
-            <div className="min-w-[140px] flex-1">
+            <div className="relative flex w-24 shrink-0 items-center justify-center self-stretch">
+              <CategoryIcon
+                className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 text-white opacity-45"
+                strokeWidth={1.5}
+              />
+            </div>
+
+            <div className="w-full min-w-[112px] text-left sm:w-36 lg:w-full">
+              <div
+                className={`space-y-0.5 text-xs font-semibold leading-tight break-words whitespace-normal ${mutedTextClass}`}
+              >
+                <div
+                  className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
+                >
+                  {categoryLines[0]}
+                </div>
+                <div>{categoryLines[1]}</div>
+                <div>{categoryLines[2]}</div>
+              </div>
+            </div>
+
+            <div className="min-w-[120px] flex-1">
               <div
                 className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
               >
@@ -885,7 +937,9 @@ export function TransactionsView({
 
   const getFxRateForDate = (date: string, currencyCode: string) => {
     if (!currencyCode || currencyCode === "RUB") return 1;
-    const rates = fxRatesByDate[date];
+    const dateKey = getDateKey(date);
+    if (!dateKey) return null;
+    const rates = fxRatesByDate[dateKey];
     if (!rates) return null;
     return rates.find((rate) => rate.char_code === currencyCode)?.rate ?? null;
   };
@@ -950,8 +1004,6 @@ export function TransactionsView({
     return formatRubInput(raw);
   };
 
-  const normalizeDateInput = (value: string) => (value ? value.slice(0, 10) : "");
-
   const closeDialog = () => {
     setDialogMode(null);
     setEditingTx(null);
@@ -982,7 +1034,7 @@ export function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setDialogMode("edit");
-    setDate(normalizeDateInput(tx.transaction_date));
+    setDate(getDateKey(tx.transaction_date));
     setDirection(tx.direction);
     setPrimaryItemId(tx.primary_item_id);
     setCounterpartyItemId(tx.counterparty_item_id);
@@ -1008,7 +1060,7 @@ export function TransactionsView({
 
     const baselineTx = selectedTxs[0];
     const baseline = {
-      date: normalizeDateInput(baselineTx.transaction_date),
+      date: getDateKey(baselineTx.transaction_date),
       direction: baselineTx.direction,
       primaryItemId: baselineTx.primary_item_id,
       counterpartyItemId: baselineTx.counterparty_item_id,
@@ -1129,9 +1181,7 @@ export function TransactionsView({
 
     for (const tx of targets) {
       const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
-      const nextDate = changes.hasDateChanged
-        ? date
-        : normalizeDateInput(tx.transaction_date);
+      const nextDate = changes.hasDateChanged ? date : getDateKey(tx.transaction_date);
       const nextPrimaryItemId = changes.hasPrimaryItemChanged
         ? primaryItemId
         : tx.primary_item_id;
@@ -1233,9 +1283,8 @@ export function TransactionsView({
       const results = await Promise.allSettled(
         targets.map((tx) => {
           const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
-          const nextDate = changes.hasDateChanged
-            ? date
-            : normalizeDateInput(tx.transaction_date);
+          const baseDate = changes.hasDateChanged ? date : getDateKey(tx.transaction_date);
+          const nextDate = mergeDateWithTime(baseDate, tx.transaction_date);
           const nextPrimaryItemId = changes.hasPrimaryItemChanged
             ? primaryItemId
             : tx.primary_item_id;
@@ -1471,16 +1520,17 @@ export function TransactionsView({
         if (!parsedDate) {
           throw new Error(`Строка ${rowNumber}: не удалось распознать дату операции.`);
         }
-        const transactionDate = formatDateForApi(parsedDate);
+        const transactionDateKey = formatDateForApi(parsedDate);
+        const transactionDate = formatDateTimeForApi(parsedDate);
         if (importTxType === "PLANNED") {
           const today = new Date().toISOString().slice(0, 10);
-          if (transactionDate < today) {
+          if (transactionDateKey < today) {
             throw new Error(
               `Строка ${rowNumber}: плановая транзакция не может быть раньше текущего дня.`
             );
           }
         }
-        if (item.start_date && transactionDate < item.start_date) {
+        if (item.start_date && transactionDateKey < item.start_date) {
           throw new Error(
             `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
           );
@@ -1579,7 +1629,8 @@ export function TransactionsView({
   useEffect(() => {
     const dates = new Set<string>();
     [...txs, ...deletedTxs].forEach((tx) => {
-      if (tx.transaction_date) dates.add(tx.transaction_date);
+      const dateKey = getDateKey(tx.transaction_date);
+      if (dateKey) dates.add(dateKey);
     });
 
     const missingDates = Array.from(dates).filter(
@@ -1659,8 +1710,9 @@ export function TransactionsView({
         (showConfirmed && tx.status === "CONFIRMED") ||
         (showUnconfirmed && tx.status === "UNCONFIRMED");
       if (!matchesConfirmation) return false;
-      if (dateFrom && tx.transaction_date < dateFrom) return false;
-      if (dateTo && tx.transaction_date > dateTo) return false;
+      const txDateKey = getDateKey(tx.transaction_date);
+      if (dateFrom && txDateKey < dateFrom) return false;
+      if (dateTo && txDateKey > dateTo) return false;
       if (commentQuery) {
         const commentText = (tx.comment ?? "").toLowerCase();
         if (!commentText.includes(commentQuery)) return false;
@@ -2000,8 +2052,12 @@ export function TransactionsView({
                       }
 
                       try {
+                        const transactionDate =
+                          isEditMode && editingTx
+                            ? mergeDateWithTime(date, editingTx.transaction_date)
+                            : date;
                         const payload = {
-                          transaction_date: date,
+                          transaction_date: transactionDate,
                           primary_item_id: primaryItemId,
                           counterparty_item_id: isTransfer
                             ? counterpartyItemId
@@ -2665,7 +2721,7 @@ export function TransactionsView({
                               <img
                                 src={bankLogo}
                                 alt={bankName || ""}
-                                className="h-5 w-5 rounded border border-white/70 bg-white object-contain"
+                                className="h-3.5 w-3.5 rounded border border-white/70 bg-white object-contain"
                                 loading="lazy"
                               />
                             )}

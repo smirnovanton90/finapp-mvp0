@@ -146,7 +146,7 @@ class Transaction(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     user: Mapped["User"] = relationship(back_populates="transactions")
 
-    transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    transaction_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
     primary_item: Mapped["Item"] = relationship(foreign_keys=[primary_item_id])

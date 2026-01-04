@@ -35,6 +35,10 @@ function toDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function toTxDateKey(value: string) {
+  return value ? value.slice(0, 10) : "";
+}
+
 function parseDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
   return new Date(year, month - 1, day);
@@ -105,8 +109,10 @@ function buildTxsByDate(txs: TransactionOut[], itemId: number) {
   txs.forEach((tx) => {
     if (tx.transaction_type !== "ACTUAL") return;
     if (tx.primary_item_id !== itemId && tx.counterparty_item_id !== itemId) return;
-    if (!map.has(tx.transaction_date)) map.set(tx.transaction_date, []);
-    map.get(tx.transaction_date)?.push(tx);
+    const dateKey = toTxDateKey(tx.transaction_date);
+    if (!dateKey) return;
+    if (!map.has(dateKey)) map.set(dateKey, []);
+    map.get(dateKey)?.push(tx);
   });
   return map;
 }

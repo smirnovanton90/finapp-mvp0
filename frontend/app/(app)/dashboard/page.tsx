@@ -50,6 +50,10 @@ function toDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function toTxDateKey(value: string) {
+  return value ? value.slice(0, 10) : "";
+}
+
 function parseDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
   return new Date(year, month - 1, day);
@@ -168,7 +172,8 @@ function buildDailyNetAssets(items: ItemOut[], txs: TransactionOut[]): DailyPoin
   };
 
   actualTxs.forEach((tx) => {
-    const dateKey = tx.transaction_date;
+    const dateKey = toTxDateKey(tx.transaction_date);
+    if (!dateKey) return;
     let primaryDelta = 0;
     if (tx.direction === "INCOME") primaryDelta = tx.amount_rub;
     if (tx.direction === "EXPENSE") primaryDelta = -tx.amount_rub;

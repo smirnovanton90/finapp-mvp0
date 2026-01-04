@@ -110,7 +110,7 @@ class ItemOut(BaseModel):
         from_attributes = True
 
 class TransactionBase(BaseModel):
-    transaction_date: date
+    transaction_date: datetime
     primary_item_id: int
     counterparty_item_id: int | None = None
     amount_rub: int = Field(ge=0)

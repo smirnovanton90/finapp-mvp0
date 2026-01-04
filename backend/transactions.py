@@ -6,7 +6,7 @@ from auth import get_current_user
 from models import Transaction, Item, User
 from schemas import TransactionCreate, TransactionOut, TransactionStatusUpdate
 from sqlalchemy import select
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -16,11 +16,32 @@ def transfer_delta(kind: str, is_primary: bool, amount: int) -> int:
     return -amount if is_primary else amount
 
 
+def format_amount_value(value: int) -> str:
+    abs_value = abs(value)
+    if abs_value % 100 == 0:
+        rubles = abs_value // 100
+        formatted = f"{rubles:,}"
+        return formatted.replace(",", " ")
+    rub = abs_value / 100
+    formatted = f"{rub:,.2f}"
+    return formatted.replace(",", " ").replace(".", ",")
+
+
+def format_tx_datetime(value: datetime | date) -> str:
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        dt = datetime.combine(value, datetime.min.time())
+    return dt.strftime("%d.%m.%Y %H:%M")
+
+
 def insufficient_funds_detail(amount: int, balance: int, item_name: str, tx_date) -> str:
-    date_label = tx_date.isoformat()
+    amount_label = format_amount_value(amount)
+    balance_label = format_amount_value(balance)
+    date_label = format_tx_datetime(tx_date)
     return (
         f"Недостаточно средств для добавления транзакции по счету \"{item_name}\". "
-        f"Сумма: {amount}, остаток на дату {date_label}: {balance}. "
+        f"Сумма: {amount_label}, остаток на дату {date_label}: {balance_label}. "
         "Добавление транзакции приведет к отрицательному остатку."
     )
 
@@ -71,7 +92,8 @@ def create_transaction(
     if not primary:
         raise HTTPException(status_code=400, detail="Invalid primary_item_id")
 
-    if data.transaction_date < primary.start_date:
+    tx_date = data.transaction_date.date()
+    if tx_date < primary.start_date:
         raise HTTPException(
             status_code=400,
             detail="Дата транзакции не может быть раньше даты начала действия актива/обязательства.",
@@ -100,7 +122,7 @@ def create_transaction(
         if counter.id == primary.id:
             raise HTTPException(status_code=400, detail="Transfer items must be different")
 
-        if data.transaction_date < counter.start_date:
+        if tx_date < counter.start_date:
             raise HTTPException(
                 status_code=400,
                 detail="Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства.",
@@ -252,7 +274,8 @@ def update_transaction(
     if not new_primary:
         raise HTTPException(status_code=400, detail="Invalid primary_item_id")
 
-    if data.transaction_date < new_primary.start_date:
+    new_tx_date = data.transaction_date.date()
+    if new_tx_date < new_primary.start_date:
         raise HTTPException(
             status_code=400,
             detail="Transaction date cannot be earlier than the item's start date.",
@@ -275,7 +298,7 @@ def update_transaction(
         if new_counter.id == new_primary.id:
             raise HTTPException(status_code=400, detail="Transfer items must be different")
 
-        if data.transaction_date < new_counter.start_date:
+        if new_tx_date < new_counter.start_date:
             raise HTTPException(
                 status_code=400,
                 detail="Transaction date cannot be earlier than the counterparty start date.",

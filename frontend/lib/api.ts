@@ -77,7 +77,7 @@ export type TransactionStatus = "CONFIRMED" | "UNCONFIRMED";
 export type TransactionOut = {
   id: number;
 
-  transaction_date: string; // YYYY-MM-DD
+  transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
   primary_item_id: number;
   counterparty_item_id: number | null;
 
@@ -98,7 +98,7 @@ export type TransactionOut = {
 };
 
 export type TransactionCreate = {
-  transaction_date: string; // YYYY-MM-DD
+  transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
   primary_item_id: number;
   counterparty_item_id?: number | null;
 

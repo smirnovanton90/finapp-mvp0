@@ -46,6 +46,10 @@ function toMonthKey(dateKey: string) {
   return dateKey.slice(0, 7);
 }
 
+function toTxDateKey(value: string) {
+  return value ? value.slice(0, 10) : "";
+}
+
 function formatMonthLabel(monthKey: string) {
   const [year, month] = monthKey.split("-");
   const monthIndex = Number.parseInt(month, 10) - 1;
@@ -152,7 +156,9 @@ function getRubEquivalentCents(
   ratesByDate: Record<string, FxRateOut[]>
 ) {
   if (!currencyCode || currencyCode === "RUB") return tx.amount_rub;
-  const rates = ratesByDate[tx.transaction_date];
+  const dateKey = toTxDateKey(tx.transaction_date);
+  if (!dateKey) return null;
+  const rates = ratesByDate[dateKey];
   if (!rates) return null;
   const rate = rates.find((rate) => rate.char_code === currencyCode)?.rate ?? null;
   if (!rate) return null;
@@ -185,7 +191,9 @@ function buildCategoryMatrix(
     const l3 = normalizeCategory(tx.category_l3);
     if (!tx.transaction_date) return;
 
-    const monthKey = toMonthKey(tx.transaction_date);
+    const dateKey = toTxDateKey(tx.transaction_date);
+    if (!dateKey) return;
+    const monthKey = toMonthKey(dateKey);
     monthSet.add(monthKey);
 
     const currencyCode = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
@@ -585,7 +593,8 @@ export default function IncomeExpenseDynamicsPage() {
   const allMonthKeys = useMemo(() => {
     const months = new Set<string>();
     actualTxs.forEach((tx) => {
-      if (tx.transaction_date) months.add(toMonthKey(tx.transaction_date));
+      const dateKey = toTxDateKey(tx.transaction_date);
+      if (dateKey) months.add(toMonthKey(dateKey));
     });
     return Array.from(months).sort();
   }, [actualTxs]);
@@ -598,8 +607,10 @@ export default function IncomeExpenseDynamicsPage() {
       const currencyCode =
         itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
       if (currencyCode === "RUB") return;
-      if (!fxRatesByDate[tx.transaction_date]) {
-        missingDates.add(tx.transaction_date);
+      const dateKey = toTxDateKey(tx.transaction_date);
+      if (!dateKey) return;
+      if (!fxRatesByDate[dateKey]) {
+        missingDates.add(dateKey);
       }
     });
 

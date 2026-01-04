@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from db import get_db
 from auth import get_current_user
@@ -56,6 +56,7 @@ def list_transactions(
         db.query(Transaction)
         .filter(Transaction.user_id == user.id)
         .filter(Transaction.deleted_at.is_(None))
+        .options(selectinload(Transaction.chain))
         .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
         .all()
     )
@@ -70,6 +71,7 @@ def list_deleted_transactions(
         db.query(Transaction)
         .filter(Transaction.user_id == user.id)
         .filter(Transaction.deleted_at.isnot(None))
+        .options(selectinload(Transaction.chain))
         .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
         .all()
     )

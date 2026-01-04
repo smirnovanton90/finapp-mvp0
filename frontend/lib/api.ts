@@ -72,7 +72,9 @@ export type FxRateOut = {
 
 export type TransactionDirection = "INCOME" | "EXPENSE" | "TRANSFER";
 export type TransactionType = "ACTUAL" | "PLANNED";
-export type TransactionStatus = "CONFIRMED" | "UNCONFIRMED";
+export type TransactionStatus = "CONFIRMED" | "UNCONFIRMED" | "REALIZED";
+export type TransactionChainFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "REGULAR";
+export type TransactionChainMonthlyRule = "FIRST_DAY" | "LAST_DAY";
 
 export type TransactionOut = {
   id: number;
@@ -80,6 +82,8 @@ export type TransactionOut = {
   transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
   primary_item_id: number;
   counterparty_item_id: number | null;
+  chain_id: number | null;
+  chain_name: string | null;
 
   amount_rub: number; // в копейках
   amount_counterparty: number | null;
@@ -94,6 +98,51 @@ export type TransactionOut = {
   description: string | null;
   comment: string | null;
 
+  created_at: string;
+};
+
+export type TransactionChainCreate = {
+  name: string;
+  start_date: string; // YYYY-MM-DD
+  end_date: string; // YYYY-MM-DD
+  frequency: TransactionChainFrequency;
+  weekly_day?: number | null;
+  monthly_day?: number | null;
+  monthly_rule?: TransactionChainMonthlyRule | null;
+  interval_days?: number | null;
+  primary_item_id: number;
+  counterparty_item_id?: number | null;
+  amount_rub: number;
+  amount_counterparty?: number | null;
+  direction: TransactionDirection;
+  category_l1: string;
+  category_l2: string;
+  category_l3: string;
+  description?: string | null;
+  comment?: string | null;
+};
+
+export type TransactionChainOut = {
+  id: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  frequency: TransactionChainFrequency;
+  weekly_day: number | null;
+  monthly_day: number | null;
+  monthly_rule: TransactionChainMonthlyRule | null;
+  interval_days: number | null;
+  primary_item_id: number;
+  counterparty_item_id: number | null;
+  amount_rub: number;
+  amount_counterparty: number | null;
+  direction: TransactionDirection;
+  category_l1: string;
+  category_l2: string;
+  category_l3: string;
+  description: string | null;
+  comment: string | null;
+  deleted_at: string | null;
   created_at: string;
 };
 
@@ -266,4 +315,28 @@ export async function updateTransactionStatus(
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
+}
+
+export async function fetchTransactionChains(): Promise<TransactionChainOut[]> {
+  const res = await authFetch(`${API_BASE}/transaction-chains`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createTransactionChain(
+  payload: TransactionChainCreate
+): Promise<TransactionChainOut> {
+  const res = await authFetch(`${API_BASE}/transaction-chains`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function deleteTransactionChain(id: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/transaction-chains/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
 }

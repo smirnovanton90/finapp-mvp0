@@ -33,6 +33,9 @@ class User(Base):
     items: Mapped[list["Item"]] = relationship(back_populates="user")
 
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
+    transaction_chains: Mapped[list["TransactionChain"]] = relationship(
+        back_populates="user"
+    )
 
 
 class Currency(Base):
@@ -146,6 +149,11 @@ class Transaction(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     user: Mapped["User"] = relationship(back_populates="transactions")
 
+    chain_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("transaction_chains.id"), nullable=True
+    )
+    chain: Mapped[Optional["TransactionChain"]] = relationship(back_populates="transactions")
+
     transaction_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
@@ -176,9 +184,89 @@ class Transaction(Base):
 
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    @property
+    def chain_name(self) -> str | None:
+        return self.chain.name if self.chain else None
+
     __table_args__ = (
         CheckConstraint("direction in ('INCOME','EXPENSE','TRANSFER')", name="ck_transactions_direction"),
         CheckConstraint("transaction_type in ('ACTUAL','PLANNED')", name="ck_transactions_type"),
-        CheckConstraint("status in ('CONFIRMED','UNCONFIRMED')", name="ck_transactions_status"),
+        CheckConstraint("status in ('CONFIRMED','UNCONFIRMED','REALIZED')", name="ck_transactions_status"),
         CheckConstraint("amount_rub >= 0", name="ck_transactions_amount_non_negative"),
+    )
+
+
+class TransactionChain(Base):
+    __tablename__ = "transaction_chains"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    user: Mapped["User"] = relationship(back_populates="transaction_chains")
+
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    frequency: Mapped[str] = mapped_column(String(20), nullable=False)
+    weekly_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    monthly_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    monthly_rule: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
+    primary_item: Mapped["Item"] = relationship(foreign_keys=[primary_item_id])
+
+    counterparty_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    counterparty_item: Mapped[Optional["Item"]] = relationship(
+        foreign_keys=[counterparty_item_id]
+    )
+
+    amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    amount_counterparty: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    category_l1: Mapped[str] = mapped_column(String(100), nullable=False)
+    category_l2: Mapped[str] = mapped_column(String(100), nullable=False)
+    category_l3: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    transactions: Mapped[list["Transaction"]] = relationship(back_populates="chain")
+
+    __table_args__ = (
+        CheckConstraint(
+            "frequency in ('DAILY','WEEKLY','MONTHLY','REGULAR')",
+            name="ck_transaction_chains_frequency",
+        ),
+        CheckConstraint(
+            "direction in ('INCOME','EXPENSE','TRANSFER')",
+            name="ck_transaction_chains_direction",
+        ),
+        CheckConstraint("amount_rub >= 0", name="ck_transaction_chains_amount_non_negative"),
+        CheckConstraint(
+            "(weekly_day is null) or (weekly_day between 0 and 6)",
+            name="ck_transaction_chains_weekly_day_range",
+        ),
+        CheckConstraint(
+            "(monthly_day is null) or (monthly_day between 1 and 31)",
+            name="ck_transaction_chains_monthly_day_range",
+        ),
+        CheckConstraint(
+            "(monthly_rule is null) or (monthly_rule in ('FIRST_DAY','LAST_DAY'))",
+            name="ck_transaction_chains_monthly_rule",
+        ),
+        CheckConstraint(
+            "(interval_days is null) or (interval_days >= 1)",
+            name="ck_transaction_chains_interval_days",
+        ),
     )

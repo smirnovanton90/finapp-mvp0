@@ -1,0 +1,267 @@
+from datetime import date, datetime, timedelta, timezone
+import calendar
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from auth import get_current_user
+from db import get_db
+from models import Item, Transaction, TransactionChain, User
+from schemas import TransactionChainCreate, TransactionChainOut
+
+router = APIRouter(prefix="/transaction-chains", tags=["transaction-chains"])
+
+
+def iter_daily(start: date, end: date):
+    current = start
+    while current <= end:
+        yield current
+        current += timedelta(days=1)
+
+
+def iter_weekly(start: date, end: date, weekday: int):
+    offset = (weekday - start.weekday()) % 7
+    current = start + timedelta(days=offset)
+    while current <= end:
+        yield current
+        current += timedelta(days=7)
+
+
+def iter_monthly(
+    start: date, end: date, monthly_day: int | None, monthly_rule: str | None
+):
+    current = date(start.year, start.month, 1)
+    while current <= end:
+        last_day = calendar.monthrange(current.year, current.month)[1]
+        if monthly_day is not None:
+            day = min(monthly_day, last_day)
+            candidate = date(current.year, current.month, day)
+        elif monthly_rule == "FIRST_DAY":
+            candidate = date(current.year, current.month, 1)
+        else:
+            candidate = date(current.year, current.month, last_day)
+
+        if start <= candidate <= end:
+            yield candidate
+
+        if current.month == 12:
+            current = date(current.year + 1, 1, 1)
+        else:
+            current = date(current.year, current.month + 1, 1)
+
+
+def iter_regular(start: date, end: date, interval_days: int):
+    current = start
+    step = timedelta(days=interval_days)
+    while current <= end:
+        yield current
+        current += step
+
+
+def build_schedule_dates(
+    start: date,
+    end: date,
+    frequency: str,
+    weekly_day: int | None,
+    monthly_day: int | None,
+    monthly_rule: str | None,
+    interval_days: int | None,
+) -> list[date]:
+    if frequency == "DAILY":
+        return list(iter_daily(start, end))
+    if frequency == "WEEKLY":
+        if weekly_day is None:
+            return []
+        return list(iter_weekly(start, end, weekly_day))
+    if frequency == "MONTHLY":
+        return list(iter_monthly(start, end, monthly_day, monthly_rule))
+    if frequency == "REGULAR":
+        if interval_days is None or interval_days < 1:
+            return []
+        return list(iter_regular(start, end, interval_days))
+    return []
+
+
+@router.get("", response_model=list[TransactionChainOut])
+def list_transaction_chains(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return (
+        db.query(TransactionChain)
+        .filter(TransactionChain.user_id == user.id)
+        .order_by(TransactionChain.created_at.desc(), TransactionChain.id.desc())
+        .all()
+    )
+
+
+@router.post("", response_model=TransactionChainOut)
+def create_transaction_chain(
+    data: TransactionChainCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    primary = (
+        db.query(Item)
+        .filter(Item.id == data.primary_item_id, Item.user_id == user.id)
+        .first()
+    )
+    if not primary:
+        raise HTTPException(status_code=400, detail="Invalid primary_item_id")
+
+    if data.start_date < primary.start_date:
+        raise HTTPException(
+            status_code=400,
+            detail="start_date cannot be earlier than the primary item start date",
+        )
+
+    counter = None
+    amount_counterparty = None
+
+    if data.direction == "TRANSFER":
+        if not data.counterparty_item_id:
+            raise HTTPException(
+                status_code=400,
+                detail="counterparty_item_id is required for TRANSFER",
+            )
+        counter = (
+            db.query(Item)
+            .filter(Item.id == data.counterparty_item_id, Item.user_id == user.id)
+            .first()
+        )
+        if not counter:
+            raise HTTPException(status_code=400, detail="Invalid counterparty_item_id")
+        if counter.id == primary.id:
+            raise HTTPException(status_code=400, detail="Transfer items must be different")
+        if data.start_date < counter.start_date:
+            raise HTTPException(
+                status_code=400,
+                detail="start_date cannot be earlier than the counterparty start date",
+            )
+
+        if primary.currency_code != counter.currency_code:
+            if data.amount_counterparty is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="amount_counterparty is required for cross-currency transfer",
+                )
+            amount_counterparty = data.amount_counterparty
+        else:
+            if data.amount_counterparty is None:
+                amount_counterparty = data.amount_rub
+            elif data.amount_counterparty != data.amount_rub:
+                raise HTTPException(
+                    status_code=400,
+                    detail="amount_counterparty must match amount_rub for same-currency transfer",
+                )
+            else:
+                amount_counterparty = data.amount_counterparty
+    else:
+        if data.counterparty_item_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="counterparty_item_id is only allowed for TRANSFER",
+            )
+
+    schedule_dates = build_schedule_dates(
+        data.start_date,
+        data.end_date,
+        data.frequency,
+        data.weekly_day,
+        data.monthly_day,
+        data.monthly_rule,
+        data.interval_days,
+    )
+    if not schedule_dates:
+        raise HTTPException(status_code=400, detail="No dates generated for chain")
+
+    chain = TransactionChain(
+        user_id=user.id,
+        name=data.name,
+        start_date=data.start_date,
+        end_date=data.end_date,
+        frequency=data.frequency,
+        weekly_day=data.weekly_day,
+        monthly_day=data.monthly_day,
+        monthly_rule=data.monthly_rule,
+        interval_days=data.interval_days,
+        primary_item_id=data.primary_item_id,
+        counterparty_item_id=data.counterparty_item_id
+        if data.direction == "TRANSFER"
+        else None,
+        amount_rub=data.amount_rub,
+        amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
+        direction=data.direction,
+        category_l1=data.category_l1,
+        category_l2=data.category_l2,
+        category_l3=data.category_l3,
+        description=data.description,
+        comment=data.comment,
+    )
+    db.add(chain)
+    db.flush()
+
+    txs = []
+    for tx_date in schedule_dates:
+        txs.append(
+            Transaction(
+                user_id=user.id,
+                chain_id=chain.id,
+                transaction_date=datetime.combine(tx_date, datetime.min.time()),
+                primary_item_id=data.primary_item_id,
+                counterparty_item_id=data.counterparty_item_id
+                if data.direction == "TRANSFER"
+                else None,
+                amount_rub=data.amount_rub,
+                amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
+                direction=data.direction,
+                transaction_type="PLANNED",
+                status="CONFIRMED",
+                category_l1=data.category_l1,
+                category_l2=data.category_l2,
+                category_l3=data.category_l3,
+                description=data.description,
+                comment=data.comment,
+            )
+        )
+
+    db.add_all(txs)
+    db.commit()
+    db.refresh(chain)
+    return chain
+
+
+@router.delete("/{chain_id}")
+def delete_transaction_chain(
+    chain_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    chain = (
+        db.query(TransactionChain)
+        .filter(TransactionChain.id == chain_id, TransactionChain.user_id == user.id)
+        .with_for_update()
+        .first()
+    )
+    if not chain:
+        raise HTTPException(status_code=404, detail="Transaction chain not found")
+
+    if chain.deleted_at is not None:
+        return {"ok": True}
+
+    now = datetime.now(timezone.utc)
+    chain.deleted_at = now
+
+    (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.chain_id == chain.id,
+            Transaction.transaction_type == "PLANNED",
+            Transaction.deleted_at.is_(None),
+        )
+        .update({Transaction.deleted_at: now}, synchronize_session=False)
+    )
+
+    db.commit()
+    return {"ok": True}

@@ -12,12 +12,14 @@ import { useSession } from "next-auth/react";
 import {
   ArrowRight,
   Ban,
+  BadgeCheck,
   ChevronDown,
   CheckCircle2,
   CircleDashed,
   MoreVertical,
   Pencil,
   Plus,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -449,6 +451,7 @@ function TransactionCardRow({
   isSelected,
   onToggleSelection,
   onCreateFrom,
+  onRealize,
   onEdit,
   onDelete,
   isDeleting,
@@ -469,6 +472,7 @@ function TransactionCardRow({
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
   onCreateFrom: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
+  onRealize: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
   onEdit: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
   onDelete: (id: number) => void;
   isDeleting: boolean;
@@ -479,6 +483,8 @@ function TransactionCardRow({
   const isExpense = tx.direction === "EXPENSE";
   const isIncome = tx.direction === "INCOME";
   const isPlanned = tx.transaction_type === "PLANNED";
+  const isConfirmed = tx.status === "CONFIRMED";
+  const isRealized = tx.status === "REALIZED";
 
   const amountValue = formatAmount(tx.amount_rub);
   const counterpartyAmountValue = formatAmount(tx.amount_counterparty ?? tx.amount_rub);
@@ -543,6 +549,7 @@ function TransactionCardRow({
   const textClass = tx.isDeleted ? "text-slate-500" : "text-slate-900";
 
   const mutedTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-600/80";
+  const chainTextClass = tx.isDeleted ? "text-slate-400" : "text-violet-700";
 
   const amountClass = tx.isDeleted
     ? "text-slate-500"
@@ -559,21 +566,34 @@ function TransactionCardRow({
   const isEditDisabled = tx.isDeleted || isDeleting;
   const isDeleteDisabled = tx.isDeleted || isDeleting;
   const isCreateDisabled = isDeleting;
+  const isRealizeDisabled = tx.isDeleted || isDeleting || isRealized;
+  const canRealize = isPlanned && !tx.isDeleted && !isRealized;
 
-  const isConfirmed = tx.status === "CONFIRMED";
-  const StatusIcon = isConfirmed ? CheckCircle2 : CircleDashed;
+  const StatusIcon = isRealized ? BadgeCheck : isConfirmed ? CheckCircle2 : CircleDashed;
   const statusBaseClass = tx.isDeleted
     ? "text-slate-400"
-    : isConfirmed
-      ? "text-emerald-600"
-      : "text-amber-600";
+    : isRealized
+      ? "text-sky-600"
+      : isConfirmed
+        ? "text-emerald-600"
+        : "text-amber-600";
   const statusHoverClass = tx.isDeleted
     ? ""
+    : isRealized
+      ? "hover:text-sky-700"
+      : isConfirmed
+        ? "hover:text-emerald-700"
+        : "hover:text-amber-700";
+
+  const statusHint = isRealized
+    ? "Реализована"
     : isConfirmed
-      ? "hover:text-emerald-700"
-      : "hover:text-amber-700";
+      ? "Подтверждена"
+      : "Неподтверждена. Нажмите, чтобы подтвердить";
 
   const commentText = tx.comment?.trim() ? tx.comment : "-";
+  const chainLabel =
+    isPlanned && tx.chain_name?.trim() ? tx.chain_name.trim() : null;
 
   const categoryLines = [
     tx.category_l1?.trim() ? tx.category_l1 : "-",
@@ -685,10 +705,19 @@ function TransactionCardRow({
             </div>
 
             <div className="min-w-[120px] flex-1">
-              <div
-                className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
-              >
-                {commentText}
+              <div className="space-y-1">
+                {chainLabel && (
+                  <div
+                    className={`text-xs font-semibold break-words whitespace-normal ${chainTextClass}`}
+                  >
+                    Цепочка: {chainLabel}
+                  </div>
+                )}
+                <div
+                  className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
+                >
+                  {commentText}
+                </div>
               </div>
             </div>
           </>
@@ -750,41 +779,66 @@ function TransactionCardRow({
             </div>
 
             <div className="min-w-[120px] flex-1">
-              <div
-                className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
-              >
-                {commentText}
+              <div className="space-y-1">
+                {chainLabel && (
+                  <div
+                    className={`text-xs font-semibold break-words whitespace-normal ${chainTextClass}`}
+                  >
+                    Цепочка: {chainLabel}
+                  </div>
+                )}
+                <div
+                  className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
+                >
+                  {commentText}
+                </div>
               </div>
             </div>
           </>
         )}
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           {tx.isDeleted && (
-            <span className="inline-flex items-center text-slate-400" title="Удалено">
+            <span className="inline-flex items-center text-slate-400" title="???????">
               <Ban className="h-4 w-4" />
             </span>
           )}
 
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className={`hover:bg-transparent ${statusBaseClass} ${statusHoverClass}`}
-            aria-label={
-              isConfirmed
-                ? "Подтвержденная транзакция"
-                : "Неподтвержденная транзакция. Нажмите для подтверждения"
-            }
-            title={
-              isConfirmed
-                ? "Подтвержденная"
-                : "Неподтвержденная. Нажмите, чтобы подтвердить"
-            }
-            onClick={() => onConfirm(tx)}
-            disabled={tx.isDeleted || isDeleting || isConfirming || isConfirmed}
-          >
-            <StatusIcon className="h-4 w-4" />
-          </Button>
+          <div className="flex flex-col items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className={`hover:bg-transparent ${statusBaseClass} ${statusHoverClass}`}
+              aria-label={statusHint}
+              title={statusHint}
+              onClick={() => onConfirm(tx)}
+              disabled={
+                tx.isDeleted ||
+                isDeleting ||
+                isConfirming ||
+                isConfirmed ||
+                isRealized
+              }
+            >
+              <StatusIcon className="h-4 w-4" />
+            </Button>
+            {canRealize && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
+                aria-label="???????????"
+                title="???????????"
+                onClick={(event) =>
+                  onRealize(tx, event.currentTarget as HTMLElement)
+                }
+                disabled={isRealizeDisabled}
+              >
+                <Sparkles className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -856,6 +910,7 @@ export function TransactionsView({
     "create" | "edit" | "bulk-edit" | null
   >(null);
   const [editingTx, setEditingTx] = useState<TransactionOut | null>(null);
+  const [realizeSource, setRealizeSource] = useState<TransactionCard | null>(null);
   const [bulkEditIds, setBulkEditIds] = useState<number[] | null>(null);
   const [bulkEditBaseline, setBulkEditBaseline] = useState<BulkEditBaseline | null>(
     null
@@ -1184,6 +1239,7 @@ export function TransactionsView({
   const isDialogOpen = dialogMode !== null;
   const isEditMode = dialogMode === "edit";
   const isBulkEdit = dialogMode === "bulk-edit";
+  const isRealizeMode = realizeSource !== null;
 
   const applyCategorySelection = (l1: string, l2: string, l3: string) => {
     setCat1(l1);
@@ -1218,6 +1274,7 @@ export function TransactionsView({
   const closeDialog = () => {
     setDialogMode(null);
     setEditingTx(null);
+    setRealizeSource(null);
     setFormError(null);
     setBulkEditIds(null);
     setBulkEditBaseline(null);
@@ -1230,6 +1287,7 @@ export function TransactionsView({
     lastActiveElementRef.current = null;
     setFormError(null);
     setEditingTx(null);
+    setRealizeSource(null);
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
@@ -1242,6 +1300,7 @@ export function TransactionsView({
       trigger ?? (document.activeElement as HTMLElement | null);
     setFormError(null);
     setEditingTx(tx);
+    setRealizeSource(null);
     setFormMode("STANDARD");
     setIsCategorySearchOpen(false);
     setBulkEditIds(null);
@@ -1276,6 +1335,7 @@ export function TransactionsView({
       trigger ?? (document.activeElement as HTMLElement | null);
     setFormError(null);
     setEditingTx(null);
+    setRealizeSource(null);
     setFormMode("STANDARD");
     setIsCategorySearchOpen(false);
     setBulkEditIds(null);
@@ -1285,6 +1345,43 @@ export function TransactionsView({
     setDate(getDateKey(tx.transaction_date));
     setDirection(tx.direction);
     setFormTransactionType(tx.transaction_type);
+    setPrimaryItemId(tx.primary_item_id);
+    setCounterpartyItemId(
+      tx.direction === "TRANSFER" ? tx.counterparty_item_id : null
+    );
+    setAmountStr(formatCentsForInput(tx.amount_rub));
+    setAmountCounterpartyStr(
+      tx.direction === "TRANSFER" && tx.amount_counterparty != null
+        ? formatCentsForInput(tx.amount_counterparty)
+        : ""
+    );
+    applyCategorySelection(
+      tx.category_l1 || "",
+      tx.category_l2 || "",
+      tx.category_l3 || ""
+    );
+    setDescription(tx.description ?? "");
+    setComment(tx.comment ?? "");
+  };
+
+  const openRealizeDialog = (
+    tx: TransactionCard,
+    trigger?: HTMLElement | null
+  ) => {
+    lastActiveElementRef.current =
+      trigger ?? (document.activeElement as HTMLElement | null);
+    setFormError(null);
+    setEditingTx(null);
+    setRealizeSource(tx);
+    setFormMode("STANDARD");
+    setIsCategorySearchOpen(false);
+    setBulkEditIds(null);
+    setBulkEditBaseline(null);
+    setIsBulkEditConfirmOpen(false);
+    setDialogMode("create");
+    setDate(getDateKey(tx.transaction_date));
+    setDirection(tx.direction);
+    setFormTransactionType("ACTUAL");
     setPrimaryItemId(tx.primary_item_id);
     setCounterpartyItemId(
       tx.direction === "TRANSFER" ? tx.counterparty_item_id : null
@@ -1332,6 +1429,7 @@ export function TransactionsView({
 
     setFormError(null);
     setEditingTx(null);
+    setRealizeSource(null);
     setFormMode("STANDARD");
     setIsCategorySearchOpen(false);
     setDialogMode("bulk-edit");
@@ -1350,7 +1448,7 @@ export function TransactionsView({
   };
 
   const handleConfirmStatus = async (tx: TransactionCard) => {
-    if (tx.status === "CONFIRMED") return;
+    if (tx.status === "CONFIRMED" || tx.status === "REALIZED") return;
     setConfirmingTxId(tx.id);
     setError(null);
     try {
@@ -1956,7 +2054,8 @@ export function TransactionsView({
         (showPlanned && tx.transaction_type === "PLANNED");
       if (!matchesType) return false;
       const matchesConfirmation =
-        (showConfirmed && tx.status === "CONFIRMED") ||
+        (showConfirmed &&
+          (tx.status === "CONFIRMED" || tx.status === "REALIZED")) ||
         (showUnconfirmed && tx.status === "UNCONFIRMED");
       if (!matchesConfirmation) return false;
       const txDateKey = getDateKey(tx.transaction_date);
@@ -2060,7 +2159,7 @@ export function TransactionsView({
           (tx) =>
             !tx.isDeleted &&
             selectedTxIds.has(tx.id) &&
-            tx.status !== "CONFIRMED"
+            tx.status === "UNCONFIRMED"
         )
         .map((tx) => tx.id),
     [sortedTxs, selectedTxIds]
@@ -2323,18 +2422,21 @@ export function TransactionsView({
                           }
                         }
 
-                        try {
-                          const transactionDate =
-                            isEditMode && editingTx
-                              ? mergeDateWithTime(date, editingTx.transaction_date)
-                              : date;
-                          const basePayload = {
-                            transaction_date: transactionDate,
-                            primary_item_id: primaryItemId,
-                            transaction_type: formTransactionType,
-                            description: description || null,
-                            comment: comment || null,
-                          };
+                      try {
+                        const payloadTransactionType = isRealizeMode
+                          ? "ACTUAL"
+                          : formTransactionType;
+                        const transactionDate =
+                          isEditMode && editingTx
+                            ? mergeDateWithTime(date, editingTx.transaction_date)
+                            : date;
+                        const basePayload = {
+                          transaction_date: transactionDate,
+                          primary_item_id: primaryItemId,
+                          transaction_type: payloadTransactionType,
+                          description: description || null,
+                          comment: comment || null,
+                        };
                           const expensePayload = {
                             ...basePayload,
                             counterparty_item_id: null,
@@ -2360,6 +2462,20 @@ export function TransactionsView({
                             createTransaction(expensePayload),
                             createTransaction(transferPayload),
                           ]);
+                          if (realizeSource) {
+                            try {
+                              await updateTransactionStatus(
+                                realizeSource.id,
+                                "REALIZED"
+                              );
+                            } catch (e: any) {
+                              setError(
+                                e?.message ??
+                                  "Не удалось отметить плановую транзакцию как реализованную."
+                              );
+                            }
+                            setRealizeSource(null);
+                          }
                           closeDialog();
                           await loadAll();
                         } catch (e: any) {
@@ -2423,6 +2539,9 @@ export function TransactionsView({
                       }
 
                       try {
+                        const payloadTransactionType = isRealizeMode
+                          ? "ACTUAL"
+                          : formTransactionType;
                         const transactionDate =
                           isEditMode && editingTx
                             ? mergeDateWithTime(date, editingTx.transaction_date)
@@ -2436,7 +2555,7 @@ export function TransactionsView({
                           amount_rub: cents,
                           amount_counterparty: isTransfer ? counterpartyCents : null,
                           direction,
-                          transaction_type: formTransactionType,
+                          transaction_type: payloadTransactionType,
                           category_l1: isTransfer ? "" : cat1,
                           category_l2: isTransfer ? "" : cat2,
                           category_l3: isTransfer ? "" : cat3,
@@ -2448,6 +2567,21 @@ export function TransactionsView({
                           await updateTransaction(editingTx.id, payload);
                         } else {
                           await createTransaction(payload);
+                        }
+
+                        if (!isEditMode && realizeSource) {
+                          try {
+                            await updateTransactionStatus(
+                              realizeSource.id,
+                              "REALIZED"
+                            );
+                          } catch (e: any) {
+                            setError(
+                              e?.message ??
+                                "Не удалось отметить плановую транзакцию как реализованную."
+                            );
+                          }
+                          setRealizeSource(null);
                         }
 
                         closeDialog();
@@ -2463,7 +2597,7 @@ export function TransactionsView({
                       </div>
                     )}
 
-                    {!isBulkEdit && (
+                    {!isBulkEdit && !isRealizeMode && (
                       <div className="grid gap-2" role="group" aria-label="Тип транзакции">
                         <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
                           <button
@@ -3651,6 +3785,7 @@ export function TransactionsView({
                   isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
                   onToggleSelection={toggleTxSelection}
                   onCreateFrom={openCreateFromDialog}
+                  onRealize={openRealizeDialog}
                   onEdit={openEditDialog}
                   onDelete={(id) => openDeleteDialog([id])}
                   isDeleting={isDeleting}

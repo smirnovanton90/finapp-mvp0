@@ -4,7 +4,11 @@ from typing import Literal
 
 ItemKind = Literal["ASSET", "LIABILITY"]
 InterestPayoutOrder = Literal["END_OF_TERM", "MONTHLY"]
-TransactionStatus = Literal["CONFIRMED", "UNCONFIRMED"]
+TransactionDirection = Literal["INCOME", "EXPENSE", "TRANSFER"]
+TransactionType = Literal["ACTUAL", "PLANNED"]
+TransactionStatus = Literal["CONFIRMED", "UNCONFIRMED", "REALIZED"]
+TransactionChainFrequency = Literal["DAILY", "WEEKLY", "MONTHLY", "REGULAR"]
+TransactionChainMonthlyRule = Literal["FIRST_DAY", "LAST_DAY"]
 
 
 class ItemCreate(BaseModel):
@@ -115,8 +119,8 @@ class TransactionBase(BaseModel):
     counterparty_item_id: int | None = None
     amount_rub: int = Field(ge=0)
     amount_counterparty: int | None = Field(default=None, ge=0)
-    direction: str
-    transaction_type: str
+    direction: TransactionDirection
+    transaction_type: TransactionType
     category_l1: str
     category_l2: str
     category_l3: str
@@ -130,12 +134,105 @@ class TransactionOut(TransactionBase):
     id: int
     status: TransactionStatus
     created_at: datetime
+    chain_id: int | None = None
+    chain_name: str | None = None
 
     class Config:
         from_attributes = True
 
 class TransactionStatusUpdate(BaseModel):
     status: TransactionStatus
+
+
+class TransactionChainCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    start_date: date
+    end_date: date
+    frequency: TransactionChainFrequency
+    weekly_day: int | None = Field(default=None, ge=0, le=6)
+    monthly_day: int | None = Field(default=None, ge=1, le=31)
+    monthly_rule: TransactionChainMonthlyRule | None = None
+    interval_days: int | None = Field(default=None, ge=1)
+    primary_item_id: int
+    counterparty_item_id: int | None = None
+    amount_rub: int = Field(ge=0)
+    amount_counterparty: int | None = Field(default=None, ge=0)
+    direction: TransactionDirection
+    category_l1: str
+    category_l2: str
+    category_l3: str
+    description: str | None = None
+    comment: str | None = None
+
+    @model_validator(mode="after")
+    def validate_frequency_details(self) -> "TransactionChainCreate":
+        if self.start_date > self.end_date:
+            raise ValueError("start_date must not be later than end_date")
+
+        if self.frequency == "WEEKLY":
+            if self.weekly_day is None:
+                raise ValueError("weekly_day is required for WEEKLY frequency")
+            if (
+                self.monthly_day is not None
+                or self.monthly_rule is not None
+                or self.interval_days is not None
+            ):
+                raise ValueError("monthly fields are not allowed for WEEKLY frequency")
+        elif self.frequency == "MONTHLY":
+            if self.weekly_day is not None:
+                raise ValueError("weekly_day is only allowed for WEEKLY frequency")
+            if self.monthly_day is not None and self.monthly_rule is not None:
+                raise ValueError("monthly_day and monthly_rule cannot be used together")
+            if self.monthly_day is None and self.monthly_rule is None:
+                raise ValueError("monthly_day or monthly_rule is required for MONTHLY frequency")
+            if self.interval_days is not None:
+                raise ValueError("interval_days is not allowed for MONTHLY frequency")
+        elif self.frequency == "REGULAR":
+            if self.interval_days is None:
+                raise ValueError("interval_days is required for REGULAR frequency")
+            if (
+                self.weekly_day is not None
+                or self.monthly_day is not None
+                or self.monthly_rule is not None
+            ):
+                raise ValueError("weekly/monthly fields are not allowed for REGULAR frequency")
+        else:
+            if (
+                self.weekly_day is not None
+                or self.monthly_day is not None
+                or self.monthly_rule is not None
+                or self.interval_days is not None
+            ):
+                raise ValueError("weekly/monthly/interval fields are not allowed for DAILY frequency")
+
+        return self
+
+
+class TransactionChainOut(BaseModel):
+    id: int
+    name: str
+    start_date: date
+    end_date: date
+    frequency: TransactionChainFrequency
+    weekly_day: int | None
+    monthly_day: int | None
+    monthly_rule: TransactionChainMonthlyRule | None
+    interval_days: int | None
+    primary_item_id: int
+    counterparty_item_id: int | None
+    amount_rub: int
+    amount_counterparty: int | None
+    direction: TransactionDirection
+    category_l1: str
+    category_l2: str
+    category_l3: str
+    description: str | None
+    comment: str | None
+    deleted_at: datetime | None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class CurrencyOut(BaseModel):

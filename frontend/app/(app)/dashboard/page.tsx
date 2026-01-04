@@ -20,9 +20,9 @@ type ChartPoint = {
   value: number;
 };
 
-type DailyPoint = {
+type DailyRow = {
   date: string;
-  valueCents: number;
+  totalRubCents: number | null;
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -63,6 +63,14 @@ function addDays(date: Date, days: number) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
 
+function addMonths(date: Date, months: number) {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
+  const lastDay = new Date(year, month + months + 1, 0).getDate();
+  return new Date(year, month + months, Math.min(day, lastDay));
+}
+
 function daysBetween(start: Date, end: Date) {
   const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
   const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
@@ -76,6 +84,12 @@ function buildLinePath(points: ChartPoint[]) {
     path.push(`L ${points[i].x} ${points[i].y}`);
   }
   return path.join(" ");
+}
+
+function buildAreaPath(points: ChartPoint[], baselineY: number) {
+  const line = buildLinePath(points);
+  if (!line) return "";
+  return `${line} L ${points[points.length - 1].x} ${baselineY} L ${points[0].x} ${baselineY} Z`;
 }
 
 function niceStep(range: number, targetTicks: number) {
@@ -103,16 +117,10 @@ function buildTicks(minValue: number, maxValue: number) {
 }
 
 function formatTick(value: number) {
-  const absValue = Math.abs(value);
-  if (absValue >= 1_000_000) {
-    const val = (value / 1_000_000).toFixed(absValue >= 10_000_000 ? 0 : 1);
-    return `${val}m`;
-  }
-  if (absValue >= 1_000) {
-    const val = (value / 1_000).toFixed(absValue >= 10_000 ? 0 : 1);
-    return `${val}k`;
-  }
-  return `${value}`;
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function formatRub(valueInCents: number) {
@@ -129,124 +137,109 @@ function formatDateLabel(dateKey: string) {
   return `${day}.${month}.${year}`;
 }
 
+function formatChartDate(date: Date) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear()).slice(-2);
+  return `${day}.${month}.${year}`;
+}
+
+function buildDateRange(startKey: string, endKey: string) {
+  const start = parseDateKey(startKey);
+  const end = parseDateKey(endKey);
+  const [rangeStart, rangeEnd] = start > end ? [end, start] : [start, end];
+
+  const dates: string[] = [];
+  for (
+    let current = rangeStart;
+    current <= rangeEnd;
+    current = addDays(current, 1)
+  ) {
+    dates.push(toDateKey(current));
+  }
+  return dates;
+}
+
+function toCbrDate(value: string) {
+  const parts = value.split("-");
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    if (year && month && day) return `${day}/${month}/${year}`;
+  }
+  return value;
+}
+
 function transferDelta(kind: ItemKind, isPrimary: boolean, amount: number) {
   if (kind === "LIABILITY") return isPrimary ? amount : -amount;
   return isPrimary ? -amount : amount;
 }
 
-function buildDailyNetAssets(items: ItemOut[], txs: TransactionOut[]): DailyPoint[] {
-  const actualTxs = txs.filter((tx) => tx.transaction_type === "ACTUAL");
-  if (items.length === 0 && actualTxs.length === 0) return [];
+function getItemStartKey(item: ItemOut) {
+  return item.start_date
+    ? toTxDateKey(item.start_date)
+    : toDateKey(new Date(item.created_at));
+}
 
-  const itemsByStartDate = new Map<string, ItemOut[]>();
-  const itemsByArchiveDate = new Map<string, ItemOut[]>();
-  const itemKindById = new Map<number, ItemKind>();
+function getRateForDate(
+  ratesByDate: Record<string, FxRateOut[]>,
+  dateKey: string,
+  currencyCode: string,
+  latestRatesByCurrency: Map<string, { dateKey: string; rate: number }>,
+  todayKey: string
+) {
+  if (currencyCode === "RUB") return 1;
+  if (dateKey > todayKey) {
+    return latestRatesByCurrency.get(currencyCode)?.rate ?? null;
+  }
+  const rates = ratesByDate[dateKey];
+  if (!rates) return null;
+  const match = rates.find((rate) => rate.char_code === currencyCode);
+  return match?.rate ?? null;
+}
 
-  const addItemByDate = (map: Map<string, ItemOut[]>, dateKey: string, item: ItemOut) => {
-    if (!map.has(dateKey)) map.set(dateKey, []);
-    map.get(dateKey)?.push(item);
-  };
-
-  items.forEach((item) => {
-    const createdDateKey = toDateKey(new Date(item.created_at));
-    addItemByDate(itemsByStartDate, createdDateKey, item);
-    itemKindById.set(item.id, item.kind);
-
-    if (item.archived_at) {
-      const archiveDate = new Date(item.archived_at);
-      const removeDate = new Date(
-        archiveDate.getFullYear(),
-        archiveDate.getMonth(),
-        archiveDate.getDate()
-      );
-      addItemByDate(itemsByArchiveDate, toDateKey(removeDate), item);
-    }
-  });
-
-  const deltasByDate = new Map<string, Map<number, number>>();
+function buildDeltasByDate(
+  txs: TransactionOut[],
+  selectedIds: Set<number>,
+  itemKindById: Map<number, ItemKind>
+) {
+  const map = new Map<string, Map<number, number>>();
   const addDelta = (dateKey: string, itemId: number, delta: number) => {
-    if (!deltasByDate.has(dateKey)) deltasByDate.set(dateKey, new Map());
-    const map = deltasByDate.get(dateKey);
-    if (!map) return;
-    map.set(itemId, (map.get(itemId) ?? 0) + delta);
+    if (!map.has(dateKey)) map.set(dateKey, new Map());
+    const bucket = map.get(dateKey);
+    if (!bucket) return;
+    bucket.set(itemId, (bucket.get(itemId) ?? 0) + delta);
   };
 
-  actualTxs.forEach((tx) => {
+  txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
-    let primaryDelta = 0;
-    if (tx.direction === "INCOME") primaryDelta = tx.amount_rub;
-    if (tx.direction === "EXPENSE") primaryDelta = -tx.amount_rub;
-    if (tx.direction === "TRANSFER") {
-      const primaryKind = itemKindById.get(tx.primary_item_id);
-      primaryDelta = primaryKind
-        ? transferDelta(primaryKind, true, tx.amount_rub)
-        : -tx.amount_rub;
+
+    const primarySelected = selectedIds.has(tx.primary_item_id);
+    const counterSelected = tx.counterparty_item_id
+      ? selectedIds.has(tx.counterparty_item_id)
+      : false;
+    if (!primarySelected && !counterSelected) return;
+
+    if (primarySelected) {
+      let delta = 0;
+      if (tx.direction === "INCOME") delta = tx.amount_rub;
+      if (tx.direction === "EXPENSE") delta = -tx.amount_rub;
+      if (tx.direction === "TRANSFER") {
+        const kind = itemKindById.get(tx.primary_item_id) ?? "ASSET";
+        delta = transferDelta(kind, true, tx.amount_rub);
+      }
+      addDelta(dateKey, tx.primary_item_id, delta);
     }
 
-    addDelta(dateKey, tx.primary_item_id, primaryDelta);
-
-    if (tx.direction === "TRANSFER" && tx.counterparty_item_id) {
-      const counterKind = itemKindById.get(tx.counterparty_item_id);
+    if (counterSelected && tx.direction === "TRANSFER" && tx.counterparty_item_id) {
+      const kind = itemKindById.get(tx.counterparty_item_id) ?? "ASSET";
       const counterAmount = tx.amount_counterparty ?? tx.amount_rub;
-      const counterDelta = counterKind
-        ? transferDelta(counterKind, false, counterAmount)
-        : counterAmount;
-      addDelta(dateKey, tx.counterparty_item_id, counterDelta);
+      const delta = transferDelta(kind, false, counterAmount);
+      addDelta(dateKey, tx.counterparty_item_id, delta);
     }
   });
 
-  const allDateKeys = [
-    ...itemsByStartDate.keys(),
-    ...deltasByDate.keys(),
-  ];
-  const startKey = allDateKeys.sort()[0];
-  const endKey = toDateKey(new Date());
-  let startDate = startKey ? parseDateKey(startKey) : new Date();
-  const endDate = parseDateKey(endKey);
-  if (startDate > endDate) startDate = endDate;
-
-  const itemBalances = new Map<number, number>();
-  let netAssetsCents = 0;
-  const daily: DailyPoint[] = [];
-  const sign = (kind: ItemKind) => (kind === "ASSET" ? 1 : -1);
-
-  for (
-    let current = startDate;
-    current <= endDate;
-    current = addDays(current, 1)
-  ) {
-    const dateKey = toDateKey(current);
-
-    const newItems = itemsByStartDate.get(dateKey) ?? [];
-    newItems.forEach((item) => {
-      itemBalances.set(item.id, item.initial_value_rub);
-      netAssetsCents += sign(item.kind) * item.initial_value_rub;
-    });
-
-    const dayDeltas = deltasByDate.get(dateKey);
-    if (dayDeltas) {
-      dayDeltas.forEach((delta, itemId) => {
-        const currentBalance = itemBalances.get(itemId) ?? 0;
-        itemBalances.set(itemId, currentBalance + delta);
-        const kind = itemKindById.get(itemId);
-        if (kind) netAssetsCents += sign(kind) * delta;
-      });
-    }
-
-    const archivedItems = itemsByArchiveDate.get(dateKey) ?? [];
-    archivedItems.forEach((item) => {
-      const currentBalance = itemBalances.get(item.id);
-      if (currentBalance !== undefined) {
-        netAssetsCents -= sign(item.kind) * currentBalance;
-        itemBalances.delete(item.id);
-      }
-    });
-
-    daily.push({ date: dateKey, valueCents: netAssetsCents });
-  }
-
-  return daily;
+  return map;
 }
 
 function buildDayMarks(
@@ -271,7 +264,7 @@ function buildDayMarks(
   for (let dayIndex = 0; dayIndex <= totalDays; dayIndex += step) {
     const date = addDays(startDate, dayIndex);
     marks.push({
-      label: String(date.getDate()),
+      label: formatChartDate(date),
       x: padding.left + (innerWidth * dayIndex) / totalDays,
       dayIndex,
     });
@@ -280,7 +273,7 @@ function buildDayMarks(
   if (marks[marks.length - 1]?.dayIndex !== totalDays) {
     const date = addDays(startDate, totalDays);
     marks.push({
-      label: String(date.getDate()),
+      label: formatChartDate(date),
       x: padding.left + innerWidth,
       dayIndex: totalDays,
     });
@@ -294,6 +287,9 @@ export default function DashboardPage() {
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
+  const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
+    {}
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -302,6 +298,10 @@ export default function DashboardPage() {
   const chartRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [chartSize, setChartSize] = useState({ width: 720, height: 280 });
+  const now = new Date();
+  const todayKey = toDateKey(now);
+  const rangeStartKey = toDateKey(addMonths(now, -1));
+  const rangeEndKey = toDateKey(addMonths(now, 1));
 
   useEffect(() => {
     if (!session) return;
@@ -340,6 +340,14 @@ export default function DashboardPage() {
     });
     return map;
   }, [fxRates]);
+
+  useEffect(() => {
+    if (fxRates.length === 0) return;
+    setFxRatesByDate((prev) => {
+      if (prev[todayKey]) return prev;
+      return { ...prev, [todayKey]: fxRates };
+    });
+  }, [fxRates, todayKey]);
 
   function getRubEquivalentCents(item: ItemOut): number | null {
     const rate = rateByCode[item.currency_code];
@@ -432,19 +440,194 @@ export default function DashboardPage() {
     };
   }, [activeItems, rateByCode]);
 
-  const dailySeries = useMemo(() => buildDailyNetAssets(items, txs), [items, txs]);
+  const chartItems = useMemo(() => activeItems, [activeItems]);
 
-  const chartData = useMemo(() => {
-    return dailySeries.map((point) => ({
-      date: point.date,
-      value: point.valueCents / 100,
-      valueCents: point.valueCents,
-    }));
-  }, [dailySeries]);
+  const dateKeys = useMemo(
+    () => buildDateRange(rangeStartKey, rangeEndKey),
+    [rangeEndKey, rangeStartKey]
+  );
+
+  const needsRates = useMemo(
+    () => chartItems.some((item) => item.currency_code !== "RUB"),
+    [chartItems]
+  );
+
+  const rateFetchKeys = useMemo(() => {
+    if (!needsRates || dateKeys.length === 0) return [];
+    const pastKeys = dateKeys.filter((dateKey) => dateKey <= todayKey);
+    if (pastKeys.length === 0) return [todayKey];
+    return Array.from(new Set(pastKeys));
+  }, [dateKeys, needsRates, todayKey]);
+
+  const latestRatesByCurrency = useMemo(() => {
+    const latest = new Map<string, { dateKey: string; rate: number }>();
+    Object.entries(fxRatesByDate).forEach(([dateKey, rates]) => {
+      if (dateKey > todayKey) return;
+      rates?.forEach((rate) => {
+        const prev = latest.get(rate.char_code);
+        if (!prev || dateKey > prev.dateKey) {
+          latest.set(rate.char_code, { dateKey, rate: rate.rate });
+        }
+      });
+    });
+    return latest;
+  }, [fxRatesByDate, todayKey]);
+
+  useEffect(() => {
+    if (!needsRates || rateFetchKeys.length === 0) return;
+
+    const missingDates = rateFetchKeys.filter(
+      (dateKey) => !fxRatesByDate[dateKey]
+    );
+    if (missingDates.length === 0) return;
+
+    let cancelled = false;
+    const loadRates = async () => {
+      const next: Record<string, FxRateOut[]> = {};
+
+      for (const dateKey of missingDates) {
+        try {
+          const rates = await fetchFxRates(toCbrDate(dateKey));
+          if (cancelled) return;
+          next[dateKey] = rates;
+        } catch (e) {
+          if (cancelled) return;
+          next[dateKey] = [];
+        }
+      }
+
+      if (!cancelled && Object.keys(next).length > 0) {
+        setFxRatesByDate((prev) => ({ ...prev, ...next }));
+      }
+    };
+
+    loadRates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fxRatesByDate, needsRates, rateFetchKeys]);
+
+  const dailyRows = useMemo<DailyRow[]>(() => {
+    if (!chartItems.length || !rangeStartKey || !rangeEndKey) return [];
+
+    const selectedIds = new Set(chartItems.map((item) => item.id));
+    const itemKindById = new Map(chartItems.map((item) => [item.id, item.kind]));
+    const itemStartKeyById = new Map(
+      chartItems.map((item) => [item.id, getItemStartKey(item)])
+    );
+    const itemsByStartDate = new Map<string, ItemOut[]>();
+    chartItems.forEach((item) => {
+      const startKey = itemStartKeyById.get(item.id);
+      if (!startKey) return;
+      if (!itemsByStartDate.has(startKey)) itemsByStartDate.set(startKey, []);
+      itemsByStartDate.get(startKey)?.push(item);
+    });
+
+    const deltasByDate = buildDeltasByDate(txs, selectedIds, itemKindById);
+    const startKeys = chartItems.map((item) => getItemStartKey(item)).sort();
+    const earliestStartKey = startKeys[0] ?? "";
+    const startKey =
+      earliestStartKey && earliestStartKey < rangeStartKey
+        ? earliestStartKey
+        : rangeStartKey;
+    let startDate = parseDateKey(startKey);
+    const endDate = parseDateKey(rangeEndKey);
+    if (startDate > endDate) startDate = endDate;
+
+    const balances = new Map<number, number>();
+    const rows: DailyRow[] = [];
+
+    for (
+      let current = startDate;
+      current <= endDate;
+      current = addDays(current, 1)
+    ) {
+      const dateKey = toDateKey(current);
+      const newItems = itemsByStartDate.get(dateKey) ?? [];
+      newItems.forEach((item) => {
+        balances.set(item.id, item.initial_value_rub);
+      });
+
+      const dayDeltas = deltasByDate.get(dateKey);
+      if (dayDeltas) {
+        dayDeltas.forEach((delta, itemId) => {
+          const currentBalance = balances.get(itemId) ?? 0;
+          balances.set(itemId, currentBalance + delta);
+        });
+      }
+
+      if (dateKey < rangeStartKey) continue;
+
+      const rateCache = new Map<string, number | null>();
+      const getRate = (currency: string) => {
+        if (!rateCache.has(currency)) {
+          rateCache.set(
+            currency,
+            getRateForDate(
+              fxRatesByDate,
+              dateKey,
+              currency,
+              latestRatesByCurrency,
+              todayKey
+            )
+          );
+        }
+        return rateCache.get(currency) ?? null;
+      };
+
+      let totalRubCents: number | null = 0;
+      let missingRate = false;
+
+      chartItems.forEach((item) => {
+        const startKeyForItem = itemStartKeyById.get(item.id) ?? "";
+        if (startKeyForItem && dateKey < startKeyForItem) {
+          return;
+        }
+        const valueCents = balances.get(item.id) ?? item.initial_value_rub;
+
+        const rate = getRate(item.currency_code);
+        if (rate === null) {
+          if (item.currency_code !== "RUB") missingRate = true;
+        } else {
+          const rubValueCents = Math.round((valueCents / 100) * rate * 100);
+          const signedRub = item.kind === "LIABILITY" ? -rubValueCents : rubValueCents;
+          if (totalRubCents !== null) totalRubCents += signedRub;
+        }
+      });
+
+      if (missingRate) totalRubCents = null;
+
+      rows.push({
+        date: dateKey,
+        totalRubCents,
+      });
+    }
+
+    return rows;
+  }, [
+    chartItems,
+    fxRatesByDate,
+    latestRatesByCurrency,
+    rangeEndKey,
+    rangeStartKey,
+    todayKey,
+    txs,
+  ]);
+
+  const chartData = useMemo(
+    () =>
+      dailyRows.map((row) => ({
+        date: row.date,
+        value: (row.totalRubCents ?? 0) / 100,
+        totalRubCents: row.totalRubCents,
+      })),
+    [dailyRows]
+  );
 
   const width = chartSize.width;
   const height = chartSize.height;
-  const padding = { top: 24, right: 24, bottom: 44, left: 52 };
+  const padding = { top: 24, right: 0, bottom: 44, left: 52 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
 
@@ -466,20 +649,31 @@ export default function DashboardPage() {
     return { x, y, value: point.value };
   });
 
-  const linePath = buildLinePath(points);
   const baselineValue = chartMin;
   const baselineRatio = (baselineValue - chartMin) / (chartMax - chartMin || 1);
   const baselineY = padding.top + innerHeight - innerHeight * baselineRatio;
-  const areaPath = linePath
-    ? `${linePath} L ${points[points.length - 1].x} ${baselineY} L ${points[0].x} ${baselineY} Z`
-    : "";
+  const futureStartIndex = chartData.findIndex((point) => point.date > todayKey);
+  const pastPoints =
+    futureStartIndex === -1 ? points : points.slice(0, Math.max(futureStartIndex, 0));
+  const futurePoints =
+    futureStartIndex === -1 ? [] : points.slice(Math.max(futureStartIndex - 1, 0));
+  const pastLinePath = buildLinePath(pastPoints);
+  const futureLinePath = buildLinePath(futurePoints);
+  const pastAreaPath = buildAreaPath(pastPoints, baselineY);
+  const futureAreaPath = buildAreaPath(futurePoints, baselineY);
 
   const hoverPoint = hoverIndex !== null ? points[hoverIndex] : null;
   const hoverData = hoverIndex !== null ? chartData[hoverIndex] : null;
+  const hoverIsFuture = hoverData ? hoverData.date > todayKey : false;
 
   const dayMarks =
     chartData.length >= 2
-      ? buildDayMarks(chartData[0].date, chartData[chartData.length - 1].date, width, padding)
+      ? buildDayMarks(
+          chartData[0].date,
+          chartData[chartData.length - 1].date,
+          width,
+          padding
+        )
       : [];
 
   useEffect(() => {
@@ -663,7 +857,9 @@ export default function DashboardPage() {
                             {formatDateLabel(hoverData.date)}
                           </div>
                           <div className="text-sm font-semibold">
-                            {formatRub(hoverData.valueCents)}
+                            {hoverData.totalRubCents === null
+                              ? "-"
+                              : formatRub(hoverData.totalRubCents)}
                           </div>
                         </div>
                       )}
@@ -677,15 +873,25 @@ export default function DashboardPage() {
                         onMouseLeave={() => setHoverIndex(null)}
                       >
                         <defs>
-                          <linearGradient id="netArea" x1="0" y1="0" x2="0" y2="1">
+                          <linearGradient id="assetsArea" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#8D63FF" stopOpacity="0.35" />
                             <stop offset="100%" stopColor="#8D63FF" stopOpacity="0" />
                           </linearGradient>
-                          <linearGradient id="netLine" x1="0" y1="0" x2="1" y2="0">
+                          <linearGradient
+                            id="assetsAreaFuture"
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop offset="0%" stopColor="#F59E0B" stopOpacity="0.35" />
+                            <stop offset="100%" stopColor="#F59E0B" stopOpacity="0" />
+                          </linearGradient>
+                          <linearGradient id="assetsLine" x1="0" y1="0" x2="1" y2="0">
                             <stop offset="0%" stopColor="#7F5CFF" />
                             <stop offset="100%" stopColor="#A089FF" />
                           </linearGradient>
-                          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                          <filter id="assetsGlow" x="-50%" y="-50%" width="200%" height="200%">
                             <feDropShadow
                               dx="0"
                               dy="10"
@@ -724,15 +930,27 @@ export default function DashboardPage() {
                           })}
                         </g>
 
-                        {areaPath && <path d={areaPath} fill="url(#netArea)" />}
-                        {linePath && (
+                        {pastAreaPath && <path d={pastAreaPath} fill="url(#assetsArea)" />}
+                        {futureAreaPath && (
+                          <path d={futureAreaPath} fill="url(#assetsAreaFuture)" />
+                        )}
+                        {pastLinePath && (
                           <path
-                            d={linePath}
+                            d={pastLinePath}
                             fill="none"
-                            stroke="url(#netLine)"
+                            stroke="url(#assetsLine)"
                             strokeWidth="3"
                             strokeLinecap="round"
-                            filter="url(#glow)"
+                            filter="url(#assetsGlow)"
+                          />
+                        )}
+                        {futureLinePath && (
+                          <path
+                            d={futureLinePath}
+                            fill="none"
+                            stroke="#F59E0B"
+                            strokeWidth="3"
+                            strokeLinecap="round"
                           />
                         )}
                         {hoverPoint && (
@@ -742,32 +960,40 @@ export default function DashboardPage() {
                               x2={hoverPoint.x}
                               y1={padding.top}
                               y2={padding.top + innerHeight}
-                              stroke="#CFC5FF"
+                              stroke={hoverIsFuture ? "#FDE68A" : "#CFC5FF"}
                               strokeDasharray="4 6"
                             />
                             <circle
                               cx={hoverPoint.x}
                               cy={hoverPoint.y}
                               r="6"
-                              fill="#7F5CFF"
-                              stroke="#F3EDFF"
+                              fill={hoverIsFuture ? "#F59E0B" : "#7F5CFF"}
+                              stroke={hoverIsFuture ? "#FEF3C7" : "#F3EDFF"}
                               strokeWidth="4"
                             />
                           </>
                         )}
-                        {dayMarks.map((mark) => (
-                          <text
-                            key={`${mark.label}-${mark.x}`}
-                            x={mark.x}
-                            y={height - 12}
-                            textAnchor="middle"
-                            fontSize="12"
-                            fill="#6F67B3"
-                            fontWeight={500}
-                          >
-                            {mark.label}
-                          </text>
-                        ))}
+                        {dayMarks.map((mark, index) => {
+                          const anchor =
+                            index === 0
+                              ? "start"
+                              : index === dayMarks.length - 1
+                              ? "end"
+                              : "middle";
+                          return (
+                            <text
+                              key={`${mark.label}-${mark.x}`}
+                              x={mark.x}
+                              y={height - 12}
+                              textAnchor={anchor}
+                              fontSize="12"
+                              fill="#6F67B3"
+                              fontWeight={500}
+                            >
+                              {mark.label}
+                            </text>
+                          );
+                        })}
                       </svg>
                     </div>
                   </>

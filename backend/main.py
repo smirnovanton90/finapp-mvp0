@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, date as date_type
 import requests
 from sqlalchemy.orm import Session
 from sqlalchemy import select, delete, func
+from sqlalchemy.exc import SQLAlchemyError
 
 from db import get_db
 from models import Item, User, Currency, FxRate, Bank
@@ -136,27 +137,45 @@ def _get_fx_rates(date_req: str | None, db: Session) -> list[FxRateOut]:
     cache_key = date_req or "latest"
     cached = _FX_CACHE.get(cache_key)
     now = datetime.utcnow()
+    today = now.date()
 
     if cached and (now - cached[0]) < _FX_CACHE_TTL:
         return cached[1]
 
     parsed_date = _parse_date_req(date_req)
-    if parsed_date:
-        stored = _load_fx_rates(parsed_date, db)
+    requested_date = parsed_date if parsed_date and parsed_date <= today else None
+    stored: list[FxRateOut] | None = None
+    try:
+        if requested_date:
+            stored = _load_fx_rates(requested_date, db)
+        else:
+            latest_date = db.execute(
+                select(func.max(FxRate.rate_date)).where(FxRate.rate_date <= today)
+            ).scalar()
+            if latest_date:
+                stored = _load_fx_rates(latest_date, db)
         if stored:
             _FX_CACHE[cache_key] = (now, stored)
             return stored
-    else:
-        latest_date = db.execute(select(func.max(FxRate.rate_date))).scalar()
-        if latest_date:
-            stored = _load_fx_rates(latest_date, db)
-            if stored:
-                _FX_CACHE[cache_key] = (now, stored)
-                return stored
+    except SQLAlchemyError:
+        stored = None
 
-    fetched_date, rates = _fetch_cbr_rates(date_req)
-    store_date = parsed_date or fetched_date
-    _store_fx_rates(store_date, rates, db)
+    try:
+        fetched_date, rates = _fetch_cbr_rates(date_req if requested_date else None)
+    except requests.RequestException:
+        if cached:
+            return cached[1]
+        if stored:
+            return stored
+        raise
+
+    store_date = requested_date or fetched_date
+    if store_date > today:
+        store_date = today
+    try:
+        _store_fx_rates(store_date, rates, db)
+    except SQLAlchemyError:
+        db.rollback()
     _FX_CACHE[cache_key] = (now, rates)
     return rates
 

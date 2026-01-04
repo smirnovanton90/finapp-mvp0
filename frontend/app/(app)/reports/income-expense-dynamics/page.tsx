@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { CATEGORY_ICON_BY_L1, CATEGORY_ICON_FALLBACK } from "@/lib/category-icons";
 import { cn } from "@/lib/utils";
 
 type CategoryRow = {
@@ -393,6 +394,10 @@ function CategorySectionBody({
                 ? expandedL2.has(l2Key)
                 : true;
           const indentClass = row.level === 1 ? "" : row.level === 2 ? "pl-4" : "pl-8";
+          const CategoryIcon =
+            row.level === 1
+              ? CATEGORY_ICON_BY_L1[row.l1] ?? CATEGORY_ICON_FALLBACK
+              : null;
           return (
             <TableRow key={`${sectionId}:${row.id}`}>
               <TableCell
@@ -422,6 +427,9 @@ function CategorySectionBody({
                   ) : (
                     <span className="inline-flex h-5 w-5" aria-hidden="true" />
                   )}
+                  {CategoryIcon ? (
+                    <CategoryIcon className="h-4 w-4 text-slate-500" />
+                  ) : null}
                   <span>{row.label}</span>
                 </div>
               </TableCell>

@@ -5,47 +5,19 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
   type FormEvent,
 } from "react";
 import { useSession } from "next-auth/react";
 import {
   ArrowRight,
   Ban,
-  Briefcase,
-  Building,
-  Bus,
-  Car,
   ChevronDown,
   CheckCircle2,
   CircleDashed,
-  Coins,
-  CreditCard,
-  Film,
-  Gamepad2,
-  Gift,
-  Hammer,
-  Heart,
-  HeartPulse,
-  Home,
-  Laptop,
   MoreVertical,
-  PawPrint,
   Pencil,
-  Percent,
-  PiggyBank,
-  Plane,
   Plus,
-  Receipt,
-  Repeat,
-  Scissors,
-  Shield,
-  Shirt,
-  TrendingUp,
   Trash2,
-  Utensils,
-  Wifi,
-  Wrench,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -104,6 +76,10 @@ import {
   DEFAULT_CATEGORIES,
   readStoredCategories,
 } from "@/lib/categories";
+import {
+  CATEGORY_ICON_BY_L1,
+  CATEGORY_ICON_FALLBACK,
+} from "@/lib/category-icons";
 
 type TransactionsViewMode = "actual" | "planning";
 
@@ -132,38 +108,6 @@ type CategoryPathOption = {
   label: string;
   searchKey: string;
 };
-
-const CATEGORY_ICON_BY_L1: Record<string, ComponentType<{ className?: string; strokeWidth?: number }>> =
-  {
-    "Доход от основного места работы": Briefcase,
-    "Доход от подработок": Hammer,
-    "Пассивный доход": TrendingUp,
-    "Бонусы и Cash-back": Percent,
-    "Прочие доходы": Coins,
-    "Автомобиль": Car,
-    "Недвижимость": Building,
-    "Услуги": Wrench,
-    "Благотворительность": Heart,
-    "Хобби и увлечения": Gamepad2,
-    "Интернет и связь": Wifi,
-    "Домашние животные": PawPrint,
-    "Кредиты": CreditCard,
-    "Здоровье": HeartPulse,
-    "Налоги": Receipt,
-    "Одежда и обувь": Shirt,
-    "Отдых и развлечения": Film,
-    "Отпуска": Plane,
-    "Вредные привычки": Ban,
-    "Питание": Utensils,
-    "Подписки": Repeat,
-    "Подарки": Gift,
-    "Страхование": Shield,
-    "Транспорт": Bus,
-    "Уход за собой": Scissors,
-    "Хозяйственные расходы": Home,
-    "Электроника": Laptop,
-    "Прочие расходы": MoreVertical,
-  };
 
 function formatAmount(valueInCents: number) {
   const hasCents = Math.abs(valueInCents) % 100 !== 0;
@@ -607,7 +551,7 @@ function TransactionCardRow({
     tx.category_l3?.trim() ? tx.category_l3 : "-",
   ];
   const categoryKey = tx.category_l1?.trim() ?? "";
-  const CategoryIcon = CATEGORY_ICON_BY_L1[categoryKey] ?? PiggyBank;
+  const CategoryIcon = CATEGORY_ICON_BY_L1[categoryKey] ?? CATEGORY_ICON_FALLBACK;
 
   const checkboxDisabled = tx.isDeleted || isDeleting;
 

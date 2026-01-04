@@ -478,6 +478,7 @@ function TransactionCardRow({
   const isTransfer = tx.direction === "TRANSFER";
   const isExpense = tx.direction === "EXPENSE";
   const isIncome = tx.direction === "INCOME";
+  const isPlanned = tx.transaction_type === "PLANNED";
 
   const amountValue = formatAmount(tx.amount_rub);
   const counterpartyAmountValue = formatAmount(tx.amount_counterparty ?? tx.amount_rub);
@@ -515,13 +516,29 @@ function TransactionCardRow({
       : null;
   const timeValue = formatTime(tx.transaction_date);
 
+  const actualTone = isExpense
+    ? "bg-[linear-gradient(270deg,_#FEF2F2_0%,_#FCA5A5_100%)]"
+    : isIncome
+      ? "bg-[linear-gradient(270deg,_#F4F2E9_0%,_#BDDFB2_100%)]"
+      : "bg-[linear-gradient(270deg,_#F5F3FF_0%,_#C4B5FD_100%)]";
+  const plannedTone = isExpense
+    ? "bg-[linear-gradient(270deg,_#FFF7F7_0%,_#FEE2E2_100%)]"
+    : isIncome
+      ? "bg-[linear-gradient(270deg,_#F9F7F0_0%,_#DDEFD7_100%)]"
+      : "bg-[linear-gradient(270deg,_#FBFAFF_0%,_#DDD6FE_100%)]";
   const cardTone = tx.isDeleted
     ? "bg-slate-100"
-    : isExpense
-      ? "bg-[linear-gradient(270deg,_#FEF2F2_0%,_#FCA5A5_100%)]"
-      : isIncome
-        ? "bg-[linear-gradient(270deg,_#F4F2E9_0%,_#BDDFB2_100%)]"
-        : "bg-[linear-gradient(270deg,_#F5F3FF_0%,_#C4B5FD_100%)]";
+    : isPlanned
+      ? plannedTone
+      : actualTone;
+  const plannedBorderClass =
+    !tx.isDeleted && isPlanned
+      ? isExpense
+        ? "border-2 border-dashed border-rose-300"
+        : isIncome
+          ? "border-2 border-dashed border-emerald-500"
+          : "border-2 border-dashed border-violet-300"
+      : "";
 
   const textClass = tx.isDeleted ? "text-slate-500" : "text-slate-900";
 
@@ -573,7 +590,7 @@ function TransactionCardRow({
 
   return (
     <div
-      className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardTone}`}
+      className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardTone} ${plannedBorderClass}`}
     >
       <div className="flex flex-1 flex-wrap items-center gap-3 px-3 py-3 lg:grid lg:grid-cols-[auto_4.5rem_8.5rem_6rem_8.5rem_minmax(10rem,1fr)_auto] lg:items-center lg:gap-2">
         <input
@@ -824,6 +841,8 @@ export function TransactionsView({
 }) {
   const { data: session } = useSession();
   const isPlanningView = view === "planning";
+  const defaultShowActual = !isPlanningView;
+  const defaultShowPlanned = isPlanningView;
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [banks, setBanks] = useState<BankOut[]>([]);
@@ -847,6 +866,11 @@ export function TransactionsView({
   const [showDeleted, setShowDeleted] = useState(false);
   const [showConfirmed, setShowConfirmed] = useState(true);
   const [showUnconfirmed, setShowUnconfirmed] = useState(true);
+  const [formTransactionType, setFormTransactionType] = useState<
+    TransactionOut["transaction_type"]
+  >(() => (defaultShowActual ? "ACTUAL" : "PLANNED"));
+  const [showActual, setShowActual] = useState(defaultShowActual);
+  const [showPlanned, setShowPlanned] = useState(defaultShowPlanned);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [commentFilter, setCommentFilter] = useState("");
@@ -1109,6 +1133,8 @@ export function TransactionsView({
 
   const isTransfer = direction === "TRANSFER";
   const isLoanRepayment = formMode === "LOAN_REPAYMENT";
+  const isActualTransaction = formTransactionType === "ACTUAL";
+  const isPlannedTransaction = formTransactionType === "PLANNED";
   const showCounterpartySelect = isTransfer || isLoanRepayment;
   const primarySelectItems = isLoanRepayment ? assetItems : items;
   const counterpartySelectItems = isLoanRepayment ? liabilityItems : items;
@@ -1170,6 +1196,7 @@ export function TransactionsView({
     setDate(new Date().toISOString().slice(0, 10));
     setDirection("EXPENSE");
     setFormMode("STANDARD");
+    setFormTransactionType(defaultShowActual ? "ACTUAL" : "PLANNED");
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
     setAmountStr("");
@@ -1223,6 +1250,7 @@ export function TransactionsView({
     setDialogMode("edit");
     setDate(getDateKey(tx.transaction_date));
     setDirection(tx.direction);
+    setFormTransactionType(tx.transaction_type);
     setPrimaryItemId(tx.primary_item_id);
     setCounterpartyItemId(tx.counterparty_item_id);
     setAmountStr(formatCentsForInput(tx.amount_rub));
@@ -1256,6 +1284,7 @@ export function TransactionsView({
     setDialogMode("create");
     setDate(getDateKey(tx.transaction_date));
     setDirection(tx.direction);
+    setFormTransactionType(tx.transaction_type);
     setPrimaryItemId(tx.primary_item_id);
     setCounterpartyItemId(
       tx.direction === "TRANSFER" ? tx.counterparty_item_id : null
@@ -1909,16 +1938,8 @@ export function TransactionsView({
   }, [txs]);
 
   const filteredTxs = useMemo(() => {
-    const active = showActive
-      ? isPlanningView
-        ? txs.filter((tx) => tx.transaction_type === "PLANNED")
-        : txs
-      : [];
-    const deleted = showDeleted
-      ? isPlanningView
-        ? deletedTxs.filter((tx) => tx.transaction_type === "PLANNED")
-        : deletedTxs
-      : [];
+    const active = showActive ? txs : [];
+    const deleted = showDeleted ? deletedTxs : [];
 
     const combined = [
       ...active.map((tx) => ({ ...tx })),
@@ -1930,6 +1951,10 @@ export function TransactionsView({
     const maxAmount = parseAmountFilter(amountTo);
 
     return combined.filter((tx) => {
+      const matchesType =
+        (showActual && tx.transaction_type === "ACTUAL") ||
+        (showPlanned && tx.transaction_type === "PLANNED");
+      if (!matchesType) return false;
       const matchesConfirmation =
         (showConfirmed && tx.status === "CONFIRMED") ||
         (showUnconfirmed && tx.status === "UNCONFIRMED");
@@ -1990,11 +2015,12 @@ export function TransactionsView({
   }, [
     txs,
     deletedTxs,
-    isPlanningView,
     showActive,
     showDeleted,
     showConfirmed,
     showUnconfirmed,
+    showActual,
+    showPlanned,
     dateFrom,
     dateTo,
     commentFilter,
@@ -2154,7 +2180,6 @@ export function TransactionsView({
 
   const deleteCount = deleteIds?.length ?? 0;
   const isBulkDelete = deleteCount > 1;
-  const txType = isPlanningView ? "PLANNED" : "ACTUAL";
   const isIncomeSelected = selectedDirections.has("INCOME");
   const isExpenseSelected = selectedDirections.has("EXPENSE");
   const isTransferSelected = selectedDirections.has("TRANSFER");
@@ -2288,7 +2313,7 @@ export function TransactionsView({
                           );
                           return;
                         }
-                        if (txType === "PLANNED") {
+                        if (isPlannedTransaction) {
                           const today = new Date().toISOString().slice(0, 10);
                           if (date < today) {
                             setFormError(
@@ -2306,7 +2331,7 @@ export function TransactionsView({
                           const basePayload = {
                             transaction_date: transactionDate,
                             primary_item_id: primaryItemId,
-                            transaction_type: editingTx?.transaction_type ?? txType,
+                            transaction_type: formTransactionType,
                             description: description || null,
                             comment: comment || null,
                           };
@@ -2387,7 +2412,7 @@ export function TransactionsView({
                         }
                         counterpartyCents = counterCents;
                       }
-                      if (txType === "PLANNED") {
+                      if (isPlannedTransaction) {
                         const today = new Date().toISOString().slice(0, 10);
                         if (date < today) {
                           setFormError(
@@ -2411,7 +2436,7 @@ export function TransactionsView({
                           amount_rub: cents,
                           amount_counterparty: isTransfer ? counterpartyCents : null,
                           direction,
-                          transaction_type: editingTx?.transaction_type ?? txType,
+                          transaction_type: formTransactionType,
                           category_l1: isTransfer ? "" : cat1,
                           category_l2: isTransfer ? "" : cat2,
                           category_l3: isTransfer ? "" : cat3,
@@ -2435,6 +2460,37 @@ export function TransactionsView({
                     {formError && (
                       <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
                         {formError}
+                      </div>
+                    )}
+
+                    {!isBulkEdit && (
+                      <div className="grid gap-2" role="group" aria-label="Тип транзакции">
+                        <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+                          <button
+                            type="button"
+                            aria-pressed={isActualTransaction}
+                            onClick={() => setFormTransactionType("ACTUAL")}
+                            className={`${segmentedButtonBase} ${
+                              isActualTransaction
+                                ? "bg-violet-50 text-violet-700"
+                                : "bg-white text-muted-foreground hover:bg-white"
+                            }`}
+                          >
+                            Фактическая
+                          </button>
+                          <button
+                            type="button"
+                            aria-pressed={isPlannedTransaction}
+                            onClick={() => setFormTransactionType("PLANNED")}
+                            className={`${segmentedButtonBase} ${
+                              isPlannedTransaction
+                                ? "bg-amber-50 text-amber-700"
+                                : "bg-white text-muted-foreground hover:bg-white"
+                            }`}
+                          >
+                            Плановая
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -3401,11 +3457,59 @@ export function TransactionsView({
                     onClick={() => setShowUnconfirmed((prev) => !prev)}
                     className={`${segmentedButtonBase} ${
                       showUnconfirmed
-                        ? "bg-amber-50 text-amber-700"
+                        ? "bg-red-50 text-red-700"
                         : "bg-white text-muted-foreground hover:bg-white"
                     }`}
                   >
                     Неподтвержденные
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-semibold text-foreground">
+                    Тип транзакции
+                  </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={() => {
+                      setShowActual(defaultShowActual);
+                      setShowPlanned(defaultShowPlanned);
+                    }}
+                    disabled={
+                      showActual === defaultShowActual &&
+                      showPlanned === defaultShowPlanned
+                    }
+                  >
+                    Сбросить
+                  </button>
+                </div>
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                  <button
+                    type="button"
+                    aria-pressed={showActual}
+                    onClick={() => setShowActual((prev) => !prev)}
+                    className={`${segmentedButtonBase} ${
+                      showActual
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Фактическая
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={showPlanned}
+                    onClick={() => setShowPlanned((prev) => !prev)}
+                    className={`${segmentedButtonBase} ${
+                      showPlanned
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Плановая
                   </button>
                 </div>
               </div>

@@ -187,6 +187,7 @@ def health():
 @app.get("/items", response_model=list[ItemOut])
 def list_items(
     include_archived: bool = False,
+    include_closed: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -194,6 +195,8 @@ def list_items(
 
     if not include_archived:
         stmt = stmt.where(Item.archived_at.is_(None))
+    if not include_closed:
+        stmt = stmt.where(Item.closed_at.is_(None))
 
     stmt = stmt.order_by(Item.created_at.desc())
     return list(db.execute(stmt).scalars())
@@ -323,6 +326,27 @@ def archive_item(
 
     if item.archived_at is None:
         item.archived_at = func.now()
+
+    db.commit()
+    db.refresh(item)
+    return item
+
+@app.patch("/items/{item_id}/close", response_model=ItemOut)
+def close_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if item.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot close deleted item")
+    if item.current_value_rub != 0:
+        raise HTTPException(status_code=400, detail="Item balance must be zero to close")
+
+    if item.closed_at is None:
+        item.closed_at = func.now()
 
     db.commit()
     db.refresh(item)

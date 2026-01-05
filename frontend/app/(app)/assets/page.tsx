@@ -2,6 +2,7 @@
 
 import {
   AlertCircle,
+  Archive,
   Banknote,
   BarChart3,
   Calculator,
@@ -10,6 +11,7 @@ import {
   CreditCard,
   Home,
   Landmark,
+  MoreVertical,
   Package,
   PiggyBank,
   Plus,
@@ -49,12 +51,20 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   fetchItems,
   fetchBanks,
   fetchCurrencies,
   fetchFxRates,
   createItem,
   archiveItem,
+  closeItem,
   ItemKind,
   ItemCreate,
   ItemOut,
@@ -187,6 +197,8 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [showClosed, setShowClosed] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
@@ -382,13 +394,26 @@ export default function Page() {
     () => new Map(banks.map((bank) => [bank.id, bank])),
     [banks]
   );
-  const assetItems = useMemo(
-    () => items.filter((item) => item.kind === "ASSET"),
+  const activeItems = useMemo(
+    () => items.filter((item) => !item.archived_at && !item.closed_at),
     [items]
   );
+  const visibleItems = useMemo(
+    () =>
+      items.filter((item) => {
+        if (item.archived_at) return showArchived;
+        if (item.closed_at) return showClosed;
+        return true;
+      }),
+    [items, showArchived, showClosed]
+  );
+  const activeAssetItems = useMemo(
+    () => activeItems.filter((item) => item.kind === "ASSET"),
+    [activeItems]
+  );
   const bankAccountItems = useMemo(
-    () => assetItems.filter((item) => item.type_code === "bank_account"),
-    [assetItems]
+    () => activeAssetItems.filter((item) => item.type_code === "bank_account"),
+    [activeAssetItems]
   );
   const depositEndDateText = useMemo(() => {
     if (!openDate || !depositTermDays) return "";
@@ -436,63 +461,92 @@ export default function Page() {
 
   // Фильтрация по категориям
   const cashItems = useMemo(
-    () => items.filter((x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code)),
-    [items]
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
   );
 
   const financialInstrumentsItems = useMemo(
-    () => items.filter((x) => x.kind === "ASSET" && FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)),
-    [items]
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "ASSET" && FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
   );
 
   const propertyItems = useMemo(
-    () => items.filter((x) => x.kind === "ASSET" && PROPERTY_TYPES.includes(x.type_code)),
-    [items]
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "ASSET" && PROPERTY_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
   );
 
   const otherAssetItems = useMemo(
-    () => items.filter((x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code)),
-    [items]
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
   );
 
   const liabilityItems = useMemo(
-    () => items.filter((x) => x.kind === "LIABILITY"),
-    [items]
+    () => visibleItems.filter((x) => x.kind === "LIABILITY"),
+    [visibleItems]
   );
 
   // Итоги по категориям
   const cashTotal = useMemo(
-    () => cashItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [cashItems, rateByCode]
+    () =>
+      activeItems
+        .filter((x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code))
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
   );
 
   const financialInstrumentsTotal = useMemo(
     () =>
-      financialInstrumentsItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [financialInstrumentsItems, rateByCode]
+      activeItems
+        .filter(
+          (x) =>
+            x.kind === "ASSET" && FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)
+        )
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
   );
 
   const propertyTotal = useMemo(
-    () => propertyItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [propertyItems, rateByCode]
+    () =>
+      activeItems
+        .filter((x) => x.kind === "ASSET" && PROPERTY_TYPES.includes(x.type_code))
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
   );
 
   const otherAssetTotal = useMemo(
-    () => otherAssetItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [otherAssetItems, rateByCode]
+    () =>
+      activeItems
+        .filter((x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code))
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
   );
 
   const liabilityTotal = useMemo(
-    () => liabilityItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [liabilityItems, rateByCode]
+    () =>
+      activeItems
+        .filter((x) => x.kind === "LIABILITY")
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
   );
 
   const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
-    const assets = items
+    const assets = activeItems
       .filter((x) => x.kind === "ASSET")
       .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
   
-    const liabilities = items
+    const liabilities = activeItems
       .filter((x) => x.kind === "LIABILITY")
       .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
   
@@ -501,7 +555,7 @@ export default function Page() {
       totalLiabilities: liabilities,
       netTotal: assets - liabilities, // обязательства вычитаем
     };
-  }, [items, rateByCode]);
+  }, [activeItems, rateByCode]);
 
   useEffect(() => {
     if (!isCreateOpen || typeOptions.length === 0) return;
@@ -514,7 +568,7 @@ export default function Page() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchItems();
+      const data = await fetchItems({ includeArchived: true, includeClosed: true });
       setItems(data);
     } catch (e: any) {
       setError(e?.message ?? "Ошибка загрузки");
@@ -815,6 +869,7 @@ export default function Page() {
   
   async function onArchive(id: number) {
     setLoading(true);
+    setError(null);
     try {
       await archiveItem(id);
       await loadItems();
@@ -825,7 +880,19 @@ export default function Page() {
     }
   }
 
-  // Компонент таблицы категории
+  async function onClose(id: number) {
+    setLoading(true);
+    setError(null);
+    try {
+      await closeItem(id);
+      await loadItems();
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось закрыть счет");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function CategoryTable({
     title,
     items: categoryItems,
@@ -909,43 +976,86 @@ export default function Page() {
                   const bankLogoUrl = bank?.logo_url ?? null;
                   const bankName = bank?.name ?? "";
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
+                  const isArchived = Boolean(it.archived_at);
+                  const isClosed = Boolean(it.closed_at);
+                  const canClose = !isArchived && !isClosed && it.current_value_rub === 0;
+                  const canDelete = !isArchived;
+                  const rowToneClass = isArchived
+                    ? "bg-rose-50/80"
+                    : isClosed
+                    ? "bg-slate-100/80"
+                    : "";
+                  const textToneClass = isArchived
+                    ? "text-slate-400"
+                    : isClosed
+                    ? "text-slate-400"
+                    : "";
+                  const mutedToneClass = isArchived
+                    ? "text-slate-300"
+                    : isClosed
+                    ? "text-slate-300"
+                    : "text-muted-foreground";
+                  const iconToneClass = isArchived
+                    ? "text-slate-400"
+                    : isClosed
+                    ? "text-slate-400"
+                    : "text-violet-600";
 
                   return (
-                    <TableRow key={it.id} className="border-b-2 border-border/70">
+                    <TableRow
+                      key={it.id}
+                      className={["border-b-2 border-border/70", rowToneClass].join(" ")}
+                    >
                       <TableCell className="w-40 min-w-40 pl-6 whitespace-normal break-words">
                         <div className="flex items-center gap-2">
                           {TypeIcon && (
                             <TypeIcon
-                              className="h-7 w-7 shrink-0 text-violet-600"
+                              className={["h-7 w-7 shrink-0", iconToneClass].join(" ")}
                               strokeWidth={1.5}
                             />
                           )}
                           <div className="flex flex-col gap-1">
-                            <span className="font-medium leading-tight">{it.name}</span>
-                            <span className="text-xs text-muted-foreground leading-tight">
+                            <span
+                              className={["font-medium leading-tight", textToneClass].join(" ")}
+                            >
+                              {it.name}
+                            </span>
+                            <span className={["text-xs leading-tight", mutedToneClass].join(" ")}>
                               {typeMeta}
                             </span>
                           </div>
                         </div>
                       </TableCell>
 
-                      <TableCell className="w-10 min-w-10 text-center text-sm text-muted-foreground">
+                      <TableCell
+                        className={["w-10 min-w-10 text-center text-sm", mutedToneClass].join(
+                          " "
+                        )}
+                      >
                         {bankLogoUrl ? (
                           <img
                             src={bankLogoUrl}
                             alt={bankName}
-                            className="mx-auto h-5 w-5 rounded object-contain bg-white"
+                            className={[
+                              "mx-auto h-5 w-5 rounded object-contain bg-white",
+                              isArchived || isClosed ? "opacity-40" : "",
+                            ].join(" ")}
                             loading="lazy"
                           />
                         ) : null}
                       </TableCell>
 
-                      <TableCell className="w-16 min-w-16 text-center text-sm text-muted-foreground">
+                      <TableCell
+                        className={["w-16 min-w-16 text-center text-sm", mutedToneClass].join(
+                          " "
+                        )}
+                      >
                         {currencyCode ? (
                           <span
                             className={[
                               "inline-flex min-w-10 items-center justify-center rounded-full px-1.5 py-[1px] text-[11px] font-semibold uppercase",
                               getCurrencyBadgeClass(currencyCode),
+                              isArchived || isClosed ? "opacity-40" : "",
                             ].join(" ")}
                           >
                             {currencyCode}
@@ -958,7 +1068,13 @@ export default function Page() {
                       <TableCell
                         className={[
                           "w-36 min-w-36 text-right font-semibold tabular-nums",
-                          isLiability ? "text-red-600" : "",
+                          isArchived
+                            ? "text-slate-400"
+                            : isClosed
+                            ? "text-slate-400"
+                            : isLiability
+                            ? "text-red-600"
+                            : "",
                         ].join(" ")}
                       >
                         {isLiability
@@ -966,14 +1082,24 @@ export default function Page() {
                           : formatAmount(it.current_value_rub)}
                       </TableCell>
 
-                      <TableCell className="w-24 min-w-24 text-right text-sm text-muted-foreground">
+                      <TableCell
+                        className={["w-24 min-w-24 text-right text-sm", mutedToneClass].join(
+                          " "
+                        )}
+                      >
                         {rate ? formatRate(rate) : "-"}
                       </TableCell>
 
                       <TableCell
                         className={[
                           "w-36 min-w-36 text-right font-semibold tabular-nums",
-                          isLiability ? "text-red-600" : "",
+                          isArchived
+                            ? "text-slate-400"
+                            : isClosed
+                            ? "text-slate-400"
+                            : isLiability
+                            ? "text-red-600"
+                            : "",
                         ].join(" ")}
                       >
                         {rubEquivalent === null
@@ -983,20 +1109,53 @@ export default function Page() {
                           : formatRub(rubEquivalent)}
                       </TableCell>
 
-                      <TableCell className="w-28 min-w-28 text-right text-sm text-muted-foreground">
+                      <TableCell
+                        className={["w-28 min-w-28 text-right text-sm", mutedToneClass].join(
+                          " "
+                        )}
+                      >
                         {new Date(`${it.start_date}T00:00:00`).toLocaleDateString("ru-RU")}
                       </TableCell>
 
                       <TableCell className="w-12 min-w-12 pr-6 text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-muted-foreground hover:text-rose-500 hover:bg-transparent"
-                          onClick={() => onArchive(it.id)}
-                          aria-label="Архивировать"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className={[
+                                "hover:bg-transparent",
+                                isArchived
+                                  ? "text-slate-400"
+                                  : isClosed
+                                  ? "text-slate-400"
+                                  : "text-muted-foreground",
+                              ].join(" ")}
+                              aria-label="Открыть меню действий"
+                              disabled={isArchived && !canDelete}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem
+                              onSelect={() => onClose(it.id)}
+                              disabled={!canClose}
+                            >
+                              <Archive className="h-4 w-4" />
+                              Закрыть
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => onArchive(it.id)}
+                              disabled={!canDelete}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Удалить
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   );
@@ -1328,7 +1487,7 @@ export default function Page() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none">Не выбрано</SelectItem>
-                      {assetItems.map((item) => {
+                      {activeAssetItems.map((item) => {
                         const typeLabel =
                           ASSET_TYPES.find((t) => t.code === item.type_code)?.label ||
                           item.type_code;
@@ -1464,6 +1623,28 @@ export default function Page() {
             </div>
           </CardContent>
         </Card>
+
+        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/70 bg-white px-4 py-3">
+          <span className="text-sm font-medium text-muted-foreground">Показывать:</span>
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={showClosed}
+              onChange={(event) => setShowClosed(event.target.checked)}
+            />
+            Закрытые
+          </label>
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={showArchived}
+              onChange={(event) => setShowArchived(event.target.checked)}
+            />
+            Удаленные
+          </label>
+        </div>
 
         <CategoryTable
           title="Денежные средства"

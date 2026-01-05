@@ -24,6 +24,7 @@ export type ItemOut = {
   current_value_rub: number;
   start_date: string;
   created_at: string;
+  closed_at: string | null;
   archived_at: string | null;
 };
 
@@ -180,8 +181,15 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
   return fetch(input, { ...init, headers });
 }
 
-export async function fetchItems(): Promise<ItemOut[]> {
-  const res = await authFetch(`${API_BASE}/items`);
+export async function fetchItems(options?: {
+  includeArchived?: boolean;
+  includeClosed?: boolean;
+}): Promise<ItemOut[]> {
+  const params = new URLSearchParams();
+  if (options?.includeArchived) params.set("include_archived", "true");
+  if (options?.includeClosed) params.set("include_closed", "true");
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/items${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
@@ -222,6 +230,14 @@ export async function archiveItem(id: number): Promise<ItemOut> {
     if (!res.ok) throw new Error(await readError(res));
     return res.json();
   }
+
+export async function closeItem(id: number): Promise<ItemOut> {
+  const res = await authFetch(`${API_BASE}/items/${id}/close`, {
+    method: "PATCH",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
 
 async function readError(res: Response) {
   const text = await res.text();

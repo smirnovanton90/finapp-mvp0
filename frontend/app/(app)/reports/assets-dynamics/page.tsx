@@ -351,7 +351,7 @@ export default function AssetsDynamicsPage() {
     setLoading(true);
     setError(null);
 
-    Promise.all([fetchItems(), fetchTransactions()])
+    Promise.all([fetchItems({ includeClosed: true }), fetchTransactions()])
       .then(([itemsData, txData]) => {
         if (!active) return;
         setItems(itemsData);
@@ -826,10 +826,13 @@ export default function AssetsDynamicsPage() {
                     {assetItems.length === 0 && (
                       <DropdownMenuItem disabled>Нет активов</DropdownMenuItem>
                     )}
-                    {assetItems.map((item) => (
+                    {assetItems.map((item) => {
+                      const isClosed = Boolean(item.closed_at);
+                      return (
                       <DropdownMenuCheckboxItem
                         key={item.id}
                         checked={selectedItemIds.includes(item.id)}
+                        className={isClosed ? "bg-slate-100/80" : ""}
                         onSelect={(event) => event.preventDefault()}
                         onCheckedChange={() =>
                           setSelectedItemIds((prev) =>
@@ -840,22 +843,33 @@ export default function AssetsDynamicsPage() {
                         }
                       >
                         <span className="flex w-full items-center justify-between gap-3">
-                          <span className="truncate">{item.name}</span>
-                          <span className="text-xs text-muted-foreground">
+                          <span className={["truncate", isClosed ? "text-slate-500" : ""].join(" ")}>
+                            {item.name}
+                          </span>
+                          <span
+                            className={[
+                              "text-xs",
+                              isClosed ? "text-slate-400" : "text-muted-foreground",
+                            ].join(" ")}
+                          >
                             {item.currency_code}
                           </span>
                         </span>
                       </DropdownMenuCheckboxItem>
-                    ))}
+                      );
+                    })}
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel>Обязательства</DropdownMenuLabel>
                     {liabilityItems.length === 0 && (
                       <DropdownMenuItem disabled>Нет обязательств</DropdownMenuItem>
                     )}
-                    {liabilityItems.map((item) => (
+                    {liabilityItems.map((item) => {
+                      const isClosed = Boolean(item.closed_at);
+                      return (
                       <DropdownMenuCheckboxItem
                         key={item.id}
                         checked={selectedItemIds.includes(item.id)}
+                        className={isClosed ? "bg-slate-100/80" : ""}
                         onSelect={(event) => event.preventDefault()}
                         onCheckedChange={() =>
                           setSelectedItemIds((prev) =>
@@ -866,13 +880,21 @@ export default function AssetsDynamicsPage() {
                         }
                       >
                         <span className="flex w-full items-center justify-between gap-3">
-                          <span className="truncate">{item.name}</span>
-                          <span className="text-xs text-muted-foreground">
+                          <span className={["truncate", isClosed ? "text-slate-500" : ""].join(" ")}>
+                            {item.name}
+                          </span>
+                          <span
+                            className={[
+                              "text-xs",
+                              isClosed ? "text-slate-400" : "text-muted-foreground",
+                            ].join(" ")}
+                          >
                             {item.currency_code}
                           </span>
                         </span>
                       </DropdownMenuCheckboxItem>
-                    ))}
+                      );
+                    })}
                   </>
                 )}
               </DropdownMenuContent>

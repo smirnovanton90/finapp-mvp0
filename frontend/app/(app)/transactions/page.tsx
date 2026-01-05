@@ -1087,20 +1087,24 @@ export function TransactionsView({
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
+  const activeItems = useMemo(
+    () => items.filter((item) => !item.archived_at && !item.closed_at),
+    [items]
+  );
   const banksById = useMemo(
     () => new Map(banks.map((bank) => [bank.id, bank])),
     [banks]
   );
   const sortedItems = useMemo(() => {
-    return [...items].sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [items]);
+    return [...activeItems].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [activeItems]);
   const assetItems = useMemo(
-    () => items.filter((item) => item.kind === "ASSET"),
-    [items]
+    () => activeItems.filter((item) => item.kind === "ASSET"),
+    [activeItems]
   );
   const liabilityItems = useMemo(
-    () => items.filter((item) => item.kind === "LIABILITY"),
-    [items]
+    () => activeItems.filter((item) => item.kind === "LIABILITY"),
+    [activeItems]
   );
   const categoryL1Options = useMemo(() => {
     return [...categoryMaps.l1].sort((a, b) => a.localeCompare(b, "ru"));
@@ -1191,8 +1195,8 @@ export function TransactionsView({
   const isActualTransaction = formTransactionType === "ACTUAL";
   const isPlannedTransaction = formTransactionType === "PLANNED";
   const showCounterpartySelect = isTransfer || isLoanRepayment;
-  const primarySelectItems = isLoanRepayment ? assetItems : items;
-  const counterpartySelectItems = isLoanRepayment ? liabilityItems : items;
+  const primarySelectItems = isLoanRepayment ? assetItems : activeItems;
+  const counterpartySelectItems = isLoanRepayment ? liabilityItems : activeItems;
   const primaryCurrencyCode = primaryItemId
     ? itemsById.get(primaryItemId)?.currency_code ?? null
     : null;
@@ -1957,7 +1961,7 @@ export function TransactionsView({
     setError(null);
     try {
       const [itemsData, txData, deletedData, banksData] = await Promise.all([
-        fetchItems(),
+        fetchItems({ includeArchived: true, includeClosed: true }),
         fetchTransactions(),
         fetchDeletedTransactions(),
         fetchBanks().catch(() => []),

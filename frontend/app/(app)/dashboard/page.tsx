@@ -357,7 +357,7 @@ export default function DashboardPage() {
   }
 
   const activeItems = useMemo(
-    () => items.filter((item) => !item.archived_at),
+    () => items.filter((item) => !item.archived_at && !item.closed_at),
     [items]
   );
 

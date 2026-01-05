@@ -134,6 +134,7 @@ class Item(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    closed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (

@@ -108,6 +108,7 @@ class ItemOut(BaseModel):
     current_value_rub: int
     start_date: date
     created_at: datetime
+    closed_at: datetime | None
     archived_at: datetime | None
 
     class Config:

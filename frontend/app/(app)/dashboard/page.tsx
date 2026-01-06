@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Calculator } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
 import {
+  fetchCategories,
   fetchFxRates,
   fetchItems,
   fetchTransactions,
@@ -31,6 +33,18 @@ const CASH_TYPES = ["cash", "bank_account", "bank_card"];
 const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "savings_account", "brokerage", "securities"];
 const PROPERTY_TYPES = ["real_estate", "car"];
 const OTHER_ASSET_TYPES = ["other_asset"];
+const DONUT_COLORS = [
+  "#7F5CFF",
+  "#34D399",
+  "#F59E0B",
+  "#3B82F6",
+  "#F97316",
+  "#F43F5E",
+  "#22C55E",
+  "#0EA5E9",
+];
+const UPCOMING_DAYS = 3;
+const CATEGORY_BREAKDOWN_LIMIT = 6;
 
 const LIABILITY_TYPES = [
   { code: "credit_card_debt", label: "Задолженность по кредитной карте" },
@@ -137,11 +151,98 @@ function formatDateLabel(dateKey: string) {
   return `${day}.${month}.${year}`;
 }
 
+function formatMonthLabel(date: Date) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
 function formatChartDate(date: Date) {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const year = String(date.getFullYear()).slice(-2);
   return `${day}.${month}.${year}`;
+}
+
+function getPreviousMonthRange(date: Date) {
+  const start = new Date(date.getFullYear(), date.getMonth() - 1, 1);
+  const end = new Date(date.getFullYear(), date.getMonth(), 0);
+  return { start, end };
+}
+
+function isRealizedTransaction(tx: TransactionOut) {
+  return tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
+}
+
+type CategoryBreakdownRow = {
+  label: string;
+  value: number;
+};
+
+type CategoryBreakdown = {
+  total: number;
+  rows: CategoryBreakdownRow[];
+};
+
+type CategorySegment = CategoryBreakdownRow & {
+  percent: number;
+  color: string;
+};
+
+function buildCategoryBreakdown(
+  txs: TransactionOut[],
+  direction: "INCOME" | "EXPENSE",
+  startKey: string,
+  endKey: string,
+  categoryLookup: ReturnType<typeof buildCategoryLookup>,
+  limit: number
+): CategoryBreakdown {
+  const totals = new Map<string, number>();
+  let total = 0;
+
+  const resolveLabel = (categoryId: number | null) => {
+    if (!categoryId) return "Без категории";
+    const path = categoryLookup.idToPath.get(categoryId);
+    if (!path || path.length === 0) return "Без категории";
+    return path.join(" / ");
+  };
+
+  txs.forEach((tx) => {
+    if (tx.direction !== direction) return;
+    const dateKey = toTxDateKey(tx.transaction_date);
+    if (!dateKey) return;
+    if (dateKey < startKey || dateKey > endKey) return;
+    if (!isRealizedTransaction(tx)) return;
+    const label = resolveLabel(tx.category_id);
+    totals.set(label, (totals.get(label) ?? 0) + tx.amount_rub);
+    total += tx.amount_rub;
+  });
+
+  const rows = Array.from(totals.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value);
+
+  if (rows.length > limit) {
+    const head = rows.slice(0, limit);
+    const restValue = rows.slice(limit).reduce((sum, row) => sum + row.value, 0);
+    if (restValue > 0) head.push({ label: "Другое", value: restValue });
+    return { total, rows: head };
+  }
+
+  return { total, rows };
+}
+
+function buildCategorySegments(
+  breakdown: CategoryBreakdown,
+  colorOffset: number
+): CategorySegment[] {
+  if (breakdown.total <= 0 || breakdown.rows.length === 0) return [];
+  return breakdown.rows.map((row, index) => ({
+    ...row,
+    percent: row.value / breakdown.total,
+    color: DONUT_COLORS[(index + colorOffset) % DONUT_COLORS.length],
+  }));
 }
 
 function buildDateRange(startKey: string, endKey: string) {
@@ -287,6 +388,7 @@ export default function DashboardPage() {
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
+  const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
     {}
   );
@@ -294,6 +396,8 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [tooltipLeft, setTooltipLeft] = useState<number | null>(null);
+  const [incomeHover, setIncomeHover] = useState<CategorySegment | null>(null);
+  const [expenseHover, setExpenseHover] = useState<CategorySegment | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -302,6 +406,11 @@ export default function DashboardPage() {
   const todayKey = toDateKey(now);
   const rangeStartKey = toDateKey(addMonths(now, -1));
   const rangeEndKey = toDateKey(addMonths(now, 1));
+  const previousMonthRange = getPreviousMonthRange(now);
+  const previousMonthStartKey = toDateKey(previousMonthRange.start);
+  const previousMonthEndKey = toDateKey(previousMonthRange.end);
+  const previousMonthLabel = formatMonthLabel(previousMonthRange.start);
+  const upcomingEndKey = toDateKey(addDays(now, UPCOMING_DAYS - 1));
 
   useEffect(() => {
     if (!session) return;
@@ -313,12 +422,14 @@ export default function DashboardPage() {
       fetchItems({ includeArchived: true }),
       fetchTransactions(),
       fetchFxRates().catch(() => [] as FxRateOut[]),
+      fetchCategories({ includeArchived: false }),
     ])
-      .then(([itemsData, txData, fxRatesData]) => {
+      .then(([itemsData, txData, fxRatesData, categoriesData]) => {
         if (!active) return;
         setItems(itemsData);
         setTxs(txData);
         setFxRates(fxRatesData);
+        setCategoryNodes(categoriesData);
       })
       .catch((e: any) => {
         if (!active) return;
@@ -340,6 +451,16 @@ export default function DashboardPage() {
     });
     return map;
   }, [fxRates]);
+
+  const itemsById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items]
+  );
+
+  const categoryLookup = useMemo(
+    () => buildCategoryLookup(categoryNodes),
+    [categoryNodes]
+  );
 
   useEffect(() => {
     if (fxRates.length === 0) return;
@@ -439,6 +560,111 @@ export default function DashboardPage() {
       netTotal: assets - liabilities,
     };
   }, [activeItems, rateByCode]);
+
+  const incomeBreakdown = useMemo(
+    () =>
+      buildCategoryBreakdown(
+        txs,
+        "INCOME",
+        previousMonthStartKey,
+        previousMonthEndKey,
+        categoryLookup,
+        CATEGORY_BREAKDOWN_LIMIT
+      ),
+    [categoryLookup, previousMonthEndKey, previousMonthStartKey, txs]
+  );
+
+  const expenseBreakdown = useMemo(
+    () =>
+      buildCategoryBreakdown(
+        txs,
+        "EXPENSE",
+        previousMonthStartKey,
+        previousMonthEndKey,
+        categoryLookup,
+        CATEGORY_BREAKDOWN_LIMIT
+      ),
+    [categoryLookup, previousMonthEndKey, previousMonthStartKey, txs]
+  );
+
+  const incomeSegments = useMemo(
+    () => buildCategorySegments(incomeBreakdown, 0),
+    [incomeBreakdown]
+  );
+
+  const expenseSegments = useMemo(
+    () => buildCategorySegments(expenseBreakdown, 2),
+    [expenseBreakdown]
+  );
+
+  const overduePlannedCount = useMemo(() => {
+    let count = 0;
+    txs.forEach((tx) => {
+      if (tx.transaction_type !== "PLANNED") return;
+      if (tx.status === "REALIZED") return;
+      const dateKey = toTxDateKey(tx.transaction_date);
+      if (!dateKey) return;
+      if (dateKey < todayKey) count += 1;
+    });
+    return count;
+  }, [todayKey, txs]);
+
+  const upcomingPlanned = useMemo(() => {
+    const items: {
+      id: number;
+      dateKey: string;
+      title: string;
+      direction: TransactionOut["direction"];
+      amount: number;
+      accountLabel: string;
+    }[] = [];
+
+    const resolveLabel = (categoryId: number | null) => {
+      if (!categoryId) return "Без категории";
+      const path = categoryLookup.idToPath.get(categoryId);
+      if (!path || path.length === 0) return "Без категории";
+      return path.join(" / ");
+    };
+
+    txs.forEach((tx) => {
+      if (tx.transaction_type !== "PLANNED") return;
+      if (tx.status === "REALIZED") return;
+      const dateKey = toTxDateKey(tx.transaction_date);
+      if (!dateKey) return;
+      if (dateKey < todayKey || dateKey > upcomingEndKey) return;
+
+      const primaryItem = itemsById.get(tx.primary_item_id);
+      const counterpartyItem = tx.counterparty_item_id
+        ? itemsById.get(tx.counterparty_item_id)
+        : null;
+      const baseTitle = tx.description?.trim() || tx.comment?.trim();
+      const categoryLabel = resolveLabel(tx.category_id);
+      const fallbackTitle =
+        tx.direction === "TRANSFER" ? "Перевод" : categoryLabel || "Без категории";
+      const title = baseTitle && baseTitle.length > 0 ? baseTitle : fallbackTitle;
+      const primaryLabel = primaryItem?.name ?? `#${tx.primary_item_id}`;
+      const counterpartyLabel = counterpartyItem?.name ?? null;
+      const accountLabel =
+        tx.direction === "TRANSFER" && counterpartyLabel
+          ? `${primaryLabel} -> ${counterpartyLabel}`
+          : primaryLabel;
+
+      items.push({
+        id: tx.id,
+        dateKey,
+        title,
+        direction: tx.direction,
+        amount: tx.amount_rub,
+        accountLabel,
+      });
+    });
+
+    items.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+    return items;
+  }, [categoryLookup, itemsById, todayKey, txs, upcomingEndKey]);
+
+  const upcomingDisplay = upcomingPlanned.slice(0, 5);
+  const upcomingExtra = Math.max(0, upcomingPlanned.length - upcomingDisplay.length);
 
   const chartItems = useMemo(() => activeItems, [activeItems]);
 
@@ -745,6 +971,227 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Дэшборд</h1>
           <p className="text-sm text-muted-foreground">Ключевые метрики за последние дни.</p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
+          <Card className="relative overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Текущий чистый капитал
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="break-words text-4xl font-semibold leading-tight text-violet-600 tabular-nums">
+                {loading
+                  ? "..."
+                  : netTotal < 0
+                  ? `-${formatRub(Math.abs(netTotal))}`
+                  : formatRub(netTotal)}
+              </div>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between">
+                  <span>Активы</span>
+                  <span className="tabular-nums whitespace-nowrap">
+                    {loading ? "..." : formatRub(totalAssets)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Обязательства</span>
+                  <span className="tabular-nums whitespace-nowrap">
+                    {loading ? "..." : `-${formatRub(totalLiabilities)}`}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Просроченные плановые транзакции
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="text-3xl font-semibold text-rose-600 tabular-nums">
+                {loading ? "..." : overduePlannedCount}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Нереализованные, дата меньше сегодня
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <Card className="overflow-hidden">
+            <CardContent className="space-y-6">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium text-slate-800">
+                    Доходы за {previousMonthLabel}
+                  </div>
+                  <div className="text-lg font-semibold text-emerald-600 tabular-nums whitespace-nowrap">
+                    {loading ? "..." : formatRub(incomeBreakdown.total)}
+                  </div>
+                </div>
+                {loading ? (
+                  <div className="text-sm text-muted-foreground">Загрузка...</div>
+                ) : incomeSegments.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    Нет данных за {previousMonthLabel}
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className="relative"
+                      onMouseLeave={() => setIncomeHover(null)}
+                    >
+                      {incomeHover && (
+                        <div className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full -mt-2 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-xs text-white shadow">
+                          <span className="font-medium">{incomeHover.label}</span>
+                          <span className="opacity-80">
+                            {" "}
+                            - {Math.round(incomeHover.percent * 100)}%
+                          </span>
+                          <span className="opacity-80">
+                            {" "}
+                            - {formatRub(incomeHover.value)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                        {incomeSegments.map((segment, index) => (
+                          <div
+                            key={`${segment.label}-${index}`}
+                            className="h-full"
+                            style={{
+                              width: `${segment.percent * 100}%`,
+                              backgroundColor: segment.color,
+                            }}
+                            onMouseEnter={() => setIncomeHover(segment)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium text-slate-800">
+                    Расходы за {previousMonthLabel}
+                  </div>
+                  <div className="text-lg font-semibold text-rose-600 tabular-nums whitespace-nowrap">
+                    {loading ? "..." : formatRub(expenseBreakdown.total)}
+                  </div>
+                </div>
+                {loading ? (
+                  <div className="text-sm text-muted-foreground">Загрузка...</div>
+                ) : expenseSegments.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    Нет данных за {previousMonthLabel}
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className="relative"
+                      onMouseLeave={() => setExpenseHover(null)}
+                    >
+                      {expenseHover && (
+                        <div className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full -mt-2 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-xs text-white shadow">
+                          <span className="font-medium">{expenseHover.label}</span>
+                          <span className="opacity-80">
+                            {" "}
+                            - {Math.round(expenseHover.percent * 100)}%
+                          </span>
+                          <span className="opacity-80">
+                            {" "}
+                            - {formatRub(expenseHover.value)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                        {expenseSegments.map((segment, index) => (
+                          <div
+                            key={`${segment.label}-${index}`}
+                            className="h-full"
+                            style={{
+                              width: `${segment.percent * 100}%`,
+                              backgroundColor: segment.color,
+                            }}
+                            onMouseEnter={() => setExpenseHover(segment)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base text-slate-800">
+                Плановые транзакции в ближайшие {UPCOMING_DAYS} календарных дня
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {loading ? (
+                <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+                  Загрузка...
+                </div>
+              ) : upcomingDisplay.length === 0 ? (
+                <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+                  Нет плановых транзакций на ближайшие {UPCOMING_DAYS} дня
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {upcomingDisplay.map((item) => {
+                    const amountColor =
+                      item.direction === "INCOME"
+                        ? "text-emerald-600"
+                        : item.direction === "EXPENSE"
+                        ? "text-rose-600"
+                        : "text-slate-600";
+                    const sign =
+                      item.direction === "INCOME"
+                        ? "+"
+                        : item.direction === "EXPENSE"
+                        ? "-"
+                        : "";
+                    return (
+                      <div
+                        key={item.id}
+                        className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-slate-800">
+                            {item.title}
+                          </div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            {formatDateLabel(item.dateKey)} - {item.accountLabel}
+                          </div>
+                        </div>
+                        <div
+                          className={`shrink-0 text-sm font-semibold tabular-nums whitespace-nowrap ${amountColor}`}
+                        >
+                          {sign}
+                          {formatRub(item.amount)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {!loading && upcomingExtra > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  Еще плановых транзакций: {upcomingExtra}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">

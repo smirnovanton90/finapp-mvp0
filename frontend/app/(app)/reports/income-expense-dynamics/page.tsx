@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import {
+  fetchCategories,
   fetchFxRates,
   fetchItems,
   fetchTransactions,
@@ -22,31 +23,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  CATEGORY_ICON_BY_L1,
-  CATEGORY_ICON_BY_NAME,
-  CATEGORY_ICON_FALLBACK,
-} from "@/lib/category-icons";
-import { CategoryNode, readStoredCategories } from "@/lib/categories";
+import { CATEGORY_ICON_BY_NAME, CATEGORY_ICON_FALLBACK } from "@/lib/category-icons";
+import { CategoryNode } from "@/lib/categories";
 import { cn } from "@/lib/utils";
 
 type CategoryRow = {
-  id: string;
+  id: number;
   label: string;
   level: 1 | 2 | 3;
-  l1: string;
-  l2?: string;
-  l3?: string;
+  l1Id: number;
+  l2Id?: number;
+  l3Id?: number;
 };
 
 type CategoryMatrix = {
   rows: CategoryRow[];
   monthKeys: string[];
-  totals: Map<string, Record<string, number>>;
+  totals: Map<number, Record<string, number>>;
   hasMissingRates: boolean;
 };
-
-const MISSING_L2_LABEL = "Без категории";
 
 function toMonthKey(dateKey: string) {
   return dateKey.slice(0, 7);
@@ -88,9 +83,37 @@ function formatRub(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
-function normalizeCategory(value?: string | null) {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
+function buildCategoryIndex(nodes: CategoryNode[]) {
+  const map = new Map<number, CategoryNode>();
+  const walk = (items: CategoryNode[]) => {
+    items.forEach((item) => {
+      map.set(item.id, item);
+      if (item.children?.length) {
+        walk(item.children);
+      }
+    });
+  };
+  walk(nodes);
+  return map;
+}
+
+function buildCategoryTrailResolver(categoryById: Map<number, CategoryNode>) {
+  const cache = new Map<number, CategoryNode[]>();
+  return (categoryId: number) => {
+    const cached = cache.get(categoryId);
+    if (cached) return cached;
+    const trail: CategoryNode[] = [];
+    let current = categoryById.get(categoryId);
+    while (current) {
+      trail.push(current);
+      const parentId = current.parent_id ?? null;
+      if (!parentId) break;
+      current = categoryById.get(parentId);
+    }
+    const result = trail.reverse();
+    cache.set(categoryId, result);
+    return result;
+  };
 }
 
 function toCbrDate(value: string) {
@@ -102,52 +125,73 @@ function toCbrDate(value: string) {
   return value;
 }
 
-function buildCategoryRows(txs: TransactionOut[]) {
-  const tree = new Map<string, Map<string, Set<string>>>();
+function buildCategoryRows(
+  txs: TransactionOut[],
+  categoryById: Map<number, CategoryNode>
+) {
+  const tree = new Map<number, Map<number, Set<number>>>();
+  const labels = new Map<number, string>();
+  const resolveTrail = buildCategoryTrailResolver(categoryById);
 
   txs.forEach((tx) => {
-    const l1 = normalizeCategory(tx.category_l1);
+    const categoryId = tx.category_id;
+    if (!categoryId) return;
+    const trail = resolveTrail(categoryId);
+    if (trail.length === 0) return;
+    const [l1, l2, l3] = trail;
     if (!l1) return;
-    const l2 = normalizeCategory(tx.category_l2);
-    const l3 = normalizeCategory(tx.category_l3);
 
-    if (!tree.has(l1)) tree.set(l1, new Map());
-    const l2Map = tree.get(l1)!;
+    labels.set(l1.id, l1.name);
+    if (!tree.has(l1.id)) tree.set(l1.id, new Map());
+    const l2Map = tree.get(l1.id)!;
 
     if (l2) {
-      if (!l2Map.has(l2)) l2Map.set(l2, new Set());
-      if (l3) l2Map.get(l2)?.add(l3);
-      return;
-    }
-
-    if (l3) {
-      if (!l2Map.has(MISSING_L2_LABEL)) l2Map.set(MISSING_L2_LABEL, new Set());
-      l2Map.get(MISSING_L2_LABEL)?.add(l3);
+      labels.set(l2.id, l2.name);
+      if (!l2Map.has(l2.id)) l2Map.set(l2.id, new Set());
+      if (l3) {
+        labels.set(l3.id, l3.name);
+        l2Map.get(l2.id)?.add(l3.id);
+      }
     }
   });
 
   const rows: CategoryRow[] = [];
-  const l1Keys = Array.from(tree.keys()).sort((a, b) => a.localeCompare(b, "ru"));
-  l1Keys.forEach((l1) => {
-    rows.push({ id: `l1:${l1}`, label: l1, level: 1, l1 });
+  const l1Ids = Array.from(tree.keys()).sort((a, b) =>
+    (labels.get(a) ?? "").localeCompare(labels.get(b) ?? "", "ru")
+  );
+  l1Ids.forEach((l1Id) => {
+    rows.push({
+      id: l1Id,
+      label: labels.get(l1Id) ?? "",
+      level: 1,
+      l1Id,
+    });
 
-    const l2Map = tree.get(l1)!;
-    const l2Keys = Array.from(l2Map.keys()).sort((a, b) =>
-      a.localeCompare(b, "ru")
+    const l2Map = tree.get(l1Id) ?? new Map<number, Set<number>>();
+    const l2Ids = Array.from(l2Map.keys()).sort((a, b) =>
+      (labels.get(a) ?? "").localeCompare(labels.get(b) ?? "", "ru")
     );
-    l2Keys.forEach((l2) => {
-      rows.push({ id: `l1:${l1}|l2:${l2}`, label: l2, level: 2, l1, l2 });
+    l2Ids.forEach((l2Id) => {
+      rows.push({
+        id: l2Id,
+        label: labels.get(l2Id) ?? "",
+        level: 2,
+        l1Id,
+        l2Id,
+      });
 
-      const l3Set = l2Map.get(l2)!;
-      const l3Keys = Array.from(l3Set).sort((a, b) => a.localeCompare(b, "ru"));
-      l3Keys.forEach((l3) => {
+      const l3Set = l2Map.get(l2Id) ?? new Set<number>();
+      const l3Ids = Array.from(l3Set).sort((a, b) =>
+        (labels.get(a) ?? "").localeCompare(labels.get(b) ?? "", "ru")
+      );
+      l3Ids.forEach((l3Id) => {
         rows.push({
-          id: `l1:${l1}|l2:${l2}|l3:${l3}`,
-          label: l3,
+          id: l3Id,
+          label: labels.get(l3Id) ?? "",
           level: 3,
-          l1,
-          l2,
-          l3,
+          l1Id,
+          l2Id,
+          l3Id,
         });
       });
     });
@@ -175,14 +219,16 @@ function buildCategoryMatrix(
   txs: TransactionOut[],
   itemsById: Map<number, ItemOut>,
   ratesByDate: Record<string, FxRateOut[]>,
+  categoryById: Map<number, CategoryNode>,
   monthKeysOverride?: string[]
 ): CategoryMatrix {
-  const rows = buildCategoryRows(txs);
-  const totals = new Map<string, Record<string, number>>();
+  const rows = buildCategoryRows(txs, categoryById);
+  const totals = new Map<number, Record<string, number>>();
   rows.forEach((row) => totals.set(row.id, {}));
 
   const monthSet = new Set<string>();
   let hasMissingRates = false;
+  const resolveTrail = buildCategoryTrailResolver(categoryById);
 
   const addValue = (rowId: string, monthKey: string, value: number) => {
     const rowTotals = totals.get(rowId);
@@ -191,11 +237,12 @@ function buildCategoryMatrix(
   };
 
   txs.forEach((tx) => {
-    const l1 = normalizeCategory(tx.category_l1);
-    if (!l1) return;
-    const l2 = normalizeCategory(tx.category_l2);
-    const l3 = normalizeCategory(tx.category_l3);
-    if (!tx.transaction_date) return;
+    const categoryId = tx.category_id;
+    if (!categoryId) return;
+    const trail = resolveTrail(categoryId);
+    if (trail.length === 0) return;
+    const [l1, l2, l3] = trail;
+    if (!l1 || !tx.transaction_date) return;
 
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
@@ -211,16 +258,10 @@ function buildCategoryMatrix(
 
     const sign = tx.direction === "EXPENSE" ? -1 : 1;
     const value = Math.abs(rubCents) * sign;
-    addValue(`l1:${l1}`, monthKey, value);
+    addValue(l1.id, monthKey, value);
     if (l2) {
-      addValue(`l1:${l1}|l2:${l2}`, monthKey, value);
-      if (l3) addValue(`l1:${l1}|l2:${l2}|l3:${l3}`, monthKey, value);
-      return;
-    }
-
-    if (l3) {
-      addValue(`l1:${l1}|l2:${MISSING_L2_LABEL}`, monthKey, value);
-      addValue(`l1:${l1}|l2:${MISSING_L2_LABEL}|l3:${l3}`, monthKey, value);
+      addValue(l2.id, monthKey, value);
+      if (l3) addValue(l3.id, monthKey, value);
     }
   });
 
@@ -230,7 +271,7 @@ function buildCategoryMatrix(
 
 function buildSummaryTotals(
   rows: CategoryRow[],
-  totals: Map<string, Record<string, number>>,
+  totals: Map<number, Record<string, number>>,
   monthKeys: string[]
 ) {
   const summary: Record<string, number> = {};
@@ -252,7 +293,8 @@ function buildSummaryTotals(
 
 function useCategoryExpansion(rows: CategoryRow[]) {
   const l1Keys = useMemo(
-    () => Array.from(new Set(rows.filter((row) => row.level === 1).map((row) => row.l1))),
+    () =>
+      Array.from(new Set(rows.filter((row) => row.level === 1).map((row) => row.l1Id))),
     [rows]
   );
   const l2Keys = useMemo(
@@ -261,13 +303,13 @@ function useCategoryExpansion(rows: CategoryRow[]) {
         new Set(
           rows
             .filter((row) => row.level === 2)
-            .map((row) => `${row.l1}::${row.l2 ?? ""}`)
+            .map((row) => `${row.l1Id}::${row.l2Id ?? 0}`)
         )
       ),
     [rows]
   );
   const l1HasChildren = useMemo(
-    () => new Set(rows.filter((row) => row.level === 2).map((row) => row.l1)),
+    () => new Set(rows.filter((row) => row.level === 2).map((row) => row.l1Id)),
     [rows]
   );
   const l2HasChildren = useMemo(
@@ -275,13 +317,13 @@ function useCategoryExpansion(rows: CategoryRow[]) {
       new Set(
         rows
           .filter((row) => row.level === 3)
-          .map((row) => `${row.l1}::${row.l2 ?? ""}`)
+          .map((row) => `${row.l1Id}::${row.l2Id ?? 0}`)
       ),
     [rows]
   );
 
   const initializedRef = useRef(false);
-  const [expandedL1, setExpandedL1] = useState<Set<string>>(() => new Set());
+  const [expandedL1, setExpandedL1] = useState<Set<number>>(() => new Set());
   const [expandedL2, setExpandedL2] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -299,7 +341,7 @@ function useCategoryExpansion(rows: CategoryRow[]) {
     initializedRef.current = true;
   }, [l1Keys, l2Keys]);
 
-  const toggleL1 = (key: string) => {
+  const toggleL1 = (key: number) => {
     setExpandedL1((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -318,9 +360,9 @@ function useCategoryExpansion(rows: CategoryRow[]) {
 
   const isRowVisible = (row: CategoryRow) => {
     if (row.level === 1) return true;
-    if (!expandedL1.has(row.l1)) return false;
+    if (!expandedL1.has(row.l1Id)) return false;
     if (row.level === 2) return true;
-    const key = `${row.l1}::${row.l2 ?? ""}`;
+    const key = `${row.l1Id}::${row.l2Id ?? 0}`;
     return expandedL2.has(key);
   };
 
@@ -343,16 +385,16 @@ function CategorySectionBody({
   monthKeys,
   emptyLabel,
   accent,
-  l1IconByName,
+  l1IconById,
 }: {
   sectionId: string;
   title: string;
   rows: CategoryRow[];
-  totals: Map<string, Record<string, number>>;
+  totals: Map<number, Record<string, number>>;
   monthKeys: string[];
   emptyLabel: string;
   accent: string;
-  l1IconByName: Map<string, string>;
+  l1IconById: Map<number, string>;
 }) {
   const {
     l1HasChildren,
@@ -387,28 +429,25 @@ function CategorySectionBody({
         rows.map((row) => {
           if (!isRowVisible(row)) return null;
           const rowTotals = totals.get(row.id) ?? {};
-          const l2Key = `${row.l1}::${row.l2 ?? ""}`;
+          const l2Key = `${row.l1Id}::${row.l2Id ?? 0}`;
           const hasChildren =
             row.level === 1
-              ? l1HasChildren.has(row.l1)
+              ? l1HasChildren.has(row.l1Id)
               : row.level === 2
                 ? l2HasChildren.has(l2Key)
                 : false;
           const isExpanded =
             row.level === 1
-              ? expandedL1.has(row.l1)
+              ? expandedL1.has(row.l1Id)
               : row.level === 2
                 ? expandedL2.has(l2Key)
                 : true;
           const indentClass = row.level === 1 ? "" : row.level === 2 ? "pl-4" : "pl-8";
-          const iconName = row.level === 1 ? l1IconByName.get(row.l1) : null;
+          const iconName = row.level === 1 ? l1IconById.get(row.l1Id) : null;
           const CategoryIcon =
             row.level === 1
-              ? iconName === "none"
-                ? CATEGORY_ICON_FALLBACK
-                : (iconName ? CATEGORY_ICON_BY_NAME[iconName] : undefined) ??
-                  CATEGORY_ICON_BY_L1[row.l1] ??
-                  CATEGORY_ICON_FALLBACK
+              ? (iconName ? CATEGORY_ICON_BY_NAME[iconName] : undefined) ??
+                CATEGORY_ICON_FALLBACK
               : null;
           return (
             <TableRow key={`${sectionId}:${row.id}`}>
@@ -424,7 +463,9 @@ function CategorySectionBody({
                   {hasChildren ? (
                     <button
                       type="button"
-                      onClick={() => (row.level === 1 ? toggleL1(row.l1) : toggleL2(l2Key))}
+                      onClick={() =>
+                        row.level === 1 ? toggleL1(row.l1Id) : toggleL2(l2Key)
+                      }
                       className="inline-flex h-5 w-5 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                       aria-label={
                         isExpanded ? "Свернуть подкатегории" : "Развернуть подкатегории"
@@ -471,7 +512,7 @@ function CategoryTable({
   emptyLabel,
   summaryLabel,
   summaryTotals,
-  l1IconByName,
+  l1IconById,
 }: {
   title: string;
   monthKeys: string[];
@@ -479,14 +520,14 @@ function CategoryTable({
     id: string;
     title: string;
     rows: CategoryRow[];
-    totals: Map<string, Record<string, number>>;
+    totals: Map<number, Record<string, number>>;
     emptyLabel: string;
     accent: string;
   }[];
   emptyLabel: string;
   summaryLabel?: string;
   summaryTotals?: Record<string, number>;
-  l1IconByName: Map<string, string>;
+  l1IconById: Map<number, string>;
 }) {
   const hasAnyRows = sections.some((section) => section.rows.length > 0);
 
@@ -522,7 +563,7 @@ function CategoryTable({
                     monthKeys={monthKeys}
                     emptyLabel={section.emptyLabel}
                     accent={section.accent}
-                    l1IconByName={l1IconByName}
+                    l1IconById={l1IconById}
                   />
                 ))}
               </TableBody>
@@ -563,23 +604,19 @@ export default function IncomeExpenseDynamicsPage() {
   const [ratesLoading, setRatesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const stored = readStoredCategories();
-    if (stored) setCategoryNodes(stored);
-  }, []);
+useEffect(() => {
+  if (!session) return;
+  let active = true;
+  setLoading(true);
+  setError(null);
 
-  useEffect(() => {
-    if (!session) return;
-    let active = true;
-    setLoading(true);
-    setError(null);
-
-    Promise.all([fetchItems(), fetchTransactions()])
-      .then(([itemsData, txData]) => {
-        if (!active) return;
-        setItems(itemsData);
-        setTransactions(txData);
-      })
+  Promise.all([fetchItems(), fetchTransactions(), fetchCategories()])
+    .then(([itemsData, txData, categoryData]) => {
+      if (!active) return;
+      setItems(itemsData);
+      setTransactions(txData);
+      setCategoryNodes(categoryData);
+    })
       .catch((e: any) => {
         if (!active) return;
         setError(
@@ -600,10 +637,14 @@ export default function IncomeExpenseDynamicsPage() {
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
-  const l1IconByName = useMemo(() => {
-    const map = new Map<string, string>();
+  const categoryIndex = useMemo(
+    () => buildCategoryIndex(categoryNodes),
+    [categoryNodes]
+  );
+  const l1IconById = useMemo(() => {
+    const map = new Map<number, string>();
     categoryNodes.forEach((node) => {
-      if (node.icon) map.set(node.name, node.icon);
+      if (node.icon_name) map.set(node.id, node.icon_name);
     });
     return map;
   }, [categoryNodes]);
@@ -683,15 +724,23 @@ export default function IncomeExpenseDynamicsPage() {
     };
   }, [actualTxs, fxRatesByDate, itemsById]);
 
-  const incomeMatrix = useMemo(
-    () => buildCategoryMatrix(incomeTxs, itemsById, fxRatesByDate, allMonthKeys),
-    [incomeTxs, itemsById, fxRatesByDate, allMonthKeys]
-  );
+const incomeMatrix = useMemo(
+  () =>
+    buildCategoryMatrix(incomeTxs, itemsById, fxRatesByDate, categoryIndex, allMonthKeys),
+  [incomeTxs, itemsById, fxRatesByDate, categoryIndex, allMonthKeys]
+);
 
-  const expenseMatrix = useMemo(
-    () => buildCategoryMatrix(expenseTxs, itemsById, fxRatesByDate, allMonthKeys),
-    [expenseTxs, itemsById, fxRatesByDate, allMonthKeys]
-  );
+const expenseMatrix = useMemo(
+  () =>
+    buildCategoryMatrix(
+      expenseTxs,
+      itemsById,
+      fxRatesByDate,
+      categoryIndex,
+      allMonthKeys
+    ),
+  [expenseTxs, itemsById, fxRatesByDate, categoryIndex, allMonthKeys]
+);
 
   const incomeTotals = useMemo(
     () =>
@@ -783,7 +832,7 @@ export default function IncomeExpenseDynamicsPage() {
               emptyLabel="Пока нет фактических доходов и расходов."
               summaryLabel="Итого"
               summaryTotals={saldoTotals}
-              l1IconByName={l1IconByName}
+              l1IconById={l1IconById}
             />
           </div>
         )}

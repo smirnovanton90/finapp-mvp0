@@ -36,6 +36,10 @@ class User(Base):
     transaction_chains: Mapped[list["TransactionChain"]] = relationship(
         back_populates="user"
     )
+    categories: Mapped[list["Category"]] = relationship(back_populates="owner")
+    category_states: Mapped[list["UserCategoryState"]] = relationship(
+        back_populates="user"
+    )
 
 
 class Currency(Base):
@@ -85,6 +89,65 @@ class Bank(Base):
     )
 
     items: Mapped[list["Item"]] = relationship(back_populates="bank")
+
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("categories.id"), nullable=True
+    )
+    scope: Mapped[str] = mapped_column(String(10), nullable=False)
+    icon_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    archived_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    parent: Mapped[Optional["Category"]] = relationship(
+        "Category", remote_side="Category.id", back_populates="children"
+    )
+    children: Mapped[list["Category"]] = relationship(back_populates="parent")
+    owner: Mapped[Optional["User"]] = relationship(back_populates="categories")
+    user_states: Mapped[list["UserCategoryState"]] = relationship(
+        back_populates="category"
+    )
+
+    __table_args__ = (
+        CheckConstraint("scope in ('INCOME','EXPENSE','BOTH')", name="ck_categories_scope"),
+    )
+
+
+class UserCategoryState(Base):
+    __tablename__ = "user_category_state"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), primary_key=True
+    )
+    category_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("categories.id"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    icon_override: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="category_states")
+    category: Mapped["Category"] = relationship(back_populates="user_states")
 
 
 class Item(Base):
@@ -172,9 +235,10 @@ class Transaction(Base):
         String(20), nullable=False, server_default="CONFIRMED"
     )
 
-    category_l1: Mapped[str] = mapped_column(String(100), nullable=False)
-    category_l2: Mapped[str] = mapped_column(String(100), nullable=False)
-    category_l3: Mapped[str] = mapped_column(String(100), nullable=False)
+    category_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("categories.id"), nullable=True
+    )
+    category: Mapped[Optional["Category"]] = relationship()
 
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -229,9 +293,10 @@ class TransactionChain(Base):
 
     direction: Mapped[str] = mapped_column(String(20), nullable=False)
 
-    category_l1: Mapped[str] = mapped_column(String(100), nullable=False)
-    category_l2: Mapped[str] = mapped_column(String(100), nullable=False)
-    category_l3: Mapped[str] = mapped_column(String(100), nullable=False)
+    category_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("categories.id"), nullable=True
+    )
+    category: Mapped[Optional["Category"]] = relationship()
 
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
+from category_service import resolve_category_or_400
 from db import get_db
 from models import Item, Transaction, TransactionChain, User
 from schemas import TransactionChainCreate, TransactionChainOut
@@ -175,6 +176,8 @@ def create_transaction_chain(
     if not schedule_dates:
         raise HTTPException(status_code=400, detail="No dates generated for chain")
 
+    category = resolve_category_or_400(db, user, data.category_id)
+
     chain = TransactionChain(
         user_id=user.id,
         name=data.name,
@@ -192,9 +195,7 @@ def create_transaction_chain(
         amount_rub=data.amount_rub,
         amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
         direction=data.direction,
-        category_l1=data.category_l1,
-        category_l2=data.category_l2,
-        category_l3=data.category_l3,
+        category_id=category.id if category else None,
         description=data.description,
         comment=data.comment,
     )
@@ -217,9 +218,7 @@ def create_transaction_chain(
                 direction=data.direction,
                 transaction_type="PLANNED",
                 status="CONFIRMED",
-                category_l1=data.category_l1,
-                category_l2=data.category_l2,
-                category_l3=data.category_l3,
+                category_id=category.id if category else None,
                 description=data.description,
                 comment=data.comment,
             )

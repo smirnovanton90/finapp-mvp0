@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useSession } from "next-auth/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,34 +24,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CategoryNode, CategoryScope } from "@/lib/categories";
 import {
-  CategoryNode,
-  CategoryScope,
-  DEFAULT_CATEGORIES,
-  readStoredCategories,
-  writeStoredCategories,
-} from "@/lib/categories";
-import {
-  CATEGORY_ICON_BY_L1,
   CATEGORY_ICON_BY_NAME,
+  CATEGORY_ICON_FALLBACK,
   CATEGORY_ICON_OPTIONS,
-  CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
 import { cn } from "@/lib/utils";
-import { fetchTransactions, TransactionDirection, TransactionOut } from "@/lib/api";
+import {
+  createCategory,
+  deleteCategory,
+  fetchCategories,
+  updateCategoryIcon,
+  updateCategoryScope,
+  updateCategoryVisibility,
+} from "@/lib/api";
 import { Folder, Plus, RefreshCw, Trash2 } from "lucide-react";
 
-type DraftNode = {
-  id: string;
-  name: string;
-  directions: Set<TransactionDirection>;
-  children: DraftNode[];
-};
-
 type DeleteTarget = {
-  id: string;
+  id: number;
   name: string;
   childCount: number;
+  ownerUserId: number | null | undefined;
 };
 
 const MAX_DEPTH = 3;
@@ -67,197 +60,13 @@ const SCOPE_OPTIONS: Array<{
   { value: "BOTH", label: "Доходы и расходы", dotClass: "bg-violet-500" },
 ];
 
-function createId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `cat_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-}
-
-function normalizeName(name: string) {
-  return name.trim().toLowerCase();
-}
-
-function cleanCategory(value: string | null | undefined) {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed || trimmed === "-") return null;
-  return trimmed;
-}
-
-function scopeFromDirections(directions: Set<TransactionDirection>): CategoryScope {
-  const hasIncome = directions.has("INCOME");
-  const hasExpense = directions.has("EXPENSE");
-  if (hasIncome && hasExpense) return "BOTH";
-  if (hasIncome) return "INCOME";
-  if (hasExpense) return "EXPENSE";
-  return "BOTH";
-}
-
-function insertDraftNode(
-  nodes: DraftNode[],
-  path: string[],
-  direction: TransactionDirection
-) {
-  let level = nodes;
-  path.forEach((part) => {
-    let node = level.find((item) => item.name === part);
-    if (!node) {
-      node = {
-        id: createId(),
-        name: part,
-        directions: new Set<TransactionDirection>(),
-        children: [],
-      };
-      level.push(node);
-    }
-    node.directions.add(direction);
-    level = node.children;
-  });
-}
-
-function sortNodes(nodes: CategoryNode[]): CategoryNode[] {
-  return [...nodes]
+function filterCategories(nodes: CategoryNode[]): CategoryNode[] {
+  return nodes
+    .filter((node) => node.enabled !== false && !node.archived_at)
     .map((node) => ({
       ...node,
-      children: node.children ? sortNodes(node.children) : undefined,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-}
-
-function finalizeNodes(nodes: DraftNode[]): CategoryNode[] {
-  return sortNodes(
-    nodes.map((node) => ({
-      id: node.id,
-      name: node.name,
-      scope: scopeFromDirections(node.directions),
-      children: node.children.length ? finalizeNodes(node.children) : undefined,
-    }))
-  );
-}
-
-function buildTreeFromTransactions(transactions: TransactionOut[]): CategoryNode[] {
-  const roots: DraftNode[] = [];
-  transactions.forEach((tx) => {
-    if (tx.direction === "TRANSFER") return;
-    const level1 = cleanCategory(tx.category_l1);
-    if (!level1) return;
-    const level2 = cleanCategory(tx.category_l2);
-    const level3 = cleanCategory(tx.category_l3);
-    const path = [level1];
-    if (level2) path.push(level2);
-    if (level2 && level3) path.push(level3);
-    insertDraftNode(roots, path, tx.direction);
-  });
-  return finalizeNodes(roots);
-}
-
-function mergeCategoryTrees(
-  current: CategoryNode[],
-  incoming: CategoryNode[]
-): CategoryNode[] {
-  const incomingMap = new Map(
-    incoming.map((node) => [normalizeName(node.name), node])
-  );
-  const currentKeys = new Set(current.map((node) => normalizeName(node.name)));
-
-  const merged = current.map((node) => {
-    const incomingNode = incomingMap.get(normalizeName(node.name));
-    if (!incomingNode) return node;
-    const mergedChildren = mergeCategoryTrees(
-      node.children ?? [],
-      incomingNode.children ?? []
-    );
-    return {
-      ...node,
-      icon: node.icon ?? incomingNode.icon,
-      children: mergedChildren.length ? mergedChildren : undefined,
-    };
-  });
-
-  incoming.forEach((node) => {
-    if (!currentKeys.has(normalizeName(node.name))) {
-      merged.push(node);
-    }
-  });
-
-  return sortNodes(merged);
-}
-
-function updateNodeScope(
-  nodes: CategoryNode[],
-  id: string,
-  scope: CategoryScope
-): CategoryNode[] {
-  return nodes.map((node) => {
-    if (node.id === id) {
-      return { ...node, scope };
-    }
-    if (node.children) {
-      return { ...node, children: updateNodeScope(node.children, id, scope) };
-    }
-    return node;
-  });
-}
-
-function updateNodeIcon(
-  nodes: CategoryNode[],
-  id: string,
-  icon?: string
-): CategoryNode[] {
-  return nodes.map((node) => {
-    if (node.id === id) {
-      const next = { ...node };
-      if (icon) {
-        next.icon = icon;
-      } else {
-        delete next.icon;
-      }
-      return next;
-    }
-    if (node.children) {
-      return { ...node, children: updateNodeIcon(node.children, id, icon) };
-    }
-    return node;
-  });
-}
-
-function addNode(
-  nodes: CategoryNode[],
-  parentId: string | null,
-  node: CategoryNode
-): CategoryNode[] {
-  if (!parentId) return [...nodes, node];
-  return nodes.map((item) => {
-    if (item.id === parentId) {
-      const nextChildren = item.children ? [...item.children, node] : [node];
-      return { ...item, children: nextChildren };
-    }
-    if (item.children) {
-      return { ...item, children: addNode(item.children, parentId, node) };
-    }
-    return item;
-  });
-}
-
-function removeNode(nodes: CategoryNode[], id: string): CategoryNode[] {
-  return nodes
-    .filter((node) => node.id !== id)
-    .map((node) =>
-      node.children
-        ? { ...node, children: removeNode(node.children, id) }
-        : node
-    );
-}
-
-function findNodeById(nodes: CategoryNode[], id: string): CategoryNode | null {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    if (node.children) {
-      const found = findNodeById(node.children, id);
-      if (found) return found;
-    }
-  }
-  return null;
+      children: node.children ? filterCategories(node.children) : undefined,
+    }));
 }
 
 function countNodes(nodes: CategoryNode[]): number {
@@ -269,16 +78,6 @@ function countNodes(nodes: CategoryNode[]): number {
 
 function countDescendants(node: CategoryNode): number {
   return countNodes(node.children ?? []);
-}
-
-function hasDuplicateName(
-  nodes: CategoryNode[],
-  parentId: string | null,
-  name: string
-): boolean {
-  const normalized = normalizeName(name);
-  const siblings = parentId ? findNodeById(nodes, parentId)?.children ?? [] : nodes;
-  return siblings.some((item) => normalizeName(item.name) === normalized);
 }
 
 function CategoryTree({
@@ -293,8 +92,8 @@ function CategoryTree({
   depth: number;
   onAddChild: (node: CategoryNode, depth: number) => void;
   onDelete: (node: CategoryNode) => void;
-  onScopeChange: (id: string, scope: CategoryScope) => void;
-  onIconChange: (id: string, icon?: string) => void;
+  onScopeChange: (id: number, scope: CategoryScope) => void;
+  onIconChange: (id: number, iconName: string | null) => void;
 }) {
   if (nodes.length === 0) return null;
   return (
@@ -303,30 +102,31 @@ function CategoryTree({
         const scopeMeta =
           SCOPE_OPTIONS.find((option) => option.value === node.scope) ??
           SCOPE_OPTIONS[2];
-        const iconName = node.icon === "none" ? undefined : node.icon;
-        const defaultIconName =
-          depth === 1 ? CATEGORY_ICON_NAME_BY_L1[node.name] : undefined;
-        const resolvedIconName = node.icon === undefined ? defaultIconName : node.icon;
+        const iconName =
+          node.icon_name && node.icon_name.trim().length > 0 ? node.icon_name : undefined;
         const PreviewIcon =
           (iconName ? CATEGORY_ICON_BY_NAME[iconName] : undefined) ??
-          (node.icon === undefined ? CATEGORY_ICON_BY_L1[node.name] : undefined) ??
+          CATEGORY_ICON_FALLBACK ??
           Folder;
+        const isGlobal = node.owner_user_id == null;
+        const isDisabled = node.enabled === false;
         return (
           <div key={node.id}>
-            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm sm:flex-nowrap">
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm sm:flex-nowrap",
+                isDisabled && "opacity-50"
+              )}
+            >
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <PreviewIcon className="h-4 w-4 text-violet-600" />
                 <span className="truncate font-medium text-slate-900">{node.name}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Select
-                  value={
-                    resolvedIconName && resolvedIconName.trim().length > 0
-                      ? resolvedIconName
-                      : "none"
-                  }
+                  value={iconName && iconName.trim().length > 0 ? iconName : "none"}
                   onValueChange={(value) =>
-                    onIconChange(node.id, value === "none" ? "none" : value)
+                    onIconChange(node.id, value === "none" ? null : value)
                   }
                 >
                   <SelectTrigger className="h-8 w-[160px] border-2 border-border/70 bg-white text-xs shadow-none">
@@ -352,6 +152,7 @@ function CategoryTree({
                   onValueChange={(value) =>
                     onScopeChange(node.id, value as CategoryScope)
                   }
+                  disabled={isGlobal}
                 >
                   <SelectTrigger className="h-8 w-[180px] border-2 border-border/70 bg-white text-xs shadow-none">
                     <SelectValue />
@@ -408,15 +209,12 @@ function CategoryTree({
 }
 
 export default function CategoriesPage() {
-  const { data: session } = useSession();
-  const [categories, setCategories] = useState<CategoryNode[]>(
-    () => readStoredCategories() ?? DEFAULT_CATEGORIES
-  );
-  const loading = false;
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [addParentId, setAddParentId] = useState<string | null>(null);
+  const [addParentId, setAddParentId] = useState<number | null>(null);
   const [addParentName, setAddParentName] = useState<string | null>(null);
   const [addParentDepth, setAddParentDepth] = useState(0);
   const [newName, setNewName] = useState("");
@@ -425,28 +223,52 @@ export default function CategoriesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
-  useEffect(() => {
-    writeStoredCategories(categories);
-  }, [categories]);
+  const loadCategories = useCallback(
+    async (silent?: boolean) => {
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const data = await fetchCategories();
+        setCategories(data);
+      } catch (e: any) {
+        setError(e?.message ?? "Не удалось загрузить категории.");
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [setCategories]
+  );
 
-  const totalCount = useMemo(() => countNodes(categories), [categories]);
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
+  const visibleCategories = useMemo(
+    () => filterCategories(categories),
+    [categories]
+  );
+  const totalCount = useMemo(
+    () => countNodes(visibleCategories),
+    [visibleCategories]
+  );
 
   const openAddDialog = (
-    parentId: string | null,
+    parentId: number | null,
     parentName: string | null,
-    parentDepth: number
+    parentDepth: number,
+    parentScope?: CategoryScope | null
   ) => {
     setAddParentId(parentId);
     setAddParentName(parentName);
     setAddParentDepth(parentDepth);
     setNewName("");
-    setNewScope("BOTH");
+    setNewScope(parentScope ?? "BOTH");
     setNewIcon("");
     setFormError(null);
     setIsAddOpen(true);
   };
 
-  const handleAddSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleAddSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = newName.trim();
     if (!trimmed) {
@@ -457,44 +279,75 @@ export default function CategoriesPage() {
       setFormError("Нельзя добавить подкатегорию глубже 3 уровней.");
       return;
     }
-    if (hasDuplicateName(categories, addParentId, trimmed)) {
-      setFormError("Категория с таким названием уже есть на этом уровне.");
-      return;
+    setFormError(null);
+    setSyncing(true);
+    try {
+      await createCategory({
+        name: trimmed,
+        parent_id: addParentId,
+        scope: newScope,
+        icon_name: newIcon ? newIcon : null,
+      });
+      setIsAddOpen(false);
+      await loadCategories(true);
+    } catch (e: any) {
+      setFormError(e?.message ?? "Не удалось добавить категорию.");
+    } finally {
+      setSyncing(false);
     }
-
-    const nextNode: CategoryNode = {
-      id: createId(),
-      name: trimmed,
-      scope: newScope,
-      icon: newIcon ? newIcon : undefined,
-    };
-
-    setCategories((prev) => sortNodes(addNode(prev, addParentId, nextNode)));
-    setIsAddOpen(false);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    setCategories((prev) => removeNode(prev, deleteTarget.id));
-    setDeleteTarget(null);
-  };
-
-  const handleScopeChange = (id: string, scope: CategoryScope) => {
-    setCategories((prev) => updateNodeScope(prev, id, scope));
-  };
-
-  const handleIconChange = (id: string, icon?: string) => {
-    setCategories((prev) => updateNodeIcon(prev, id, icon));
-  };
-
-  const handleSync = async () => {
-    if (!session) return;
     setSyncing(true);
     setError(null);
     try {
-      const txs = await fetchTransactions();
-      const nextTree = buildTreeFromTransactions(txs);
-      setCategories((prev) => mergeCategoryTrees(prev, nextTree));
+      if (deleteTarget.ownerUserId == null) {
+        await updateCategoryVisibility(deleteTarget.id, false);
+      } else {
+        await deleteCategory(deleteTarget.id);
+      }
+      setDeleteTarget(null);
+      await loadCategories(true);
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось удалить категорию.");
+      setDeleteTarget(null);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleScopeChange = async (id: number, scope: CategoryScope) => {
+    setSyncing(true);
+    setError(null);
+    try {
+      await updateCategoryScope(id, scope);
+      await loadCategories(true);
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось обновить тип категории.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleIconChange = async (id: number, iconName: string | null) => {
+    setSyncing(true);
+    setError(null);
+    try {
+      await updateCategoryIcon(id, iconName);
+      await loadCategories(true);
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось обновить иконку.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      await loadCategories(true);
     } catch (e: any) {
       setError(e?.message ?? "Не удалось обновить категории.");
     } finally {
@@ -609,9 +462,11 @@ export default function CategoriesPage() {
               Удалить категорию {deleteTarget ? `"${deleteTarget.name}"` : ""}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget?.childCount
-                ? `Будут удалены и все подкатегории: ${deleteTarget.childCount}.`
-                : "Действие нельзя отменить."}
+              {deleteTarget?.ownerUserId == null
+                ? "Категория будет скрыта только для вас."
+                : deleteTarget?.childCount
+                  ? `Будут удалены и все подкатегории: ${deleteTarget.childCount}.`
+                  : "Действие нельзя отменить."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -648,7 +503,7 @@ export default function CategoriesPage() {
               disabled={syncing || loading}
             >
               <RefreshCw className={cn("h-4 w-4", syncing ? "animate-spin" : "")} />
-              Обновить из транзакций
+              Обновить
             </Button>
           </div>
         </div>
@@ -673,22 +528,23 @@ export default function CategoriesPage() {
                     {error}
                   </div>
                 )}
-                {categories.length === 0 ? (
+                {visibleCategories.length === 0 ? (
                   <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
                     Категории пока не добавлены.
                   </div>
                 ) : (
                   <CategoryTree
-                    nodes={categories}
+                    nodes={visibleCategories}
                     depth={1}
                     onAddChild={(node, depth) =>
-                      openAddDialog(node.id, node.name, depth)
+                      openAddDialog(node.id, node.name, depth, node.scope)
                     }
                     onDelete={(node) =>
                       setDeleteTarget({
                         id: node.id,
                         name: node.name,
                         childCount: countDescendants(node),
+                        ownerUserId: node.owner_user_id,
                       })
                     }
                     onScopeChange={handleScopeChange}

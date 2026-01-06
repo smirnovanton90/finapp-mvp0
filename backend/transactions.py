@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from db import get_db
 from auth import get_current_user
+from category_service import resolve_category_or_400
 from models import Transaction, Item, User
 from schemas import TransactionCreate, TransactionOut, TransactionStatusUpdate
 from sqlalchemy import select
@@ -158,6 +159,8 @@ def create_transaction(
     # 3) Создаём транзакцию
     status_value = data.status or "CONFIRMED"
 
+    category = resolve_category_or_400(db, user, data.category_id)
+
     tx = Transaction(
         user_id=user.id,
         transaction_date=data.transaction_date,
@@ -168,9 +171,7 @@ def create_transaction(
         direction=data.direction,
         transaction_type=data.transaction_type,
         status=status_value,
-        category_l1=data.category_l1,
-        category_l2=data.category_l2,
-        category_l3=data.category_l3,
+        category_id=category.id if category else None,
         description=data.description,
         comment=data.comment,
     )
@@ -386,6 +387,8 @@ def update_transaction(
     for item_id, delta in deltas.items():
         items_by_id[item_id].current_value_rub += delta
 
+    category = resolve_category_or_400(db, user, data.category_id)
+
     tx.transaction_date = data.transaction_date
     tx.primary_item_id = data.primary_item_id
     tx.counterparty_item_id = data.counterparty_item_id if data.direction == "TRANSFER" else None
@@ -395,9 +398,7 @@ def update_transaction(
     tx.transaction_type = data.transaction_type
     if data.status is not None:
         tx.status = data.status
-    tx.category_l1 = data.category_l1
-    tx.category_l2 = data.category_l2
-    tx.category_l3 = data.category_l3
+    tx.category_id = category.id if category else None
     tx.description = data.description
     tx.comment = data.comment
 

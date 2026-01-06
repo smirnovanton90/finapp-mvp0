@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -62,6 +63,7 @@ import {
   createTransaction,
   deleteTransaction,
   fetchBanks,
+  fetchCategories,
   fetchFxRates,
   fetchDeletedTransactions,
   fetchItems,
@@ -75,13 +77,11 @@ import {
   updateTransactionStatus,
 } from "@/lib/api";
 import {
+  buildCategoryLookup,
   buildCategoryMaps,
   CategoryNode,
-  DEFAULT_CATEGORIES,
-  readStoredCategories,
 } from "@/lib/categories";
 import {
-  CATEGORY_ICON_BY_L1,
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
@@ -446,7 +446,8 @@ function TransactionCardRow({
   itemCurrencyCode,
   itemBankLogoUrl,
   itemBankName,
-  categoryIconFor,
+  categoryIconForId,
+  categoryLinesForId,
   getRubEquivalentCents,
   isSelected,
   onToggleSelection,
@@ -463,11 +464,12 @@ function TransactionCardRow({
   itemCurrencyCode: (id: number | null | undefined) => string;
   itemBankLogoUrl: (id: number | null | undefined) => string | null;
   itemBankName: (id: number | null | undefined) => string;
-  categoryIconFor: (
-    l1?: string | null,
-    l2?: string | null,
-    l3?: string | null
+  categoryIconForId: (
+    categoryId: number | null
   ) => ComponentType<{ className?: string; strokeWidth?: number }>;
+  categoryLinesForId: (
+    categoryId: number | null
+  ) => [string, string, string];
   getRubEquivalentCents: (tx: TransactionCard, currencyCode: string) => number | null;
   isSelected: boolean;
   onToggleSelection: (id: number, checked: boolean) => void;
@@ -595,16 +597,8 @@ function TransactionCardRow({
   const chainLabel =
     isPlanned && tx.chain_name?.trim() ? tx.chain_name.trim() : null;
 
-  const categoryLines = [
-    tx.category_l1?.trim() ? tx.category_l1 : "-",
-    tx.category_l2?.trim() ? tx.category_l2 : "-",
-    tx.category_l3?.trim() ? tx.category_l3 : "-",
-  ];
-  const CategoryIcon = categoryIconFor(
-    tx.category_l1,
-    tx.category_l2,
-    tx.category_l3
-  );
+  const categoryLines = categoryLinesForId(tx.category_id);
+  const CategoryIcon = categoryIconForId(tx.category_id);
 
   const checkboxDisabled = tx.isDeleted || isDeleting;
 
@@ -966,12 +960,12 @@ export function TransactionsView({
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
   const [loanTotalStr, setLoanTotalStr] = useState("");
   const [loanInterestStr, setLoanInterestStr] = useState("");
-  const [cat1, setCat1] = useState("Питание");
-  const [cat2, setCat2] = useState("Продукты питания");
-  const [cat3, setCat3] = useState("-");
+  const [cat1, setCat1] = useState("");
+  const [cat2, setCat2] = useState("");
+  const [cat3, setCat3] = useState("");
   const [categoryQuery, setCategoryQuery] = useState("");
   const [isCategorySearchOpen, setIsCategorySearchOpen] = useState(false);
-  const [categoryNodes, setCategoryNodes] = useState(() => DEFAULT_CATEGORIES);
+  const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
@@ -988,9 +982,20 @@ export function TransactionsView({
   const [isBulkConfirming, setIsBulkConfirming] = useState(false);
 
   useEffect(() => {
-    const stored = readStoredCategories();
-    setCategoryNodes(stored ?? DEFAULT_CATEGORIES);
-  }, []);
+    let cancelled = false;
+    fetchCategories()
+      .then((data) => {
+        if (!cancelled) setCategoryNodes(data);
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setError(err?.message ?? "Не удалось загрузить категории.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [setError]);
 
   const categoryMaps = useMemo(
     () => buildCategoryMaps(categoryNodes),
@@ -1040,48 +1045,42 @@ export function TransactionsView({
     );
   }, [categoryPaths, normalizedCategoryQuery]);
 
-  const categoryIconByPath = useMemo(() => {
-    const map = new Map<string, string>();
-    const walk = (nodes: CategoryNode[], trail: string[]) => {
-      nodes.forEach((node) => {
-        const nextTrail = [...trail, node.name];
-        const [l1, l2, l3] = nextTrail;
-        const key = makeCategoryPathKey(l1, l2, l3);
-        if (typeof node.icon === "string" && node.icon.trim().length > 0) {
-          map.set(key, node.icon);
-        }
-        if (node.children && node.children.length > 0) {
-          walk(node.children, nextTrail);
-        }
-      });
-    };
-    walk(categoryNodes, []);
-    return map;
-  }, [categoryNodes]);
+  const categoryLookup = useMemo(
+    () => buildCategoryLookup(categoryNodes),
+    [categoryNodes]
+  );
 
-  const resolveCategoryIcon = (
-    l1?: string | null,
-    l2?: string | null,
-    l3?: string | null
-  ) => {
-    const l1Key = l1?.trim() ?? "";
-    if (!l1Key) return CATEGORY_ICON_FALLBACK;
-    const l2Key = l2?.trim() ?? "";
-    const l3Key = l3?.trim() ?? "";
-    const iconName =
-      (l3Key && categoryIconByPath.get(makeCategoryPathKey(l1Key, l2Key, l3Key))) ??
-      (l2Key && categoryIconByPath.get(makeCategoryPathKey(l1Key, l2Key))) ??
-      categoryIconByPath.get(makeCategoryPathKey(l1Key));
-    if (iconName) {
-      if (iconName === "none") return CATEGORY_ICON_FALLBACK;
-      return (
-        CATEGORY_ICON_BY_NAME[iconName] ??
-        CATEGORY_ICON_BY_L1[l1Key] ??
-        CATEGORY_ICON_FALLBACK
-      );
-    }
-    return CATEGORY_ICON_BY_L1[l1Key] ?? CATEGORY_ICON_FALLBACK;
-  };
+  const getCategoryParts = useCallback(
+    (categoryId: number | null): [string, string, string] => {
+      if (!categoryId) return ["", "", ""];
+      const parts = categoryLookup.idToPath.get(categoryId) ?? [];
+      const [l1, l2, l3] = parts;
+      return [l1 ?? "", l2 ?? "", l3 ?? ""];
+    },
+    [categoryLookup.idToPath]
+  );
+
+  const getCategoryLines = useCallback(
+    (categoryId: number | null): [string, string, string] => {
+      const [l1, l2, l3] = getCategoryParts(categoryId);
+      return [
+        l1 || CATEGORY_PLACEHOLDER,
+        l2 || CATEGORY_PLACEHOLDER,
+        l3 || CATEGORY_PLACEHOLDER,
+      ];
+    },
+    [getCategoryParts]
+  );
+
+  const resolveCategoryIcon = useCallback(
+    (categoryId: number | null) => {
+      if (!categoryId) return CATEGORY_ICON_FALLBACK;
+      const iconName = categoryLookup.idToIcon.get(categoryId);
+      if (!iconName) return CATEGORY_ICON_FALLBACK;
+      return CATEGORY_ICON_BY_NAME[iconName] ?? CATEGORY_ICON_FALLBACK;
+    },
+    [categoryLookup.idToIcon]
+  );
 
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
@@ -1252,6 +1251,30 @@ export function TransactionsView({
     setCategoryQuery(formatCategoryPath(l1, l2, l3));
   };
 
+  const applyCategorySelectionById = (categoryId: number | null) => {
+    const [l1, l2, l3] = getCategoryParts(categoryId);
+    applyCategorySelection(
+      l1,
+      l2 || CATEGORY_PLACEHOLDER,
+      l3 || CATEGORY_PLACEHOLDER
+    );
+  };
+
+  const normalizeCategoryValue = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === CATEGORY_PLACEHOLDER) return "";
+    return trimmed;
+  };
+
+  const resolveCategoryId = (l1: string, l2: string, l3: string) => {
+    const key = makeCategoryPathKey(
+      normalizeCategoryValue(l1),
+      normalizeCategoryValue(l2),
+      normalizeCategoryValue(l3)
+    );
+    return categoryLookup.pathToId.get(key) ?? null;
+  };
+
   const resetForm = () => {
     setDate(new Date().toISOString().slice(0, 10));
     setDirection("EXPENSE");
@@ -1322,11 +1345,7 @@ export function TransactionsView({
         ? formatCentsForInput(tx.amount_counterparty)
         : ""
     );
-    applyCategorySelection(
-      tx.category_l1 || "",
-      tx.category_l2 || "",
-      tx.category_l3 || ""
-    );
+    applyCategorySelectionById(tx.category_id);
     setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
   };
@@ -1359,11 +1378,7 @@ export function TransactionsView({
         ? formatCentsForInput(tx.amount_counterparty)
         : ""
     );
-    applyCategorySelection(
-      tx.category_l1 || "",
-      tx.category_l2 || "",
-      tx.category_l3 || ""
-    );
+    applyCategorySelectionById(tx.category_id);
     setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
   };
@@ -1396,11 +1411,7 @@ export function TransactionsView({
         ? formatCentsForInput(tx.amount_counterparty)
         : ""
     );
-    applyCategorySelection(
-      tx.category_l1 || "",
-      tx.category_l2 || "",
-      tx.category_l3 || ""
-    );
+    applyCategorySelectionById(tx.category_id);
     setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
   };
@@ -1413,6 +1424,9 @@ export function TransactionsView({
     if (selectedTxs.length < 2) return;
 
     const baselineTx = selectedTxs[0];
+    const [baselineCat1, baselineCat2, baselineCat3] = getCategoryParts(
+      baselineTx.category_id
+    );
     const baseline = {
       date: getDateKey(baselineTx.transaction_date),
       direction: baselineTx.direction,
@@ -1424,9 +1438,9 @@ export function TransactionsView({
         baselineTx.amount_counterparty != null
           ? formatCentsForInput(baselineTx.amount_counterparty)
           : "",
-      cat1: baselineTx.category_l1 || "",
-      cat2: baselineTx.category_l2 || "",
-      cat3: baselineTx.category_l3 || "",
+      cat1: baselineCat1,
+      cat2: baselineCat2 || CATEGORY_PLACEHOLDER,
+      cat3: baselineCat3 || CATEGORY_PLACEHOLDER,
       description: baselineTx.description ?? "",
       comment: baselineTx.comment ?? "",
     };
@@ -1684,24 +1698,16 @@ export function TransactionsView({
             amount_counterparty: nextAmountCounterparty,
             direction: nextDirection,
             transaction_type: tx.transaction_type,
-            category_l1:
-              nextDirection === "TRANSFER"
-                ? ""
-                : changes.hasCat1Changed
-                  ? cat1
-                  : tx.category_l1 || "",
-            category_l2:
-              nextDirection === "TRANSFER"
-                ? ""
-                : changes.hasCat2Changed
-                  ? cat2
-                  : tx.category_l2 || "",
-            category_l3:
-              nextDirection === "TRANSFER"
-                ? ""
-                : changes.hasCat3Changed
-                  ? cat3
-                  : tx.category_l3 || "",
+            category_id: (() => {
+              if (nextDirection === "TRANSFER") return null;
+              const [existingL1, existingL2, existingL3] = getCategoryParts(
+                tx.category_id
+              );
+              const nextL1 = changes.hasCat1Changed ? cat1 : existingL1;
+              const nextL2 = changes.hasCat2Changed ? cat2 : existingL2;
+              const nextL3 = changes.hasCat3Changed ? cat3 : existingL3;
+              return resolveCategoryId(nextL1, nextL2, nextL3);
+            })(),
             description: changes.hasDescriptionChanged
               ? description || null
               : tx.description ?? null,
@@ -1908,6 +1914,16 @@ export function TransactionsView({
             `Строка ${rowNumber}: не удалось сопоставить категорию первого уровня.`
           );
         }
+        const categoryId = resolveCategoryId(
+          categoryL1,
+          CATEGORY_PLACEHOLDER,
+          CATEGORY_PLACEHOLDER
+        );
+        if (!categoryId) {
+          throw new Error(
+            `Строка ${rowNumber}: не удалось сопоставить категорию по дереву.`
+          );
+        }
 
         const commentValue = String(rawComment ?? "").trim();
 
@@ -1920,9 +1936,7 @@ export function TransactionsView({
             direction,
             transaction_type: importTxType,
             status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
-            category_l1: categoryL1,
-            category_l2: "-",
-            category_l3: "-",
+            category_id: categoryId,
             description: null,
             comment: commentValue ? commentValue : null,
           },
@@ -2074,21 +2088,22 @@ export function TransactionsView({
         if (minAmount != null && absAmount < minAmount) return false;
         if (maxAmount != null && absAmount > maxAmount) return false;
       }
+      const [txCat1, txCat2, txCat3] = getCategoryParts(tx.category_id);
       if (
         selectedCategoryL1.size > 0 &&
-        !selectedCategoryL1.has(tx.category_l1)
+        !selectedCategoryL1.has(txCat1)
       ) {
         return false;
       }
       if (
         selectedCategoryL2.size > 0 &&
-        !selectedCategoryL2.has(tx.category_l2)
+        !selectedCategoryL2.has(txCat2)
       ) {
         return false;
       }
       if (
         selectedCategoryL3.size > 0 &&
-        !selectedCategoryL3.has(tx.category_l3)
+        !selectedCategoryL3.has(txCat3)
       ) {
         return false;
       }
@@ -2135,6 +2150,7 @@ export function TransactionsView({
     selectedCurrencyCodes,
     selectedDirections,
     selectedItemIds,
+    getCategoryParts,
     itemsById,
   ]);
 
@@ -2434,6 +2450,11 @@ export function TransactionsView({
                           isEditMode && editingTx
                             ? mergeDateWithTime(date, editingTx.transaction_date)
                             : date;
+                        const expenseCategoryId = resolveCategoryId(cat1, cat2, cat3);
+                        if (!expenseCategoryId) {
+                          setFormError("Выберите категорию из списка.");
+                          return;
+                        }
                         const basePayload = {
                           transaction_date: transactionDate,
                           primary_item_id: primaryItemId,
@@ -2447,9 +2468,7 @@ export function TransactionsView({
                             amount_rub: interestCents,
                             amount_counterparty: null,
                             direction: "EXPENSE" as const,
-                            category_l1: cat1,
-                            category_l2: cat2,
-                            category_l3: cat3,
+                            category_id: expenseCategoryId,
                           };
                           const transferPayload = {
                             ...basePayload,
@@ -2457,9 +2476,7 @@ export function TransactionsView({
                             amount_rub: principalCents,
                             amount_counterparty: null,
                             direction: "TRANSFER" as const,
-                            category_l1: "",
-                            category_l2: "",
-                            category_l3: "",
+                            category_id: null,
                           };
 
                           await Promise.all([
@@ -2550,6 +2567,13 @@ export function TransactionsView({
                           isEditMode && editingTx
                             ? mergeDateWithTime(date, editingTx.transaction_date)
                             : date;
+                        const resolvedCategoryId = isTransfer
+                          ? null
+                          : resolveCategoryId(cat1, cat2, cat3);
+                        if (!isTransfer && !resolvedCategoryId) {
+                          setFormError("Выберите категорию из списка.");
+                          return;
+                        }
                         const payload = {
                           transaction_date: transactionDate,
                           primary_item_id: primaryItemId,
@@ -2560,9 +2584,7 @@ export function TransactionsView({
                           amount_counterparty: isTransfer ? counterpartyCents : null,
                           direction,
                           transaction_type: payloadTransactionType,
-                          category_l1: isTransfer ? "" : cat1,
-                          category_l2: isTransfer ? "" : cat2,
-                          category_l3: isTransfer ? "" : cat3,
+                          category_id: resolvedCategoryId,
                           description: description || null,
                           comment: comment || null,
                         };
@@ -3777,17 +3799,18 @@ export function TransactionsView({
               </div>
             ) : (
               sortedTxs.map((tx) => (
-                <TransactionCardRow
-                  key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
-                  tx={tx}
-                  itemName={itemName}
-                  itemCurrencyCode={itemCurrencyCode}
-                  itemBankLogoUrl={itemBankLogoUrl}
-                  itemBankName={itemBankName}
-                  categoryIconFor={resolveCategoryIcon}
-                  getRubEquivalentCents={getRubEquivalentCents}
-                  isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
-                  onToggleSelection={toggleTxSelection}
+                  <TransactionCardRow
+                    key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
+                    tx={tx}
+                    itemName={itemName}
+                    itemCurrencyCode={itemCurrencyCode}
+                    itemBankLogoUrl={itemBankLogoUrl}
+                    itemBankName={itemBankName}
+                    categoryIconForId={resolveCategoryIcon}
+                    categoryLinesForId={getCategoryLines}
+                    getRubEquivalentCents={getRubEquivalentCents}
+                    isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
+                    onToggleSelection={toggleTxSelection}
                   onCreateFrom={openCreateFromDialog}
                   onRealize={openRealizeDialog}
                   onEdit={openEditDialog}

@@ -9,6 +9,7 @@ TransactionType = Literal["ACTUAL", "PLANNED"]
 TransactionStatus = Literal["CONFIRMED", "UNCONFIRMED", "REALIZED"]
 TransactionChainFrequency = Literal["DAILY", "WEEKLY", "MONTHLY", "REGULAR"]
 TransactionChainMonthlyRule = Literal["FIRST_DAY", "LAST_DAY"]
+CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
 
 
 class ItemCreate(BaseModel):
@@ -122,11 +123,19 @@ class TransactionBase(BaseModel):
     amount_counterparty: int | None = Field(default=None, ge=0)
     direction: TransactionDirection
     transaction_type: TransactionType
-    category_l1: str
-    category_l2: str
-    category_l3: str
+    category_id: int | None = None
     description: str | None = None
     comment: str | None = None
+
+    @model_validator(mode="after")
+    def validate_category_for_direction(self) -> "TransactionBase":
+        if self.direction == "TRANSFER":
+            if self.category_id is not None:
+                raise ValueError("category_id is not allowed for TRANSFER")
+        else:
+            if self.category_id is None:
+                raise ValueError("category_id is required for INCOME/EXPENSE")
+        return self
 
 class TransactionCreate(TransactionBase):
     status: TransactionStatus | None = None
@@ -159,14 +168,19 @@ class TransactionChainCreate(BaseModel):
     amount_rub: int = Field(ge=0)
     amount_counterparty: int | None = Field(default=None, ge=0)
     direction: TransactionDirection
-    category_l1: str
-    category_l2: str
-    category_l3: str
+    category_id: int | None = None
     description: str | None = None
     comment: str | None = None
 
     @model_validator(mode="after")
     def validate_frequency_details(self) -> "TransactionChainCreate":
+        if self.direction == "TRANSFER":
+            if self.category_id is not None:
+                raise ValueError("category_id is not allowed for TRANSFER")
+        else:
+            if self.category_id is None:
+                raise ValueError("category_id is required for INCOME/EXPENSE")
+
         if self.start_date > self.end_date:
             raise ValueError("start_date must not be later than end_date")
 
@@ -224,13 +238,45 @@ class TransactionChainOut(BaseModel):
     amount_rub: int
     amount_counterparty: int | None
     direction: TransactionDirection
-    category_l1: str
-    category_l2: str
-    category_l3: str
+    category_id: int | None
     description: str | None
     comment: str | None
     deleted_at: datetime | None
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    parent_id: int | None = None
+    scope: CategoryScope
+    icon_name: str | None = Field(default=None, max_length=50)
+
+
+class CategoryScopeUpdate(BaseModel):
+    scope: CategoryScope
+
+
+class CategoryVisibilityUpdate(BaseModel):
+    enabled: bool
+
+
+class CategoryIconUpdate(BaseModel):
+    icon_name: str | None = Field(default=None, max_length=50)
+
+
+class CategoryOut(BaseModel):
+    id: int
+    name: str
+    scope: CategoryScope
+    icon_name: str | None
+    parent_id: int | None
+    owner_user_id: int | None
+    enabled: bool
+    archived_at: datetime | None
+    children: list["CategoryOut"] = []
 
     class Config:
         from_attributes = True

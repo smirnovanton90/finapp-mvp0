@@ -33,13 +33,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  buildCategoryLookup,
   buildCategoryMaps,
-  DEFAULT_CATEGORIES,
-  readStoredCategories,
+  CategoryNode,
+  makeCategoryPathKey,
 } from "@/lib/categories";
 import {
   createTransactionChain,
   deleteTransactionChain,
+  fetchCategories,
   fetchItems,
   fetchTransactions,
   fetchDeletedTransactions,
@@ -206,17 +208,42 @@ export default function FinancialPlanningPage() {
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
 
-  const [categoryNodes, setCategoryNodes] = useState(() => DEFAULT_CATEGORIES);
-
-  useEffect(() => {
-    const stored = readStoredCategories();
-    setCategoryNodes(stored ?? DEFAULT_CATEGORIES);
-  }, []);
+  const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
 
   const categoryMaps = useMemo(() => {
     const scope = direction === "TRANSFER" ? undefined : direction;
     return buildCategoryMaps(categoryNodes, scope);
   }, [categoryNodes, direction]);
+
+  const categoryLookup = useMemo(
+    () => buildCategoryLookup(categoryNodes),
+    [categoryNodes]
+  );
+
+  const normalizeCategoryValue = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === CATEGORY_PLACEHOLDER) return "";
+    return trimmed;
+  };
+
+  const resolveCategoryId = (l1: string, l2: string, l3: string) => {
+    const key = makeCategoryPathKey(
+      normalizeCategoryValue(l1),
+      normalizeCategoryValue(l2),
+      normalizeCategoryValue(l3)
+    );
+    return categoryLookup.pathToId.get(key) ?? null;
+  };
+
+  const formatCategoryLabel = (categoryId: number | null, txDirection: string) => {
+    if (txDirection === "TRANSFER") return "Перевод";
+    const parts = categoryLookup.idToPath.get(categoryId) ?? [];
+    const label = parts
+      .map((part) => part?.trim())
+      .filter((part) => part && part !== CATEGORY_PLACEHOLDER)
+      .join(" / ");
+    return label || "-";
+  };
 
   const categoryPaths = useMemo(() => {
     const paths: CategoryPathOption[] = [];
@@ -304,16 +331,19 @@ export default function FinancialPlanningPage() {
       setLoading(true);
       setError(null);
       try {
-        const [itemsData, chainsData, txData, deletedData] = await Promise.all([
-          fetchItems(),
-          fetchTransactionChains(),
-          fetchTransactions(),
-          fetchDeletedTransactions(),
-        ]);
+        const [itemsData, chainsData, txData, deletedData, categoriesData] =
+          await Promise.all([
+            fetchItems(),
+            fetchTransactionChains(),
+            fetchTransactions(),
+            fetchDeletedTransactions(),
+            fetchCategories(),
+          ]);
         setItems(itemsData);
         setChains(chainsData);
         setTxs(txData);
         setDeletedTxs(deletedData);
+        setCategoryNodes(categoriesData);
       } catch (e: any) {
         setError(e?.message ?? "Не удалось загрузить планирование.");
       } finally {
@@ -494,6 +524,12 @@ export default function FinancialPlanningPage() {
       intervalValue = parsed;
     }
 
+    const resolvedCategoryId =
+      direction === "TRANSFER" ? null : resolveCategoryId(cat1, cat2, cat3);
+    if (direction !== "TRANSFER" && !resolvedCategoryId) {
+      setFormError("Выберите категорию из списка.");
+      return;
+    }
     const payload = {
       name,
       start_date: startDate,
@@ -514,9 +550,7 @@ export default function FinancialPlanningPage() {
       amount_rub: amountCents,
       amount_counterparty: direction === "TRANSFER" ? counterpartyCents : null,
       direction,
-      category_l1: direction === "TRANSFER" ? "" : cat1,
-      category_l2: direction === "TRANSFER" ? "" : cat2,
-      category_l3: direction === "TRANSFER" ? "" : cat3,
+      category_id: resolvedCategoryId,
       description: description || null,
       comment: comment || null,
     };
@@ -696,12 +730,10 @@ export default function FinancialPlanningPage() {
                 : chain.direction === "EXPENSE"
                   ? "Расход"
                   : "Перевод";
-            const categoryLabel =
-              chain.direction === "TRANSFER"
-                ? "Перевод"
-                : [chain.category_l1, chain.category_l2, chain.category_l3]
-                    .filter((part) => part && part !== CATEGORY_PLACEHOLDER)
-                    .join(" / ");
+            const categoryLabel = formatCategoryLabel(
+              chain.category_id,
+              chain.direction
+            );
 
             return (
               <Card key={chain.id} className="bg-white">
@@ -804,12 +836,10 @@ export default function FinancialPlanningPage() {
                   : chain.direction === "EXPENSE"
                     ? "bg-rose-50 text-rose-700"
                     : "bg-violet-50 text-violet-700";
-              const categoryLabel =
-                chain.direction === "TRANSFER"
-                  ? "Перевод"
-                  : [chain.category_l1, chain.category_l2, chain.category_l3]
-                      .filter((part) => part && part !== CATEGORY_PLACEHOLDER)
-                      .join(" / ");
+              const categoryLabel = formatCategoryLabel(
+                chain.category_id,
+                chain.direction
+              );
               const chainDirectionLabel =
                 chain.direction === "INCOME"
                   ? "Доход"

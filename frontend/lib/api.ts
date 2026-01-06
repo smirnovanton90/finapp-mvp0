@@ -71,6 +71,27 @@ export type FxRateOut = {
   rate: number;
 };
 
+export type CategoryScope = "INCOME" | "EXPENSE" | "BOTH";
+
+export type CategoryNode = {
+  id: number;
+  name: string;
+  scope: CategoryScope;
+  icon_name: string | null;
+  parent_id: number | null;
+  owner_user_id: number | null;
+  enabled: boolean;
+  archived_at: string | null;
+  children?: CategoryNode[];
+};
+
+export type CategoryCreate = {
+  name: string;
+  parent_id?: number | null;
+  scope: CategoryScope;
+  icon_name?: string | null;
+};
+
 export type TransactionDirection = "INCOME" | "EXPENSE" | "TRANSFER";
 export type TransactionType = "ACTUAL" | "PLANNED";
 export type TransactionStatus = "CONFIRMED" | "UNCONFIRMED" | "REALIZED";
@@ -92,9 +113,7 @@ export type TransactionOut = {
   transaction_type: TransactionType;
   status: TransactionStatus;
 
-  category_l1: string;
-  category_l2: string;
-  category_l3: string;
+  category_id: number | null;
 
   description: string | null;
   comment: string | null;
@@ -116,9 +135,7 @@ export type TransactionChainCreate = {
   amount_rub: number;
   amount_counterparty?: number | null;
   direction: TransactionDirection;
-  category_l1: string;
-  category_l2: string;
-  category_l3: string;
+  category_id: number | null;
   description?: string | null;
   comment?: string | null;
 };
@@ -138,9 +155,7 @@ export type TransactionChainOut = {
   amount_rub: number;
   amount_counterparty: number | null;
   direction: TransactionDirection;
-  category_l1: string;
-  category_l2: string;
-  category_l3: string;
+  category_id: number | null;
   description: string | null;
   comment: string | null;
   deleted_at: string | null;
@@ -158,9 +173,7 @@ export type TransactionCreate = {
   transaction_type: TransactionType;
   status?: TransactionStatus;
 
-  category_l1: string;
-  category_l2: string;
-  category_l3: string;
+  category_id: number | null;
 
   description?: string | null;
   comment?: string | null;
@@ -212,6 +225,71 @@ export async function fetchFxRates(dateReq?: string): Promise<FxRateOut[]> {
   const res = await authFetch(`${API_BASE}/fx-rates${qs}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
+}
+
+export async function fetchCategories(options?: {
+  includeArchived?: boolean;
+}): Promise<CategoryNode[]> {
+  const params = new URLSearchParams();
+  if (options?.includeArchived === false) {
+    params.set("include_archived", "false");
+  }
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/categories${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createCategory(payload: CategoryCreate): Promise<CategoryNode> {
+  const res = await authFetch(`${API_BASE}/categories`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateCategoryScope(
+  id: number,
+  scope: CategoryScope
+): Promise<CategoryNode> {
+  const res = await authFetch(`${API_BASE}/categories/${id}/scope`, {
+    method: "PATCH",
+    body: JSON.stringify({ scope }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateCategoryVisibility(
+  id: number,
+  enabled: boolean
+): Promise<CategoryNode> {
+  const res = await authFetch(`${API_BASE}/categories/${id}/visibility`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateCategoryIcon(
+  id: number,
+  iconName: string | null
+): Promise<CategoryNode> {
+  const res = await authFetch(`${API_BASE}/categories/${id}/icon`, {
+    method: "PATCH",
+    body: JSON.stringify({ icon_name: iconName }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function deleteCategory(id: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/categories/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 export async function createItem(payload: ItemCreate): Promise<ItemOut> {

@@ -64,10 +64,9 @@ import {
   deleteTransaction,
   fetchBanks,
   fetchCategories,
-  fetchFxRates,
-  fetchDeletedTransactions,
   fetchItems,
-  fetchTransactions,
+  fetchFxRatesBatch,
+  fetchTransactionsPage,
   BankOut,
   FxRateOut,
   ItemOut,
@@ -113,6 +112,8 @@ type CategoryPathOption = {
   label: string;
   searchKey: string;
 };
+
+const PAGE_SIZE = 50;
 
 function formatAmount(valueInCents: number) {
   const hasCents = Math.abs(valueInCents) % 100 !== 0;
@@ -895,7 +896,9 @@ export function TransactionsView({
   const [items, setItems] = useState<ItemOut[]>([]);
   const [banks, setBanks] = useState<BankOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
-  const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
+  const [txCursor, setTxCursor] = useState<string | null>(null);
+  const [hasMoreTxs, setHasMoreTxs] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -980,6 +983,7 @@ export function TransactionsView({
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmingTxId, setConfirmingTxId] = useState<number | null>(null);
   const [isBulkConfirming, setIsBulkConfirming] = useState(false);
+  const txRequestIdRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -1082,10 +1086,40 @@ export function TransactionsView({
     [categoryLookup.idToIcon]
   );
 
+  const categoryFilterIds = useMemo(() => {
+    if (
+      selectedCategoryL1.size === 0 &&
+      selectedCategoryL2.size === 0 &&
+      selectedCategoryL3.size === 0
+    ) {
+      return [];
+    }
+    const ids: number[] = [];
+    categoryLookup.idToPath.forEach((path, id) => {
+      const [l1 = "", l2 = "", l3 = ""] = path;
+      if (selectedCategoryL1.size > 0 && !selectedCategoryL1.has(l1)) return;
+      if (selectedCategoryL2.size > 0 && !selectedCategoryL2.has(l2)) return;
+      if (selectedCategoryL3.size > 0 && !selectedCategoryL3.has(l3)) return;
+      ids.push(id);
+    });
+    return ids;
+  }, [
+    categoryLookup.idToPath,
+    selectedCategoryL1,
+    selectedCategoryL2,
+    selectedCategoryL3,
+  ]);
+
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
+  const currencyItemIds = useMemo(() => {
+    if (selectedCurrencyCodes.size === 0) return [];
+    return items
+      .filter((item) => selectedCurrencyCodes.has(item.currency_code))
+      .map((item) => item.id);
+  }, [items, selectedCurrencyCodes]);
   const activeItems = useMemo(
     () => items.filter((item) => !item.archived_at && !item.closed_at),
     [items]
@@ -1143,17 +1177,8 @@ export function TransactionsView({
     items.forEach((item) => {
       if (item.currency_code) values.add(item.currency_code);
     });
-    [...txs, ...deletedTxs].forEach((tx) => {
-      const primary = itemsById.get(tx.primary_item_id)?.currency_code;
-      if (primary) values.add(primary);
-      const counterparty =
-        tx.counterparty_item_id != null
-          ? itemsById.get(tx.counterparty_item_id)?.currency_code
-          : null;
-      if (counterparty) values.add(counterparty);
-    });
     return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [items, txs, deletedTxs, itemsById]);
+  }, [items]);
 
   const itemName = (id: number | null | undefined) => {
     if (!id) return "-";
@@ -1476,11 +1501,6 @@ export function TransactionsView({
           item.id === tx.id ? { ...item, status: updated.status } : item
         )
       );
-      setDeletedTxs((prev) =>
-        prev.map((item) =>
-          item.id === tx.id ? { ...item, status: updated.status } : item
-        )
-      );
     } catch (e: any) {
       setError(e?.message ?? "Не удалось подтвердить транзакцию.");
     } finally {
@@ -1759,11 +1779,6 @@ export function TransactionsView({
             confirmedIds.has(item.id) ? { ...item, status: "CONFIRMED" } : item
           )
         );
-        setDeletedTxs((prev) =>
-          prev.map((item) =>
-            confirmedIds.has(item.id) ? { ...item, status: "CONFIRMED" } : item
-          )
-        );
       }
 
       if (hasErrors) {
@@ -1970,7 +1985,153 @@ export function TransactionsView({
     }
   };
 
+  const statusFilter = useMemo(() => {
+    const values: TransactionOut["status"][] = [];
+    if (showConfirmed) values.push("CONFIRMED", "REALIZED");
+    if (showUnconfirmed) values.push("UNCONFIRMED");
+    return values;
+  }, [showConfirmed, showUnconfirmed]);
+  const transactionTypeFilter = useMemo(() => {
+    const values: TransactionOut["transaction_type"][] = [];
+    if (showActual) values.push("ACTUAL");
+    if (showPlanned) values.push("PLANNED");
+    return values;
+  }, [showActual, showPlanned]);
+  const directionFilter = useMemo(
+    () => Array.from(selectedDirections),
+    [selectedDirections]
+  );
+  const itemFilterIds = useMemo(
+    () => Array.from(selectedItemIds),
+    [selectedItemIds]
+  );
+  const commentQuery = useMemo(() => commentFilter.trim(), [commentFilter]);
+  const minAmount = useMemo(() => parseAmountFilter(amountFrom), [amountFrom]);
+  const maxAmount = useMemo(() => parseAmountFilter(amountTo), [amountTo]);
+  const includeDeleted = showActive && showDeleted;
+  const deletedOnly = showDeleted && !showActive;
+
+  const txQuery = useMemo(() => {
+    const disabled =
+      (!showActive && !showDeleted) ||
+      statusFilter.length === 0 ||
+      transactionTypeFilter.length === 0;
+    return {
+      disabled,
+      params: {
+        include_deleted: includeDeleted,
+        deleted_only: deletedOnly,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        status: statusFilter,
+        direction: directionFilter,
+        transaction_type: transactionTypeFilter,
+        item_ids: itemFilterIds,
+        currency_item_ids: currencyItemIds,
+        category_ids: categoryFilterIds,
+        comment_query: commentQuery || undefined,
+        min_amount: minAmount ?? undefined,
+        max_amount: maxAmount ?? undefined,
+      },
+    };
+  }, [
+    categoryFilterIds,
+    commentQuery,
+    currencyItemIds,
+    dateFrom,
+    dateTo,
+    deletedOnly,
+    directionFilter,
+    includeDeleted,
+    itemFilterIds,
+    maxAmount,
+    minAmount,
+    showActive,
+    showDeleted,
+    statusFilter,
+    transactionTypeFilter,
+  ]);
+
+  const loadItems = useCallback(async () => {
+    try {
+      const itemsData = await fetchItems({
+        includeArchived: true,
+        includeClosed: true,
+      });
+      setItems(itemsData);
+    } catch (e: any) {
+      setError(
+        e?.message ?? "گ?گç ‘?گ?г?г>г?‘?‘? гْгّг?‘?‘?гْгٌ‘'‘? ‘'‘?гّг?гْгّгَ‘إгٌгٌ."
+      );
+    }
+  }, []);
+
+  const loadBanks = useCallback(async () => {
+    const banksData = await fetchBanks().catch(() => []);
+    setBanks(banksData);
+  }, []);
+
+  const loadTransactions = useCallback(
+    async ({
+      cursor,
+      append = false,
+    }: {
+      cursor?: string | null;
+      append?: boolean;
+    } = {}) => {
+      if (!session) return;
+      if (txQuery.disabled) {
+        setTxs([]);
+        setTxCursor(null);
+        setHasMoreTxs(false);
+        setLoading(false);
+        setIsLoadingMore(false);
+        return;
+      }
+      const requestId = (txRequestIdRef.current += 1);
+      if (append) {
+        setIsLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const page = await fetchTransactionsPage({
+          ...txQuery.params,
+          limit: PAGE_SIZE,
+          cursor: cursor ?? undefined,
+        });
+        if (requestId !== txRequestIdRef.current) return;
+        setTxs((prev) => (append ? [...prev, ...page.items] : page.items));
+        setTxCursor(page.next_cursor);
+        setHasMoreTxs(page.has_more);
+      } catch (e: any) {
+        if (requestId !== txRequestIdRef.current) return;
+        setError(
+          e?.message ?? "г?гç ‘?г?гّг>г?‘?‘? гْгّг?‘?‘?гْгٌ‘'‘? ‘'‘?гّг?гْгّгَ‘إгٌгٌ."
+        );
+      } finally {
+        if (requestId !== txRequestIdRef.current) return;
+        if (append) {
+          setIsLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [session, txQuery]
+  );
+
+  const refreshAfterMutation = useCallback(async () => {
+    await loadItems();
+    await loadTransactions({ cursor: null, append: false });
+  }, [loadItems, loadTransactions]);
+
   async function loadAll() {
+    await refreshAfterMutation();
+    await loadBanks();
+    return;
+    /*
     setLoading(true);
     setError(null);
     try {
@@ -1989,15 +2150,29 @@ export function TransactionsView({
     } finally {
       setLoading(false);
     }
+    */
   }
 
   useEffect(() => {
-    if (session) loadAll();
-  }, [session]);
+    if (!session) return;
+    loadItems();
+    loadBanks();
+  }, [session, loadBanks, loadItems]);
+
+  useEffect(() => {
+    if (!session) return;
+    const handle = setTimeout(() => {
+      setTxs([]);
+      setTxCursor(null);
+      setHasMoreTxs(false);
+      loadTransactions({ cursor: null, append: false });
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [session, loadTransactions, txQuery]);
 
   useEffect(() => {
     const dates = new Set<string>();
-    [...txs, ...deletedTxs].forEach((tx) => {
+    txs.forEach((tx) => {
       const dateKey = getDateKey(tx.transaction_date);
       if (dateKey) dates.add(dateKey);
     });
@@ -2009,32 +2184,25 @@ export function TransactionsView({
 
     let cancelled = false;
     (async () => {
-      const entries = await Promise.all(
-        missingDates.map(async (date) => {
-          try {
-            const rates = await fetchFxRates(toCbrDate(date));
-            return [date, rates] as const;
-          } catch {
-            return [date, null] as const;
-          }
-        })
-      );
-
-      if (cancelled) return;
-
-      setFxRatesByDate((prev) => {
-        const next = { ...prev };
-        entries.forEach(([date, rates]) => {
-          if (rates && rates.length) next[date] = rates;
+      try {
+        const ratesByDate = await fetchFxRatesBatch(missingDates);
+        if (cancelled) return;
+        setFxRatesByDate((prev) => {
+          const next = { ...prev };
+          Object.entries(ratesByDate).forEach(([date, rates]) => {
+            if (rates && rates.length) next[date] = rates;
+          });
+          return next;
         });
-        return next;
-      });
+      } catch {
+        // ignore fx-rate batch errors
+      }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [txs, deletedTxs, fxRatesByDate]);
+  }, [txs, fxRatesByDate]);
 
   useEffect(() => {
     setSelectedTxIds((prev) => {
@@ -2053,116 +2221,12 @@ export function TransactionsView({
     });
   }, [txs]);
 
-  const filteredTxs = useMemo(() => {
-    const active = showActive ? txs : [];
-    const deleted = showDeleted ? deletedTxs : [];
+  const filteredTxs = useMemo(
+    () => txs.map((tx) => ({ ...tx, isDeleted: Boolean(tx.deleted_at) })),
+    [txs]
+  );
 
-    const combined = [
-      ...active.map((tx) => ({ ...tx })),
-      ...deleted.map((tx) => ({ ...tx, isDeleted: true })),
-    ];
-
-    const commentQuery = commentFilter.trim().toLowerCase();
-    const minAmount = parseAmountFilter(amountFrom);
-    const maxAmount = parseAmountFilter(amountTo);
-
-    return combined.filter((tx) => {
-      const matchesType =
-        (showActual && tx.transaction_type === "ACTUAL") ||
-        (showPlanned && tx.transaction_type === "PLANNED");
-      if (!matchesType) return false;
-      const matchesConfirmation =
-        (showConfirmed &&
-          (tx.status === "CONFIRMED" || tx.status === "REALIZED")) ||
-        (showUnconfirmed && tx.status === "UNCONFIRMED");
-      if (!matchesConfirmation) return false;
-      const txDateKey = getDateKey(tx.transaction_date);
-      if (dateFrom && txDateKey < dateFrom) return false;
-      if (dateTo && txDateKey > dateTo) return false;
-      if (commentQuery) {
-        const commentText = (tx.comment ?? "").toLowerCase();
-        if (!commentText.includes(commentQuery)) return false;
-      }
-      if (minAmount != null || maxAmount != null) {
-        const absAmount = Math.abs(tx.amount_rub);
-        if (minAmount != null && absAmount < minAmount) return false;
-        if (maxAmount != null && absAmount > maxAmount) return false;
-      }
-      const [txCat1, txCat2, txCat3] = getCategoryParts(tx.category_id);
-      if (
-        selectedCategoryL1.size > 0 &&
-        !selectedCategoryL1.has(txCat1)
-      ) {
-        return false;
-      }
-      if (
-        selectedCategoryL2.size > 0 &&
-        !selectedCategoryL2.has(txCat2)
-      ) {
-        return false;
-      }
-      if (
-        selectedCategoryL3.size > 0 &&
-        !selectedCategoryL3.has(txCat3)
-      ) {
-        return false;
-      }
-      if (selectedCurrencyCodes.size > 0) {
-        const primaryCurrency = itemsById.get(tx.primary_item_id)?.currency_code;
-        const counterpartyCurrency =
-          tx.counterparty_item_id != null
-            ? itemsById.get(tx.counterparty_item_id)?.currency_code
-            : null;
-        const hasCurrency =
-          (primaryCurrency && selectedCurrencyCodes.has(primaryCurrency)) ||
-          (counterpartyCurrency && selectedCurrencyCodes.has(counterpartyCurrency));
-        if (!hasCurrency) return false;
-      }
-      if (selectedDirections.size > 0 && !selectedDirections.has(tx.direction)) {
-        return false;
-      }
-      if (selectedItemIds.size > 0) {
-        const hasPrimary = selectedItemIds.has(tx.primary_item_id);
-        const hasCounterparty =
-          tx.counterparty_item_id != null &&
-          selectedItemIds.has(tx.counterparty_item_id);
-        if (!hasPrimary && !hasCounterparty) return false;
-      }
-      return true;
-    });
-  }, [
-    txs,
-    deletedTxs,
-    showActive,
-    showDeleted,
-    showConfirmed,
-    showUnconfirmed,
-    showActual,
-    showPlanned,
-    dateFrom,
-    dateTo,
-    commentFilter,
-    amountFrom,
-    amountTo,
-    selectedCategoryL1,
-    selectedCategoryL2,
-    selectedCategoryL3,
-    selectedCurrencyCodes,
-    selectedDirections,
-    selectedItemIds,
-    getCategoryParts,
-    itemsById,
-  ]);
-
-  const sortedTxs = useMemo(() => {
-    return filteredTxs
-      .slice()
-      .sort((a, b) => {
-        const dateDiff = b.transaction_date.localeCompare(a.transaction_date);
-        if (dateDiff !== 0) return dateDiff;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      });
-  }, [filteredTxs]);
+  const sortedTxs = useMemo(() => filteredTxs, [filteredTxs]);
   const selectableIds = useMemo(
     () => sortedTxs.filter((tx) => !tx.isDeleted).map((tx) => tx.id),
     [sortedTxs]
@@ -2191,6 +2255,10 @@ export function TransactionsView({
   const allSelected =
     selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
   const someSelected = selectedVisibleCount > 0 && !allSelected;
+  const handleLoadMore = useCallback(() => {
+    if (!hasMoreTxs || isLoadingMore || loading) return;
+    loadTransactions({ cursor: txCursor, append: true });
+  }, [hasMoreTxs, isLoadingMore, loading, loadTransactions, txCursor]);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const lastActiveElementRef = useRef<HTMLElement | null>(null);
@@ -3823,6 +3891,19 @@ export function TransactionsView({
                   }
                 />
               ))
+            )}
+            {hasMoreTxs && (
+              <div className="flex justify-center pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-2 border-slate-200 bg-white shadow-none"
+                  onClick={handleLoadMore}
+                  disabled={isLoadingMore || loading}
+                >
+                  {isLoadingMore ? "Loading..." : "Load more"}
+                </Button>
+              </div>
             )}
           </div>
         </div>

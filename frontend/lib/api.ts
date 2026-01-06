@@ -119,6 +119,31 @@ export type TransactionOut = {
   comment: string | null;
 
   created_at: string;
+  deleted_at: string | null;
+};
+
+export type TransactionPageOut = {
+  items: TransactionOut[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
+export type FetchTransactionsPageParams = {
+  limit?: number;
+  cursor?: string | null;
+  include_deleted?: boolean;
+  deleted_only?: boolean;
+  date_from?: string;
+  date_to?: string;
+  status?: TransactionStatus[];
+  direction?: TransactionDirection[];
+  transaction_type?: TransactionType[];
+  item_ids?: number[];
+  currency_item_ids?: number[];
+  category_ids?: number[];
+  comment_query?: string;
+  min_amount?: number;
+  max_amount?: number;
 };
 
 export type TransactionChainCreate = {
@@ -223,6 +248,18 @@ export async function fetchCurrencies(): Promise<CurrencyOut[]> {
 export async function fetchFxRates(dateReq?: string): Promise<FxRateOut[]> {
   const qs = dateReq ? `?date_req=${encodeURIComponent(dateReq)}` : "";
   const res = await authFetch(`${API_BASE}/fx-rates${qs}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchFxRatesBatch(
+  dates: string[]
+): Promise<Record<string, FxRateOut[]>> {
+  if (dates.length === 0) return {};
+  const res = await authFetch(`${API_BASE}/fx-rates/batch`, {
+    method: "POST",
+    body: JSON.stringify({ dates }),
+  });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
@@ -359,6 +396,37 @@ async function readError(res: Response) {
 
 export async function fetchTransactions(): Promise<TransactionOut[]> {
   const res = await authFetch(`${API_BASE}/transactions`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchTransactionsPage(
+  options: FetchTransactionsPageParams
+): Promise<TransactionPageOut> {
+  const params = new URLSearchParams();
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.cursor) params.set("cursor", options.cursor);
+  if (options.include_deleted) params.set("include_deleted", "true");
+  if (options.deleted_only) params.set("deleted_only", "true");
+  if (options.date_from) params.set("date_from", options.date_from);
+  if (options.date_to) params.set("date_to", options.date_to);
+  if (options.comment_query) params.set("comment_query", options.comment_query);
+  if (options.min_amount != null) params.set("min_amount", String(options.min_amount));
+  if (options.max_amount != null) params.set("max_amount", String(options.max_amount));
+  options.status?.forEach((value) => params.append("status", value));
+  options.direction?.forEach((value) => params.append("direction", value));
+  options.transaction_type?.forEach((value) =>
+    params.append("transaction_type", value)
+  );
+  options.item_ids?.forEach((value) => params.append("item_ids", String(value)));
+  options.currency_item_ids?.forEach((value) =>
+    params.append("currency_item_ids", String(value))
+  );
+  options.category_ids?.forEach((value) =>
+    params.append("category_ids", String(value))
+  );
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/transactions/page${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

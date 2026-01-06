@@ -146,9 +146,15 @@ class TransactionOut(TransactionBase):
     created_at: datetime
     chain_id: int | None = None
     chain_name: str | None = None
+    deleted_at: datetime | None = None
 
     class Config:
         from_attributes = True
+
+class TransactionPageOut(BaseModel):
+    items: list[TransactionOut]
+    next_cursor: str | None = None
+    has_more: bool
 
 class TransactionStatusUpdate(BaseModel):
     status: TransactionStatus
@@ -298,6 +304,10 @@ class FxRateOut(BaseModel):
     nominal: int
     value: float
     rate: float
+
+
+class FxRatesBatchRequest(BaseModel):
+    dates: list[str] = Field(min_length=1)
 
 
 class BankOut(BaseModel):

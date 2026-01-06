@@ -11,9 +11,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +26,6 @@ import {
 import { CategoryNode, CategoryScope } from "@/lib/categories";
 import {
   CATEGORY_ICON_BY_NAME,
-  CATEGORY_ICON_FALLBACK,
   CATEGORY_ICON_OPTIONS,
 } from "@/lib/category-icons";
 import { cn } from "@/lib/utils";
@@ -39,15 +37,7 @@ import {
   updateCategoryScope,
   updateCategoryVisibility,
 } from "@/lib/api";
-import {
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 
 type DeleteTarget = {
   id: number;
@@ -115,29 +105,30 @@ function CategoryTree({
 }) {
   if (nodes.length === 0) return null;
   return (
-    <div className="space-y-2">
+    <div>
       {nodes.map((node) => {
         const scopeMeta =
           SCOPE_OPTIONS.find((option) => option.value === node.scope) ??
           SCOPE_OPTIONS[2];
         const iconName =
           node.icon_name && node.icon_name.trim().length > 0 ? node.icon_name : undefined;
-        const PreviewIcon =
-          (iconName ? CATEGORY_ICON_BY_NAME[iconName] : undefined) ??
-          CATEGORY_ICON_FALLBACK ??
-          Folder;
+        const PreviewIcon = iconName ? CATEGORY_ICON_BY_NAME[iconName] : null;
         const isDisabled = node.enabled === false;
         const hasChildren = Boolean(node.children && node.children.length > 0);
         const isExpanded = hasChildren && expandedIds.has(node.id);
+        const indentPx = Math.max(0, depth - 1) * 16;
         return (
           <div key={node.id}>
             <div
               className={cn(
-                "flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm sm:flex-nowrap",
+                "flex flex-wrap items-center gap-3 px-2 py-1 sm:flex-nowrap",
                 isDisabled && "opacity-50"
               )}
             >
-                <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div
+                  className="flex min-w-0 flex-1 items-center gap-2"
+                  style={{ paddingLeft: indentPx }}
+                >
                   {hasChildren ? (
                     <button
                       type="button"
@@ -156,7 +147,11 @@ function CategoryTree({
                   ) : (
                     <span className="inline-flex h-6 w-6" aria-hidden="true" />
                   )}
-                  <PreviewIcon className="h-4 w-4 text-violet-600" />
+                  {PreviewIcon ? (
+                    <PreviewIcon className="h-4 w-4 text-violet-600" />
+                  ) : (
+                    <span className="inline-flex h-4 w-4" aria-hidden="true" />
+                  )}
                   <span className="truncate font-medium text-slate-900">{node.name}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-600">
@@ -165,13 +160,13 @@ function CategoryTree({
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1 border-2 border-border/70 text-xs"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground hover:bg-transparent hover:text-violet-600"
                     onClick={() => onEdit(node)}
+                    aria-label="Изменить категорию"
                   >
-                    <Pencil className="h-3.5 w-3.5" />
-                    Изменить
+                    <Pencil className="h-4 w-4" />
                   </Button>
                   {depth < MAX_DEPTH && (
                     <Button
@@ -196,17 +191,15 @@ function CategoryTree({
               </div>
             </div>
             {isExpanded && node.children && node.children.length > 0 && (
-              <div className="ml-5 border-l border-slate-200 pl-4 pt-2">
-                <CategoryTree
-                  nodes={node.children}
-                  depth={depth + 1}
-                  onAddChild={onAddChild}
-                  onDelete={onDelete}
-                  onEdit={onEdit}
-                  expandedIds={expandedIds}
-                  onToggle={onToggle}
-                />
-              </div>
+              <CategoryTree
+                nodes={node.children}
+                depth={depth + 1}
+                onAddChild={onAddChild}
+                onDelete={onDelete}
+                onEdit={onEdit}
+                expandedIds={expandedIds}
+                onToggle={onToggle}
+              />
             )}
           </div>
         );
@@ -259,11 +252,6 @@ export default function CategoriesPage() {
     () => filterCategories(categories),
     [categories]
   );
-  const totalCount = useMemo(
-    () => countNodes(visibleCategories),
-    [visibleCategories]
-  );
-
   const openAddDialog = (
     parentId: number | null,
     parentName: string | null,
@@ -381,32 +369,6 @@ export default function CategoriesPage() {
       return next;
     });
   }, []);
-
-  const handleScopeChange = async (id: number, scope: CategoryScope) => {
-    setSyncing(true);
-    setError(null);
-    try {
-      await updateCategoryScope(id, scope);
-      await loadCategories(true);
-    } catch (e: any) {
-      setError(e?.message ?? "Не удалось обновить тип категории.");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const handleIconChange = async (id: number, iconName: string | null) => {
-    setSyncing(true);
-    setError(null);
-    try {
-      await updateCategoryIcon(id, iconName);
-      await loadCategories(true);
-    } catch (e: any) {
-      setError(e?.message ?? "Не удалось обновить иконку.");
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -654,26 +616,11 @@ export default function CategoriesPage() {
               <Plus className="h-4 w-4" />
               Добавить категорию
             </Button>
-            <Button
-              variant="outline"
-              onClick={handleSync}
-              disabled={syncing || loading}
-            >
-              <RefreshCw className={cn("h-4 w-4", syncing ? "animate-spin" : "")} />
-              Обновить
-            </Button>
           </div>
         </div>
 
         <Card>
-          <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Folder className="h-5 w-5 text-violet-600" />
-              Дерево категорий
-            </CardTitle>
-            <Badge variant="secondary">Всего: {totalCount}</Badge>
-          </CardHeader>
-          <CardContent>
+<CardContent>
             {loading ? (
               <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
                 Загрузка категорий...
@@ -717,3 +664,4 @@ export default function CategoriesPage() {
     </main>
   );
 }
+

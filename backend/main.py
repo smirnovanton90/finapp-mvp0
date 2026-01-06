@@ -8,7 +8,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from db import get_db
 from models import Item, User, Currency, FxRate, Bank
-from schemas import ItemCreate, ItemOut, CurrencyOut, FxRateOut, BankOut
+from schemas import (
+    ItemCreate,
+    ItemOut,
+    CurrencyOut,
+    FxRateOut,
+    BankOut,
+    FxRatesBatchRequest,
+)
 from auth import get_current_user
 
 from transactions import router as transactions_router
@@ -236,6 +243,26 @@ def list_fx_rates(
         return _get_fx_rates(date_req, db)
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/fx-rates/batch", response_model=dict[str, list[FxRateOut]])
+def list_fx_rates_batch(
+    payload: FxRatesBatchRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    results: dict[str, list[FxRateOut]] = {}
+    for raw in {value.strip() for value in payload.dates if value}:
+        parsed = _parse_date_req(raw)
+        if not parsed:
+            continue
+        date_key = parsed.isoformat()
+        date_req = parsed.strftime("%d/%m/%Y")
+        try:
+            results[date_key] = _get_fx_rates(date_req, db)
+        except requests.RequestException:
+            continue
+    return results
 
 
 @app.post("/items", response_model=ItemOut)

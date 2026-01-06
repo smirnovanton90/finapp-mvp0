@@ -1,15 +1,36 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 
 from db import get_db
 from auth import get_current_user
 from category_service import resolve_category_or_400
 from models import Transaction, Item, User
-from schemas import TransactionCreate, TransactionOut, TransactionStatusUpdate
-from sqlalchemy import select
-from datetime import date, datetime, timezone
+from schemas import (
+    TransactionCreate,
+    TransactionOut,
+    TransactionStatusUpdate,
+    TransactionPageOut,
+    TransactionDirection,
+    TransactionStatus,
+    TransactionType,
+)
+from sqlalchemy import select, and_, or_, func
+from datetime import date, datetime, time, timezone
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+def _parse_cursor(value: str) -> tuple[datetime, int]:
+    parts = value.split("|", 1)
+    if len(parts) != 2:
+        raise HTTPException(status_code=400, detail="Invalid cursor format")
+    try:
+        cursor_dt = datetime.fromisoformat(parts[0])
+        cursor_id = int(parts[1])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid cursor value") from exc
+    if cursor_dt.tzinfo is not None:
+        cursor_dt = cursor_dt.replace(tzinfo=None)
+    return cursor_dt, cursor_id
 
 def transfer_delta(kind: str, is_primary: bool, amount: int) -> int:
     if kind == "LIABILITY":
@@ -61,6 +82,102 @@ def list_transactions(
         .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
         .all()
     )
+
+
+@router.get("/page", response_model=TransactionPageOut)
+def list_transactions_page(
+    limit: int = Query(50, ge=1, le=200),
+    cursor: str | None = None,
+    include_deleted: bool = False,
+    deleted_only: bool = False,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    status: list[TransactionStatus] | None = Query(default=None),
+    direction: list[TransactionDirection] | None = Query(default=None),
+    transaction_type: list[TransactionType] | None = Query(default=None),
+    item_ids: list[int] | None = Query(default=None),
+    currency_item_ids: list[int] | None = Query(default=None),
+    category_ids: list[int] | None = Query(default=None),
+    comment_query: str | None = None,
+    min_amount: int | None = Query(default=None, ge=0),
+    max_amount: int | None = Query(default=None, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(Transaction).where(Transaction.user_id == user.id)
+
+    if deleted_only:
+        stmt = stmt.where(Transaction.deleted_at.isnot(None))
+    elif not include_deleted:
+        stmt = stmt.where(Transaction.deleted_at.is_(None))
+
+    if date_from:
+        stmt = stmt.where(
+            Transaction.transaction_date >= datetime.combine(date_from, time.min)
+        )
+    if date_to:
+        stmt = stmt.where(
+            Transaction.transaction_date <= datetime.combine(date_to, time.max)
+        )
+    if status:
+        stmt = stmt.where(Transaction.status.in_(status))
+    if direction:
+        stmt = stmt.where(Transaction.direction.in_(direction))
+    if transaction_type:
+        stmt = stmt.where(Transaction.transaction_type.in_(transaction_type))
+    if category_ids:
+        stmt = stmt.where(Transaction.category_id.in_(category_ids))
+    if item_ids:
+        stmt = stmt.where(
+            or_(
+                Transaction.primary_item_id.in_(item_ids),
+                Transaction.counterparty_item_id.in_(item_ids),
+            )
+        )
+    if currency_item_ids:
+        stmt = stmt.where(
+            or_(
+                Transaction.primary_item_id.in_(currency_item_ids),
+                Transaction.counterparty_item_id.in_(currency_item_ids),
+            )
+        )
+    if comment_query:
+        trimmed = comment_query.strip()
+        if trimmed:
+            stmt = stmt.where(Transaction.comment.ilike(f"%{trimmed}%"))
+    if min_amount is not None or max_amount is not None:
+        abs_amount = func.abs(Transaction.amount_rub)
+        if min_amount is not None:
+            stmt = stmt.where(abs_amount >= min_amount)
+        if max_amount is not None:
+            stmt = stmt.where(abs_amount <= max_amount)
+    if cursor:
+        cursor_dt, cursor_id = _parse_cursor(cursor)
+        stmt = stmt.where(
+            or_(
+                Transaction.transaction_date < cursor_dt,
+                and_(
+                    Transaction.transaction_date == cursor_dt,
+                    Transaction.id < cursor_id,
+                ),
+            )
+        )
+
+    stmt = (
+        stmt.options(selectinload(Transaction.chain))
+        .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        .limit(limit + 1)
+    )
+    rows = list(db.execute(stmt).scalars())
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit]
+    next_cursor = None
+    if rows:
+        last = rows[-1]
+        next_cursor = f"{last.transaction_date.isoformat()}|{last.id}"
+
+    return TransactionPageOut(items=rows, next_cursor=next_cursor, has_more=has_more)
 
 
 @router.get("/deleted", response_model=list[TransactionOut])

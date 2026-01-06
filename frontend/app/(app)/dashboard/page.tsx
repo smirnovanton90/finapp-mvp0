@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { AlertCircle, Target, Wallet } from "lucide-react";
@@ -11,6 +11,10 @@ import {
   buildCategoryLookup,
   type CategoryNode,
 } from "@/lib/categories";
+import {
+  CATEGORY_ICON_BY_NAME,
+  CATEGORY_ICON_FALLBACK,
+} from "@/lib/category-icons";
 import {
   fetchCategories,
   fetchLimits,
@@ -34,6 +38,8 @@ type DailyRow = {
   date: string;
   totalRubCents: number | null;
 };
+
+type CategoryIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 
 const CASH_TYPES = ["cash", "bank_account", "bank_card"];
 const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "savings_account", "brokerage", "securities"];
@@ -204,6 +210,13 @@ function changeBadgeClass(percent: number | null) {
   return percent >= 0
     ? "bg-rose-50 text-rose-700"
     : "bg-emerald-50 text-emerald-700";
+}
+
+function netWorthBadgeClass(percent: number | null) {
+  if (percent === null) return "bg-white/10 text-white/70";
+  return percent >= 0
+    ? "bg-emerald-300/10 text-emerald-100"
+    : "bg-rose-300/10 text-rose-100";
 }
 
 function formatDateLabel(dateKey: string) {
@@ -546,7 +559,7 @@ export default function DashboardPage() {
   const [incomeHover, setIncomeHover] = useState<CategorySegment | null>(null);
   const [expenseHover, setExpenseHover] = useState<CategorySegment | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
-  const [chartSize, setChartSize] = useState({ width: 240, height: 140 });
+  const [chartSize, setChartSize] = useState({ width: 240, height: 128 });
   const now = new Date();
   const todayKey = toDateKey(now);
   const monthStartKey = toDateKey(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -613,6 +626,19 @@ export default function DashboardPage() {
     () => buildCategoryDescendants(categoryNodes),
     [categoryNodes]
   );
+  const topLevelIconByLabel = useMemo(() => {
+    const map = new Map<string, CategoryIcon>();
+    categoryNodes.forEach((node) => {
+      const label = node.name?.trim();
+      if (!label) return;
+      const iconName = node.icon_name?.trim();
+      if (!iconName) return;
+      const Icon = CATEGORY_ICON_BY_NAME[iconName];
+      if (!Icon) return;
+      map.set(label, Icon);
+    });
+    return map;
+  }, [categoryNodes]);
 
   const activeLimits = useMemo(
     () => limits.filter((limit) => !limit.deleted_at),
@@ -1154,16 +1180,13 @@ export default function DashboardPage() {
     return row?.totalRubCents ?? null;
   }, [dailyRows, monthStartKey]);
 
-  const netTotalChangeLabel = useMemo(() => {
-    if (loading) return "С 1 числа: ...";
-    if (monthStartNetTotal === null || monthStartNetTotal === 0) {
-      return "С 1 числа: -";
-    }
+  const netTotalChangePercent = useMemo(() => {
+    if (loading) return null;
+    if (monthStartNetTotal === null || monthStartNetTotal === 0) return null;
     const delta = netTotal - monthStartNetTotal;
     const percent = (delta / Math.abs(monthStartNetTotal)) * 100;
-    if (!Number.isFinite(percent)) return "С 1 числа: -";
-    const sign = percent >= 0 ? "+" : "-";
-    return `С 1 числа: ${sign}${formatPercent(Math.abs(percent))}%`;
+    if (!Number.isFinite(percent)) return null;
+    return percent;
   }, [loading, monthStartNetTotal, netTotal]);
 
   const chartData = useMemo(
@@ -1250,7 +1273,7 @@ export default function DashboardPage() {
           }
         >
           <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500 text-white shadow-[0_20px_50px_-28px_rgba(76,29,149,0.8)]">
-            <div className="pointer-events-none absolute right-4 top-3 h-24 w-40 opacity-90">
+            <div className="pointer-events-none absolute right-4 top-3 h-32 w-60 opacity-90">
               <div ref={chartRef} className="h-full w-full">
                 {!loading && !error && chartData.length > 1 && (
                   <svg
@@ -1305,7 +1328,14 @@ export default function DashboardPage() {
                   ? `-${formatRub(Math.abs(netTotal))}`
                   : formatRub(netTotal)}
               </div>
-              <div className="text-xs text-white/80">{netTotalChangeLabel}</div>
+              <div className="flex items-center gap-2 text-xs text-white/80">
+                <span>С 1 числа месяца</span>
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${netWorthBadgeClass(netTotalChangePercent)}`}
+                >
+                  {loading ? "..." : formatChangePercent(netTotalChangePercent)}
+                </span>
+              </div>
               <div className="space-y-1 text-xs text-white/80">
                 <div className="flex items-center justify-between">
                   <span>Активы</span>
@@ -1356,7 +1386,7 @@ export default function DashboardPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium text-slate-800">
-                Доходы за {previousMonthLabel}
+                Доходы за <span className="text-violet-600">{previousMonthLabel}</span>
               </div>
               <div className="text-lg font-semibold text-emerald-600 tabular-nums whitespace-nowrap">
                 {loading ? "..." : formatRub(incomeBreakdown.total)}
@@ -1399,42 +1429,47 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div className="mt-3 space-y-2 overflow-x-auto pb-1">
-                  {incomeLegendRows.map((row, index) => (
-                    <div
-                      key={`${row.label}-${index}`}
-                      className="grid min-w-[26rem] grid-cols-[minmax(0,1fr)_8rem_4.5rem_4.5rem_4.5rem] items-center gap-2 text-xs text-slate-600"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: row.color }}
-                        />
-                        <span className="truncate font-medium text-slate-900">
-                          {row.label}
+                  {incomeLegendRows.map((row, index) => {
+                    const CategoryIcon =
+                      topLevelIconByLabel.get(row.label) ?? CATEGORY_ICON_FALLBACK;
+                    return (
+                      <div
+                        key={`${row.label}-${index}`}
+                        className="grid min-w-[26rem] grid-cols-[minmax(0,1fr)_8rem_4.5rem_4.5rem_4.5rem] items-center gap-2 text-xs text-slate-600"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: row.color }}
+                          />
+                          <CategoryIcon className="h-3.5 w-3.5 text-slate-500" />
+                          <span className="truncate font-medium text-slate-900">
+                            {row.label}
+                          </span>
+                        </div>
+                        <span className="tabular-nums text-right text-slate-900 whitespace-nowrap">
+                          {formatRub(row.value)}
                         </span>
-                      </div>
-                      <span className="tabular-nums text-right text-slate-900 whitespace-nowrap">
-                        {formatRub(row.value)}
-                      </span>
-                      <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
-                        {formatPercent(row.percent * 100)}%
-                      </span>
-                      <div className="flex justify-end">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.prevDelta)}`}
-                        >
-                          {formatChangePercent(row.prevDelta)}
+                        <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
+                          {formatPercent(row.percent * 100)}%
                         </span>
+                        <div className="flex justify-end">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.prevDelta)}`}
+                          >
+                            {formatChangePercent(row.prevDelta)}
+                          </span>
+                        </div>
+                        <div className="flex justify-end">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.avgDelta)}`}
+                          >
+                            {formatChangePercent(row.avgDelta)}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex justify-end">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.avgDelta)}`}
-                        >
-                          {formatChangePercent(row.avgDelta)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -1443,7 +1478,7 @@ export default function DashboardPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium text-slate-800">
-                Расходы за {previousMonthLabel}
+                Расходы за <span className="text-violet-600">{previousMonthLabel}</span>
               </div>
               <div className="text-lg font-semibold text-rose-600 tabular-nums whitespace-nowrap">
                 {loading ? "..." : formatRub(expenseBreakdown.total)}
@@ -1486,42 +1521,47 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div className="mt-3 space-y-2 overflow-x-auto pb-1">
-                  {expenseLegendRows.map((row, index) => (
-                    <div
-                      key={`${row.label}-${index}`}
-                      className="grid min-w-[26rem] grid-cols-[minmax(0,1fr)_8rem_4.5rem_4.5rem_4.5rem] items-center gap-2 text-xs text-slate-600"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: row.color }}
-                        />
-                        <span className="truncate font-medium text-slate-900">
-                          {row.label}
+                  {expenseLegendRows.map((row, index) => {
+                    const CategoryIcon =
+                      topLevelIconByLabel.get(row.label) ?? CATEGORY_ICON_FALLBACK;
+                    return (
+                      <div
+                        key={`${row.label}-${index}`}
+                        className="grid min-w-[26rem] grid-cols-[minmax(0,1fr)_8rem_4.5rem_4.5rem_4.5rem] items-center gap-2 text-xs text-slate-600"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: row.color }}
+                          />
+                          <CategoryIcon className="h-3.5 w-3.5 text-slate-500" />
+                          <span className="truncate font-medium text-slate-900">
+                            {row.label}
+                          </span>
+                        </div>
+                        <span className="tabular-nums text-right text-slate-900 whitespace-nowrap">
+                          {formatRub(row.value)}
                         </span>
-                      </div>
-                      <span className="tabular-nums text-right text-slate-900 whitespace-nowrap">
-                        {formatRub(row.value)}
-                      </span>
-                      <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
-                        {formatPercent(row.percent * 100)}%
-                      </span>
-                      <div className="flex justify-end">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.prevDelta)}`}
-                        >
-                          {formatChangePercent(row.prevDelta)}
+                        <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
+                          {formatPercent(row.percent * 100)}%
                         </span>
+                        <div className="flex justify-end">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.prevDelta)}`}
+                          >
+                            {formatChangePercent(row.prevDelta)}
+                          </span>
+                        </div>
+                        <div className="flex justify-end">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.avgDelta)}`}
+                          >
+                            {formatChangePercent(row.avgDelta)}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex justify-end">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.avgDelta)}`}
-                        >
-                          {formatChangePercent(row.avgDelta)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}

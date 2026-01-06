@@ -14,6 +14,7 @@ import {
   ChevronRight,
   LayoutDashboard,
   Folder,
+  Gauge,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
@@ -36,6 +37,11 @@ const nav = [
     href: "/financial-planning",
     label: "\u041f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435",
     icon: LineChart,
+  },
+  {
+    href: "/limits",
+    label: "\u041b\u0438\u043c\u0438\u0442\u044b",
+    icon: Gauge,
   },
   {
     href: "/categories",

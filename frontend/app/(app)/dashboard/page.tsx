@@ -2,17 +2,25 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Calculator } from "lucide-react";
+import Link from "next/link";
+import { AlertCircle, Calculator, LineChart, Receipt, Target, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
+import { Button } from "@/components/ui/button";
+import {
+  buildCategoryDescendants,
+  buildCategoryLookup,
+  type CategoryNode,
+} from "@/lib/categories";
 import {
   fetchCategories,
+  fetchLimits,
   fetchFxRates,
   fetchItems,
   fetchTransactions,
   FxRateOut,
   ItemKind,
   ItemOut,
+  LimitOut,
   TransactionOut,
 } from "@/lib/api";
 
@@ -45,6 +53,12 @@ const DONUT_COLORS = [
 ];
 const UPCOMING_DAYS = 3;
 const CATEGORY_BREAKDOWN_LIMIT = 6;
+const LIMIT_PERIOD_LABELS: Record<LimitOut["period"], string> = {
+  MONTHLY: "Ежемесячный",
+  WEEKLY: "Еженедельный",
+  YEARLY: "Ежегодный",
+  CUSTOM: "Произвольный период",
+};
 
 const LIABILITY_TYPES = [
   { code: "credit_card_debt", label: "Задолженность по кредитной карте" },
@@ -83,6 +97,12 @@ function addMonths(date: Date, months: number) {
   const day = date.getDate();
   const lastDay = new Date(year, month + months + 1, 0).getDate();
   return new Date(year, month + months, Math.min(day, lastDay));
+}
+
+function getWeekStart(date: Date) {
+  const day = date.getDay();
+  const diff = (day + 6) % 7;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - diff);
 }
 
 function daysBetween(start: Date, end: Date) {
@@ -149,6 +169,43 @@ function formatRub(valueInCents: number) {
 function formatDateLabel(dateKey: string) {
   const [year, month, day] = dateKey.split("-");
   return `${day}.${month}.${year}`;
+}
+
+function formatRangeLabel(startKey: string, endKey: string) {
+  return `${formatDateLabel(startKey)} - ${formatDateLabel(endKey)}`;
+}
+
+function getLimitRange(limit: LimitOut, today: Date) {
+  if (limit.period === "CUSTOM") {
+    if (!limit.custom_start_date || !limit.custom_end_date) return null;
+    return {
+      startKey: limit.custom_start_date,
+      endKey: limit.custom_end_date,
+      rangeLabel: formatRangeLabel(limit.custom_start_date, limit.custom_end_date),
+    };
+  }
+
+  if (limit.period === "WEEKLY") {
+    const start = getWeekStart(today);
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+    const startKey = toDateKey(start);
+    const endKey = toDateKey(end);
+    return { startKey, endKey, rangeLabel: formatRangeLabel(startKey, endKey) };
+  }
+
+  if (limit.period === "MONTHLY") {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const startKey = toDateKey(start);
+    const endKey = toDateKey(end);
+    return { startKey, endKey, rangeLabel: formatRangeLabel(startKey, endKey) };
+  }
+
+  const start = new Date(today.getFullYear(), 0, 1);
+  const end = new Date(today.getFullYear(), 11, 31);
+  const startKey = toDateKey(start);
+  const endKey = toDateKey(end);
+  return { startKey, endKey, rangeLabel: formatRangeLabel(startKey, endKey) };
 }
 
 function formatMonthLabel(date: Date) {
@@ -387,6 +444,7 @@ export default function DashboardPage() {
   const { data: session } = useSession();
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
+  const [limits, setLimits] = useState<LimitOut[]>([]);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
@@ -423,13 +481,15 @@ export default function DashboardPage() {
       fetchTransactions(),
       fetchFxRates().catch(() => [] as FxRateOut[]),
       fetchCategories({ includeArchived: false }),
+      fetchLimits(),
     ])
-      .then(([itemsData, txData, fxRatesData, categoriesData]) => {
+      .then(([itemsData, txData, fxRatesData, categoriesData, limitsData]) => {
         if (!active) return;
         setItems(itemsData);
         setTxs(txData);
         setFxRates(fxRatesData);
         setCategoryNodes(categoriesData);
+        setLimits(limitsData);
       })
       .catch((e: any) => {
         if (!active) return;
@@ -461,6 +521,55 @@ export default function DashboardPage() {
     () => buildCategoryLookup(categoryNodes),
     [categoryNodes]
   );
+  const categoryDescendants = useMemo(
+    () => buildCategoryDescendants(categoryNodes),
+    [categoryNodes]
+  );
+
+  const activeLimits = useMemo(
+    () => limits.filter((limit) => !limit.deleted_at),
+    [limits]
+  );
+
+  const limitSummaryById = useMemo(() => {
+    const now = new Date();
+    const map = new Map<number, { spent: number; progress: number; rangeLabel: string }>();
+    activeLimits.forEach((limit) => {
+      const range = getLimitRange(limit, now);
+      const categoryIds =
+        categoryDescendants.get(limit.category_id) ?? new Set([limit.category_id]);
+      let spent = 0;
+      if (range) {
+        txs.forEach((tx) => {
+          if (tx.direction !== "EXPENSE") return;
+          if (!isRealizedTransaction(tx)) return;
+          if (!tx.category_id || !categoryIds.has(tx.category_id)) return;
+          const dateKey = toTxDateKey(tx.transaction_date);
+          if (!dateKey) return;
+          if (dateKey < range.startKey || dateKey > range.endKey) return;
+          spent += tx.amount_rub;
+        });
+      }
+      const progress =
+        limit.amount_rub > 0 ? Math.min(spent / limit.amount_rub, 1) : 0;
+      map.set(limit.id, {
+        spent,
+        progress,
+        rangeLabel: range?.rangeLabel ?? "",
+      });
+    });
+    return map;
+  }, [activeLimits, categoryDescendants, txs]);
+
+  const formatLimitCategoryLabel = (categoryId: number | null) => {
+    if (!categoryId) return "-";
+    const parts = categoryLookup.idToPath.get(categoryId) ?? [];
+    const label = parts
+      .map((part) => part?.trim())
+      .filter((part) => part)
+      .join(" / ");
+    return label || "-";
+  };
 
   useEffect(() => {
     if (fxRates.length === 0) return;
@@ -976,7 +1085,8 @@ export default function DashboardPage() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
           <Card className="relative overflow-hidden">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-violet-600" />
                 Текущий чистый капитал
               </CardTitle>
             </CardHeader>
@@ -1007,7 +1117,8 @@ export default function DashboardPage() {
 
           <Card className="overflow-hidden">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
+              <CardTitle className="text-base flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-violet-600" />
                 Просроченные плановые транзакции
               </CardTitle>
             </CardHeader>
@@ -1018,6 +1129,14 @@ export default function DashboardPage() {
               <p className="text-xs text-muted-foreground">
                 Нереализованные, дата меньше сегодня
               </p>
+              <Button
+                asChild
+                size="sm"
+                variant="outline"
+                className="w-fit border-violet-200 bg-white text-violet-700 shadow-none hover:bg-violet-50"
+              >
+                <Link href="/transactions?preset=overdue-planned">Просмотреть</Link>
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -1133,7 +1252,8 @@ export default function DashboardPage() {
 
           <Card className="overflow-hidden">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base text-slate-800">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Receipt className="h-5 w-5 text-violet-600" />
                 Плановые транзакции в ближайшие {UPCOMING_DAYS} календарных дня
               </CardTitle>
             </CardHeader>
@@ -1194,9 +1314,76 @@ export default function DashboardPage() {
           </Card>
         </div>
 
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Target className="h-5 w-5 text-violet-600" />
+              Контроль лимитов
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Загрузка лимитов...</div>
+            ) : activeLimits.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-sm text-muted-foreground">
+                Активных лимитов пока нет.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {activeLimits.map((limit) => {
+                  const summary = limitSummaryById.get(limit.id) ?? {
+                    spent: 0,
+                    progress: 0,
+                    rangeLabel: "",
+                  };
+                  const overBudget = summary.spent > limit.amount_rub;
+                  const progressColor = overBudget
+                    ? "bg-rose-500"
+                    : "bg-emerald-500";
+                  const periodLabel = LIMIT_PERIOD_LABELS[limit.period];
+                  const rangeLabel = summary.rangeLabel;
+                  return (
+                    <div
+                      key={limit.id}
+                      className="rounded-xl border border-slate-100 bg-white px-3 py-2"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-slate-800">
+                            {limit.name}
+                          </div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            {periodLabel}
+                            {rangeLabel ? ` | ${rangeLabel}` : ""}
+                            {" | "}
+                            {formatLimitCategoryLabel(limit.category_id)}
+                          </div>
+                        </div>
+                        <div
+                          className={`shrink-0 text-sm font-semibold tabular-nums whitespace-nowrap ${
+                            overBudget ? "text-rose-600" : "text-slate-700"
+                          }`}
+                        >
+                          {formatRub(summary.spent)} / {formatRub(limit.amount_rub)}
+                        </div>
+                      </div>
+                      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className={`h-full ${progressColor}`}
+                          style={{ width: `${summary.progress * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
           <Card className="h-full">
-            <CardHeader>
+            <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <Calculator className="h-5 w-5 text-violet-600" />
                 ИТОГО
@@ -1266,8 +1453,10 @@ export default function DashboardPage() {
           </Card>
 
           <Card className="overflow-hidden">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-base text-slate-800">Динамика чистых активов</CardTitle>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <LineChart className="h-5 w-5 text-violet-600" />
+                Динамика чистых активов</CardTitle>
             </CardHeader>
             <CardContent className="px-0">
               <div className="relative py-6">

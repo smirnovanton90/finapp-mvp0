@@ -187,6 +187,29 @@ export type TransactionChainOut = {
   created_at: string;
 };
 
+export type LimitPeriod = "MONTHLY" | "WEEKLY" | "YEARLY" | "CUSTOM";
+
+export type LimitOut = {
+  id: number;
+  name: string;
+  period: LimitPeriod;
+  custom_start_date: string | null;
+  custom_end_date: string | null;
+  category_id: number;
+  amount_rub: number;
+  created_at: string;
+  deleted_at: string | null;
+};
+
+export type LimitCreate = {
+  name: string;
+  period: LimitPeriod;
+  custom_start_date?: string | null;
+  custom_end_date?: string | null;
+  category_id: number;
+  amount_rub: number;
+};
+
 export type TransactionCreate = {
   transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
   primary_item_id: number;
@@ -266,13 +289,17 @@ export async function fetchFxRatesBatch(
 
 export async function fetchCategories(options?: {
   includeArchived?: boolean;
+  noCache?: boolean;
 }): Promise<CategoryNode[]> {
   const params = new URLSearchParams();
   if (options?.includeArchived === false) {
     params.set("include_archived", "false");
   }
   const qs = params.toString();
-  const res = await authFetch(`${API_BASE}/categories${qs ? `?${qs}` : ""}`);
+  const res = await authFetch(
+    `${API_BASE}/categories${qs ? `?${qs}` : ""}`,
+    options?.noCache ? { cache: "no-store" } : undefined
+  );
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
@@ -498,6 +525,47 @@ export async function createTransactionChain(
 
 export async function deleteTransactionChain(id: number): Promise<void> {
   const res = await authFetch(`${API_BASE}/transaction-chains/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function fetchLimits(options?: {
+  include_deleted?: boolean;
+  deleted_only?: boolean;
+}): Promise<LimitOut[]> {
+  const params = new URLSearchParams();
+  if (options?.include_deleted) params.set("include_deleted", "true");
+  if (options?.deleted_only) params.set("deleted_only", "true");
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/limits${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createLimit(payload: LimitCreate): Promise<LimitOut> {
+  const res = await authFetch(`${API_BASE}/limits`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateLimit(
+  id: number,
+  payload: LimitCreate
+): Promise<LimitOut> {
+  const res = await authFetch(`${API_BASE}/limits/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function deleteLimit(id: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/limits/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await readError(res));

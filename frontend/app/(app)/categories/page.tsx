@@ -37,7 +37,7 @@ import {
   updateCategoryScope,
   updateCategoryVisibility,
 } from "@/lib/api";
-import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, User } from "lucide-react";
 
 type DeleteTarget = {
   id: number;
@@ -67,12 +67,27 @@ const SCOPE_OPTIONS: Array<{
 ];
 
 function filterCategories(nodes: CategoryNode[]): CategoryNode[] {
+  const scopeOrder: Record<CategoryScope, number> = {
+    INCOME: 0,
+    EXPENSE: 1,
+    BOTH: 2,
+  };
+
   return nodes
     .filter((node) => node.enabled !== false && !node.archived_at)
-    .map((node) => ({
-      ...node,
-      children: node.children ? filterCategories(node.children) : undefined,
-    }));
+    .map((node, index) => ({
+      node: {
+        ...node,
+        children: node.children ? filterCategories(node.children) : undefined,
+      },
+      index,
+    }))
+    .sort((a, b) => {
+      const scopeDiff = scopeOrder[a.node.scope] - scopeOrder[b.node.scope];
+      if (scopeDiff !== 0) return scopeDiff;
+      return a.index - b.index;
+    })
+    .map(({ node }) => node);
 }
 
 function countNodes(nodes: CategoryNode[]): number {
@@ -113,6 +128,7 @@ function CategoryTree({
         const iconName =
           node.icon_name && node.icon_name.trim().length > 0 ? node.icon_name : undefined;
         const PreviewIcon = iconName ? CATEGORY_ICON_BY_NAME[iconName] : null;
+        const isUserCategory = node.owner_user_id != null;
         const isDisabled = node.enabled === false;
         const hasChildren = Boolean(node.children && node.children.length > 0);
         const isExpanded = hasChildren && expandedIds.has(node.id);
@@ -152,11 +168,21 @@ function CategoryTree({
                   ) : (
                     <span className="inline-flex h-4 w-4" aria-hidden="true" />
                   )}
-                  <span className="truncate font-medium text-slate-900">{node.name}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-medium text-slate-900">
+                      {node.name}
+                    </span>
+                    {isUserCategory && (
+                      <User
+                        className="h-3.5 w-3.5 shrink-0 text-slate-400"
+                        aria-label="Пользовательская категория"
+                        title="Пользовательская категория"
+                      />
+                    )}
+                  </span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-slate-600">
+                <div className="flex items-center text-xs text-slate-600">
                   <span className={cn("h-2 w-2 rounded-full", scopeMeta.dotClass)} />
-                  <span>{scopeMeta.label}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
@@ -233,7 +259,7 @@ export default function CategoriesPage() {
       if (!silent) setLoading(true);
       setError(null);
       try {
-        const data = await fetchCategories({ includeArchived: false });
+        const data = await fetchCategories({ includeArchived: false, noCache: true });
         setCategories(data);
       } catch (e: any) {
         setError(e?.message ?? "Не удалось загрузить категории.");

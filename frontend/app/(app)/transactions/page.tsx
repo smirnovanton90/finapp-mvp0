@@ -10,6 +10,7 @@ import {
   type FormEvent,
 } from "react";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   Ban,
@@ -277,6 +278,12 @@ function formatDateForApi(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getYesterdayDateKey() {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return formatDateForApi(date);
 }
 
 function formatDateTimeForApi(date: Date) {
@@ -879,10 +886,26 @@ export function TransactionsView({
 }: {
   view?: TransactionsViewMode;
 }) {
+  const searchParams = useSearchParams();
   const { data: session } = useSession();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
-  const defaultShowPlanned = isPlanningView;
+  const defaultShowPlannedRealized = isPlanningView;
+  const defaultShowPlannedUnrealized = isPlanningView;
+  const isOverduePreset = searchParams.get("preset") === "overdue-planned";
+  const initialShowActual = isOverduePreset ? false : defaultShowActual;
+  const initialShowPlannedRealized = isOverduePreset
+    ? false
+    : defaultShowPlannedRealized;
+  const initialShowPlannedUnrealized = isOverduePreset
+    ? true
+    : defaultShowPlannedUnrealized;
+  const initialFormTransactionType = isOverduePreset
+    ? "PLANNED"
+    : defaultShowActual
+      ? "ACTUAL"
+      : "PLANNED";
+  const initialDateTo = isOverduePreset ? getYesterdayDateKey() : "";
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [banks, setBanks] = useState<BankOut[]>([]);
@@ -912,11 +935,16 @@ export function TransactionsView({
   const [showUnconfirmed, setShowUnconfirmed] = useState(true);
   const [formTransactionType, setFormTransactionType] = useState<
     TransactionOut["transaction_type"]
-  >(() => (defaultShowActual ? "ACTUAL" : "PLANNED"));
-  const [showActual, setShowActual] = useState(defaultShowActual);
-  const [showPlanned, setShowPlanned] = useState(defaultShowPlanned);
+  >(() => initialFormTransactionType);
+  const [showActual, setShowActual] = useState(initialShowActual);
+  const [showPlannedRealized, setShowPlannedRealized] = useState(
+    initialShowPlannedRealized
+  );
+  const [showPlannedUnrealized, setShowPlannedUnrealized] = useState(
+    initialShowPlannedUnrealized
+  );
   const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateTo, setDateTo] = useState(initialDateTo);
   const [commentFilter, setCommentFilter] = useState("");
   const [amountFrom, setAmountFrom] = useState("");
   const [amountTo, setAmountTo] = useState("");
@@ -1121,11 +1149,22 @@ export function TransactionsView({
   const resolveCategoryIcon = useCallback(
     (categoryId: number | null) => {
       if (!categoryId) return CATEGORY_ICON_FALLBACK;
-      const iconName = categoryLookup.idToIcon.get(categoryId);
-      if (!iconName) return CATEGORY_ICON_FALLBACK;
-      return CATEGORY_ICON_BY_NAME[iconName] ?? CATEGORY_ICON_FALLBACK;
+      const path = categoryLookup.idToPath.get(categoryId);
+      if (!path || path.length === 0) return CATEGORY_ICON_FALLBACK;
+      for (let depth = path.length; depth >= 1; depth -= 1) {
+        const key = makeCategoryPathKey(...path.slice(0, depth));
+        const targetId = categoryLookup.pathToId.get(key);
+        if (!targetId) continue;
+        const iconName = categoryLookup.idToIcon.get(targetId);
+        if (!iconName) continue;
+        const normalizedIconName = iconName.trim();
+        if (!normalizedIconName) continue;
+        const Icon = CATEGORY_ICON_BY_NAME[normalizedIconName];
+        if (Icon) return Icon;
+      }
+      return CATEGORY_ICON_FALLBACK;
     },
-    [categoryLookup.idToIcon]
+    [categoryLookup.idToIcon, categoryLookup.idToPath, categoryLookup.pathToId]
   );
 
   const categoryFilterIds = useMemo(() => {
@@ -1264,7 +1303,7 @@ export function TransactionsView({
   }, [isCrossCurrencyTransfer]);
 
   const segmentedButtonBase =
-    "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+    "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
   const isDialogOpen = dialogMode !== null;
   const isEditMode = dialogMode === "edit";
   const isBulkEdit = dialogMode === "bulk-edit";
@@ -1988,16 +2027,26 @@ export function TransactionsView({
 
   const statusFilter = useMemo(() => {
     const values: TransactionOut["status"][] = [];
-    if (showConfirmed) values.push("CONFIRMED", "REALIZED");
-    if (showUnconfirmed) values.push("UNCONFIRMED");
+    const allowConfirmed = showActual || showPlannedUnrealized;
+    if (allowConfirmed) {
+      if (showConfirmed) values.push("CONFIRMED");
+      if (showUnconfirmed) values.push("UNCONFIRMED");
+    }
+    if (showPlannedRealized) values.push("REALIZED");
     return values;
-  }, [showConfirmed, showUnconfirmed]);
+  }, [
+    showActual,
+    showConfirmed,
+    showPlannedRealized,
+    showPlannedUnrealized,
+    showUnconfirmed,
+  ]);
   const transactionTypeFilter = useMemo(() => {
     const values: TransactionOut["transaction_type"][] = [];
     if (showActual) values.push("ACTUAL");
-    if (showPlanned) values.push("PLANNED");
+    if (showPlannedRealized || showPlannedUnrealized) values.push("PLANNED");
     return values;
-  }, [showActual, showPlanned]);
+  }, [showActual, showPlannedRealized, showPlannedUnrealized]);
   const directionFilter = useMemo(
     () => Array.from(selectedDirections),
     [selectedDirections]
@@ -3625,11 +3674,13 @@ export function TransactionsView({
                     className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
                     onClick={() => {
                       setShowActual(defaultShowActual);
-                      setShowPlanned(defaultShowPlanned);
+                      setShowPlannedRealized(defaultShowPlannedRealized);
+                      setShowPlannedUnrealized(defaultShowPlannedUnrealized);
                     }}
                     disabled={
                       showActual === defaultShowActual &&
-                      showPlanned === defaultShowPlanned
+                      showPlannedRealized === defaultShowPlannedRealized &&
+                      showPlannedUnrealized === defaultShowPlannedUnrealized
                     }
                   >
                     Сбросить
@@ -3650,15 +3701,41 @@ export function TransactionsView({
                   </button>
                   <button
                     type="button"
-                    aria-pressed={showPlanned}
-                    onClick={() => setShowPlanned((prev) => !prev)}
+                    aria-pressed={showPlannedRealized}
+                    onClick={() => setShowPlannedRealized((prev) => !prev)}
                     className={`${segmentedButtonBase} ${
-                      showPlanned
+                      showPlannedRealized
+                        ? "bg-sky-50 text-sky-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    } text-xs leading-tight whitespace-normal`}
+                  >
+                    <span className="text-center leading-tight">
+                      <span className="inline-flex items-center gap-2">
+                        <BadgeCheck className="h-4 w-4" />
+                        Плановая
+                      </span>
+                      <br />
+                      реализованная
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={showPlannedUnrealized}
+                    onClick={() => setShowPlannedUnrealized((prev) => !prev)}
+                    className={`${segmentedButtonBase} ${
+                      showPlannedUnrealized
                         ? "bg-amber-50 text-amber-700"
                         : "bg-white text-muted-foreground hover:bg-white"
-                    }`}
+                    } text-xs leading-tight whitespace-normal`}
                   >
-                    Плановая
+                    <span className="text-center leading-tight">
+                      <span className="inline-flex items-center gap-2">
+                        <Sparkles className="h-4 w-4" />
+                        Плановая
+                      </span>
+                      <br />
+                      нереализованная
+                    </span>
                   </button>
                 </div>
               </div>

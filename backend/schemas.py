@@ -10,6 +10,7 @@ TransactionStatus = Literal["CONFIRMED", "UNCONFIRMED", "REALIZED"]
 TransactionChainFrequency = Literal["DAILY", "WEEKLY", "MONTHLY", "REGULAR"]
 TransactionChainMonthlyRule = Literal["FIRST_DAY", "LAST_DAY"]
 CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
+LimitPeriod = Literal["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"]
 
 
 class ItemCreate(BaseModel):
@@ -249,6 +250,44 @@ class TransactionChainOut(BaseModel):
     comment: str | None
     deleted_at: datetime | None
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LimitBase(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    period: LimitPeriod
+    category_id: int
+    amount_rub: int = Field(ge=0)
+    custom_start_date: date | None = None
+    custom_end_date: date | None = None
+
+    @model_validator(mode="after")
+    def validate_custom_period(self) -> "LimitBase":
+        if self.period == "CUSTOM":
+            if self.custom_start_date is None or self.custom_end_date is None:
+                raise ValueError(
+                    "custom_start_date and custom_end_date are required for CUSTOM period"
+                )
+            if self.custom_start_date > self.custom_end_date:
+                raise ValueError("custom_start_date must be on or before custom_end_date")
+        else:
+            if self.custom_start_date is not None or self.custom_end_date is not None:
+                raise ValueError(
+                    "custom_start_date/custom_end_date are only allowed for CUSTOM period"
+                )
+        return self
+
+
+class LimitCreate(LimitBase):
+    pass
+
+
+class LimitOut(LimitBase):
+    id: int
+    created_at: datetime
+    deleted_at: datetime | None
 
     class Config:
         from_attributes = True

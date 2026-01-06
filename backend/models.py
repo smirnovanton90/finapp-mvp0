@@ -36,6 +36,7 @@ class User(Base):
     transaction_chains: Mapped[list["TransactionChain"]] = relationship(
         back_populates="user"
     )
+    limits: Mapped[list["Limit"]] = relationship(back_populates="user")
     categories: Mapped[list["Category"]] = relationship(back_populates="owner")
     category_states: Mapped[list["UserCategoryState"]] = relationship(
         back_populates="user"
@@ -334,5 +335,49 @@ class TransactionChain(Base):
         CheckConstraint(
             "(interval_days is null) or (interval_days >= 1)",
             name="ck_transaction_chains_interval_days",
+        ),
+    )
+
+
+class Limit(Base):
+    __tablename__ = "limits"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    user: Mapped["User"] = relationship(back_populates="limits")
+
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    period: Mapped[str] = mapped_column(String(20), nullable=False)
+    custom_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    custom_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    category_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("categories.id"), nullable=False
+    )
+    category: Mapped[Optional["Category"]] = relationship()
+
+    amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "period in ('WEEKLY','MONTHLY','YEARLY','CUSTOM')",
+            name="ck_limits_period",
+        ),
+        CheckConstraint("amount_rub >= 0", name="ck_limits_amount_non_negative"),
+        CheckConstraint(
+            "(period = 'CUSTOM' and custom_start_date is not null and custom_end_date is not null) "
+            "or (period <> 'CUSTOM' and custom_start_date is null and custom_end_date is null)",
+            name="ck_limits_custom_dates",
+        ),
+        CheckConstraint(
+            "(custom_start_date is null or custom_end_date is null) "
+            "or (custom_start_date <= custom_end_date)",
+            name="ck_limits_custom_date_order",
         ),
     )

@@ -502,7 +502,8 @@ function getRateForDate(
 function buildDeltasByDate(
   txs: TransactionOut[],
   selectedIds: Set<number>,
-  itemKindById: Map<number, ItemKind>
+  itemKindById: Map<number, ItemKind>,
+  todayKey: string
 ) {
   const map = new Map<string, Map<number, number>>();
   const addDelta = (dateKey: string, itemId: number, delta: number) => {
@@ -515,6 +516,8 @@ function buildDeltasByDate(
   txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
+    const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
+    if (dateKey <= todayKey && !isRealized) return;
 
     const primarySelected = selectedIds.has(tx.primary_item_id);
     const counterSelected = tx.counterparty_item_id
@@ -1084,7 +1087,7 @@ export default function DashboardPage() {
       itemsByStartDate.get(startKey)?.push(item);
     });
 
-    const deltasByDate = buildDeltasByDate(txs, selectedIds, itemKindById);
+    const deltasByDate = buildDeltasByDate(txs, selectedIds, itemKindById, todayKey);
     const startKeys = chartItems.map((item) => getItemStartKey(item)).sort();
     const earliestStartKey = startKeys[0] ?? "";
     const startKey =

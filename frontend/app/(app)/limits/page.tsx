@@ -87,6 +87,18 @@ function formatDateLabel(dateKey: string) {
   return `${day}.${month}.${year}`;
 }
 
+function getLimitProgressTone(ratio: number) {
+  if (ratio >= 1) return "over";
+  if (ratio >= 0.75) return "warn";
+  return "ok";
+}
+
+function getLimitProgressColorClass(tone: "over" | "warn" | "ok") {
+  if (tone === "over") return "bg-rose-500";
+  if (tone === "warn") return "bg-orange-500";
+  return "bg-emerald-500";
+}
+
 function toDateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -783,10 +795,10 @@ export default function LimitsPage() {
                     progress: 0,
                     rangeLabel: null,
                   };
-                  const overBudget = summary.spent > limit.amount_rub;
-                  const progressColor = overBudget
-                    ? "bg-rose-500"
-                    : "bg-emerald-500";
+                  const ratio =
+                    limit.amount_rub > 0 ? summary.spent / limit.amount_rub : 0;
+                  const tone = getLimitProgressTone(ratio);
+                  const progressColorClass = getLimitProgressColorClass(tone);
                   const periodLabel = PERIOD_LABELS[limit.period];
                   const rangeLabel = summary.rangeLabel;
                   return (
@@ -834,7 +846,7 @@ export default function LimitsPage() {
                             Потрачено:{" "}
                             <span
                               className={
-                                overBudget ? "text-rose-600 font-medium" : "font-medium"
+                                tone === "over" ? "text-rose-500 font-medium" : "font-medium"
                               }
                             >
                               {formatRub(summary.spent)}
@@ -844,7 +856,7 @@ export default function LimitsPage() {
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                           <div
-                            className={`h-full ${progressColor}`}
+                            className={`h-full ${progressColorClass}`}
                             style={{ width: `${summary.progress * 100}%` }}
                           />
                         </div>

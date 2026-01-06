@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { AlertCircle, Calculator, LineChart, Receipt, Target, Wallet } from "lucide-react";
+import { AlertCircle, Target, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,8 +35,6 @@ type DailyRow = {
   totalRubCents: number | null;
 };
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
 const CASH_TYPES = ["cash", "bank_account", "bank_card"];
 const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "savings_account", "brokerage", "securities"];
 const PROPERTY_TYPES = ["real_estate", "car"];
@@ -51,8 +49,10 @@ const DONUT_COLORS = [
   "#22C55E",
   "#0EA5E9",
 ];
-const UPCOMING_DAYS = 3;
 const CATEGORY_BREAKDOWN_LIMIT = 6;
+const UNCATEGORIZED_LABEL = "Без категории";
+const OTHER_LABEL = "Другое";
+const OTHER_SHARE_MAX = 0.1;
 const LIMIT_PERIOD_LABELS: Record<LimitOut["period"], string> = {
   MONTHLY: "Ежемесячный",
   WEEKLY: "Еженедельный",
@@ -105,12 +105,6 @@ function getWeekStart(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() - diff);
 }
 
-function daysBetween(start: Date, end: Date) {
-  const startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
-  const endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
-  return Math.round((endUtc - startUtc) / MS_PER_DAY);
-}
-
 function buildLinePath(points: ChartPoint[]) {
   if (points.length === 0) return "";
   const path = [`M ${points[0].x} ${points[0].y}`];
@@ -150,13 +144,6 @@ function buildTicks(minValue: number, maxValue: number) {
   return ticks;
 }
 
-function formatTick(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
 function formatRub(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
     style: "currency",
@@ -164,6 +151,59 @@ function formatRub(valueInCents: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(valueInCents / 100);
+}
+
+function formatPercent(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function sumMapValues(map: Map<string, number>) {
+  let total = 0;
+  map.forEach((value) => {
+    total += value;
+  });
+  return total;
+}
+
+function calcPercentChange(current: number, baseline: number | null) {
+  if (!baseline) return null;
+  const percent = ((current - baseline) / Math.abs(baseline)) * 100;
+  if (!Number.isFinite(percent)) return null;
+  return percent;
+}
+
+function formatChangePercent(percent: number | null) {
+  if (percent === null) return "-";
+  const sign = percent >= 0 ? "+" : "-";
+  return `${sign}${formatPercent(Math.abs(percent))}%`;
+}
+
+function getLimitProgressTone(ratio: number) {
+  if (ratio >= 1) return "over";
+  if (ratio >= 0.75) return "warn";
+  return "ok";
+}
+
+function getLimitProgressColorClass(tone: "over" | "warn" | "ok") {
+  if (tone === "over") return "bg-rose-500";
+  if (tone === "warn") return "bg-orange-500";
+  return "bg-emerald-500";
+}
+
+function getLimitProgressTextClass(tone: "over" | "warn" | "ok") {
+  if (tone === "over") return "text-rose-500";
+  if (tone === "warn") return "text-orange-500";
+  return "text-emerald-500";
+}
+
+function changeBadgeClass(percent: number | null) {
+  if (percent === null) return "bg-slate-100 text-slate-500";
+  return percent >= 0
+    ? "bg-rose-50 text-rose-700"
+    : "bg-emerald-50 text-emerald-700";
 }
 
 function formatDateLabel(dateKey: string) {
@@ -215,13 +255,6 @@ function formatMonthLabel(date: Date) {
   }).format(date);
 }
 
-function formatChartDate(date: Date) {
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const year = String(date.getFullYear()).slice(-2);
-  return `${day}.${month}.${year}`;
-}
-
 function getPreviousMonthRange(date: Date) {
   const start = new Date(date.getFullYear(), date.getMonth() - 1, 1);
   const end = new Date(date.getFullYear(), date.getMonth(), 0);
@@ -247,6 +280,21 @@ type CategorySegment = CategoryBreakdownRow & {
   color: string;
 };
 
+type LegendRow = CategorySegment & {
+  prevDelta: number | null;
+  avgDelta: number | null;
+};
+
+function resolveTopLevelLabel(
+  categoryId: number | null,
+  categoryLookup: ReturnType<typeof buildCategoryLookup>
+) {
+  if (!categoryId) return UNCATEGORIZED_LABEL;
+  const path = categoryLookup.idToPath.get(categoryId);
+  const label = path?.[0]?.trim();
+  return label || UNCATEGORIZED_LABEL;
+}
+
 function buildCategoryBreakdown(
   txs: TransactionOut[],
   direction: "INCOME" | "EXPENSE",
@@ -258,12 +306,8 @@ function buildCategoryBreakdown(
   const totals = new Map<string, number>();
   let total = 0;
 
-  const resolveLabel = (categoryId: number | null) => {
-    if (!categoryId) return "Без категории";
-    const path = categoryLookup.idToPath.get(categoryId);
-    if (!path || path.length === 0) return "Без категории";
-    return path.join(" / ");
-  };
+  const resolveLabel = (categoryId: number | null) =>
+    resolveTopLevelLabel(categoryId, categoryLookup);
 
   txs.forEach((tx) => {
     if (tx.direction !== direction) return;
@@ -276,18 +320,105 @@ function buildCategoryBreakdown(
     total += tx.amount_rub;
   });
 
+  if (total <= 0) return { total, rows: [] };
+
   const rows = Array.from(totals.entries())
     .map(([label, value]) => ({ label, value }))
     .sort((a, b) => b.value - a.value);
 
-  if (rows.length > limit) {
-    const head = rows.slice(0, limit);
-    const restValue = rows.slice(limit).reduce((sum, row) => sum + row.value, 0);
-    if (restValue > 0) head.push({ label: "Другое", value: restValue });
-    return { total, rows: head };
+  const baseCount = Math.min(limit, rows.length);
+  let visibleCount = baseCount;
+  let visibleSum = rows.slice(0, visibleCount).reduce((sum, row) => sum + row.value, 0);
+  let otherValue = Math.max(total - visibleSum, 0);
+  const maxOtherValue = total * OTHER_SHARE_MAX;
+
+  while (visibleCount < rows.length && otherValue > maxOtherValue) {
+    visibleSum += rows[visibleCount].value;
+    visibleCount += 1;
+    otherValue = Math.max(total - visibleSum, 0);
   }
 
-  return { total, rows };
+  const head = rows.slice(0, visibleCount);
+  if (otherValue > 0) head.push({ label: OTHER_LABEL, value: otherValue });
+  return { total, rows: head };
+}
+
+function buildCategoryTotalsByLabel(
+  txs: TransactionOut[],
+  direction: "INCOME" | "EXPENSE",
+  startKey: string,
+  endKey: string,
+  categoryLookup: ReturnType<typeof buildCategoryLookup>
+) {
+  const totals = new Map<string, number>();
+
+  const resolveLabel = (categoryId: number | null) =>
+    resolveTopLevelLabel(categoryId, categoryLookup);
+
+  txs.forEach((tx) => {
+    if (tx.direction !== direction) return;
+    const dateKey = toTxDateKey(tx.transaction_date);
+    if (!dateKey) return;
+    if (dateKey < startKey || dateKey > endKey) return;
+    if (!isRealizedTransaction(tx)) return;
+    const label = resolveLabel(tx.category_id);
+    totals.set(label, (totals.get(label) ?? 0) + tx.amount_rub);
+  });
+
+  return totals;
+}
+
+function buildCategoryMonthlyTotals(
+  txs: TransactionOut[],
+  direction: "INCOME" | "EXPENSE",
+  startKey: string,
+  endKey: string,
+  categoryLookup: ReturnType<typeof buildCategoryLookup>
+) {
+  const totals = new Map<string, Map<string, number>>();
+
+  txs.forEach((tx) => {
+    if (tx.direction !== direction) return;
+    const dateKey = toTxDateKey(tx.transaction_date);
+    if (!dateKey) return;
+    if (dateKey < startKey || dateKey > endKey) return;
+    if (!isRealizedTransaction(tx)) return;
+    const label = resolveTopLevelLabel(tx.category_id, categoryLookup);
+    const monthKey = dateKey.slice(0, 7);
+    if (!totals.has(label)) totals.set(label, new Map());
+    const monthTotals = totals.get(label);
+    if (!monthTotals) return;
+    monthTotals.set(monthKey, (monthTotals.get(monthKey) ?? 0) + tx.amount_rub);
+  });
+
+  return totals;
+}
+
+function buildOtherMonthlyTotals(
+  monthlyTotalsByLabel: Map<string, Map<string, number>>,
+  otherLabels: string[]
+) {
+  const totals = new Map<string, number>();
+  otherLabels.forEach((label) => {
+    const monthTotals = monthlyTotalsByLabel.get(label);
+    if (!monthTotals) return;
+    monthTotals.forEach((value, monthKey) => {
+      totals.set(monthKey, (totals.get(monthKey) ?? 0) + value);
+    });
+  });
+  return totals;
+}
+
+function averageMonthlyTotal(monthTotals: Map<string, number>) {
+  let sum = 0;
+  let count = 0;
+  monthTotals.forEach((value) => {
+    if (value !== 0) {
+      sum += value;
+      count += 1;
+    }
+  });
+  return count > 0 ? sum / count : null;
 }
 
 function buildCategorySegments(
@@ -400,46 +531,6 @@ function buildDeltasByDate(
   return map;
 }
 
-function buildDayMarks(
-  startKey: string,
-  endKey: string,
-  width: number,
-  padding: {
-    left: number;
-    right: number;
-    top: number;
-    bottom: number;
-  }
-) {
-  const startDate = parseDateKey(startKey);
-  const endDate = parseDateKey(endKey);
-  const totalDays = Math.max(daysBetween(startDate, endDate), 1);
-  const innerWidth = width - padding.left - padding.right;
-  const targetLabels = 7;
-  const step = Math.max(1, Math.ceil(totalDays / (targetLabels - 1)));
-  const marks: { label: string; x: number; dayIndex: number }[] = [];
-
-  for (let dayIndex = 0; dayIndex <= totalDays; dayIndex += step) {
-    const date = addDays(startDate, dayIndex);
-    marks.push({
-      label: formatChartDate(date),
-      x: padding.left + (innerWidth * dayIndex) / totalDays,
-      dayIndex,
-    });
-  }
-
-  if (marks[marks.length - 1]?.dayIndex !== totalDays) {
-    const date = addDays(startDate, totalDays);
-    marks.push({
-      label: formatChartDate(date),
-      x: padding.left + innerWidth,
-      dayIndex: totalDays,
-    });
-  }
-
-  return marks;
-}
-
 export default function DashboardPage() {
   const { data: session } = useSession();
   const [items, setItems] = useState<ItemOut[]>([]);
@@ -452,23 +543,25 @@ export default function DashboardPage() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const [tooltipLeft, setTooltipLeft] = useState<number | null>(null);
   const [incomeHover, setIncomeHover] = useState<CategorySegment | null>(null);
   const [expenseHover, setExpenseHover] = useState<CategorySegment | null>(null);
-  const svgRef = useRef<SVGSVGElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
-  const tooltipRef = useRef<HTMLDivElement | null>(null);
-  const [chartSize, setChartSize] = useState({ width: 720, height: 280 });
+  const [chartSize, setChartSize] = useState({ width: 240, height: 140 });
   const now = new Date();
   const todayKey = toDateKey(now);
-  const rangeStartKey = toDateKey(addMonths(now, -1));
-  const rangeEndKey = toDateKey(addMonths(now, 1));
+  const monthStartKey = toDateKey(new Date(now.getFullYear(), now.getMonth(), 1));
+  const monthEndKey = toDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+  const rangeStartKey = monthStartKey;
+  const rangeEndKey = monthEndKey;
   const previousMonthRange = getPreviousMonthRange(now);
   const previousMonthStartKey = toDateKey(previousMonthRange.start);
   const previousMonthEndKey = toDateKey(previousMonthRange.end);
   const previousMonthLabel = formatMonthLabel(previousMonthRange.start);
-  const upcomingEndKey = toDateKey(addDays(now, UPCOMING_DAYS - 1));
+  const priorMonthRange = getPreviousMonthRange(previousMonthRange.start);
+  const priorMonthStartKey = toDateKey(priorMonthRange.start);
+  const priorMonthEndKey = toDateKey(priorMonthRange.end);
+  const twelveMonthStartKey = toDateKey(addMonths(previousMonthRange.start, -11));
+  const twelveMonthEndKey = previousMonthEndKey;
 
   useEffect(() => {
     if (!session) return;
@@ -511,11 +604,6 @@ export default function DashboardPage() {
     });
     return map;
   }, [fxRates]);
-
-  const itemsById = useMemo(
-    () => new Map(items.map((item) => [item.id, item])),
-    [items]
-  );
 
   const categoryLookup = useMemo(
     () => buildCategoryLookup(categoryNodes),
@@ -706,6 +794,172 @@ export default function DashboardPage() {
     [expenseBreakdown]
   );
 
+  const incomeTotalsCurrent = useMemo(
+    () =>
+      buildCategoryTotalsByLabel(
+        txs,
+        "INCOME",
+        previousMonthStartKey,
+        previousMonthEndKey,
+        categoryLookup
+      ),
+    [categoryLookup, previousMonthEndKey, previousMonthStartKey, txs]
+  );
+
+  const expenseTotalsCurrent = useMemo(
+    () =>
+      buildCategoryTotalsByLabel(
+        txs,
+        "EXPENSE",
+        previousMonthStartKey,
+        previousMonthEndKey,
+        categoryLookup
+      ),
+    [categoryLookup, previousMonthEndKey, previousMonthStartKey, txs]
+  );
+
+  const incomeTotalsPrevMonth = useMemo(
+    () =>
+      buildCategoryTotalsByLabel(
+        txs,
+        "INCOME",
+        priorMonthStartKey,
+        priorMonthEndKey,
+        categoryLookup
+      ),
+    [categoryLookup, priorMonthEndKey, priorMonthStartKey, txs]
+  );
+
+  const expenseTotalsPrevMonth = useMemo(
+    () =>
+      buildCategoryTotalsByLabel(
+        txs,
+        "EXPENSE",
+        priorMonthStartKey,
+        priorMonthEndKey,
+        categoryLookup
+      ),
+    [categoryLookup, priorMonthEndKey, priorMonthStartKey, txs]
+  );
+
+  const incomeMonthlyTotals = useMemo(
+    () =>
+      buildCategoryMonthlyTotals(
+        txs,
+        "INCOME",
+        twelveMonthStartKey,
+        twelveMonthEndKey,
+        categoryLookup
+      ),
+    [categoryLookup, twelveMonthEndKey, twelveMonthStartKey, txs]
+  );
+
+  const expenseMonthlyTotals = useMemo(
+    () =>
+      buildCategoryMonthlyTotals(
+        txs,
+        "EXPENSE",
+        twelveMonthStartKey,
+        twelveMonthEndKey,
+        categoryLookup
+      ),
+    [categoryLookup, twelveMonthEndKey, twelveMonthStartKey, txs]
+  );
+
+  const incomePrevMonthTotal = useMemo(
+    () => sumMapValues(incomeTotalsPrevMonth),
+    [incomeTotalsPrevMonth]
+  );
+
+  const expensePrevMonthTotal = useMemo(
+    () => sumMapValues(expenseTotalsPrevMonth),
+    [expenseTotalsPrevMonth]
+  );
+
+  const incomeLegendRows = useMemo<LegendRow[]>(() => {
+    if (incomeSegments.length === 0) return [];
+    const visibleLabels = incomeSegments
+      .map((segment) => segment.label)
+      .filter((label) => label !== OTHER_LABEL);
+    const otherLabels = Array.from(incomeTotalsCurrent.keys()).filter(
+      (label) => !visibleLabels.includes(label)
+    );
+    const prevTopSum = visibleLabels.reduce(
+      (sum, label) => sum + (incomeTotalsPrevMonth.get(label) ?? 0),
+      0
+    );
+    const otherPrevValue = Math.max(incomePrevMonthTotal - prevTopSum, 0);
+    const otherMonthlyTotals = buildOtherMonthlyTotals(
+      incomeMonthlyTotals,
+      otherLabels
+    );
+    const otherAvgValue = averageMonthlyTotal(otherMonthlyTotals);
+    const emptyMonthly = new Map<string, number>();
+
+    return incomeSegments.map((segment) => {
+      const isOther = segment.label === OTHER_LABEL;
+      const prevValue = isOther
+        ? otherPrevValue
+        : incomeTotalsPrevMonth.get(segment.label) ?? 0;
+      const avgValue = isOther
+        ? otherAvgValue
+        : averageMonthlyTotal(incomeMonthlyTotals.get(segment.label) ?? emptyMonthly);
+      return {
+        ...segment,
+        prevDelta: calcPercentChange(segment.value, prevValue),
+        avgDelta: calcPercentChange(segment.value, avgValue),
+      };
+    });
+  }, [
+    incomeSegments,
+    incomeTotalsCurrent,
+    incomeMonthlyTotals,
+    incomeTotalsPrevMonth,
+    incomePrevMonthTotal,
+  ]);
+
+  const expenseLegendRows = useMemo<LegendRow[]>(() => {
+    if (expenseSegments.length === 0) return [];
+    const visibleLabels = expenseSegments
+      .map((segment) => segment.label)
+      .filter((label) => label !== OTHER_LABEL);
+    const otherLabels = Array.from(expenseTotalsCurrent.keys()).filter(
+      (label) => !visibleLabels.includes(label)
+    );
+    const prevTopSum = visibleLabels.reduce(
+      (sum, label) => sum + (expenseTotalsPrevMonth.get(label) ?? 0),
+      0
+    );
+    const otherPrevValue = Math.max(expensePrevMonthTotal - prevTopSum, 0);
+    const otherMonthlyTotals = buildOtherMonthlyTotals(
+      expenseMonthlyTotals,
+      otherLabels
+    );
+    const otherAvgValue = averageMonthlyTotal(otherMonthlyTotals);
+    const emptyMonthly = new Map<string, number>();
+
+    return expenseSegments.map((segment) => {
+      const isOther = segment.label === OTHER_LABEL;
+      const prevValue = isOther
+        ? otherPrevValue
+        : expenseTotalsPrevMonth.get(segment.label) ?? 0;
+      const avgValue = isOther
+        ? otherAvgValue
+        : averageMonthlyTotal(expenseMonthlyTotals.get(segment.label) ?? emptyMonthly);
+      return {
+        ...segment,
+        prevDelta: calcPercentChange(segment.value, prevValue),
+        avgDelta: calcPercentChange(segment.value, avgValue),
+      };
+    });
+  }, [
+    expenseSegments,
+    expenseTotalsCurrent,
+    expenseMonthlyTotals,
+    expenseTotalsPrevMonth,
+    expensePrevMonthTotal,
+  ]);
+
   const overduePlannedCount = useMemo(() => {
     let count = 0;
     txs.forEach((tx) => {
@@ -717,63 +971,8 @@ export default function DashboardPage() {
     });
     return count;
   }, [todayKey, txs]);
+  const showOverdueWidget = overduePlannedCount > 0;
 
-  const upcomingPlanned = useMemo(() => {
-    const items: {
-      id: number;
-      dateKey: string;
-      title: string;
-      direction: TransactionOut["direction"];
-      amount: number;
-      accountLabel: string;
-    }[] = [];
-
-    const resolveLabel = (categoryId: number | null) => {
-      if (!categoryId) return "Без категории";
-      const path = categoryLookup.idToPath.get(categoryId);
-      if (!path || path.length === 0) return "Без категории";
-      return path.join(" / ");
-    };
-
-    txs.forEach((tx) => {
-      if (tx.transaction_type !== "PLANNED") return;
-      if (tx.status === "REALIZED") return;
-      const dateKey = toTxDateKey(tx.transaction_date);
-      if (!dateKey) return;
-      if (dateKey < todayKey || dateKey > upcomingEndKey) return;
-
-      const primaryItem = itemsById.get(tx.primary_item_id);
-      const counterpartyItem = tx.counterparty_item_id
-        ? itemsById.get(tx.counterparty_item_id)
-        : null;
-      const baseTitle = tx.description?.trim() || tx.comment?.trim();
-      const categoryLabel = resolveLabel(tx.category_id);
-      const fallbackTitle =
-        tx.direction === "TRANSFER" ? "Перевод" : categoryLabel || "Без категории";
-      const title = baseTitle && baseTitle.length > 0 ? baseTitle : fallbackTitle;
-      const primaryLabel = primaryItem?.name ?? `#${tx.primary_item_id}`;
-      const counterpartyLabel = counterpartyItem?.name ?? null;
-      const accountLabel =
-        tx.direction === "TRANSFER" && counterpartyLabel
-          ? `${primaryLabel} -> ${counterpartyLabel}`
-          : primaryLabel;
-
-      items.push({
-        id: tx.id,
-        dateKey,
-        title,
-        direction: tx.direction,
-        amount: tx.amount_rub,
-        accountLabel,
-      });
-    });
-
-    items.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
-    return items;
-  }, [categoryLookup, itemsById, todayKey, txs, upcomingEndKey]);
-
-  const upcomingDisplay = upcomingPlanned.slice(0, 5);
-  const upcomingExtra = Math.max(0, upcomingPlanned.length - upcomingDisplay.length);
 
   const chartItems = useMemo(() => activeItems, [activeItems]);
 
@@ -950,6 +1149,23 @@ export default function DashboardPage() {
     txs,
   ]);
 
+  const monthStartNetTotal = useMemo(() => {
+    const row = dailyRows.find((daily) => daily.date === monthStartKey);
+    return row?.totalRubCents ?? null;
+  }, [dailyRows, monthStartKey]);
+
+  const netTotalChangeLabel = useMemo(() => {
+    if (loading) return "С 1 числа: ...";
+    if (monthStartNetTotal === null || monthStartNetTotal === 0) {
+      return "С 1 числа: -";
+    }
+    const delta = netTotal - monthStartNetTotal;
+    const percent = (delta / Math.abs(monthStartNetTotal)) * 100;
+    if (!Number.isFinite(percent)) return "С 1 числа: -";
+    const sign = percent >= 0 ? "+" : "-";
+    return `С 1 числа: ${sign}${formatPercent(Math.abs(percent))}%`;
+  }, [loading, monthStartNetTotal, netTotal]);
+
   const chartData = useMemo(
     () =>
       dailyRows.map((row) => ({
@@ -962,13 +1178,13 @@ export default function DashboardPage() {
 
   const width = chartSize.width;
   const height = chartSize.height;
-  const padding = { top: 24, right: 0, bottom: 44, left: 52 };
+  const padding = { top: 8, right: 8, bottom: 8, left: 8 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
 
   const values = chartData.map((point) => point.value);
-  const minValue = values.length ? Math.min(...values, 0) : 0;
-  const maxValue = values.length ? Math.max(...values, 0) : 0;
+  const minValue = values.length ? Math.min(...values) : 0;
+  const maxValue = values.length ? Math.max(...values) : 0;
   const rangePadding = Math.max((maxValue - minValue) * 0.12, 1);
   const paddedMin = minValue - rangePadding;
   const paddedMax = maxValue + rangePadding;
@@ -997,20 +1213,6 @@ export default function DashboardPage() {
   const pastAreaPath = buildAreaPath(pastPoints, baselineY);
   const futureAreaPath = buildAreaPath(futurePoints, baselineY);
 
-  const hoverPoint = hoverIndex !== null ? points[hoverIndex] : null;
-  const hoverData = hoverIndex !== null ? chartData[hoverIndex] : null;
-  const hoverIsFuture = hoverData ? hoverData.date > todayKey : false;
-
-  const dayMarks =
-    chartData.length >= 2
-      ? buildDayMarks(
-          chartData[0].date,
-          chartData[chartData.length - 1].date,
-          width,
-          padding
-        )
-      : [];
-
   useEffect(() => {
     if (!chartRef.current) return;
     const element = chartRef.current;
@@ -1032,48 +1234,6 @@ export default function DashboardPage() {
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (!hoverPoint || !chartRef.current || !tooltipRef.current) {
-      setTooltipLeft(null);
-      return;
-    }
-    const containerWidth = chartRef.current.clientWidth;
-    const tooltipWidth = tooltipRef.current.offsetWidth;
-    const paddingEdge = 12;
-    const clamped = Math.min(
-      Math.max(hoverPoint.x, tooltipWidth / 2 + paddingEdge),
-      containerWidth - tooltipWidth / 2 - paddingEdge
-    );
-    setTooltipLeft(clamped);
-  }, [hoverPoint?.x, hoverIndex, chartSize.width]);
-
-  const handlePointerMove = (event: React.MouseEvent<SVGSVGElement>) => {
-    if (!svgRef.current || chartData.length === 0) return;
-    if (chartData.length === 1) {
-      setHoverIndex(0);
-      return;
-    }
-    const ctm = svgRef.current.getScreenCTM();
-    if (!ctm) return;
-    let svgX = 0;
-    if (typeof DOMPoint !== "undefined") {
-      const point = new DOMPoint(event.clientX, event.clientY);
-      svgX = point.matrixTransform(ctm.inverse()).x;
-    } else {
-      const point = svgRef.current.createSVGPoint();
-      point.x = event.clientX;
-      point.y = event.clientY;
-      svgX = point.matrixTransform(ctm.inverse()).x;
-    }
-    const clampedX = Math.min(
-      Math.max(svgX, padding.left),
-      width - padding.right
-    );
-    const progress = (clampedX - padding.left) / innerWidth;
-    const index = Math.round(progress * (chartData.length - 1));
-    setHoverIndex(Math.min(Math.max(index, 0), chartData.length - 1));
-  };
-
   return (
     <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -1082,32 +1242,80 @@ export default function DashboardPage() {
           <p className="text-sm text-muted-foreground">Ключевые метрики за последние дни.</p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
-          <Card className="relative overflow-hidden">
+        <div
+          className={
+            showOverdueWidget
+              ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)]"
+              : "grid gap-4"
+          }
+        >
+          <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500 text-white shadow-[0_20px_50px_-28px_rgba(76,29,149,0.8)]">
+            <div className="pointer-events-none absolute right-4 top-3 h-24 w-40 opacity-90">
+              <div ref={chartRef} className="h-full w-full">
+                {!loading && !error && chartData.length > 1 && (
+                  <svg
+                    viewBox={`0 0 ${width} ${height}`}
+                    className="h-full w-full"
+                    aria-hidden="true"
+                  >
+                    <defs>
+                      <linearGradient id="netWorthArea" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.35" />
+                        <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0" />
+                      </linearGradient>
+                    </defs>
+
+                    {pastAreaPath && <path d={pastAreaPath} fill="url(#netWorthArea)" />}
+                    {futureAreaPath && (
+                      <path d={futureAreaPath} fill="url(#netWorthArea)" />
+                    )}
+                    {pastLinePath && (
+                      <path
+                        d={pastLinePath}
+                        fill="none"
+                        stroke="rgba(255,255,255,0.9)"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                      />
+                    )}
+                    {futureLinePath && (
+                      <path
+                        d={futureLinePath}
+                        fill="none"
+                        stroke="rgba(255,255,255,0.9)"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                      />
+                    )}
+                  </svg>
+                )}
+              </div>
+            </div>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Wallet className="h-5 w-5 text-violet-600" />
+              <CardTitle className="text-base flex items-center gap-2 text-white/90">
+                <Wallet className="h-5 w-5 text-white/90" />
                 Текущий чистый капитал
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="break-words text-4xl font-semibold leading-tight text-violet-600 tabular-nums">
+              <div className="break-words text-4xl font-semibold leading-tight text-white tabular-nums">
                 {loading
                   ? "..."
                   : netTotal < 0
                   ? `-${formatRub(Math.abs(netTotal))}`
                   : formatRub(netTotal)}
               </div>
-              <div className="space-y-1 text-xs text-muted-foreground">
+              <div className="text-xs text-white/80">{netTotalChangeLabel}</div>
+              <div className="space-y-1 text-xs text-white/80">
                 <div className="flex items-center justify-between">
                   <span>Активы</span>
-                  <span className="tabular-nums whitespace-nowrap">
+                  <span className="tabular-nums whitespace-nowrap text-white/90">
                     {loading ? "..." : formatRub(totalAssets)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Обязательства</span>
-                  <span className="tabular-nums whitespace-nowrap">
+                  <span className="tabular-nums whitespace-nowrap text-white/90">
                     {loading ? "..." : `-${formatRub(totalLiabilities)}`}
                   </span>
                 </div>
@@ -1115,244 +1323,251 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="overflow-hidden">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <AlertCircle className="h-5 w-5 text-violet-600" />
-                Просроченные плановые транзакции
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="text-3xl font-semibold text-rose-600 tabular-nums">
-                {loading ? "..." : overduePlannedCount}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Нереализованные, дата меньше сегодня
-              </p>
-              <Button
-                asChild
-                size="sm"
-                variant="outline"
-                className="w-fit border-violet-200 bg-white text-violet-700 shadow-none hover:bg-violet-50"
-              >
-                <Link href="/transactions?preset=overdue-planned">Просмотреть</Link>
-              </Button>
-            </CardContent>
-          </Card>
+          {showOverdueWidget && (
+            <Card className="overflow-hidden border-0 bg-gradient-to-br from-rose-700 via-red-600 to-orange-600 text-white shadow-[0_20px_50px_-28px_rgba(136,19,55,0.85)]">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2 text-white/90">
+                  <AlertCircle className="h-5 w-5 text-white/90" />
+                  Просроченные плановые транзакции
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-4xl font-semibold text-white tabular-nums">
+                    {loading ? "..." : overduePlannedCount}
+                  </div>
+                  <Button
+                    asChild
+                    size="sm"
+                    variant="outline"
+                    className="w-fit border-white/30 bg-white/10 text-white shadow-none hover:bg-white/20"
+                  >
+                    <Link href="/transactions?preset=overdue-planned">
+                      Просмотреть
+                    </Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <Card className="overflow-hidden">
-            <CardContent className="space-y-6">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-medium text-slate-800">
-                    Доходы за {previousMonthLabel}
-                  </div>
-                  <div className="text-lg font-semibold text-emerald-600 tabular-nums whitespace-nowrap">
-                    {loading ? "..." : formatRub(incomeBreakdown.total)}
-                  </div>
-                </div>
-                {loading ? (
-                  <div className="text-sm text-muted-foreground">Загрузка...</div>
-                ) : incomeSegments.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">
-                    Нет данных за {previousMonthLabel}
-                  </div>
-                ) : (
-                  <>
-                    <div
-                      className="relative"
-                      onMouseLeave={() => setIncomeHover(null)}
-                    >
-                      {incomeHover && (
-                        <div className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full -mt-2 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-xs text-white shadow">
-                          <span className="font-medium">{incomeHover.label}</span>
-                          <span className="opacity-80">
-                            {" "}
-                            - {Math.round(incomeHover.percent * 100)}%
-                          </span>
-                          <span className="opacity-80">
-                            {" "}
-                            - {formatRub(incomeHover.value)}
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                        {incomeSegments.map((segment, index) => (
-                          <div
-                            key={`${segment.label}-${index}`}
-                            className="h-full"
-                            style={{
-                              width: `${segment.percent * 100}%`,
-                              backgroundColor: segment.color,
-                            }}
-                            onMouseEnter={() => setIncomeHover(segment)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
+        <div className="space-y-6">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium text-slate-800">
+                Доходы за {previousMonthLabel}
               </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-medium text-slate-800">
-                    Расходы за {previousMonthLabel}
-                  </div>
-                  <div className="text-lg font-semibold text-rose-600 tabular-nums whitespace-nowrap">
-                    {loading ? "..." : formatRub(expenseBreakdown.total)}
-                  </div>
-                </div>
-                {loading ? (
-                  <div className="text-sm text-muted-foreground">Загрузка...</div>
-                ) : expenseSegments.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">
-                    Нет данных за {previousMonthLabel}
-                  </div>
-                ) : (
-                  <>
-                    <div
-                      className="relative"
-                      onMouseLeave={() => setExpenseHover(null)}
-                    >
-                      {expenseHover && (
-                        <div className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full -mt-2 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-xs text-white shadow">
-                          <span className="font-medium">{expenseHover.label}</span>
-                          <span className="opacity-80">
-                            {" "}
-                            - {Math.round(expenseHover.percent * 100)}%
-                          </span>
-                          <span className="opacity-80">
-                            {" "}
-                            - {formatRub(expenseHover.value)}
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                        {expenseSegments.map((segment, index) => (
-                          <div
-                            key={`${segment.label}-${index}`}
-                            className="h-full"
-                            style={{
-                              width: `${segment.percent * 100}%`,
-                              backgroundColor: segment.color,
-                            }}
-                            onMouseEnter={() => setExpenseHover(segment)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
+              <div className="text-lg font-semibold text-emerald-600 tabular-nums whitespace-nowrap">
+                {loading ? "..." : formatRub(incomeBreakdown.total)}
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Receipt className="h-5 w-5 text-violet-600" />
-                Плановые транзакции в ближайшие {UPCOMING_DAYS} календарных дня
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {loading ? (
-                <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
-                  Загрузка...
-                </div>
-              ) : upcomingDisplay.length === 0 ? (
-                <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
-                  Нет плановых транзакций на ближайшие {UPCOMING_DAYS} дня
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {upcomingDisplay.map((item) => {
-                    const amountColor =
-                      item.direction === "INCOME"
-                        ? "text-emerald-600"
-                        : item.direction === "EXPENSE"
-                        ? "text-rose-600"
-                        : "text-slate-600";
-                    const sign =
-                      item.direction === "INCOME"
-                        ? "+"
-                        : item.direction === "EXPENSE"
-                        ? "-"
-                        : "";
-                    return (
+            </div>
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Загрузка...</div>
+            ) : incomeSegments.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                Нет данных за {previousMonthLabel}
+              </div>
+            ) : (
+              <>
+                <div className="relative" onMouseLeave={() => setIncomeHover(null)}>
+                  {incomeHover && (
+                    <div className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full -mt-2 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-xs text-white shadow">
+                      <span className="font-medium">{incomeHover.label}</span>
+                      <span className="opacity-80">
+                        {" "}
+                        - {Math.round(incomeHover.percent * 100)}%
+                      </span>
+                      <span className="opacity-80">
+                        {" "}
+                        - {formatRub(incomeHover.value)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex h-4 w-full overflow-hidden rounded-full bg-white/70 shadow-[0_12px_24px_-16px_rgba(15,23,42,0.35)]">
+                    {incomeSegments.map((segment, index) => (
                       <div
-                        key={item.id}
-                        className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-slate-800">
-                            {item.title}
-                          </div>
-                          <div className="truncate text-xs text-muted-foreground">
-                            {formatDateLabel(item.dateKey)} - {item.accountLabel}
-                          </div>
-                        </div>
-                        <div
-                          className={`shrink-0 text-sm font-semibold tabular-nums whitespace-nowrap ${amountColor}`}
-                        >
-                          {sign}
-                          {formatRub(item.amount)}
-                        </div>
+                        key={`${segment.label}-${index}`}
+                        className="h-full"
+                        style={{
+                          width: `${segment.percent * 100}%`,
+                          backgroundColor: segment.color,
+                        }}
+                        onMouseEnter={() => setIncomeHover(segment)}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2 overflow-x-auto pb-1">
+                  {incomeLegendRows.map((row, index) => (
+                    <div
+                      key={`${row.label}-${index}`}
+                      className="grid min-w-[26rem] grid-cols-[minmax(0,1fr)_8rem_4.5rem_4.5rem_4.5rem] items-center gap-2 text-xs text-slate-600"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: row.color }}
+                        />
+                        <span className="truncate font-medium text-slate-900">
+                          {row.label}
+                        </span>
                       </div>
-                    );
-                  })}
+                      <span className="tabular-nums text-right text-slate-900 whitespace-nowrap">
+                        {formatRub(row.value)}
+                      </span>
+                      <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
+                        {formatPercent(row.percent * 100)}%
+                      </span>
+                      <div className="flex justify-end">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.prevDelta)}`}
+                        >
+                          {formatChangePercent(row.prevDelta)}
+                        </span>
+                      </div>
+                      <div className="flex justify-end">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.avgDelta)}`}
+                        >
+                          {formatChangePercent(row.avgDelta)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
-              {!loading && upcomingExtra > 0 && (
-                <div className="text-xs text-muted-foreground">
-                  Еще плановых транзакций: {upcomingExtra}
+              </>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium text-slate-800">
+                Расходы за {previousMonthLabel}
+              </div>
+              <div className="text-lg font-semibold text-rose-600 tabular-nums whitespace-nowrap">
+                {loading ? "..." : formatRub(expenseBreakdown.total)}
+              </div>
+            </div>
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Загрузка...</div>
+            ) : expenseSegments.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                Нет данных за {previousMonthLabel}
+              </div>
+            ) : (
+              <>
+                <div className="relative" onMouseLeave={() => setExpenseHover(null)}>
+                  {expenseHover && (
+                    <div className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full -mt-2 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-xs text-white shadow">
+                      <span className="font-medium">{expenseHover.label}</span>
+                      <span className="opacity-80">
+                        {" "}
+                        - {Math.round(expenseHover.percent * 100)}%
+                      </span>
+                      <span className="opacity-80">
+                        {" "}
+                        - {formatRub(expenseHover.value)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex h-4 w-full overflow-hidden rounded-full bg-white/70 shadow-[0_12px_24px_-16px_rgba(15,23,42,0.35)]">
+                    {expenseSegments.map((segment, index) => (
+                      <div
+                        key={`${segment.label}-${index}`}
+                        className="h-full"
+                        style={{
+                          width: `${segment.percent * 100}%`,
+                          backgroundColor: segment.color,
+                        }}
+                        onMouseEnter={() => setExpenseHover(segment)}
+                      />
+                    ))}
+                  </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                <div className="mt-3 space-y-2 overflow-x-auto pb-1">
+                  {expenseLegendRows.map((row, index) => (
+                    <div
+                      key={`${row.label}-${index}`}
+                      className="grid min-w-[26rem] grid-cols-[minmax(0,1fr)_8rem_4.5rem_4.5rem_4.5rem] items-center gap-2 text-xs text-slate-600"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: row.color }}
+                        />
+                        <span className="truncate font-medium text-slate-900">
+                          {row.label}
+                        </span>
+                      </div>
+                      <span className="tabular-nums text-right text-slate-900 whitespace-nowrap">
+                        {formatRub(row.value)}
+                      </span>
+                      <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
+                        {formatPercent(row.percent * 100)}%
+                      </span>
+                      <div className="flex justify-end">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.prevDelta)}`}
+                        >
+                          {formatChangePercent(row.prevDelta)}
+                        </span>
+                      </div>
+                      <div className="flex justify-end">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.avgDelta)}`}
+                        >
+                          {formatChangePercent(row.avgDelta)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
         </div>
 
-        <Card className="overflow-hidden">
+        <Card className="overflow-hidden border-0 bg-gradient-to-br from-sky-600 via-blue-600 to-indigo-600 text-white shadow-[0_20px_50px_-28px_rgba(30,64,175,0.7)]">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Target className="h-5 w-5 text-violet-600" />
+            <CardTitle className="text-base flex items-center gap-2 text-white/90">
+              <Target className="h-5 w-5 text-white/90" />
               Контроль лимитов
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {loading ? (
-              <div className="text-sm text-muted-foreground">Загрузка лимитов...</div>
+              <div className="text-sm text-white/80">Загрузка лимитов...</div>
             ) : activeLimits.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-sm text-muted-foreground">
+              <div className="rounded-lg border border-dashed border-white/40 bg-white/10 p-4 text-center text-sm text-white/80">
                 Активных лимитов пока нет.
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 {activeLimits.map((limit) => {
                   const summary = limitSummaryById.get(limit.id) ?? {
                     spent: 0,
                     progress: 0,
                     rangeLabel: "",
                   };
-                  const overBudget = summary.spent > limit.amount_rub;
-                  const progressColor = overBudget
-                    ? "bg-rose-500"
-                    : "bg-emerald-500";
+                  const ratio =
+                    limit.amount_rub > 0 ? summary.spent / limit.amount_rub : 0;
+                  const tone = getLimitProgressTone(ratio);
+                  const progressColorClass = getLimitProgressColorClass(tone);
                   const periodLabel = LIMIT_PERIOD_LABELS[limit.period];
                   const rangeLabel = summary.rangeLabel;
                   return (
                     <div
                       key={limit.id}
-                      className="rounded-xl border border-slate-100 bg-white px-3 py-2"
+                      className="rounded-xl px-3 py-2"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-slate-800">
+                          <div className="truncate text-sm font-medium text-white/90">
                             {limit.name}
                           </div>
-                          <div className="truncate text-xs text-muted-foreground">
+                          <div className="truncate text-xs text-white/70">
                             {periodLabel}
                             {rangeLabel ? ` | ${rangeLabel}` : ""}
                             {" | "}
@@ -1360,17 +1575,20 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div
-                          className={`shrink-0 text-sm font-semibold tabular-nums whitespace-nowrap ${
-                            overBudget ? "text-rose-600" : "text-slate-700"
-                          }`}
+                          className="shrink-0 text-sm font-semibold tabular-nums whitespace-nowrap"
                         >
-                          {formatRub(summary.spent)} / {formatRub(limit.amount_rub)}
+                          <span className={getLimitProgressTextClass(tone)}>
+                            {formatRub(summary.spent)}
+                          </span>{" "}
+                          <span className="text-white/90">/ {formatRub(limit.amount_rub)}</span>
                         </div>
                       </div>
-                      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/20">
                         <div
-                          className={`h-full ${progressColor}`}
-                          style={{ width: `${summary.progress * 100}%` }}
+                          className={`h-full ${progressColorClass}`}
+                          style={{
+                            width: `${summary.progress * 100}%`,
+                          }}
                         />
                       </div>
                     </div>
@@ -1381,263 +1599,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-          <Card className="h-full">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Calculator className="h-5 w-5 text-violet-600" />
-                ИТОГО
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Активы:</span>
-                  <span className="font-semibold tabular-nums">{formatRub(totalAssets)}</span>
-                </div>
-                <div className="space-y-1 pl-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Денежные средства</span>
-                    <span className="tabular-nums">{formatRub(cashTotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Финансовые инструменты</span>
-                    <span className="tabular-nums">{formatRub(financialInstrumentsTotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Имущество</span>
-                    <span className="tabular-nums">{formatRub(propertyTotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Другие активы</span>
-                    <span className="tabular-nums">{formatRub(otherAssetTotal)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Обязательства:</span>
-                  <span className="font-semibold tabular-nums text-red-600">
-                    -{formatRub(totalLiabilities)}
-                  </span>
-                </div>
-                <div className="space-y-1 pl-3">
-                  {LIABILITY_TYPES.map((type) => {
-                    const value = liabilityTotalsByType[type.code] ?? 0;
-                    const formatted = value > 0 ? `-${formatRub(value)}` : formatRub(0);
-                    return (
-                      <div key={type.code} className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">{type.label}</span>
-                        <span className="tabular-nums text-red-600">{formatted}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="pt-2 border-t flex justify-between items-center">
-                <span className="font-medium">Чистые активы:</span>
-                <span
-                  className={[
-                    "font-semibold tabular-nums",
-                    netTotal < 0 ? "text-red-600" : "",
-                  ].join(" ")}
-                >
-                  {netTotal < 0
-                    ? `-${formatRub(Math.abs(netTotal))}`
-                    : formatRub(netTotal)}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <LineChart className="h-5 w-5 text-violet-600" />
-                Динамика чистых активов</CardTitle>
-            </CardHeader>
-            <CardContent className="px-0">
-              <div className="relative py-6">
-                {loading && (
-                  <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-                    Загрузка данных...</div>
-                )}
-
-                {!loading && error && (
-                  <div className="flex h-64 items-center justify-center text-sm text-red-600">
-                    {error}
-                  </div>
-                )}
-
-                {!loading && !error && chartData.length === 0 && (
-                  <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-                    Нет данных для построения графика.</div>
-                )}
-
-                {!loading && !error && chartData.length > 0 && (
-                  <>
-                    <div ref={chartRef} className="relative h-64 w-full">
-                      {hoverPoint && hoverData && (
-                        <div
-                          ref={tooltipRef}
-                          className="pointer-events-none absolute z-20 rounded-2xl bg-gradient-to-r from-[#7F5CFF] via-[#8B6CFF] to-[#9B7CFF] px-4 py-2 text-white shadow-lg"
-                          style={{
-                            left: tooltipLeft !== null ? `${tooltipLeft}px` : `${hoverPoint.x}px`,
-                            top: `${(hoverPoint.y / height) * 100}%`,
-                            transform: "translate(-50%, -120%)",
-                          }}
-                        >
-                          <div className="text-xs opacity-80">
-                            {formatDateLabel(hoverData.date)}
-                          </div>
-                          <div className="text-sm font-semibold">
-                            {hoverData.totalRubCents === null
-                              ? "-"
-                              : formatRub(hoverData.totalRubCents)}
-                          </div>
-                        </div>
-                      )}
-                      <svg
-                        ref={svgRef}
-                        viewBox={`0 0 ${width} ${height}`}
-                        className="h-full w-full"
-                        role="img"
-                        aria-label="Динамика чистых активов"
-                        onMouseMove={handlePointerMove}
-                        onMouseLeave={() => setHoverIndex(null)}
-                      >
-                        <defs>
-                          <linearGradient id="assetsArea" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#8D63FF" stopOpacity="0.35" />
-                            <stop offset="100%" stopColor="#8D63FF" stopOpacity="0" />
-                          </linearGradient>
-                          <linearGradient
-                            id="assetsAreaFuture"
-                            x1="0"
-                            y1="0"
-                            x2="0"
-                            y2="1"
-                          >
-                            <stop offset="0%" stopColor="#F59E0B" stopOpacity="0.35" />
-                            <stop offset="100%" stopColor="#F59E0B" stopOpacity="0" />
-                          </linearGradient>
-                          <linearGradient id="assetsLine" x1="0" y1="0" x2="1" y2="0">
-                            <stop offset="0%" stopColor="#7F5CFF" />
-                            <stop offset="100%" stopColor="#A089FF" />
-                          </linearGradient>
-                          <filter id="assetsGlow" x="-50%" y="-50%" width="200%" height="200%">
-                            <feDropShadow
-                              dx="0"
-                              dy="10"
-                              stdDeviation="8"
-                              floodColor="#8D63FF"
-                              floodOpacity="0.25"
-                            />
-                          </filter>
-                        </defs>
-
-                        <g>
-                          {ticks.map((tick) => {
-                            const ratio = (tick - chartMin) / (chartMax - chartMin || 1);
-                            const y = padding.top + innerHeight - innerHeight * ratio;
-                            return (
-                              <g key={tick}>
-                                <line
-                                  x1={padding.left}
-                                  x2={width - padding.right}
-                                  y1={y}
-                                  y2={y}
-                                  stroke="#DED8FF"
-                                  strokeDasharray="4 8"
-                                />
-                                <text
-                                  x={padding.left - 12}
-                                  y={y + 4}
-                                  textAnchor="end"
-                                  fontSize="12"
-                                  fill="#9A93BF"
-                                >
-                                  {formatTick(tick)}
-                                </text>
-                              </g>
-                            );
-                          })}
-                        </g>
-
-                        {pastAreaPath && <path d={pastAreaPath} fill="url(#assetsArea)" />}
-                        {futureAreaPath && (
-                          <path d={futureAreaPath} fill="url(#assetsAreaFuture)" />
-                        )}
-                        {pastLinePath && (
-                          <path
-                            d={pastLinePath}
-                            fill="none"
-                            stroke="url(#assetsLine)"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                            filter="url(#assetsGlow)"
-                          />
-                        )}
-                        {futureLinePath && (
-                          <path
-                            d={futureLinePath}
-                            fill="none"
-                            stroke="#F59E0B"
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                          />
-                        )}
-                        {hoverPoint && (
-                          <>
-                            <line
-                              x1={hoverPoint.x}
-                              x2={hoverPoint.x}
-                              y1={padding.top}
-                              y2={padding.top + innerHeight}
-                              stroke={hoverIsFuture ? "#FDE68A" : "#CFC5FF"}
-                              strokeDasharray="4 6"
-                            />
-                            <circle
-                              cx={hoverPoint.x}
-                              cy={hoverPoint.y}
-                              r="6"
-                              fill={hoverIsFuture ? "#F59E0B" : "#7F5CFF"}
-                              stroke={hoverIsFuture ? "#FEF3C7" : "#F3EDFF"}
-                              strokeWidth="4"
-                            />
-                          </>
-                        )}
-                        {dayMarks.map((mark, index) => {
-                          const anchor =
-                            index === 0
-                              ? "start"
-                              : index === dayMarks.length - 1
-                              ? "end"
-                              : "middle";
-                          return (
-                            <text
-                              key={`${mark.label}-${mark.x}`}
-                              x={mark.x}
-                              y={height - 12}
-                              textAnchor={anchor}
-                              fontSize="12"
-                              fill="#6F67B3"
-                              fontWeight={500}
-                            >
-                              {mark.label}
-                            </text>
-                          );
-                        })}
-                      </svg>
-                    </div>
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
       </div>
     </main>
   );

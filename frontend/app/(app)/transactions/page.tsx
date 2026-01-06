@@ -164,15 +164,6 @@ function formatDate(value: string) {
   });
 }
 
-function toCbrDate(value: string) {
-  const parts = value.split("-");
-  if (parts.length === 3) {
-    const [year, month, day] = parts;
-    if (year && month && day) return `${day}/${month}/${year}`;
-  }
-  return value;
-}
-
 function formatTime(value: string) {
   const hasTime = /[T\s]\d{1,2}:\d{2}/.test(value);
   if (!hasTime) return "";
@@ -794,7 +785,7 @@ function TransactionCardRow({
 
         <div className="flex items-center gap-2">
           {tx.isDeleted && (
-            <span className="inline-flex items-center text-slate-400" title="???????">
+            <span className="inline-flex items-center text-slate-400" title="Удалена">
               <Ban className="h-4 w-4" />
             </span>
           )}
@@ -822,8 +813,8 @@ function TransactionCardRow({
                 variant="ghost"
                 size="icon-sm"
                 className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
-                aria-label="???????????"
-                title="???????????"
+                aria-label="Реализовать"
+                title="Реализовать"
                 onClick={(event) =>
                   onRealize(tx, event.currentTarget as HTMLElement)
                 }
@@ -901,6 +892,7 @@ export function TransactionsView({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
   const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [dialogMode, setDialogMode] = useState<
@@ -931,19 +923,12 @@ export function TransactionsView({
   const [selectedDirections, setSelectedDirections] = useState<
     Set<TransactionOut["direction"]>
   >(() => new Set());
-  const [selectedCategoryL1, setSelectedCategoryL1] = useState<Set<string>>(
-    () => new Set()
-  );
-  const [selectedCategoryL2, setSelectedCategoryL2] = useState<Set<string>>(
-    () => new Set()
-  );
-  const [selectedCategoryL3, setSelectedCategoryL3] = useState<Set<string>>(
-    () => new Set()
-  );
+  const [selectedCategoryFilterKeys, setSelectedCategoryFilterKeys] = useState<
+    Set<string>
+  >(() => new Set());
+  const [categoryFilterQuery, setCategoryFilterQuery] = useState("");
+  const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
   const [isItemsFilterOpen, setIsItemsFilterOpen] = useState(false);
-  const [isCategoryL1Open, setIsCategoryL1Open] = useState(false);
-  const [isCategoryL2Open, setIsCategoryL2Open] = useState(false);
-  const [isCategoryL3Open, setIsCategoryL3Open] = useState(false);
   const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
   const [selectedCurrencyCodes, setSelectedCurrencyCodes] = useState<Set<string>>(
     () => new Set()
@@ -1038,6 +1023,34 @@ export function TransactionsView({
     return paths;
   }, [scopedCategoryMaps]);
 
+  const filterCategoryPaths = useMemo(() => {
+    const paths: CategoryPathOption[] = [];
+    const addPath = (l1: string, l2: string, l3: string) => {
+      const label = formatCategoryPath(l1, l2, l3);
+      if (!label) return;
+      paths.push({
+        l1,
+        l2,
+        l3,
+        label,
+        searchKey: normalizeCategory(label),
+      });
+    };
+
+    categoryMaps.l1.forEach((l1) => {
+      addPath(l1, CATEGORY_PLACEHOLDER, CATEGORY_PLACEHOLDER);
+      const l2List = categoryMaps.l2[l1] ?? [];
+      l2List.forEach((l2) => {
+        addPath(l1, l2, CATEGORY_PLACEHOLDER);
+        const l3List = categoryMaps.l3[l2] ?? [];
+        l3List.forEach((l3) => {
+          addPath(l1, l2, l3);
+        });
+      });
+    });
+    return paths;
+  }, [categoryMaps]);
+
   const normalizedCategoryQuery = useMemo(
     () => normalizeCategory(categoryQuery),
     [categoryQuery]
@@ -1048,6 +1061,35 @@ export function TransactionsView({
       path.searchKey.includes(normalizedCategoryQuery)
     );
   }, [categoryPaths, normalizedCategoryQuery]);
+
+  const normalizedCategoryFilterQuery = useMemo(
+    () => normalizeCategory(categoryFilterQuery),
+    [categoryFilterQuery]
+  );
+  const filteredCategoryFilterPaths = useMemo(() => {
+    if (!normalizedCategoryFilterQuery) return filterCategoryPaths;
+    return filterCategoryPaths.filter((path) =>
+      path.searchKey.includes(normalizedCategoryFilterQuery)
+    );
+  }, [filterCategoryPaths, normalizedCategoryFilterQuery]);
+
+  const categoryFilterPathByKey = useMemo(() => {
+    return new Map(
+      filterCategoryPaths.map((option) => [
+        makeCategoryPathKey(option.l1, option.l2, option.l3),
+        option,
+      ])
+    );
+  }, [filterCategoryPaths]);
+
+  const selectedCategoryFilterOptions = useMemo(() => {
+    const options: CategoryPathOption[] = [];
+    selectedCategoryFilterKeys.forEach((key) => {
+      const option = categoryFilterPathByKey.get(key);
+      if (option) options.push(option);
+    });
+    return options;
+  }, [selectedCategoryFilterKeys, categoryFilterPathByKey]);
 
   const categoryLookup = useMemo(
     () => buildCategoryLookup(categoryNodes),
@@ -1087,28 +1129,20 @@ export function TransactionsView({
   );
 
   const categoryFilterIds = useMemo(() => {
-    if (
-      selectedCategoryL1.size === 0 &&
-      selectedCategoryL2.size === 0 &&
-      selectedCategoryL3.size === 0
-    ) {
-      return [];
-    }
+    if (selectedCategoryFilterOptions.length === 0) return [];
     const ids: number[] = [];
     categoryLookup.idToPath.forEach((path, id) => {
       const [l1 = "", l2 = "", l3 = ""] = path;
-      if (selectedCategoryL1.size > 0 && !selectedCategoryL1.has(l1)) return;
-      if (selectedCategoryL2.size > 0 && !selectedCategoryL2.has(l2)) return;
-      if (selectedCategoryL3.size > 0 && !selectedCategoryL3.has(l3)) return;
-      ids.push(id);
+      const matches = selectedCategoryFilterOptions.some((option) => {
+        if (option.l1 !== l1) return false;
+        if (option.l2 !== CATEGORY_PLACEHOLDER && option.l2 !== l2) return false;
+        if (option.l3 !== CATEGORY_PLACEHOLDER && option.l3 !== l3) return false;
+        return true;
+      });
+      if (matches) ids.push(id);
     });
     return ids;
-  }, [
-    categoryLookup.idToPath,
-    selectedCategoryL1,
-    selectedCategoryL2,
-    selectedCategoryL3,
-  ]);
+  }, [categoryLookup.idToPath, selectedCategoryFilterOptions]);
 
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
@@ -1139,39 +1173,6 @@ export function TransactionsView({
     () => activeItems.filter((item) => item.kind === "LIABILITY"),
     [activeItems]
   );
-  const categoryL1Options = useMemo(() => {
-    return [...categoryMaps.l1].sort((a, b) => a.localeCompare(b, "ru"));
-  }, [categoryMaps]);
-  const categoryL2Options = useMemo(() => {
-    const values = new Set<string>();
-    const keys =
-      selectedCategoryL1.size > 0
-        ? Array.from(selectedCategoryL1)
-        : categoryMaps.l1;
-    keys.forEach((key) => {
-      (categoryMaps.l2[key] ?? []).forEach((val) => values.add(val));
-    });
-    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [selectedCategoryL1, categoryMaps]);
-  const categoryL3Options = useMemo(() => {
-    const values = new Set<string>();
-    if (selectedCategoryL2.size > 0) {
-      selectedCategoryL2.forEach((key) => {
-        (categoryMaps.l3[key] ?? []).forEach((val) => values.add(val));
-      });
-    } else {
-      const l2Keys =
-        selectedCategoryL1.size > 0
-          ? Array.from(selectedCategoryL1).flatMap(
-              (key) => categoryMaps.l2[key] ?? []
-            )
-          : Object.keys(categoryMaps.l3);
-      l2Keys.forEach((key) => {
-        (categoryMaps.l3[key] ?? []).forEach((val) => values.add(val));
-      });
-    }
-    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [selectedCategoryL1, selectedCategoryL2, categoryMaps]);
   const currencyOptions = useMemo(() => {
     const values = new Set<string>();
     items.forEach((item) => {
@@ -2086,6 +2087,7 @@ export function TransactionsView({
         setHasMoreTxs(false);
         setLoading(false);
         setIsLoadingMore(false);
+        setIsInitialLoading(false);
         return;
       }
       const requestId = (txRequestIdRef.current += 1);
@@ -2093,6 +2095,7 @@ export function TransactionsView({
         setIsLoadingMore(true);
       } else {
         setLoading(true);
+        setIsInitialLoading(true);
       }
       setError(null);
       try {
@@ -2116,6 +2119,7 @@ export function TransactionsView({
           setIsLoadingMore(false);
         } else {
           setLoading(false);
+          setIsInitialLoading(false);
         }
       }
     },
@@ -2161,6 +2165,7 @@ export function TransactionsView({
 
   useEffect(() => {
     if (!session) return;
+    setIsInitialLoading(true);
     const handle = setTimeout(() => {
       setTxs([]);
       setTxCursor(null);
@@ -2255,6 +2260,7 @@ export function TransactionsView({
   const allSelected =
     selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
   const someSelected = selectedVisibleCount > 0 && !allSelected;
+  const showSkeleton = (loading || isInitialLoading) && sortedTxs.length === 0;
   const handleLoadMore = useCallback(() => {
     if (!hasMoreTxs || isLoadingMore || loading) return;
     loadTransactions({ cursor: txCursor, append: true });
@@ -2309,38 +2315,25 @@ export function TransactionsView({
       return next;
     });
   };
-  const toggleCategoryL1Selection = (value: string) => {
-    setSelectedCategoryL1((prev) => {
+  const toggleCategoryFilterSelection = (option: CategoryPathOption) => {
+    const key = makeCategoryPathKey(option.l1, option.l2, option.l3);
+    setSelectedCategoryFilterKeys((prev) => {
+      if (prev.has(key)) return prev;
       const next = new Set(prev);
-      if (next.has(value)) {
-        next.delete(value);
-      } else {
-        next.add(value);
-      }
+      next.add(key);
       return next;
     });
   };
-  const toggleCategoryL2Selection = (value: string) => {
-    setSelectedCategoryL2((prev) => {
+  const removeCategoryFilterSelection = (key: string) => {
+    setSelectedCategoryFilterKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(value)) {
-        next.delete(value);
-      } else {
-        next.add(value);
-      }
+      next.delete(key);
       return next;
     });
   };
-  const toggleCategoryL3Selection = (value: string) => {
-    setSelectedCategoryL3((prev) => {
-      const next = new Set(prev);
-      if (next.has(value)) {
-        next.delete(value);
-      } else {
-        next.add(value);
-      }
-      return next;
-    });
+  const resetCategoryFilters = () => {
+    setSelectedCategoryFilterKeys(new Set());
+    setCategoryFilterQuery("");
   };
   const toggleCurrencySelection = (value: string) => {
     setSelectedCurrencyCodes((prev) => {
@@ -2373,7 +2366,6 @@ export function TransactionsView({
 
   return (
     <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
-      {loading && <div className="mb-4 text-sm text-muted-foreground">Загрузка...</div>}
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
       <div className="flex flex-col gap-6 lg:flex-row">
@@ -2731,11 +2723,7 @@ export function TransactionsView({
                             setFormMode("STANDARD");
                             setDirection("INCOME");
                             setCounterpartyItemId(null);
-                            applyCategorySelection(
-                              "Доход от основного места работы",
-                              "Гарантированные выплаты",
-                              "Аванс"
-                            );
+                            applyCategorySelection("", "", "");
                           }}
                           className={`${segmentedButtonBase} ${
                             !isLoanRepayment && direction === "INCOME"
@@ -2786,7 +2774,7 @@ export function TransactionsView({
                             onClick={() => {
                               setFormMode("LOAN_REPAYMENT");
                               setDirection("EXPENSE");
-                              applyCategorySelection("Расходы", "Продукты питания", "-");
+                              applyCategorySelection("", "", "");
                             }}
                             className={`${segmentedButtonBase} whitespace-normal leading-tight ${
                               isLoanRepayment
@@ -2982,6 +2970,7 @@ export function TransactionsView({
                               setIsCategorySearchOpen(true);
                             }}
                             onFocus={() => setIsCategorySearchOpen(true)}
+                            onClick={() => setIsCategorySearchOpen(true)}
                             onBlur={() => {
                               setIsCategorySearchOpen(false);
                               setCategoryQuery(formatCategoryPath(cat1, cat2, cat3));
@@ -3003,7 +2992,7 @@ export function TransactionsView({
                             placeholder="Поиск категории"
                             type="text"
                           />
-                          {isCategorySearchOpen && categoryQuery.trim() ? (
+                          {isCategorySearchOpen ? (
                             <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
                               {filteredCategoryPaths.length === 0 ? (
                                 <div className="px-2 py-1 text-sm text-muted-foreground">
@@ -3451,182 +3440,114 @@ export function TransactionsView({
                 )}
               </div><div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsCategoryL1Open((prev) => !prev)}
-                      className="text-sm font-semibold text-foreground"
-                    >
-                      Категория 1
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Свернуть/развернуть"
-                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
-                      onClick={() => setIsCategoryL1Open((prev) => !prev)}
-                    >
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${
-                          isCategoryL1Open ? "rotate-0" : "-rotate-90"
-                        }`}
-                      />
-                    </button>
+                  <div className="text-sm font-semibold text-foreground">
+                    Категории
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                      onClick={() => setSelectedCategoryL1(new Set<string>())}
-                      disabled={selectedCategoryL1.size === 0}
-                    >
-                      Сбросить
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
+                    onClick={resetCategoryFilters}
+                    disabled={selectedCategoryFilterKeys.size === 0}
+                  >
+                    Сбросить
+                  </button>
                 </div>
-
-                {isCategoryL1Open && (
-                  <div className="space-y-2">
-                    {categoryL1Options.length === 0 ? (
-                      <div className="text-sm text-muted-foreground">
-                        Нет категорий.
-                      </div>
-                    ) : (
-                      categoryL1Options.map((value) => (
-                        <label
-                          key={value}
-                          className="flex items-center gap-3 text-sm text-foreground"
+                <div className="relative">
+                  <Input
+                    type="text"
+                    className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
+                    placeholder="Поиск категории"
+                    value={categoryFilterQuery}
+                    onChange={(e) => {
+                      setCategoryFilterQuery(e.target.value);
+                      setIsCategoryFilterOpen(true);
+                    }}
+                    onFocus={() => setIsCategoryFilterOpen(true)}
+                    onClick={() => setIsCategoryFilterOpen(true)}
+                    onBlur={() => setIsCategoryFilterOpen(false)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "Enter" &&
+                        isCategoryFilterOpen &&
+                        categoryFilterQuery.trim()
+                      ) {
+                        const first = filteredCategoryFilterPaths[0];
+                        if (first) {
+                          event.preventDefault();
+                          toggleCategoryFilterSelection(first);
+                          setCategoryFilterQuery("");
+                          setIsCategoryFilterOpen(false);
+                        }
+                      }
+                    }}
+                  />
+                  {isCategoryFilterOpen ? (
+                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
+                      {filteredCategoryFilterPaths.length === 0 ? (
+                        <div className="px-2 py-1 text-sm text-muted-foreground">
+                          Нет совпадений
+                        </div>
+                      ) : (
+                        filteredCategoryFilterPaths.map((option) => {
+                          const key = makeCategoryPathKey(
+                            option.l1,
+                            option.l2,
+                            option.l3
+                          );
+                          const isSelected = selectedCategoryFilterKeys.has(key);
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              className={`flex w-full items-start rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+                                isSelected
+                                  ? "bg-violet-50 text-violet-700"
+                                  : "text-slate-700 hover:bg-slate-100"
+                              }`}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                toggleCategoryFilterSelection(option);
+                                setCategoryFilterQuery("");
+                                setIsCategoryFilterOpen(false);
+                              }}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+                {selectedCategoryFilterOptions.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedCategoryFilterOptions.map((option) => {
+                      const key = makeCategoryPathKey(
+                        option.l1,
+                        option.l2,
+                        option.l3
+                      );
+                      return (
+                        <div
+                          key={key}
+                          className="flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs text-violet-800"
                         >
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5 accent-violet-600"
-                            checked={selectedCategoryL1.has(value)}
-                            onChange={() => toggleCategoryL1Selection(value)}
-                          />
-                          <span>{value}</span>
-                        </label>
-                      ))
-                    )}
+                          <span>{option.label}</span>
+                          <button
+                            type="button"
+                            className="text-violet-700 hover:text-violet-900"
+                            onClick={() => removeCategoryFilterSelection(key)}
+                            aria-label={`Удалить фильтр ${option.label}`}
+                          >
+                            x
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
-              </div><div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsCategoryL2Open((prev) => !prev)}
-                      className="text-sm font-semibold text-foreground"
-                    >
-                      Категория 2
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Свернуть/развернуть"
-                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
-                      onClick={() => setIsCategoryL2Open((prev) => !prev)}
-                    >
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${
-                          isCategoryL2Open ? "rotate-0" : "-rotate-90"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                      onClick={() => setSelectedCategoryL2(new Set<string>())}
-                      disabled={selectedCategoryL2.size === 0}
-                    >
-                      Сбросить
-                    </button>
-                  </div>
-                </div>
-
-                {isCategoryL2Open && (
-                  <div className="space-y-2">
-                    {categoryL2Options.length === 0 ? (
-                      <div className="text-sm text-muted-foreground">
-                        Нет категорий.
-                      </div>
-                    ) : (
-                      categoryL2Options.map((value) => (
-                        <label
-                          key={value}
-                          className="flex items-center gap-3 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5 accent-violet-600"
-                            checked={selectedCategoryL2.has(value)}
-                            onChange={() => toggleCategoryL2Selection(value)}
-                          />
-                          <span>{value}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div><div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsCategoryL3Open((prev) => !prev)}
-                      className="text-sm font-semibold text-foreground"
-                    >
-                      Категория 3
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Свернуть/развернуть"
-                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
-                      onClick={() => setIsCategoryL3Open((prev) => !prev)}
-                    >
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${
-                          isCategoryL3Open ? "rotate-0" : "-rotate-90"
-                        }`}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                      onClick={() => setSelectedCategoryL3(new Set<string>())}
-                      disabled={selectedCategoryL3.size === 0}
-                    >
-                      Сбросить
-                    </button>
-                  </div>
-                </div>
-
-                {isCategoryL3Open && (
-                  <div className="space-y-2">
-                    {categoryL3Options.length === 0 ? (
-                      <div className="text-sm text-muted-foreground">
-                        Нет категорий.
-                      </div>
-                    ) : (
-                      categoryL3Options.map((value) => (
-                        <label
-                          key={value}
-                          className="flex items-center gap-3 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5 accent-violet-600"
-                            checked={selectedCategoryL3.has(value)}
-                            onChange={() => toggleCategoryL3Selection(value)}
-                          />
-                          <span>{value}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div><div className="space-y-3">
+              </div>
+<div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="text-sm font-semibold text-foreground">
                     Комментарий
@@ -3857,11 +3778,29 @@ export function TransactionsView({
                 </div>
               )}
             </div>
-            {sortedTxs.length === 0 ? (
-
-
-
-
+            {showSkeleton ? (
+              <div className="space-y-3" aria-hidden="true">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div
+                    key={`tx-skeleton-${index}`}
+                    className="rounded-lg border-2 border-border/70 bg-white p-4"
+                  >
+                    <div className="flex items-start gap-4">
+                      <div className="h-12 w-12 shrink-0 rounded-full bg-slate-100 animate-pulse" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 w-1/3 rounded bg-slate-100 animate-pulse" />
+                        <div className="h-3 w-2/3 rounded bg-slate-100 animate-pulse" />
+                        <div className="h-3 w-1/2 rounded bg-slate-100 animate-pulse" />
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <div className="h-4 w-20 rounded bg-slate-100 animate-pulse" />
+                        <div className="h-3 w-16 rounded bg-slate-100 animate-pulse" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : sortedTxs.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-muted-foreground">
                 Нет транзакций.
               </div>

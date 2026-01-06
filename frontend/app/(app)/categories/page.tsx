@@ -39,13 +39,29 @@ import {
   updateCategoryScope,
   updateCategoryVisibility,
 } from "@/lib/api";
-import { Folder, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 
 type DeleteTarget = {
   id: number;
   name: string;
   childCount: number;
   ownerUserId: number | null | undefined;
+};
+
+type EditTarget = {
+  id: number;
+  name: string;
+  ownerUserId: number | null | undefined;
+  scope: CategoryScope;
+  iconName: string | null | undefined;
 };
 
 const MAX_DEPTH = 3;
@@ -85,15 +101,17 @@ function CategoryTree({
   depth,
   onAddChild,
   onDelete,
-  onScopeChange,
-  onIconChange,
+  onEdit,
+  expandedIds,
+  onToggle,
 }: {
   nodes: CategoryNode[];
   depth: number;
   onAddChild: (node: CategoryNode, depth: number) => void;
   onDelete: (node: CategoryNode) => void;
-  onScopeChange: (id: number, scope: CategoryScope) => void;
-  onIconChange: (id: number, iconName: string | null) => void;
+  onEdit: (node: CategoryNode) => void;
+  expandedIds: Set<number>;
+  onToggle: (id: number) => void;
 }) {
   if (nodes.length === 0) return null;
   return (
@@ -108,8 +126,9 @@ function CategoryTree({
           (iconName ? CATEGORY_ICON_BY_NAME[iconName] : undefined) ??
           CATEGORY_ICON_FALLBACK ??
           Folder;
-        const isGlobal = node.owner_user_id == null;
         const isDisabled = node.enabled === false;
+        const hasChildren = Boolean(node.children && node.children.length > 0);
+        const isExpanded = hasChildren && expandedIds.has(node.id);
         return (
           <div key={node.id}>
             <div
@@ -118,57 +137,44 @@ function CategoryTree({
                 isDisabled && "opacity-50"
               )}
             >
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <PreviewIcon className="h-4 w-4 text-violet-600" />
-                <span className="truncate font-medium text-slate-900">{node.name}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Select
-                  value={iconName && iconName.trim().length > 0 ? iconName : "none"}
-                  onValueChange={(value) =>
-                    onIconChange(node.id, value === "none" ? null : value)
-                  }
-                >
-                  <SelectTrigger className="h-8 w-[160px] border-2 border-border/70 bg-white text-xs shadow-none">
-                    <SelectValue placeholder="Иконка" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Без иконки</SelectItem>
-                    {CATEGORY_ICON_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        <span className="flex items-center gap-2">
-                          <option.Icon className="h-4 w-4 text-slate-600" />
-                          <span>{option.label}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={cn("h-2 w-2 rounded-full", scopeMeta.dotClass)} />
-                <Select
-                  value={node.scope}
-                  onValueChange={(value) =>
-                    onScopeChange(node.id, value as CategoryScope)
-                  }
-                  disabled={isGlobal}
-                >
-                  <SelectTrigger className="h-8 w-[180px] border-2 border-border/70 bg-white text-xs shadow-none">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SCOPE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-1">
-                {depth < MAX_DEPTH && (
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  {hasChildren ? (
+                    <button
+                      type="button"
+                      onClick={() => onToggle(node.id)}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      aria-label={
+                        isExpanded ? "Свернуть подкатегории" : "Развернуть подкатегории"
+                      }
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                    </button>
+                  ) : (
+                    <span className="inline-flex h-6 w-6" aria-hidden="true" />
+                  )}
+                  <PreviewIcon className="h-4 w-4 text-violet-600" />
+                  <span className="truncate font-medium text-slate-900">{node.name}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-600">
+                  <span className={cn("h-2 w-2 rounded-full", scopeMeta.dotClass)} />
+                  <span>{scopeMeta.label}</span>
+                </div>
+                <div className="flex items-center gap-1">
                   <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1 border-2 border-border/70 text-xs"
+                    onClick={() => onEdit(node)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Изменить
+                  </Button>
+                  {depth < MAX_DEPTH && (
+                    <Button
                     variant="ghost"
                     size="icon-sm"
                     className="text-muted-foreground hover:bg-transparent hover:text-violet-600"
@@ -189,15 +195,16 @@ function CategoryTree({
                 </Button>
               </div>
             </div>
-            {node.children && node.children.length > 0 && (
+            {isExpanded && node.children && node.children.length > 0 && (
               <div className="ml-5 border-l border-slate-200 pl-4 pt-2">
                 <CategoryTree
                   nodes={node.children}
                   depth={depth + 1}
                   onAddChild={onAddChild}
                   onDelete={onDelete}
-                  onScopeChange={onScopeChange}
-                  onIconChange={onIconChange}
+                  onEdit={onEdit}
+                  expandedIds={expandedIds}
+                  onToggle={onToggle}
                 />
               </div>
             )}
@@ -222,13 +229,18 @@ export default function CategoriesPage() {
   const [newIcon, setNewIcon] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [editScope, setEditScope] = useState<CategoryScope>("BOTH");
+  const [editIcon, setEditIcon] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
 
   const loadCategories = useCallback(
     async (silent?: boolean) => {
       if (!silent) setLoading(true);
       setError(null);
       try {
-        const data = await fetchCategories();
+        const data = await fetchCategories({ includeArchived: false });
         setCategories(data);
       } catch (e: any) {
         setError(e?.message ?? "Не удалось загрузить категории.");
@@ -266,6 +278,19 @@ export default function CategoriesPage() {
     setNewIcon("");
     setFormError(null);
     setIsAddOpen(true);
+  };
+
+  const openEditDialog = (node: CategoryNode) => {
+    setEditTarget({
+      id: node.id,
+      name: node.name,
+      ownerUserId: node.owner_user_id,
+      scope: node.scope,
+      iconName: node.icon_name,
+    });
+    setEditScope(node.scope);
+    setEditIcon(node.icon_name ?? "");
+    setEditError(null);
   };
 
   const handleAddSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -316,6 +341,46 @@ export default function CategoriesPage() {
       setSyncing(false);
     }
   };
+
+  const handleEditSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editTarget) return;
+    setSyncing(true);
+    setError(null);
+    setEditError(null);
+    try {
+      const updates: Promise<unknown>[] = [];
+      const isGlobal = editTarget.ownerUserId == null;
+      const normalizedIcon = editIcon.trim().length > 0 ? editIcon : null;
+      const currentIcon = editTarget.iconName ?? null;
+
+      if (!isGlobal && editScope !== editTarget.scope) {
+        updates.push(updateCategoryScope(editTarget.id, editScope));
+      }
+      if (normalizedIcon !== currentIcon) {
+        updates.push(updateCategoryIcon(editTarget.id, normalizedIcon));
+      }
+
+      if (updates.length > 0) {
+        await Promise.all(updates);
+        await loadCategories(true);
+      }
+      setEditTarget(null);
+    } catch (e: any) {
+      setEditError(e?.message ?? "Не удалось обновить категорию.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const toggleExpanded = useCallback((id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const handleScopeChange = async (id: number, scope: CategoryScope) => {
     setSyncing(true);
@@ -450,6 +515,98 @@ export default function CategoriesPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={Boolean(editTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditTarget(null);
+            setEditError(null);
+            setEditScope("BOTH");
+            setEditIcon("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Изменение категории</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleEditSubmit} className="grid gap-4">
+            {editError && (
+              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+                {editError}
+              </div>
+            )}
+
+            {editTarget && (
+              <div className="text-sm text-muted-foreground">
+                Категория: <span className="font-medium text-slate-900">{editTarget.name}</span>
+              </div>
+            )}
+
+            <div className="grid gap-2">
+              <Label>Область</Label>
+              <Select
+                value={editScope}
+                onValueChange={(value) => setEditScope(value as CategoryScope)}
+                disabled={editTarget?.ownerUserId == null}
+              >
+                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SCOPE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {editTarget?.ownerUserId == null && (
+                <div className="text-xs text-muted-foreground">
+                  Для общих категорий область менять нельзя.
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Иконка</Label>
+              <Select
+                value={editIcon || "none"}
+                onValueChange={(value) => setEditIcon(value === "none" ? "" : value)}
+              >
+                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                  <SelectValue placeholder="Без иконки" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Без иконки</SelectItem>
+                  {CATEGORY_ICON_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <span className="flex items-center gap-2">
+                        <option.Icon className="h-4 w-4 text-slate-600" />
+                        <span>{option.label}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setEditTarget(null)}>
+                Отмена
+              </Button>
+              <Button
+                type="submit"
+                className="bg-violet-600 text-white hover:bg-violet-700"
+                disabled={syncing}
+              >
+                Сохранить
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => {
@@ -547,8 +704,9 @@ export default function CategoriesPage() {
                         ownerUserId: node.owner_user_id,
                       })
                     }
-                    onScopeChange={handleScopeChange}
-                    onIconChange={handleIconChange}
+                    onEdit={openEditDialog}
+                    expandedIds={expandedIds}
+                    onToggle={toggleExpanded}
                   />
                 )}
               </div>

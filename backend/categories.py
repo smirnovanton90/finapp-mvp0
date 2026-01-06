@@ -1,4 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from dataclasses import dataclass
+import hashlib
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
 import sqlalchemy as sa
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -15,6 +20,37 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/categories", tags=["categories"])
+
+
+@dataclass
+class CategoryCacheEntry:
+    etag: str
+    payload: list[dict]
+
+
+CATEGORY_CACHE: dict[tuple[int, bool], CategoryCacheEntry] = {}
+CACHE_CONTROL_VALUE = "private, max-age=60"
+
+
+def compute_etag(payload: list[dict]) -> str:
+    payload_json = json.dumps(
+        payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    )
+    digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    return f"\"{digest}\""
+
+
+def etag_matches(header_value: str | None, etag: str) -> bool:
+    if not header_value:
+        return False
+    parts = [part.strip() for part in header_value.split(",")]
+    return "*" in parts or etag in parts
+
+
+def invalidate_category_cache(user_id: int) -> None:
+    for key in list(CATEGORY_CACHE.keys()):
+        if key[0] == user_id:
+            CATEGORY_CACHE.pop(key, None)
 
 
 def normalize_icon(value: str | None) -> str | None:
@@ -70,10 +106,27 @@ def fetch_category(
 
 @router.get("", response_model=list[CategoryOut])
 def list_categories(
+    request: Request,
+    response: Response,
     include_archived: bool = True,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    cache_key = (user.id, include_archived)
+    cache_entry = CATEGORY_CACHE.get(cache_key)
+    if cache_entry:
+        if etag_matches(request.headers.get("if-none-match"), cache_entry.etag):
+            return Response(
+                status_code=304,
+                headers={
+                    "ETag": cache_entry.etag,
+                    "Cache-Control": CACHE_CONTROL_VALUE,
+                },
+            )
+        response.headers["ETag"] = cache_entry.etag
+        response.headers["Cache-Control"] = CACHE_CONTROL_VALUE
+        return cache_entry.payload
+
     categories = db.execute(
         select(Category).where(
             or_(Category.owner_user_id.is_(None), Category.owner_user_id == user.id)
@@ -100,7 +153,22 @@ def list_categories(
         else:
             roots.append(node)
 
-    return sort_tree(roots)
+    payload = jsonable_encoder(sort_tree(roots))
+    etag = compute_etag(payload)
+    CATEGORY_CACHE[cache_key] = CategoryCacheEntry(etag=etag, payload=payload)
+
+    if etag_matches(request.headers.get("if-none-match"), etag):
+        return Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": CACHE_CONTROL_VALUE,
+            },
+        )
+
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = CACHE_CONTROL_VALUE
+    return payload
 
 
 @router.post("", response_model=CategoryOut)
@@ -144,6 +212,7 @@ def create_category(
     db.add(category)
     db.commit()
     db.refresh(category)
+    invalidate_category_cache(user.id)
     return build_category_out(category, None)
 
 
@@ -175,6 +244,7 @@ def update_category_scope(
             UserCategoryState.category_id == category_id,
         )
     ).scalar_one_or_none()
+    invalidate_category_cache(user.id)
     return build_category_out(category, state)
 
 
@@ -204,6 +274,7 @@ def update_category_visibility(
         db.add(state)
 
     db.commit()
+    invalidate_category_cache(user.id)
     return build_category_out(category, state)
 
 
@@ -245,6 +316,7 @@ def update_category_icon(
 
     db.commit()
     db.refresh(category)
+    invalidate_category_cache(user.id)
     return build_category_out(category, state)
 
 
@@ -279,4 +351,5 @@ def delete_category(
         item.archived_at = sa.func.now()
 
     db.commit()
+    invalidate_category_cache(user.id)
     return {"ok": True}

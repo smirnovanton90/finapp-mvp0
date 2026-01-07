@@ -1,6 +1,7 @@
 "use client";
 
 import { signIn } from "next-auth/react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -11,9 +12,18 @@ export default function LoginPage() {
         <CardHeader>
           <CardTitle>FinApp</CardTitle>
         </CardHeader>
-        <CardContent>
-          <Button className="w-full bg-violet-600 hover:bg-violet-700 text-white" onClick={() => signIn("google", { callbackUrl: "/dashboard" })}>
+        <CardContent className="space-y-3">
+          <Button
+            className="w-full bg-violet-600 hover:bg-violet-700 text-white"
+            onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+          >
             Войти через Google
+          </Button>
+          <Button className="w-full" variant="outline" asChild>
+            <Link href="/login/password">Войти с логином и паролем</Link>
+          </Button>
+          <Button className="w-full" variant="secondary" asChild>
+            <Link href="/register">Зарегистрироваться</Link>
           </Button>
         </CardContent>
       </Card>

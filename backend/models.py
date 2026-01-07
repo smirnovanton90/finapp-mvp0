@@ -22,7 +22,9 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    google_sub: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    login: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    google_sub: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 

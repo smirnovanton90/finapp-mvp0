@@ -15,8 +15,12 @@ from schemas import (
     FxRateOut,
     BankOut,
     FxRatesBatchRequest,
+    AuthRegister,
+    AuthLogin,
+    AuthResponse,
+    AuthUserOut,
 )
-from auth import get_current_user
+from auth import get_current_user, create_access_token, hash_password, verify_password
 
 from transactions import router as transactions_router
 from transaction_chains import router as transaction_chains_router
@@ -193,6 +197,47 @@ def _get_fx_rates(date_req: str | None, db: Session) -> list[FxRateOut]:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/auth/register", response_model=AuthResponse)
+def register(
+    payload: AuthRegister,
+    db: Session = Depends(get_db),
+):
+    existing = db.execute(select(User).where(User.login == payload.login)).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="Login already exists")
+
+    user = User(
+        login=payload.login,
+        password_hash=hash_password(payload.password),
+        name=payload.name or payload.login,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_access_token(user.id)
+    return AuthResponse(
+        access_token=token,
+        user=AuthUserOut(id=user.id, login=user.login, name=user.name),
+    )
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+def login(
+    payload: AuthLogin,
+    db: Session = Depends(get_db),
+):
+    user = db.execute(select(User).where(User.login == payload.login)).scalar_one_or_none()
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = create_access_token(user.id)
+    return AuthResponse(
+        access_token=token,
+        user=AuthUserOut(id=user.id, login=user.login, name=user.name),
+    )
 
 
 @app.get("/items", response_model=list[ItemOut])

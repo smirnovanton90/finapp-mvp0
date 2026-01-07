@@ -115,6 +115,12 @@ type CategoryPathOption = {
 };
 
 const PAGE_SIZE = 50;
+const IMPORT_BANK_READY_OGRN = "1027739642281";
+const IMPORT_BANK_IN_PROGRESS_OGRN = "1027700132195";
+const IMPORT_BANK_OGRNS = new Set([
+  IMPORT_BANK_READY_OGRN,
+  IMPORT_BANK_IN_PROGRESS_OGRN,
+]);
 
 function formatAmount(valueInCents: number) {
   const hasCents = Math.abs(valueInCents) % 100 !== 0;
@@ -985,6 +991,9 @@ export function TransactionsView({
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importBankId, setImportBankId] = useState<number | null>(null);
+  const [importBankSearch, setImportBankSearch] = useState("");
+  const [importBankDropdownOpen, setImportBankDropdownOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importItemId, setImportItemId] = useState<number | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -1201,6 +1210,33 @@ export function TransactionsView({
     () => new Map(banks.map((bank) => [bank.id, bank])),
     [banks]
   );
+  const importBankOptions = useMemo(
+    () => banks.filter((bank) => IMPORT_BANK_OGRNS.has(bank.ogrn)),
+    [banks]
+  );
+  const filteredImportBanks = useMemo(() => {
+    const query = importBankSearch.trim().toLowerCase();
+    const list = query
+      ? importBankOptions.filter((bank) =>
+          bank.name.toLowerCase().includes(query)
+        )
+      : importBankOptions.slice();
+    return list.sort((a, b) => {
+      const aHasLogo = Boolean(a.logo_url);
+      const bHasLogo = Boolean(b.logo_url);
+      if (aHasLogo !== bHasLogo) return aHasLogo ? -1 : 1;
+      return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+    });
+  }, [importBankOptions, importBankSearch]);
+  const selectedImportBank = useMemo(
+    () => importBankOptions.find((bank) => bank.id === importBankId) ?? null,
+    [importBankId, importBankOptions]
+  );
+  const isImportBankReady = selectedImportBank?.ogrn === IMPORT_BANK_READY_OGRN;
+  const isImportBankInProgress =
+    selectedImportBank?.ogrn === IMPORT_BANK_IN_PROGRESS_OGRN;
+  const isImportLocked = true;
+  const isImportFormDisabled = isImportLocked || isImporting;
   const sortedItems = useMemo(() => {
     return [...activeItems].sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [activeItems]);
@@ -1832,6 +1868,9 @@ export function TransactionsView({
   };
 
   const resetImportForm = () => {
+    setImportBankId(null);
+    setImportBankSearch("");
+    setImportBankDropdownOpen(false);
     setImportFile(null);
     setImportItemId(null);
     setImportError(null);
@@ -1853,6 +1892,10 @@ export function TransactionsView({
   const handleImportSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setImportError(null);
+
+    if (isImportLocked || !isImportBankReady) {
+      return;
+    }
 
     if (!importFile) {
       setImportError("Выберите файл .xlsx для импорта.");
@@ -2861,7 +2904,10 @@ export function TransactionsView({
                         value={primaryItemId ? String(primaryItemId) : ""}
                         onValueChange={(v) => setPrimaryItemId(Number(v))}
                       >
-                        <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                        <SelectTrigger
+                          className="border-2 border-border/70 bg-white shadow-none"
+                          disabled={isImportFormDisabled}
+                        >
                           <SelectValue placeholder="Выберите" />
                         </SelectTrigger>
                         <SelectContent>
@@ -3134,14 +3180,87 @@ export function TransactionsView({
                     variant="outline"
                     className="w-full border-2 border-border/70 bg-white shadow-none"
                   >
-                    Импорт из Excel
+                    Импорт
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[520px]">
                   <DialogHeader>
-                    <DialogTitle>Импорт из Excel</DialogTitle>
+                    <DialogTitle>Импорт</DialogTitle>
                   </DialogHeader>
                   <form className="grid gap-4" onSubmit={handleImportSubmit}>
+                    <div className="grid gap-2">
+                      <Label>Банк</Label>
+                      <div className="relative">
+                        <Input
+                          value={importBankSearch}
+                          onChange={(e) => {
+                            setImportBankSearch(e.target.value);
+                            setImportBankId(null);
+                            setImportBankDropdownOpen(true);
+                            setImportError(null);
+                          }}
+                          onFocus={() => setImportBankDropdownOpen(true)}
+                          onBlur={() =>
+                            setTimeout(() => setImportBankDropdownOpen(false), 150)
+                          }
+                          placeholder="Начните вводить название банка"
+                          className="border-2 border-border/70 bg-white shadow-none"
+                        />
+                        {importBankDropdownOpen && (
+                          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
+                            {filteredImportBanks.length === 0 ? (
+                              <div className="px-3 py-2 text-sm text-muted-foreground">
+                                Банк не найден
+                              </div>
+                            ) : (
+                              filteredImportBanks.map((bank) => (
+                                <button
+                                  key={bank.id}
+                                  type="button"
+                                  className={[
+                                    "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50",
+                                    importBankId === bank.id ? "bg-slate-50" : "",
+                                  ].join(" ")}
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    setImportBankId(bank.id);
+                                    setImportBankSearch(bank.name);
+                                    setImportBankDropdownOpen(false);
+                                    setImportError(null);
+                                  }}
+                                >
+                                  {bank.logo_url ? (
+                                    <img
+                                      src={bank.logo_url}
+                                      alt=""
+                                      className="h-8 w-8 rounded border border-border/60 object-contain bg-white"
+                                      loading="lazy"
+                                    />
+                                  ) : (
+                                    <div className="h-8 w-8 rounded border border-border/60 bg-slate-100" />
+                                  )}
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">{bank.name}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {bank.license_status}
+                                    </span>
+                                  </div>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {isImportBankInProgress && (
+                      <div className="rounded-md border border-border/70 bg-slate-50 px-3 py-2 text-sm text-muted-foreground">
+                        Функциональность в разработке
+                      </div>
+                    )}
+
+                    {isImportBankReady && (
+                      <>
                     <div className="grid gap-2">
                       <Label>Файл .xlsx</Label>
                       <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
@@ -3153,6 +3272,7 @@ export function TransactionsView({
                         type="file"
                         accept=".xlsx"
                         className="border-2 border-border/70 bg-white shadow-none"
+                        disabled={isImportFormDisabled}
                         onChange={(e) => {
                           const file = e.target.files?.[0] ?? null;
                           setImportFile(file);
@@ -3169,8 +3289,12 @@ export function TransactionsView({
                           setImportItemId(Number(v));
                           setImportError(null);
                         }}
+                        disabled={isImportFormDisabled}
                       >
-                        <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                        <SelectTrigger
+                          className="border-2 border-border/70 bg-white shadow-none"
+                          disabled={isImportFormDisabled}
+                        >
                           <SelectValue placeholder="Выберите счет" />
                         </SelectTrigger>
                         <SelectContent>
@@ -3187,11 +3311,14 @@ export function TransactionsView({
                       <input
                         type="checkbox"
                         className="h-4 w-4 accent-violet-600"
+                        disabled={isImportFormDisabled}
                         checked={importConfirmed}
                         onChange={(e) => setImportConfirmed(e.target.checked)}
                       />
                       Импортировать транзакции сразу в статусе "Подтвержденная"
                     </label>
+                    </>
+                  )}
 
                     {importError && (
                       <div className="text-sm text-red-600">{importError}</div>
@@ -3210,7 +3337,7 @@ export function TransactionsView({
                       <Button
                         type="submit"
                         className="bg-violet-600 text-white hover:bg-violet-700"
-                        disabled={isImporting}
+                        disabled={isImportFormDisabled || !isImportBankReady}
                       >
                         Импортировать
                       </Button>

@@ -13,6 +13,55 @@ CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
 LimitPeriod = Literal["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"]
 
 
+class AuthRegister(BaseModel):
+    login: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+    name: str | None = Field(default=None, max_length=200)
+
+    @field_validator("login", mode="before")
+    @classmethod
+    def normalize_login(cls, value: object) -> object:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned.lower()
+        return value
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: object) -> object | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return value
+
+
+class AuthLogin(BaseModel):
+    login: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("login", mode="before")
+    @classmethod
+    def normalize_login(cls, value: object) -> object:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned.lower()
+        return value
+
+
+class AuthUserOut(BaseModel):
+    id: int
+    login: str
+    name: str | None
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+    user: AuthUserOut
+
+
 class ItemCreate(BaseModel):
     kind: ItemKind
     type_code: str = Field(min_length=1, max_length=50)

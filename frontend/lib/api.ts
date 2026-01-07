@@ -239,7 +239,7 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
   headers.set("Authorization", `Bearer ${idToken}`);
   headers.set("Content-Type", "application/json");
 
-  return fetch(input, { ...init, headers });
+  return fetch(input, { ...init, headers, cache: init?.cache ?? "no-store" });
 }
 
 export async function fetchItems(options?: {

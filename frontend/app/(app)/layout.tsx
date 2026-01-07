@@ -13,6 +13,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const { isCollapsed } = useSidebar();
+  const sessionKey = (session?.user as { id?: string })?.id ?? "anon";
 
   useEffect(() => {
     if (status !== "loading" && !session) {
@@ -60,7 +61,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7F8FA]">
+    <div className="min-h-screen bg-[#F7F8FA]" key={sessionKey}>
       <div className="flex">
         <Sidebar />
         <div

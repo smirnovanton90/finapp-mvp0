@@ -129,6 +129,11 @@ const handler = NextAuth({
     async session({ session, token }) {
       // РїС?Р?РєРёР?С<Р?Р°РчР? idToken Р? session, С╪С'Р?Р+С< С"С?Р?Р?С' Р?Р?Р? РчР?Р? Р?Р·С?С'С?
       (session as any).idToken = (token as any).idToken;
+      if (session.user) {
+        (session.user as any).id = token.sub ?? (session.user as any).id;
+      } else {
+        (session as any).user = { id: token.sub };
+      }
       return session;
     },
   },

@@ -25,6 +25,7 @@ import {
   Trash2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,13 +115,38 @@ type CategoryPathOption = {
   searchKey: string;
 };
 
+type PdfTextItem = {
+  str: string;
+  transform: number[];
+};
+
+type PdfLineItem = {
+  text: string;
+  x: number;
+  y: number;
+};
+
+type ParsedPdfRow = {
+  dateTime: string;
+  category: string;
+  descriptionLines: string[];
+  amountText: string;
+};
+
 const PAGE_SIZE = 50;
+GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url
+).toString();
 const IMPORT_BANK_READY_OGRN = "1027739642281";
 const IMPORT_BANK_IN_PROGRESS_OGRN = "1027700132195";
 const IMPORT_BANK_OGRNS = new Set([
   IMPORT_BANK_READY_OGRN,
   IMPORT_BANK_IN_PROGRESS_OGRN,
 ]);
+const PDF_AMOUNT_REGEX = /[+-]?\d{1,3}(?:[ \u00A0]\d{3})*(?:,\d{2})/g;
+const PDF_DATE_TIME_REGEX = /\b\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\b/;
+const PDF_DATE_REGEX = /^\d{2}\.\d{2}\.\d{4}$/;
 
 function formatAmount(valueInCents: number) {
   const hasCents = Math.abs(valueInCents) % 100 !== 0;
@@ -187,10 +213,121 @@ function formatTime(value: string) {
 
 const IMPORT_HEADERS = [
   "Дата операции",
+  "Дата платежа",
+  "Номер карты",
+  "Статус",
+  "Сумма операции",
+  "Валюта операции",
   "Сумма платежа",
+  "Валюта платежа",
+  "Кэшбэк",
   "Категория",
+  "MCC",
   "Описание",
+  "Бонусы (включая кэшбэк)",
+  "Округление на инвесткопилку",
+  "Сумма операции с округлением",
 ];
+
+const MCC_CATEGORY_BY_CODE: Record<string, string> = {
+  "4111": "Транспорт",
+  "4121": "Транспорт",
+  "4131": "Транспорт",
+  "4511": "Транспорт",
+  "4784": "Отпуска",
+  "4789": "Транспорт",
+  "4812": "Интернет и связь",
+  "4814": "Интернет и связь",
+  "4821": "Интернет и связь",
+  "4829": "Интернет и связь",
+  "4899": "Интернет и связь",
+  "4900": "Хозяйственные расходы",
+  "5411": "Питание",
+  "5422": "Питание",
+  "5441": "Питание",
+  "5451": "Питание",
+  "5462": "Питание",
+  "5499": "Питание",
+  "5511": "Автомобиль",
+  "5521": "Автомобиль",
+  "5532": "Автомобиль",
+  "5533": "Автомобиль",
+  "5541": "Автомобиль",
+  "5542": "Автомобиль",
+  "5592": "Автомобиль",
+  "5598": "Автомобиль",
+  "5599": "Автомобиль",
+  "5811": "Питание",
+  "5812": "Питание",
+  "5813": "Питание",
+  "5814": "Питание",
+  "5912": "Здоровье",
+  "5921": "Вредные привычки",
+  "5947": "Подарки",
+  "5977": "Здоровье",
+  "5995": "Домашние животные",
+  "6300": "Страхование",
+  "7011": "Отпуска",
+  "7012": "Отпуска",
+  "7032": "Отпуска",
+  "7033": "Отпуска",
+  "7230": "Уход за собой",
+  "7297": "Уход за собой",
+  "7298": "Уход за собой",
+  "7299": "Уход за собой",
+  "7399": "Услуги",
+  "7511": "Автомобиль",
+  "7512": "Автомобиль",
+  "7531": "Автомобиль",
+  "7534": "Автомобиль",
+  "7538": "Автомобиль",
+  "7542": "Автомобиль",
+  "7549": "Автомобиль",
+  "7622": "Электроника",
+  "7623": "Электроника",
+  "7631": "Электроника",
+  "7641": "Электроника",
+  "7812": "Отдых и развлечения",
+  "7832": "Отдых и развлечения",
+  "7911": "Отдых и развлечения",
+  "7922": "Отдых и развлечения",
+  "7929": "Отдых и развлечения",
+  "7932": "Отдых и развлечения",
+  "7991": "Отдых и развлечения",
+  "7993": "Отдых и развлечения",
+  "7994": "Отдых и развлечения",
+  "7996": "Отдых и развлечения",
+  "7997": "Отдых и развлечения",
+  "7999": "Отдых и развлечения",
+  "8011": "Здоровье",
+  "8021": "Здоровье",
+  "8031": "Здоровье",
+  "8041": "Здоровье",
+  "8042": "Здоровье",
+  "8043": "Здоровье",
+  "8049": "Здоровье",
+  "8050": "Здоровье",
+  "8062": "Здоровье",
+  "8071": "Здоровье",
+  "8099": "Здоровье",
+  "5611": "Одежда и обувь",
+  "5621": "Одежда и обувь",
+  "5631": "Одежда и обувь",
+  "5641": "Одежда и обувь",
+  "5651": "Одежда и обувь",
+  "5661": "Одежда и обувь",
+  "5691": "Одежда и обувь",
+  "5699": "Одежда и обувь",
+  "5732": "Электроника",
+  "5734": "Электроника",
+};
+
+const MCC_CATEGORY_RANGES: Array<{ from: number; to: number; category: string }> =
+  [
+    { from: 3000, to: 3299, category: "Отпуска" },
+    { from: 3300, to: 3499, category: "Отпуска" },
+    { from: 3500, to: 3999, category: "Отпуска" },
+  ];
 
 function normalizeHeader(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
@@ -198,6 +335,21 @@ function normalizeHeader(value: string) {
 
 function normalizeCategory(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+}
+
+function resolveCategoryFromMcc(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const code = raw.replace(/\D/g, "");
+  if (!code) return null;
+  const directMatch = MCC_CATEGORY_BY_CODE[code];
+  if (directMatch) return directMatch;
+  const numericCode = Number(code);
+  if (!Number.isFinite(numericCode)) return null;
+  const rangeMatch = MCC_CATEGORY_RANGES.find(
+    (range) => numericCode >= range.from && numericCode <= range.to
+  );
+  return rangeMatch ? rangeMatch.category : null;
 }
 
 const CATEGORY_PLACEHOLDER = "-";
@@ -277,6 +429,191 @@ function parseExcelDate(value: unknown) {
     return parseDateFromString(value);
   }
   return null;
+}
+
+function normalizePdfText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function buildPdfLines(items: PdfTextItem[]) {
+  const lines: Array<{ y: number; items: PdfLineItem[] }> = [];
+  const tolerance = 2;
+
+  items.forEach((item) => {
+    const text = item.str?.trim();
+    if (!text) return;
+    const x = item.transform[4];
+    const y = item.transform[5];
+    let line = lines.find((candidate) => Math.abs(candidate.y - y) <= tolerance);
+    if (!line) {
+      line = { y, items: [] };
+      lines.push(line);
+    }
+    line.items.push({ text: item.str, x, y });
+  });
+
+  lines.forEach((line) => line.items.sort((a, b) => a.x - b.x));
+  lines.sort((a, b) => b.y - a.y);
+  return lines;
+}
+
+function extractPdfAmountCandidates(items: PdfLineItem[], pageWidth: number) {
+  const rightStart = pageWidth * 0.68;
+  const candidates: Array<{ text: string; x: number }> = [];
+
+  items.forEach((item) => {
+    if (item.x < rightStart) return;
+    const matches = item.text.match(PDF_AMOUNT_REGEX);
+    if (!matches) return;
+    matches.forEach((match) => {
+      candidates.push({ text: match, x: item.x });
+    });
+  });
+
+  return candidates.sort((a, b) => a.x - b.x);
+}
+
+function pickPdfAmountText(candidates: Array<{ text: string; x: number }>) {
+  if (candidates.length === 0) return "";
+  if (candidates.length >= 2) return candidates[candidates.length - 2].text;
+  return candidates[candidates.length - 1].text;
+}
+
+function extractPdfCategory(items: PdfLineItem[], pageWidth: number) {
+  const middleStart = pageWidth * 0.28;
+  const middleEnd = pageWidth * 0.68;
+  const text = items
+    .filter((item) => item.x >= middleStart && item.x < middleEnd)
+    .map((item) => item.text)
+    .join(" ");
+  return normalizePdfText(text);
+}
+
+function parsePdfAmount(value: string) {
+  const normalized = value.replace(/[ \u00A0]/g, "").replace(",", ".");
+  if (!normalized) return null;
+  const numberValue = Number(normalized.replace(/[+-]/g, ""));
+  if (!Number.isFinite(numberValue)) return null;
+  return {
+    amountCents: Math.round(Math.abs(numberValue) * 100),
+    isIncome: normalized.startsWith("+"),
+  };
+}
+
+async function parsePdfStatementRows(file: File): Promise<ParsedPdfRow[]> {
+  const buffer = await file.arrayBuffer();
+  const pdf = await getDocument({ data: buffer }).promise;
+  const rows: ParsedPdfRow[] = [];
+
+  for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
+    const page = await pdf.getPage(pageIndex);
+    const viewport = page.getViewport({ scale: 1 });
+    const textContent = await page.getTextContent({ normalizeWhitespace: true });
+    const rawItems = textContent.items as unknown[];
+    const items = rawItems.filter((item): item is PdfTextItem => {
+      if (!item || typeof item !== "object") return false;
+      const candidate = item as PdfTextItem;
+      return typeof candidate.str === "string" && Array.isArray(candidate.transform);
+    });
+    const lines = buildPdfLines(items);
+
+    let inOperations = false;
+    let currentRow: ParsedPdfRow | null = null;
+
+    const stopPhrases = [
+      "продолжение на следующей странице",
+      "дата формирования документа",
+      "для проверки подлинности документа",
+      "qr-код",
+      "документ подписан электронной подписью",
+      "сведения о сертификате",
+      "генеральная лицензия",
+      "проверка квалифицированной электронной подписи",
+      "действителен до",
+    ];
+
+    lines.forEach((line) => {
+      const lineText = normalizePdfText(
+        line.items.map((item) => item.text).join(" ")
+      );
+      if (!lineText) return;
+      const lineTextLower = lineText.toLowerCase();
+
+      const isHeaderLine =
+        lineTextLower.includes("дата операции") ||
+        lineTextLower.includes("категория");
+      if (
+        lineTextLower.includes("расшифровка операций") ||
+        isHeaderLine
+      ) {
+        inOperations = true;
+        return;
+      }
+      if (!inOperations) return;
+
+      if (stopPhrases.some((phrase) => lineTextLower.includes(phrase))) {
+        if (currentRow) rows.push(currentRow);
+        currentRow = null;
+        inOperations = false;
+        return;
+      }
+      if (lineTextLower.startsWith("выписка по платежному счету")) return;
+      if (lineTextLower.startsWith("страница")) return;
+      if (
+        lineTextLower.includes("дата обработки") ||
+        lineTextLower.includes("код авторизации") ||
+        lineTextLower.includes("сумма в валюте") ||
+        lineTextLower.includes("остаток средств")
+      ) {
+        return;
+      }
+
+      const dateTimeMatch = lineText.match(PDF_DATE_TIME_REGEX);
+      if (dateTimeMatch) {
+        if (currentRow) rows.push(currentRow);
+        const amountCandidates = extractPdfAmountCandidates(
+          line.items,
+          viewport.width
+        );
+        const rightStart = viewport.width * 0.68;
+        const hasPlusSign = line.items.some(
+          (item) => item.x >= rightStart && item.text.trim() === "+"
+        );
+        const hasMinusSign = line.items.some(
+          (item) => item.x >= rightStart && item.text.trim() === "-"
+        );
+        let amountText = pickPdfAmountText(amountCandidates);
+        if (
+          amountText &&
+          !amountText.startsWith("+") &&
+          !amountText.startsWith("-")
+        ) {
+          if (hasPlusSign) {
+            amountText = `+${amountText}`;
+          } else if (hasMinusSign) {
+            amountText = `-${amountText}`;
+          }
+        }
+        const category = extractPdfCategory(line.items, viewport.width);
+        currentRow = {
+          dateTime: dateTimeMatch[0],
+          category,
+          descriptionLines: [],
+          amountText,
+        };
+        return;
+      }
+
+      if (!currentRow) return;
+      if (PDF_DATE_REGEX.test(lineText)) return;
+
+      currentRow.descriptionLines.push(lineText);
+    });
+
+    if (currentRow) rows.push(currentRow);
+  }
+
+  return rows;
 }
 
 function formatDateForApi(date: Date) {
@@ -994,6 +1331,7 @@ export function TransactionsView({
   const [importBankId, setImportBankId] = useState<number | null>(null);
   const [importBankSearch, setImportBankSearch] = useState("");
   const [importBankDropdownOpen, setImportBankDropdownOpen] = useState(false);
+  const [importPdfFile, setImportPdfFile] = useState<File | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importItemId, setImportItemId] = useState<number | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -1235,8 +1573,8 @@ export function TransactionsView({
   const isImportBankReady = selectedImportBank?.ogrn === IMPORT_BANK_READY_OGRN;
   const isImportBankInProgress =
     selectedImportBank?.ogrn === IMPORT_BANK_IN_PROGRESS_OGRN;
-  const isImportLocked = true;
-  const isImportFormDisabled = isImportLocked || isImporting;
+  const isImportSupported = isImportBankReady || isImportBankInProgress;
+  const isImportFormDisabled = isImporting;
   const sortedItems = useMemo(() => {
     return [...activeItems].sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [activeItems]);
@@ -1871,12 +2209,16 @@ export function TransactionsView({
     setImportBankId(null);
     setImportBankSearch("");
     setImportBankDropdownOpen(false);
+    setImportPdfFile(null);
     setImportFile(null);
     setImportItemId(null);
     setImportError(null);
     setImportConfirmed(false);
     if (importInputRef.current) {
       importInputRef.current.value = "";
+    }
+    if (importPdfInputRef.current) {
+      importPdfInputRef.current.value = "";
     }
   };
 
@@ -1893,18 +2235,11 @@ export function TransactionsView({
     event.preventDefault();
     setImportError(null);
 
-    if (isImportLocked || !isImportBankReady) {
+    if (!selectedImportBank) {
+      setImportError("Выберите банк для импорта.");
       return;
     }
 
-    if (!importFile) {
-      setImportError("Выберите файл .xlsx для импорта.");
-      return;
-    }
-    if (!importFile.name.toLowerCase().endsWith(".xlsx")) {
-      setImportError("Формат файла должен быть .xlsx.");
-      return;
-    }
     if (importItemId == null) {
       setImportError("Выберите счет, на который импортируются транзакции.");
       return;
@@ -1923,129 +2258,245 @@ export function TransactionsView({
 
     let rowsToImport: Array<{ rowNumber: number; payload: TransactionCreate }> = [];
 
-    try {
-      const arrayBuffer = await importFile.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
-      if (workbook.SheetNames.length !== 1) {
-        throw new Error("Файл должен содержать один лист.");
+    if (isImportBankReady) {
+      if (!importFile) {
+        setImportError("Выберите файл .xlsx для импорта.");
+        return;
       }
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        blankrows: false,
-        defval: "",
-      }) as unknown[][];
-
-      if (rows.length < 2) {
-        throw new Error("Файл не содержит данных для импорта.");
+      if (!importFile.name.toLowerCase().endsWith(".xlsx")) {
+        setImportError("Формат файла должен быть .xlsx.");
+        return;
       }
 
-      const headerRow = rows[0] ?? [];
-      const normalizedHeader = headerRow.map((cell) =>
-        normalizeHeader(String(cell ?? ""))
-      );
-      const expectedHeader = IMPORT_HEADERS.map(normalizeHeader);
+      try {
+        const arrayBuffer = await importFile.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
+        if (workbook.SheetNames.length !== 1) {
+          throw new Error("Файл должен содержать ровно один лист.");
+        }
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          blankrows: false,
+          defval: "",
+        }) as unknown[][];
 
-      const isHeaderValid =
-        normalizedHeader.length === expectedHeader.length &&
-        expectedHeader.every((value, index) => value === normalizedHeader[index]);
+        if (rows.length < 2) {
+          throw new Error("Файл не содержит данных для импорта.");
+        }
 
-      if (!isHeaderValid) {
-        throw new Error(
-          `Неверный формат заголовков. Ожидаются столбцы: ${IMPORT_HEADERS.join(
-            ", "
-          )}.`
+        const headerRow = rows[0] ?? [];
+        const normalizedHeader = headerRow.map((cell) =>
+          normalizeHeader(String(cell ?? ""))
         );
-      }
+        const expectedHeader = IMPORT_HEADERS.map(normalizeHeader);
 
-      for (let i = 1; i < rows.length; i += 1) {
-        const row = rows[i] ?? [];
-        const rowNumber = i + 1;
-        const hasValues = row.some((cell) => String(cell ?? "").trim() !== "");
-        if (!hasValues) {
-          continue;
+        const isHeaderValid =
+          normalizedHeader.length === expectedHeader.length &&
+          expectedHeader.every((value, index) => value === normalizedHeader[index]);
+
+        if (!isHeaderValid) {
+          throw new Error(
+            `Файл не соответствует формату. Ожидаемые столбцы: ${IMPORT_HEADERS.join(
+              ", "
+            )}.`
+          );
         }
 
-        if (
-          row.slice(IMPORT_HEADERS.length).some((cell) => String(cell ?? "").trim() !== "")
-        ) {
-          throw new Error(`Строка ${rowNumber}: должно быть 4 столбца.`);
-        }
+        for (let i = 1; i < rows.length; i += 1) {
+          const row = rows[i] ?? [];
+          const rowNumber = i + 1;
+          const hasValues = row.some((cell) => String(cell ?? "").trim() !== "");
+          if (!hasValues) {
+            continue;
+          }
 
-        const [rawDate, rawAmount, rawCategory, rawComment] = row;
-
-        const parsedDate = parseExcelDate(rawDate);
-        if (!parsedDate) {
-          throw new Error(`Строка ${rowNumber}: не удалось распознать дату операции.`);
-        }
-        const transactionDateKey = formatDateForApi(parsedDate);
-        const transactionDate = formatDateTimeForApi(parsedDate);
-        if (importTxType === "PLANNED") {
-          const today = new Date().toISOString().slice(0, 10);
-          if (transactionDateKey < today) {
+          if (
+            row.slice(IMPORT_HEADERS.length).some((cell) => String(cell ?? "").trim() !== "")
+          ) {
             throw new Error(
-              `Строка ${rowNumber}: плановая транзакция не может быть раньше текущего дня.`
+              `Строка ${rowNumber}: ожидается ровно ${IMPORT_HEADERS.length} столбцов.`
             );
           }
-        }
-        if (item.start_date && transactionDateKey < item.start_date) {
-          throw new Error(
-            `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
+
+          const rawOperationDate = row[0];
+          const rawStatus = row[3];
+          const rawPaymentAmount = row[6];
+          const rawCategory = row[9];
+          const rawMcc = row[10];
+          const rawDescription = row[11];
+
+          const statusValue = String(rawStatus ?? "").trim().toUpperCase();
+          if (statusValue !== "OK") {
+            continue;
+          }
+
+          const parsedDate = parseExcelDate(rawOperationDate);
+          if (!parsedDate) {
+            throw new Error(`Строка ${rowNumber}: не удалось распознать дату операции.`);
+          }
+          const transactionDateKey = formatDateForApi(parsedDate);
+          const transactionDate = formatDateTimeForApi(parsedDate);
+          if (importTxType === "PLANNED") {
+            const today = new Date().toISOString().slice(0, 10);
+            if (transactionDateKey < today) {
+              throw new Error(
+                `Строка ${rowNumber}: запланированная дата не может быть в прошлом.`
+              );
+            }
+          }
+          if (item.start_date && transactionDateKey < item.start_date) {
+            throw new Error(
+              `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
+            );
+          }
+
+          const amountValue = parseAmountCell(rawPaymentAmount);
+          if (amountValue == null || !Number.isFinite(amountValue)) {
+            throw new Error(
+              `Строка ${rowNumber}: не удалось распознать сумму операции.`
+            );
+          }
+          const direction = amountValue < 0 ? "EXPENSE" : "INCOME";
+          const amountCents = Math.round(Math.abs(amountValue) * 100);
+
+          const mccCategory = resolveCategoryFromMcc(rawMcc);
+          const categoryValue = (mccCategory ?? String(rawCategory ?? "")).trim();
+          if (!categoryValue) {
+            throw new Error(`Строка ${rowNumber}: категория не заполнена.`);
+          }
+          const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
+          if (!categoryL1) {
+            throw new Error(
+              `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
+            );
+          }
+          const categoryId = resolveCategoryId(
+            categoryL1,
+            CATEGORY_PLACEHOLDER,
+            CATEGORY_PLACEHOLDER
           );
+          if (!categoryId) {
+            throw new Error(
+              `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
+            );
+          }
+
+          const commentValue = String(rawDescription ?? "").trim();
+
+          rowsToImport.push({
+            rowNumber,
+            payload: {
+              transaction_date: transactionDate,
+              primary_item_id: selectedImportItemId,
+              amount_rub: amountCents,
+              direction,
+              transaction_type: importTxType,
+              status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
+              category_id: categoryId,
+              description: null,
+              comment: commentValue ? commentValue : null,
+            },
+          });
         }
 
-        const amountValue = parseAmountCell(rawAmount);
-        if (amountValue == null || !Number.isFinite(amountValue)) {
-          throw new Error(`Строка ${rowNumber}: не удалось распознать сумму.`);
+        if (rowsToImport.length === 0) {
+          throw new Error("Файл не содержит данных для импорта.");
         }
-        const direction = amountValue < 0 ? "EXPENSE" : "INCOME";
-        const amountCents = Math.round(Math.abs(amountValue) * 100);
-
-        const categoryValue = String(rawCategory ?? "").trim();
-        if (!categoryValue) {
-          throw new Error(`Строка ${rowNumber}: категория не указана.`);
-        }
-        const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
-        if (!categoryL1) {
-          throw new Error(
-            `Строка ${rowNumber}: не удалось сопоставить категорию первого уровня.`
-          );
-        }
-        const categoryId = resolveCategoryId(
-          categoryL1,
-          CATEGORY_PLACEHOLDER,
-          CATEGORY_PLACEHOLDER
-        );
-        if (!categoryId) {
-          throw new Error(
-            `Строка ${rowNumber}: не удалось сопоставить категорию по дереву.`
-          );
-        }
-
-        const commentValue = String(rawComment ?? "").trim();
-
-        rowsToImport.push({
-          rowNumber,
-          payload: {
-            transaction_date: transactionDate,
-            primary_item_id: selectedImportItemId,
-            amount_rub: amountCents,
-            direction,
-            transaction_type: importTxType,
-            status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
-            category_id: categoryId,
-            description: null,
-            comment: commentValue ? commentValue : null,
-          },
-        });
+      } catch (err: any) {
+        setImportError(err?.message ?? "Не удалось обработать файл для импорта.");
+        return;
+      }
+    } else if (isImportBankInProgress) {
+      if (!importPdfFile) {
+        setImportError("Выберите файл .pdf для импорта.");
+        return;
+      }
+      if (!importPdfFile.name.toLowerCase().endsWith(".pdf")) {
+        setImportError("Формат файла должен быть .pdf.");
+        return;
       }
 
-      if (rowsToImport.length === 0) {
-        throw new Error("Файл не содержит строк для импорта.");
+      try {
+        const parsedRows = await parsePdfStatementRows(importPdfFile);
+        if (parsedRows.length === 0) {
+          throw new Error("В выписке не найдены операции.");
+        }
+
+        for (let i = 0; i < parsedRows.length; i += 1) {
+          const row = parsedRows[i];
+          const rowNumber = i + 1;
+          const parsedDate = parseDateFromString(row.dateTime);
+          if (!parsedDate) {
+            throw new Error(`Строка ${rowNumber}: не удалось распознать дату операции.`);
+          }
+
+          const transactionDateKey = formatDateForApi(parsedDate);
+          if (item.start_date && transactionDateKey < item.start_date) {
+            throw new Error(
+              `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
+            );
+          }
+
+          const amountMeta = parsePdfAmount(row.amountText);
+          if (!amountMeta) {
+            throw new Error(
+              `Строка ${rowNumber}: не удалось распознать сумму операции.`
+            );
+          }
+
+          const fallbackCategory = row.descriptionLines[0] ?? "";
+          const statementCategory = (row.category || fallbackCategory).trim();
+          const categoryValue = amountMeta.isIncome
+            ? statementCategory
+            : "Прочие расходы";
+          if (!categoryValue) {
+            throw new Error(`Строка ${rowNumber}: не удалось распознать категорию.`);
+          }
+          const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
+          if (!categoryL1) {
+            throw new Error(
+              `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
+            );
+          }
+          const categoryId = resolveCategoryId(
+            categoryL1,
+            CATEGORY_PLACEHOLDER,
+            CATEGORY_PLACEHOLDER
+          );
+          if (!categoryId) {
+            throw new Error(
+              `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
+            );
+          }
+
+          const descriptionLines = row.category
+            ? row.descriptionLines
+            : row.descriptionLines.slice(1);
+          const commentValue = normalizePdfText(descriptionLines.join(" "));
+
+          rowsToImport.push({
+            rowNumber,
+            payload: {
+              transaction_date: formatDateTimeForApi(parsedDate),
+              primary_item_id: selectedImportItemId,
+              amount_rub: amountMeta.amountCents,
+              direction: amountMeta.isIncome ? "INCOME" : "EXPENSE",
+              transaction_type: importTxType,
+              status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
+              category_id: categoryId,
+              description: null,
+              comment: commentValue ? commentValue : null,
+            },
+          });
+        }
+      } catch (err: any) {
+        setImportError(err?.message ?? "Не удалось обработать PDF-выписку.");
+        return;
       }
-    } catch (err: any) {
-      setImportError(err?.message ?? "Не удалось подготовить файл к импорту.");
+    } else {
+      setImportError("Импорт для выбранного банка пока не поддерживается.");
       return;
     }
 
@@ -2055,14 +2506,18 @@ export function TransactionsView({
         try {
           await createTransaction(row.payload);
         } catch (err: any) {
-          const message = err?.message ?? "Не удалось импортировать транзакцию.";
+          const message =
+            err?.message ??
+            "Не удалось создать транзакцию по данным импорта.";
           throw new Error(`Строка ${row.rowNumber}: ${message}`);
         }
       }
       handleImportOpenChange(false);
       await loadAll();
     } catch (err: any) {
-      setImportError(err?.message ?? "Не удалось импортировать транзакции.");
+      setImportError(
+        err?.message ?? "Не удалось завершить импорт транзакций."
+      );
     } finally {
       setIsImporting(false);
     }
@@ -2358,6 +2813,7 @@ export function TransactionsView({
     loadTransactions({ cursor: txCursor, append: true });
   }, [hasMoreTxs, isLoadingMore, loading, loadTransactions, txCursor]);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const importPdfInputRef = useRef<HTMLInputElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const lastActiveElementRef = useRef<HTMLElement | null>(null);
 
@@ -3199,7 +3655,10 @@ export function TransactionsView({
                             setImportBankDropdownOpen(true);
                             setImportError(null);
                           }}
-                          onFocus={() => setImportBankDropdownOpen(true)}
+                          onClick={() => {
+                            setImportBankDropdownOpen(true);
+                            setImportError(null);
+                          }}
                           onBlur={() =>
                             setTimeout(() => setImportBankDropdownOpen(false), 150)
                           }
@@ -3254,9 +3713,64 @@ export function TransactionsView({
                     </div>
 
                     {isImportBankInProgress && (
-                      <div className="rounded-md border border-border/70 bg-slate-50 px-3 py-2 text-sm text-muted-foreground">
-                        Функциональность в разработке
-                      </div>
+                      <>
+                        <div className="grid gap-2">
+                          <Label>Файл .pdf</Label>
+                          <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
+                            Поддерживаются выписки Сбербанк Онлайн. Можно загружать
+                            многостраничные документы.
+                          </div>
+                          <Input
+                            ref={importPdfInputRef}
+                            type="file"
+                            accept=".pdf"
+                            className="border-2 border-border/70 bg-white shadow-none"
+                            disabled={isImportFormDisabled}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] ?? null;
+                              setImportPdfFile(file);
+                              setImportError(null);
+                            }}
+                          />
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label>Счет</Label>
+                          <Select
+                            value={importItemId ? String(importItemId) : ""}
+                            onValueChange={(v) => {
+                              setImportItemId(Number(v));
+                              setImportError(null);
+                            }}
+                            disabled={isImportFormDisabled}
+                          >
+                            <SelectTrigger
+                              className="border-2 border-border/70 bg-white shadow-none"
+                              disabled={isImportFormDisabled}
+                            >
+                              <SelectValue placeholder="Выберите счет" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {items.map((it) => (
+                                <SelectItem key={it.id} value={String(it.id)}>
+                                  {it.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <label className="flex items-center gap-3 px-3 py-2 text-xs text-foreground">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-violet-600"
+                            disabled={isImportFormDisabled}
+                            checked={importConfirmed}
+                            onChange={(e) => setImportConfirmed(e.target.checked)}
+                          />
+                          Импортировать транзакции сразу в статусе "Подтвержденная"
+                        </label>
+                      </>
                     )}
 
                     {isImportBankReady && (
@@ -3337,7 +3851,7 @@ export function TransactionsView({
                       <Button
                         type="submit"
                         className="bg-violet-600 text-white hover:bg-violet-700"
-                        disabled={isImportFormDisabled || !isImportBankReady}
+                        disabled={isImportFormDisabled || !isImportSupported}
                       >
                         Импортировать
                       </Button>

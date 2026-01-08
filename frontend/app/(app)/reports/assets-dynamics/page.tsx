@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import {
   fetchBanks,
@@ -15,6 +15,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ItemSelector } from "@/components/item-selector";
 import {
   Table,
   TableBody,
@@ -23,6 +24,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { buildItemTransactionCounts, sortItemsByTransactionCount } from "@/lib/item-utils";
+import { getItemTypeLabel } from "@/lib/item-types";
 import { cn } from "@/lib/utils";
 
 type ChartPoint = {
@@ -224,90 +227,10 @@ function formatSignedValue(valueInCents: number, formatter: (value: number) => s
   return valueInCents < 0 ? `-${formatted}` : formatted;
 }
 
-function sortItems(items: ItemOut[]) {
-  return [...items].sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "ASSET" ? -1 : 1;
-    return a.name.localeCompare(b.name, "ru");
-  });
-}
-
 function getItemStartKey(item: ItemOut) {
   return item.start_date
     ? toTxDateKey(item.start_date)
     : toDateKey(new Date(item.created_at));
-}
-
-const ITEM_TYPE_LABELS: Record<string, string> = {
-  cash: "Наличные",
-  bank_account: "Банковский счёт",
-  bank_card: "Банковская карта",
-  savings_account: "Накопительный счет",
-  e_wallet: "Электронный кошелек",
-  brokerage: "Брокерский счёт",
-  deposit: "Вклад",
-  securities: "Акции",
-  bonds: "Облигации",
-  etf: "ETF",
-  bpif: "БПИФ",
-  pif: "ПИФ",
-  iis: "ИИС",
-  precious_metals: "Драгоценные металлы",
-  crypto: "Криптовалюта",
-  loan_to_third_party: "Предоставленные займы третьим лицам",
-  third_party_receivables: "Долги третьих лиц",
-  real_estate: "Квартира",
-  townhouse: "Дом / таунхаус",
-  land_plot: "Земельный участок",
-  garage: "Гараж / машиноместо",
-  commercial_real_estate: "Коммерческая недвижимость",
-  real_estate_share: "Доля в недвижимости",
-  car: "Автомобиль",
-  motorcycle: "Мотоцикл",
-  boat: "Катер / лодка",
-  trailer: "Прицеп",
-  special_vehicle: "Спецтехника",
-  jewelry: "Драгоценности",
-  electronics: "Техника и электроника",
-  art: "Ценные предметы искусства",
-  collectibles: "Коллекционные вещи",
-  other_valuables: "Прочие ценные вещи",
-  npf: "НПФ",
-  investment_life_insurance: "ИСЖ",
-  business_share: "Доля в бизнесе",
-  sole_proprietor: "ИП (оценка бизнеса)",
-  other_asset: "Прочие активы",
-  credit_card_debt: "Задолженность по кредитной карте",
-  consumer_loan: "Потребительский кредит",
-  mortgage: "Ипотека",
-  car_loan: "Автокредит",
-  education_loan: "Образовательный кредит",
-  installment: "Рассрочка",
-  microloan: "МФО",
-  private_loan: "Полученные займы от третьих лиц",
-  third_party_payables: "Долги третьим лицам",
-  tax_debt: "Налоги и обязательные платежи",
-  personal_income_tax_debt: "Задолженность по НДФЛ",
-  property_tax_debt: "Задолженность по налогу на имущество",
-  land_tax_debt: "Задолженность по земельному налогу",
-  transport_tax_debt: "Задолженность по транспортному налогу",
-  fns_debt: "Задолженности перед ФНС",
-  utilities_debt: "Задолженность по ЖКХ",
-  telecom_debt: "Задолженность за интернет / связь",
-  traffic_fines_debt: "Задолженность по штрафам (ГИБДД и прочие)",
-  enforcement_debt: "Задолженность по исполнительным листам",
-  alimony_debt: "Задолженность по алиментам",
-  court_debt: "Судебные задолженности",
-  court_fine_debt: "Штрафы по решениям суда",
-  business_liability: "Бизнес-обязательства",
-  other_liability: "Прочие обязательства",
-};
-
-function getItemTypeLabel(item: ItemOut) {
-  return ITEM_TYPE_LABELS[item.type_code] ?? item.type_code;
-}
-
-function normalizeItemSearch(value: string) {
-  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
 }
 
 function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number) {
@@ -352,28 +275,36 @@ function buildDeltasByDate(
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
     if (dateKey <= todayKey && !isRealized) return;
 
-    const primarySelected = selectedIds.has(tx.primary_item_id);
-    const counterSelected = tx.counterparty_item_id
-      ? selectedIds.has(tx.counterparty_item_id)
-      : false;
-    if (!primarySelected && !counterSelected) return;
+    const primaryCandidates = [
+      tx.primary_item_id,
+      tx.primary_card_item_id ?? null,
+    ].filter(Boolean) as number[];
+    const counterCandidates = [
+      tx.counterparty_item_id,
+      tx.counterparty_card_item_id ?? null,
+    ].filter(Boolean) as number[];
+    const primarySelectedIds = primaryCandidates.filter((id) => selectedIds.has(id));
+    const counterSelectedIds = counterCandidates.filter((id) => selectedIds.has(id));
+    if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0) return;
 
-    if (primarySelected) {
+    primarySelectedIds.forEach((itemId) => {
       let delta = 0;
       if (tx.direction === "INCOME") delta = tx.amount_rub;
       if (tx.direction === "EXPENSE") delta = -tx.amount_rub;
       if (tx.direction === "TRANSFER") {
-        const kind = itemKindById.get(tx.primary_item_id) ?? "ASSET";
+        const kind = itemKindById.get(itemId) ?? "ASSET";
         delta = transferDelta(kind, true, tx.amount_rub);
       }
-      addDelta(dateKey, tx.primary_item_id, delta);
-    }
+      addDelta(dateKey, itemId, delta);
+    });
 
-    if (counterSelected && tx.direction === "TRANSFER" && tx.counterparty_item_id) {
-      const kind = itemKindById.get(tx.counterparty_item_id) ?? "ASSET";
+    if (tx.direction === "TRANSFER") {
       const counterAmount = tx.amount_counterparty ?? tx.amount_rub;
-      const delta = transferDelta(kind, false, counterAmount);
-      addDelta(dateKey, tx.counterparty_item_id, delta);
+      counterSelectedIds.forEach((itemId) => {
+        const kind = itemKindById.get(itemId) ?? "ASSET";
+        const delta = transferDelta(kind, false, counterAmount);
+        addDelta(dateKey, itemId, delta);
+      });
     }
   });
 
@@ -389,8 +320,6 @@ export default function AssetsDynamicsPage() {
     {}
   );
   const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
-  const [itemFilterQuery, setItemFilterQuery] = useState("");
-  const [isItemFilterOpen, setIsItemFilterOpen] = useState(false);
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [loading, setLoading] = useState(false);
@@ -410,7 +339,7 @@ export default function AssetsDynamicsPage() {
     setError(null);
 
     Promise.all([
-      fetchItems({ includeClosed: true }),
+      fetchItems({ includeClosed: true, includeArchived: true }),
       fetchTransactions(),
       fetchBanks().catch(() => []),
     ])
@@ -436,7 +365,14 @@ export default function AssetsDynamicsPage() {
     };
   }, [session]);
 
-  const sortedItems = useMemo(() => sortItems(items), [items]);
+  const itemTxCounts = useMemo(
+    () => buildItemTransactionCounts(transactions),
+    [transactions]
+  );
+  const sortedItems = useMemo(
+    () => sortItemsByTransactionCount(items, itemTxCounts),
+    [items, itemTxCounts]
+  );
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
     [items]
@@ -445,41 +381,54 @@ export default function AssetsDynamicsPage() {
     () => new Map(banks.map((bank) => [bank.id, bank])),
     [banks]
   );
-  const itemBankLogoUrl = (id: number) => {
+  const getItemDisplayBalanceCents = useCallback(
+    (item: ItemOut) => {
+      if (item.type_code === "bank_card" && item.card_account_id) {
+        const linked = itemsById.get(item.card_account_id);
+        if (linked) return linked.current_value_rub;
+      }
+      return item.current_value_rub;
+    },
+    [itemsById]
+  );
+  const getItemDisplayInitialCents = useCallback(
+    (item: ItemOut) => {
+      if (item.type_code === "bank_card" && item.card_account_id) {
+        const linked = itemsById.get(item.card_account_id);
+        if (linked) return linked.initial_value_rub;
+      }
+      return item.initial_value_rub;
+    },
+    [itemsById]
+  );
+  const getEffectiveStartKey = useCallback(
+    (item: ItemOut) => {
+      const startKey = getItemStartKey(item);
+      if (item.type_code !== "bank_card" || !item.card_account_id) {
+        return startKey;
+      }
+      const account = itemsById.get(item.card_account_id);
+      if (!account) return startKey;
+      const accountStartKey = getItemStartKey(account);
+      if (accountStartKey && startKey) {
+        return accountStartKey > startKey ? accountStartKey : startKey;
+      }
+      return accountStartKey || startKey;
+    },
+    [itemsById]
+  );
+  const itemBankLogoUrl = (id: number | null | undefined) => {
+    if (!id) return null;
     const bankId = itemsById.get(id)?.bank_id;
     if (!bankId) return null;
     return banksById.get(bankId)?.logo_url ?? null;
   };
-  const itemBankName = (id: number) => {
+  const itemBankName = (id: number | null | undefined) => {
+    if (!id) return "";
     const bankId = itemsById.get(id)?.bank_id;
     if (!bankId) return "";
     return banksById.get(bankId)?.name ?? "";
   };
-  const normalizedItemFilterQuery = useMemo(
-    () => normalizeItemSearch(itemFilterQuery),
-    [itemFilterQuery]
-  );
-  const filteredItemOptions = useMemo(() => {
-    if (!normalizedItemFilterQuery) return sortedItems;
-    return sortedItems.filter((item) => {
-      const bankName = item.bank_id ? banksById.get(item.bank_id)?.name ?? "" : "";
-      const searchText = [
-        item.name,
-        getItemTypeLabel(item),
-        item.currency_code,
-        bankName,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      return normalizeItemSearch(searchText).includes(normalizedItemFilterQuery);
-    });
-  }, [banksById, normalizedItemFilterQuery, sortedItems]);
-  const selectedItemFilterOptions = useMemo(() => {
-    return selectedItemIds
-      .map((id) => itemsById.get(id))
-      .filter(Boolean) as ItemOut[];
-  }, [itemsById, selectedItemIds]);
-
   useEffect(() => {
     const itemIds = new Set(sortedItems.map((item) => item.id));
     setSelectedItemIds((prev) => prev.filter((id) => itemIds.has(id)));
@@ -496,12 +445,6 @@ export default function AssetsDynamicsPage() {
     const selected = new Set(selectedItemIds);
     return sortedItems.filter((item) => selected.has(item.id));
   }, [sortedItems, selectedItemIds]);
-  const addItemSelection = (id: number) => {
-    setSelectedItemIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-  };
-  const removeItemSelection = (id: number) => {
-    setSelectedItemIds((prev) => prev.filter((itemId) => itemId !== id));
-  };
 
   const selectedCurrencyCodes = useMemo(() => {
     const set = new Set<string>();
@@ -521,8 +464,8 @@ export default function AssetsDynamicsPage() {
   const defaultStartKey = getRelativeDateKey(-7);
   const defaultEndKey = getRelativeDateKey(7);
   const startKeys = useMemo(
-    () => selectedItems.map((item) => getItemStartKey(item)).sort(),
-    [selectedItems]
+    () => selectedItems.map((item) => getEffectiveStartKey(item)).sort(),
+    [getEffectiveStartKey, selectedItems]
   );
   const earliestStartKey = startKeys[0] ?? "";
   const rangeMinStartKey =
@@ -643,7 +586,7 @@ export default function AssetsDynamicsPage() {
     const selectedIds = new Set(selectedItems.map((item) => item.id));
     const itemKindById = new Map(selectedItems.map((item) => [item.id, item.kind]));
     const itemStartKeyById = new Map(
-      selectedItems.map((item) => [item.id, getItemStartKey(item)])
+      selectedItems.map((item) => [item.id, getEffectiveStartKey(item)])
     );
     const itemsByStartDate = new Map<string, ItemOut[]>();
     selectedItems.forEach((item) => {
@@ -675,7 +618,7 @@ export default function AssetsDynamicsPage() {
       const dateKey = toDateKey(current);
       const newItems = itemsByStartDate.get(dateKey) ?? [];
       newItems.forEach((item) => {
-        balances.set(item.id, item.initial_value_rub);
+        balances.set(item.id, getItemDisplayInitialCents(item));
       });
 
       const dayDeltas = deltasByDate.get(dateKey);
@@ -718,7 +661,7 @@ export default function AssetsDynamicsPage() {
           itemRubValues[item.id] = null;
           return;
         }
-        const valueCents = balances.get(item.id) ?? item.initial_value_rub;
+        const valueCents = balances.get(item.id) ?? getItemDisplayInitialCents(item);
         itemValues[item.id] = valueCents;
 
         const rate = getRate(item.currency_code);
@@ -755,6 +698,8 @@ export default function AssetsDynamicsPage() {
     return rows;
   }, [
     fxRatesByDate,
+    getEffectiveStartKey,
+    getItemDisplayInitialCents,
     latestRatesByCurrency,
     earliestStartKey,
     rangeEndKey,
@@ -902,127 +847,21 @@ export default function AssetsDynamicsPage() {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-1.5">
             <Label>Активы и обязательства</Label>
-            <div className="relative">
-              <Input
-                type="text"
-                className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
-                placeholder="Начните вводить название"
-                value={itemFilterQuery}
-                onChange={(event) => {
-                  setItemFilterQuery(event.target.value);
-                  setIsItemFilterOpen(true);
-                }}
-                onFocus={() => setIsItemFilterOpen(true)}
-                onClick={() => setIsItemFilterOpen(true)}
-                onBlur={() => setTimeout(() => setIsItemFilterOpen(false), 150)}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    isItemFilterOpen &&
-                    itemFilterQuery.trim()
-                  ) {
-                    const first = filteredItemOptions[0];
-                    if (first) {
-                      event.preventDefault();
-                      addItemSelection(first.id);
-                      setItemFilterQuery("");
-                      setIsItemFilterOpen(false);
-                    }
-                  }
-                }}
-              />
-              {isItemFilterOpen ? (
-                <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
-                  {sortedItems.length === 0 ? (
-                    <div className="px-2 py-1 text-sm text-muted-foreground">
-                      Нет активов и обязательств
-                    </div>
-                  ) : filteredItemOptions.length === 0 ? (
-                    <div className="px-2 py-1 text-sm text-muted-foreground">
-                      Ничего не найдено
-                    </div>
-                  ) : (
-                    filteredItemOptions.map((item) => {
-                      const isSelected = selectedItemIds.includes(item.id);
-                      const isClosed = Boolean(item.closed_at);
-                      const bankLogo = itemBankLogoUrl(item.id);
-                      const bankName = itemBankName(item.id);
-                      const typeLabel = getItemTypeLabel(item);
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                            isSelected
-                              ? "bg-violet-50 text-violet-700"
-                              : "text-slate-700 hover:bg-slate-100"
-                          }`}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            if (isSelected) {
-                              removeItemSelection(item.id);
-                            } else {
-                              addItemSelection(item.id);
-                            }
-                            setItemFilterQuery("");
-                            setIsItemFilterOpen(false);
-                          }}
-                        >
-                          {bankLogo ? (
-                            <img
-                              src={bankLogo}
-                              alt={bankName || ""}
-                              className="h-6 w-6 rounded border border-border/60 bg-white object-contain"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="h-6 w-6 rounded border border-border/60 bg-slate-100" />
-                          )}
-                          <div className="min-w-0">
-                            <div
-                              className={[
-                                "text-sm font-medium break-words",
-                                isClosed ? "text-slate-500" : "",
-                              ].join(" ")}
-                            >
-                              {item.name}
-                            </div>
-                            <div
-                              className={[
-                                "text-xs",
-                                isClosed ? "text-slate-400" : "text-muted-foreground",
-                              ].join(" ")}
-                            >
-                              {typeLabel} · {item.currency_code}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              ) : null}
-            </div>
-            {selectedItemFilterOptions.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {selectedItemFilterOptions.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs text-violet-800"
-                  >
-                    <span>{item.name}</span>
-                    <button
-                      type="button"
-                      className="text-violet-700 hover:text-violet-900"
-                      onClick={() => removeItemSelection(item.id)}
-                      aria-label={`Удалить фильтр ${item.name}`}
-                    >
-                      x
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+            <ItemSelector
+              items={sortedItems}
+              selectedIds={selectedItemIds}
+              onChange={setSelectedItemIds}
+              selectionMode="multi"
+              placeholder="Начните вводить название"
+              emptyMessage="Нет активов и обязательств"
+              noResultsMessage="Ничего не найдено"
+              getItemTypeLabel={getItemTypeLabel}
+              getBankLogoUrl={itemBankLogoUrl}
+              getBankName={itemBankName}
+              getItemBalance={getItemDisplayBalanceCents}
+              itemCounts={itemTxCounts}
+              ariaLabel="Активы и обязательства"
+            />
           </div>
 
           <div className="space-y-1.5">

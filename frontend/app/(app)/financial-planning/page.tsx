@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ItemSelector } from "@/components/item-selector";
 import {
   Select,
   SelectContent,
@@ -72,6 +73,8 @@ import {
   TransactionChainOut,
   TransactionOut,
 } from "@/lib/api";
+import { buildItemTransactionCounts } from "@/lib/item-utils";
+import { getItemTypeLabel } from "@/lib/item-types";
 
 const CATEGORY_PLACEHOLDER = "-";
 const CATEGORY_PATH_SEPARATOR = " / ";
@@ -350,12 +353,9 @@ export default function FinancialPlanningPage() {
     );
   }, [categoryPaths, normalizedCategoryQuery]);
 
+  const itemTxCounts = useMemo(() => buildItemTransactionCounts(txs), [txs]);
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
-    [items]
-  );
-  const sortedItems = useMemo(
-    () => [...items].sort((a, b) => a.name.localeCompare(b.name, "ru")),
     [items]
   );
   const counterpartiesById = useMemo(
@@ -1276,42 +1276,28 @@ export default function FinancialPlanningPage() {
             <div className="grid gap-2 md:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Актив/обязательство</Label>
-                <Select
-                  value={primaryItemId ? String(primaryItemId) : ""}
-                  onValueChange={(value) => setPrimaryItemId(Number(value))}
-                >
-                  <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                    <SelectValue placeholder="Выберите счет" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sortedItems.map((item) => (
-                      <SelectItem key={item.id} value={String(item.id)}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <ItemSelector
+                  items={items}
+                  selectedIds={primaryItemId ? [primaryItemId] : []}
+                  onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                  selectionMode="single"
+                  placeholder="Выберите счет"
+                  getItemTypeLabel={getItemTypeLabel}
+                  itemCounts={itemTxCounts}
+                />
               </div>
               {isTransfer && (
                 <div className="grid gap-2">
                   <Label>Контрагент</Label>
-                  <Select
-                    value={counterpartyItemId ? String(counterpartyItemId) : ""}
-                    onValueChange={(value) => setCounterpartyItemId(Number(value))}
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                      <SelectValue placeholder="Выберите счет" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sortedItems
-                        .filter((item) => item.id !== primaryItemId)
-                        .map((item) => (
-                          <SelectItem key={item.id} value={String(item.id)}>
-                            {item.name}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                  <ItemSelector
+                    items={items.filter((item) => item.id !== primaryItemId)}
+                    selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
+                    onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
+                    selectionMode="single"
+                    placeholder="Выберите счет"
+                    getItemTypeLabel={getItemTypeLabel}
+                    itemCounts={itemTxCounts}
+                  />
                 </div>
               )}
             </div>

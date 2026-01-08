@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ItemSelector } from "@/components/item-selector";
 
 import {
   Select,
@@ -63,6 +64,7 @@ import {
   fetchBanks,
   fetchCurrencies,
   fetchFxRates,
+  fetchTransactions,
   createItem,
   updateItem,
   archiveItem,
@@ -73,7 +75,10 @@ import {
   BankOut,
   CurrencyOut,
   FxRateOut,
+  TransactionOut,
 } from "@/lib/api";
+import { buildItemTransactionCounts } from "@/lib/item-utils";
+import { getItemTypeLabel } from "@/lib/item-types";
 
 
 /* ------------------ справочники ------------------ */
@@ -402,6 +407,7 @@ export default function Page() {
   const [items, setItems] = useState<ItemOut[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
+  const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -548,10 +554,26 @@ export default function Page() {
     return map;
   }, [fxRates]);
 
+  const itemsById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items]
+  );
+
+  const getItemDisplayBalanceCents = useCallback(
+    (item: ItemOut) => {
+      if (item.type_code === "bank_card" && item.card_account_id) {
+        const linked = itemsById.get(item.card_account_id);
+        if (linked) return linked.current_value_rub;
+      }
+      return item.current_value_rub;
+    },
+    [itemsById]
+  );
+
   function getRubEquivalentCents(item: ItemOut): number | null {
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
-    const amount = item.current_value_rub / 100;
+    const amount = getItemDisplayBalanceCents(item) / 100;
     return Math.round(amount * rate * 100);
   }
 
@@ -593,6 +615,7 @@ export default function Page() {
     () => typeCode === "bank_account" || typeCode === "deposit" || typeCode === "savings_account",
     [typeCode]
   );
+  const hideInitialAmountField = showBankCardFields && Boolean(cardAccountId);
   const showContractNumberField = useMemo(
     () =>
       typeCode === "bank_account" ||
@@ -623,10 +646,41 @@ export default function Page() {
     () => new Map(banks.map((bank) => [bank.id, bank])),
     [banks]
   );
+  const itemBankLogoUrl = (id: number | null | undefined) => {
+    if (!id) return null;
+    const bankId = itemsById.get(id)?.bank_id;
+    if (!bankId) return null;
+    return banksById.get(bankId)?.logo_url ?? null;
+  };
+  const itemBankName = (id: number | null | undefined) => {
+    if (!id) return "";
+    const bankId = itemsById.get(id)?.bank_id;
+    if (!bankId) return "";
+    return banksById.get(bankId)?.name ?? "";
+  };
+  const linkedCardsByAccountId = useMemo(() => {
+    const map = new Map<number, ItemOut[]>();
+    items.forEach((item) => {
+      if (item.closed_at || item.archived_at) return;
+      if (item.type_code !== "bank_card" || !item.card_account_id) return;
+      const bucket = map.get(item.card_account_id) ?? [];
+      bucket.push(item);
+      map.set(item.card_account_id, bucket);
+    });
+    return map;
+  }, [items]);
   const activeItems = useMemo(
     () => items.filter((item) => !item.archived_at && !item.closed_at),
     [items]
   );
+  const activeItemsForTotals = useMemo(
+    () =>
+      activeItems.filter(
+        (item) => !(item.type_code === "bank_card" && item.card_account_id)
+      ),
+    [activeItems]
+  );
+  const itemTxCounts = useMemo(() => buildItemTransactionCounts(txs), [txs]);
   const visibleItems = useMemo(
     () =>
       items.filter((item) => {
@@ -640,10 +694,22 @@ export default function Page() {
     () => activeItems.filter((item) => item.kind === "ASSET"),
     [activeItems]
   );
-  const bankAccountItems = useMemo(
-    () => activeAssetItems.filter((item) => item.type_code === "bank_account"),
-    [activeAssetItems]
-  );
+  const bankAccountItems = useMemo(() => {
+    const filtered = activeAssetItems.filter((item) => {
+      if (item.type_code !== "bank_account") return false;
+      if (bankId && item.bank_id !== bankId) return false;
+      if (currencyCode && item.currency_code !== currencyCode) return false;
+      return true;
+    });
+    const selectedAccountId = cardAccountId ? Number(cardAccountId) : null;
+    if (selectedAccountId) {
+      const linked = itemsById.get(selectedAccountId);
+      if (linked && !filtered.some((item) => item.id === linked.id)) {
+        filtered.push(linked);
+      }
+    }
+    return filtered;
+  }, [activeAssetItems, bankId, cardAccountId, currencyCode, itemsById]);
   const depositEndDateText = useMemo(() => {
     if (!openDate || !depositTermDays) return "";
     const days = Number(depositTermDays);
@@ -803,124 +869,124 @@ export default function Page() {
 
   const cashTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const investmentTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "ASSET" && INVESTMENT_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const thirdPartyDebtTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "ASSET" && THIRD_PARTY_DEBT_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const realEstateTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "ASSET" && REAL_ESTATE_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const transportTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "ASSET" && TRANSPORT_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const valuablesTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "ASSET" && VALUABLES_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const pensionTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "ASSET" && PENSION_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const otherAssetTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const creditLiabilityTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter(
           (x) => x.kind === "LIABILITY" && CREDIT_LIABILITY_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const thirdPartyLoanTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter(
           (x) => x.kind === "LIABILITY" && THIRD_PARTY_LOAN_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const taxLiabilityTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter((x) => x.kind === "LIABILITY" && TAX_LIABILITY_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const utilityLiabilityTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter(
           (x) => x.kind === "LIABILITY" && UTILITY_LIABILITY_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const legalLiabilityTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter(
           (x) => x.kind === "LIABILITY" && LEGAL_LIABILITY_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   const otherLiabilityTotal = useMemo(
     () =>
-      activeItems
+      activeItemsForTotals
         .filter(
           (x) => x.kind === "LIABILITY" && OTHER_LIABILITY_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
-    [activeItems, rateByCode]
+    [activeItemsForTotals, rateByCode]
   );
 
   useEffect(() => {
@@ -945,6 +1011,15 @@ export default function Page() {
       setError(e?.message ?? "Ошибка загрузки");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadTransactions() {
+    try {
+      const data = await fetchTransactions();
+      setTxs(data);
+    } catch {
+      setTxs([]);
     }
   }
 
@@ -982,6 +1057,7 @@ export default function Page() {
   useEffect(() => {
     if (session) {
       loadItems();
+      loadTransactions();
       loadCurrencies();
       loadFxRates();
       loadBanks();
@@ -1022,6 +1098,13 @@ export default function Page() {
     if (cardLast4) setCardLast4("");
     if (cardAccountId) setCardAccountId("");
   }, [showBankCardFields, cardLast4, cardAccountId]);
+
+  useEffect(() => {
+    if (!showBankCardFields) return;
+    if (!cardAccountId) return;
+    const selectedAccount = itemsById.get(Number(cardAccountId));
+    if (!selectedAccount) setCardAccountId("");
+  }, [cardAccountId, itemsById, showBankCardFields]);
 
   useEffect(() => {
     if (showDepositFields) return;
@@ -1207,6 +1290,26 @@ export default function Page() {
       return;
     }
 
+    if (showBankCardFields && cardAccountId) {
+      const linkedAccount = itemsById.get(Number(cardAccountId));
+      if (!linkedAccount) {
+        setFormError("Привязанный счет не найден.");
+        return;
+      }
+      if (!bankId) {
+        setFormError("Укажите банк карты.");
+        return;
+      }
+      if (linkedAccount.bank_id !== bankId) {
+        setFormError("Банк карты должен совпадать с банком счета.");
+        return;
+      }
+      if (linkedAccount.currency_code !== currencyCode) {
+        setFormError("Валюта карты должна совпадать с валютой счета.");
+        return;
+      }
+    }
+
     let depositTermDaysValue: number | null = null;
     if (showDepositFields && depositTermDays.trim()) {
       const parsed = Number(depositTermDays);
@@ -1231,7 +1334,10 @@ export default function Page() {
       interestRateValue = parsed;
     }
 
-    const cents = parseRubToCents(amountStr);
+    const amountValue = hideInitialAmountField
+      ? amountStr.trim() || "0"
+      : amountStr;
+    const cents = parseRubToCents(amountValue);
     if (!Number.isFinite(cents) || cents < 0) {
       setFormError("Сумма должна быть числом (например 1234,56)");
       return;
@@ -1261,7 +1367,7 @@ export default function Page() {
 
       if (showBankCardFields) {
         if (trimmedCardLast4) payload.card_last4 = trimmedCardLast4;
-        if (cardAccountId) payload.card_account_id = Number(cardAccountId);
+        payload.card_account_id = cardAccountId ? Number(cardAccountId) : null;
       }
 
       if (showDepositFields && depositTermDaysValue !== null) {
@@ -1281,7 +1387,26 @@ export default function Page() {
       }
 
       if (editingItem) {
-        await updateItem(editingItem.id, payload);
+        const nextCardAccountId =
+          payload.card_account_id !== undefined ? payload.card_account_id : null;
+        const isCardLinkChange =
+          editingItem.type_code === "bank_card" &&
+          nextCardAccountId &&
+          nextCardAccountId !== editingItem.card_account_id;
+        if (isCardLinkChange) {
+          const confirmed = window.confirm(
+            "Все транзакции по карте будут удалены и карта будет привязана к счету. Продолжить?"
+          );
+          if (!confirmed) {
+            setLoading(false);
+            return;
+          }
+        }
+        await updateItem(
+          editingItem.id,
+          payload,
+          isCardLinkChange ? { purgeCardTransactions: true } : undefined
+        );
       } else {
         await createItem(payload);
       }
@@ -1313,11 +1438,27 @@ export default function Page() {
     }
   }
 
-  async function onClose(id: number) {
+  async function onClose(item: ItemOut) {
     setLoading(true);
     setError(null);
     try {
-      await closeItem(id);
+      if (item.type_code === "bank_account") {
+        const linkedCards = linkedCardsByAccountId.get(item.id) ?? [];
+        if (linkedCards.length > 0) {
+          const confirmed = window.confirm(
+            "К счету привязаны активные карты. Закрыть счет вместе с привязанными картами?"
+          );
+          if (!confirmed) {
+            setLoading(false);
+            return;
+          }
+          await closeItem(item.id, { closeCards: true });
+        } else {
+          await closeItem(item.id);
+        }
+      } else {
+        await closeItem(item.id);
+      }
       await loadItems();
     } catch (e: any) {
       setError(e?.message ?? "Не удалось закрыть счет");
@@ -1341,6 +1482,32 @@ export default function Page() {
     icon?: React.ComponentType<{ className?: string; strokeWidth?: number }>;
     onAdd?: () => void;
   }) {
+    const accountIds = new Set<number>();
+    categoryItems.forEach((item) => {
+      if (item.type_code === "bank_account") accountIds.add(item.id);
+    });
+    const linkedCardsByAccountId = new Map<number, ItemOut[]>();
+    const groupedCardIds = new Set<number>();
+    categoryItems.forEach((item) => {
+      if (item.type_code !== "bank_card" || !item.card_account_id) return;
+      if (!accountIds.has(item.card_account_id)) return;
+      const bucket = linkedCardsByAccountId.get(item.card_account_id) ?? [];
+      bucket.push(item);
+      linkedCardsByAccountId.set(item.card_account_id, bucket);
+      groupedCardIds.add(item.id);
+    });
+    const orderedItems: ItemOut[] = [];
+    categoryItems.forEach((item) => {
+      if (item.type_code === "bank_account") {
+        orderedItems.push(item);
+        const linked = linkedCardsByAccountId.get(item.id) ?? [];
+        orderedItems.push(...linked);
+        return;
+      }
+      if (groupedCardIds.has(item.id)) return;
+      orderedItems.push(item);
+    });
+
     return (
       <Card className="pb-0">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1363,7 +1530,7 @@ export default function Page() {
           )}
         </CardHeader>
         <CardContent className="px-0">
-          {categoryItems.length === 0 ? (
+          {orderedItems.length === 0 ? (
             <div className="h-24 px-4 flex items-center justify-center text-muted-foreground">
               Пока нет записей
             </div>
@@ -1397,13 +1564,14 @@ export default function Page() {
               </TableHeader>
 
               <TableBody>
-                {categoryItems.map((it) => {
+                {orderedItems.map((it) => {
                   const typeLabel = (it.kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES).find(
                     (t) => t.code === it.type_code
                   )?.label || it.type_code;
                   const typeMeta = typeLabel;
                   const rate = rateByCode[it.currency_code];
                   const rubEquivalent = getRubEquivalentCents(it);
+                  const displayBalanceCents = getItemDisplayBalanceCents(it);
                   const currencyCode = it.currency_code || "";
                   const bank = it.bank_id ? banksById.get(it.bank_id) ?? null : null;
                   const bankLogoUrl = bank?.logo_url ?? null;
@@ -1411,9 +1579,17 @@ export default function Page() {
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
                   const isArchived = Boolean(it.archived_at);
                   const isClosed = Boolean(it.closed_at);
+                  const isLinkedCard = it.type_code === "bank_card" && Boolean(it.card_account_id);
                   const canEdit = !isArchived && !isClosed;
-                  const canClose = !isArchived && !isClosed && it.current_value_rub === 0;
+                  const canClose =
+                    !isArchived &&
+                    !isClosed &&
+                    (it.type_code === "bank_card" || it.current_value_rub === 0);
                   const canDelete = !isArchived;
+                  const linkedAccount =
+                    it.type_code === "bank_card" && it.card_account_id
+                      ? itemsById.get(it.card_account_id)
+                      : null;
                   const rowToneClass = isArchived
                     ? "bg-rose-50/80"
                     : isClosed
@@ -1440,7 +1616,12 @@ export default function Page() {
                       key={it.id}
                       className={["border-b-2 border-border/70", rowToneClass].join(" ")}
                     >
-                      <TableCell className="w-40 min-w-40 pl-6 whitespace-normal break-words">
+                      <TableCell
+                        className={[
+                          "w-40 min-w-40 whitespace-normal break-words",
+                          isLinkedCard ? "pl-12" : "pl-6",
+                        ].join(" ")}
+                      >
                         <div className="flex items-center gap-2">
                           {TypeIcon && (
                             <TypeIcon
@@ -1457,6 +1638,13 @@ export default function Page() {
                             <span className={["text-xs leading-tight", mutedToneClass].join(" ")}>
                               {typeMeta}
                             </span>
+                            {linkedAccount ? (
+                              <span
+                                className={["text-xs leading-tight", mutedToneClass].join(" ")}
+                              >
+                                Привязана к: {linkedAccount.name}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </TableCell>
@@ -1466,7 +1654,7 @@ export default function Page() {
                           " "
                         )}
                       >
-                        {bankLogoUrl ? (
+                        {!isLinkedCard && bankLogoUrl ? (
                           <img
                             src={bankLogoUrl}
                             alt={bankName}
@@ -1484,7 +1672,9 @@ export default function Page() {
                           " "
                         )}
                       >
-                        {currencyCode ? (
+                        {isLinkedCard ? (
+                          "-"
+                        ) : currencyCode ? (
                           <span
                             className={[
                               "inline-flex min-w-10 items-center justify-center rounded-full px-1.5 py-[1px] text-[11px] font-semibold uppercase",
@@ -1511,9 +1701,11 @@ export default function Page() {
                             : "",
                         ].join(" ")}
                       >
-                        {isLiability
-                          ? `-${formatAmount(it.current_value_rub)}`
-                          : formatAmount(it.current_value_rub)}
+                        {isLinkedCard
+                          ? "-"
+                          : isLiability
+                          ? `-${formatAmount(displayBalanceCents)}`
+                          : formatAmount(displayBalanceCents)}
                       </TableCell>
 
                       <TableCell
@@ -1521,7 +1713,7 @@ export default function Page() {
                           " "
                         )}
                       >
-                        {rate ? formatRate(rate) : "-"}
+                        {isLinkedCard ? "-" : rate ? formatRate(rate) : "-"}
                       </TableCell>
 
                       <TableCell
@@ -1536,7 +1728,9 @@ export default function Page() {
                             : "",
                         ].join(" ")}
                       >
-                        {rubEquivalent === null
+                        {isLinkedCard
+                          ? "-"
+                          : rubEquivalent === null
                           ? "-"
                           : isLiability
                           ? `-${formatRub(rubEquivalent)}`
@@ -1580,7 +1774,7 @@ export default function Page() {
                               Редактировать
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onSelect={() => onClose(it.id)}
+                              onSelect={() => onClose(it)}
                               disabled={!canClose}
                             >
                               <Archive className="h-4 w-4" />
@@ -1882,32 +2076,38 @@ export default function Page() {
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Привязка дебетовой карты к счету</Label>
-                  <Select
-                    value={cardAccountId}
-                    onValueChange={(value) =>
-                      setCardAccountId(value === "__none" ? "" : value)
-                    }
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                      <SelectValue placeholder="Выберите счет" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">Не выбрано</SelectItem>
-                      {bankAccountItems.map((item) => (
-                        <SelectItem key={item.id} value={String(item.id)}>
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium">{item.name}</span>
-                            {item.account_last7 && (
-                              <span className="text-xs text-muted-foreground">
-                                Последние 7 цифр: {item.account_last7}
-                              </span>
-                            )}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>Привязка карты к банковскому счету</Label>
+                  <ItemSelector
+                    items={bankAccountItems}
+                    selectedIds={cardAccountId ? [Number(cardAccountId)] : []}
+                    onChange={(ids) => {
+                      const nextId = ids[0] ?? null;
+                      if (!nextId) {
+                        setCardAccountId("");
+                        return;
+                      }
+                      setCardAccountId(String(nextId));
+                      const account = itemsById.get(nextId);
+                      if (account) {
+                        setCurrencyCode(account.currency_code ?? "RUB");
+                        setBankId(account.bank_id ?? null);
+                        if (account.bank_id) {
+                          const name = banksById.get(account.bank_id)?.name ?? "";
+                          setBankSearch(name);
+                        } else {
+                          setBankSearch("");
+                        }
+                      }
+                    }}
+                    selectionMode="single"
+                    placeholder="Выберите счет"
+                    clearLabel="Не выбрано"
+                    getItemTypeLabel={getItemTypeLabel}
+                    getBankLogoUrl={itemBankLogoUrl}
+                    getBankName={itemBankName}
+                    itemCounts={itemTxCounts}
+                    ariaLabel="Привязка карты к банковскому счету"
+                  />
                 </div>
               </>
             )}
@@ -2080,20 +2280,22 @@ export default function Page() {
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label>Сумма на дату начала действия</Label>
-              <Input
-                value={amountStr}
-                onChange={(e) => {
-                  const formatted = formatRubInput(e.target.value);
-                  setAmountStr(formatted);
-                }}
-                onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                inputMode="decimal"
-                placeholder="Например: 1 234 567,89"
-                className="border-2 border-border/70 bg-white shadow-none"
-              />
-            </div>
+            {!hideInitialAmountField && (
+              <div className="grid gap-2">
+                <Label>Сумма на дату начала действия</Label>
+                <Input
+                  value={amountStr}
+                  onChange={(e) => {
+                    const formatted = formatRubInput(e.target.value);
+                    setAmountStr(formatted);
+                  }}
+                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                  inputMode="decimal"
+                  placeholder="Например: 1 234 567,89"
+                  className="border-2 border-border/70 bg-white shadow-none"
+                />
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import calendar
 
@@ -12,6 +13,55 @@ from schemas import TransactionChainCreate, TransactionChainOut
 
 router = APIRouter(prefix="/transaction-chains", tags=["transaction-chains"])
 
+
+@dataclass(frozen=True)
+class ResolvedSide:
+    selected_item: Item
+    effective_item: Item
+    card_item: Item | None
+    start_date: date
+
+
+def _resolve_effective_side(
+    db: Session, user: User, item_id: int, role_label: str
+) -> ResolvedSide:
+    item = (
+        db.query(Item)
+        .filter(Item.id == item_id, Item.user_id == user.id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=400, detail=f"Invalid {role_label}_item_id")
+
+    if item.type_code != "bank_card" or not item.card_account_id:
+        return ResolvedSide(
+            selected_item=item,
+            effective_item=item,
+            card_item=None,
+            start_date=item.start_date,
+        )
+
+    account = (
+        db.query(Item)
+        .filter(Item.id == item.card_account_id, Item.user_id == user.id)
+        .first()
+    )
+    if not account or account.type_code != "bank_account" or account.kind != "ASSET":
+        raise HTTPException(status_code=400, detail="Invalid card_account_id")
+    if account.currency_code != item.currency_code:
+        raise HTTPException(
+            status_code=400, detail="Card and account currencies must match"
+        )
+    if account.bank_id != item.bank_id:
+        raise HTTPException(status_code=400, detail="Card and account banks must match")
+
+    start_date = max(item.start_date, account.start_date)
+    return ResolvedSide(
+        selected_item=item,
+        effective_item=account,
+        card_item=item,
+        start_date=start_date,
+    )
 
 def iter_daily(start: date, end: date):
     current = start
@@ -123,20 +173,16 @@ def create_transaction_chain(
     user: User = Depends(get_current_user),
 ):
     resolve_counterparty(db, user, data.counterparty_id)
-    primary = (
-        db.query(Item)
-        .filter(Item.id == data.primary_item_id, Item.user_id == user.id)
-        .first()
-    )
-    if not primary:
-        raise HTTPException(status_code=400, detail="Invalid primary_item_id")
+    primary_side = _resolve_effective_side(db, user, data.primary_item_id, "primary")
+    primary = primary_side.effective_item
 
-    if data.start_date < primary.start_date:
+    if data.start_date < primary_side.start_date:
         raise HTTPException(
             status_code=400,
             detail="start_date cannot be earlier than the primary item start date",
         )
 
+    counter_side = None
     counter = None
     amount_counterparty = None
 
@@ -146,16 +192,13 @@ def create_transaction_chain(
                 status_code=400,
                 detail="counterparty_item_id is required for TRANSFER",
             )
-        counter = (
-            db.query(Item)
-            .filter(Item.id == data.counterparty_item_id, Item.user_id == user.id)
-            .first()
-        )
-        if not counter:
-            raise HTTPException(status_code=400, detail="Invalid counterparty_item_id")
+        counter_side = _resolve_effective_side(db, user, data.counterparty_item_id, "counterparty")
+        counter = counter_side.effective_item
+        if counter_side.selected_item.id == primary_side.selected_item.id:
+            raise HTTPException(status_code=400, detail="Transfer items must be different")
         if counter.id == primary.id:
             raise HTTPException(status_code=400, detail="Transfer items must be different")
-        if data.start_date < counter.start_date:
+        if data.start_date < counter_side.start_date:
             raise HTTPException(
                 status_code=400,
                 detail="start_date cannot be earlier than the counterparty start date",
@@ -209,10 +252,12 @@ def create_transaction_chain(
         monthly_day=data.monthly_day,
         monthly_rule=data.monthly_rule,
         interval_days=data.interval_days,
-        primary_item_id=data.primary_item_id,
-        counterparty_item_id=data.counterparty_item_id
-        if data.direction == "TRANSFER"
-        else None,
+        primary_item_id=primary.id,
+        primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
+        counterparty_item_id=counter.id if data.direction == "TRANSFER" else None,
+        counterparty_card_item_id=(
+            counter_side.card_item.id if counter_side and counter_side.card_item else None
+        ),
         counterparty_id=data.counterparty_id,
         amount_rub=data.amount_rub,
         amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
@@ -231,10 +276,12 @@ def create_transaction_chain(
                 user_id=user.id,
                 chain_id=chain.id,
                 transaction_date=datetime.combine(tx_date, datetime.min.time()),
-                primary_item_id=data.primary_item_id,
-                counterparty_item_id=data.counterparty_item_id
-                if data.direction == "TRANSFER"
-                else None,
+                primary_item_id=primary.id,
+                primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
+                counterparty_item_id=counter.id if data.direction == "TRANSFER" else None,
+                counterparty_card_item_id=(
+                    counter_side.card_item.id if counter_side and counter_side.card_item else None
+                ),
                 counterparty_id=data.counterparty_id,
                 amount_rub=data.amount_rub,
                 amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,

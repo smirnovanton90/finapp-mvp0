@@ -45,6 +45,7 @@ import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ItemSelector } from "@/components/item-selector";
 import {
   Dialog,
   DialogContent,
@@ -84,6 +85,7 @@ import {
   fetchCounterparties,
   fetchItems,
   fetchFxRatesBatch,
+  fetchTransactions,
   fetchTransactionsPage,
   BankOut,
   CounterpartyOut,
@@ -94,6 +96,8 @@ import {
   updateTransaction,
   updateTransactionStatus,
 } from "@/lib/api";
+import { buildItemTransactionCounts } from "@/lib/item-utils";
+import { getItemTypeLabel } from "@/lib/item-types";
 import {
   buildCategoryLookup,
   buildCategoryMaps,
@@ -211,79 +215,6 @@ function getCounterpartyFilterText(counterparty: CounterpartyOut) {
   const base = buildCounterpartyName(counterparty);
   const extra = counterparty.entity_type === "LEGAL" ? counterparty.full_name : null;
   return [base, extra].filter(Boolean).join(" ");
-}
-
-const ITEM_TYPE_LABELS: Record<string, string> = {
-  cash: "Наличные",
-  bank_account: "Банковский счёт",
-  bank_card: "Банковская карта",
-  savings_account: "Накопительный счет",
-  e_wallet: "Электронный кошелек",
-  brokerage: "Брокерский счёт",
-  deposit: "Вклад",
-  securities: "Акции",
-  bonds: "Облигации",
-  etf: "ETF",
-  bpif: "БПИФ",
-  pif: "ПИФ",
-  iis: "ИИС",
-  precious_metals: "Драгоценные металлы",
-  crypto: "Криптовалюта",
-  loan_to_third_party: "Предоставленные займы третьим лицам",
-  third_party_receivables: "Долги третьих лиц",
-  real_estate: "Квартира",
-  townhouse: "Дом / таунхаус",
-  land_plot: "Земельный участок",
-  garage: "Гараж / машиноместо",
-  commercial_real_estate: "Коммерческая недвижимость",
-  real_estate_share: "Доля в недвижимости",
-  car: "Автомобиль",
-  motorcycle: "Мотоцикл",
-  boat: "Катер / лодка",
-  trailer: "Прицеп",
-  special_vehicle: "Спецтехника",
-  jewelry: "Драгоценности",
-  electronics: "Техника и электроника",
-  art: "Ценные предметы искусства",
-  collectibles: "Коллекционные вещи",
-  other_valuables: "Прочие ценные вещи",
-  npf: "НПФ",
-  investment_life_insurance: "ИСЖ",
-  business_share: "Доля в бизнесе",
-  sole_proprietor: "ИП (оценка бизнеса)",
-  other_asset: "Прочие активы",
-  credit_card_debt: "Задолженность по кредитной карте",
-  consumer_loan: "Потребительский кредит",
-  mortgage: "Ипотека",
-  car_loan: "Автокредит",
-  education_loan: "Образовательный кредит",
-  installment: "Рассрочка",
-  microloan: "МФО",
-  private_loan: "Полученные займы от третьих лиц",
-  third_party_payables: "Долги третьим лицам",
-  tax_debt: "Налоги и обязательные платежи",
-  personal_income_tax_debt: "Задолженность по НДФЛ",
-  property_tax_debt: "Задолженность по налогу на имущество",
-  land_tax_debt: "Задолженность по земельному налогу",
-  transport_tax_debt: "Задолженность по транспортному налогу",
-  fns_debt: "Задолженности перед ФНС",
-  utilities_debt: "Задолженность по ЖКХ",
-  telecom_debt: "Задолженность за интернет / связь",
-  traffic_fines_debt: "Задолженность по штрафам (ГИБДД и прочие)",
-  enforcement_debt: "Задолженность по исполнительным листам",
-  alimony_debt: "Задолженность по алиментам",
-  court_debt: "Судебные задолженности",
-  court_fine_debt: "Штрафы по решениям суда",
-  business_liability: "Бизнес-обязательства",
-  other_liability: "Прочие обязательства",
-};
-
-function getItemTypeLabel(item: ItemOut) {
-  return ITEM_TYPE_LABELS[item.type_code] ?? item.type_code;
-}
-
-function normalizeItemSearch(value: string) {
-  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
 }
 
 function formatAmount(valueInCents: number) {
@@ -1175,19 +1106,22 @@ function TransactionCardRow({
   const isPlanned = tx.transaction_type === "PLANNED";
   const isConfirmed = tx.status === "CONFIRMED";
   const isRealized = tx.status === "REALIZED";
+  const primaryDisplayId = tx.primary_card_item_id ?? tx.primary_item_id;
+  const counterpartyDisplayId =
+    tx.counterparty_card_item_id ?? tx.counterparty_item_id;
 
   const amountValue = formatAmount(tx.amount_rub);
   const counterpartyAmountValue = formatAmount(tx.amount_counterparty ?? tx.amount_rub);
-  const currencyCode = itemCurrencyCode(tx.primary_item_id);
+  const currencyCode = itemCurrencyCode(primaryDisplayId);
   const rubEquivalent = getRubEquivalentCents(tx, currencyCode);
   const showRubEquivalent =
     !isTransfer && currencyCode && currencyCode !== "RUB" && rubEquivalent !== null;
-  const primaryCurrency = itemCurrencyCode(tx.primary_item_id);
-  const counterpartyCurrency = itemCurrencyCode(tx.counterparty_item_id);
-  const primaryBankLogo = itemBankLogoUrl(tx.primary_item_id);
-  const primaryBankName = itemBankName(tx.primary_item_id);
-  const counterpartyBankLogo = itemBankLogoUrl(tx.counterparty_item_id);
-  const counterpartyBankName = itemBankName(tx.counterparty_item_id);
+  const primaryCurrency = itemCurrencyCode(primaryDisplayId);
+  const counterpartyCurrency = itemCurrencyCode(counterpartyDisplayId);
+  const primaryBankLogo = itemBankLogoUrl(primaryDisplayId);
+  const primaryBankName = itemBankName(primaryDisplayId);
+  const counterpartyBankLogo = itemBankLogoUrl(counterpartyDisplayId);
+  const counterpartyBankName = itemBankName(counterpartyDisplayId);
   const primaryAmountCents = tx.amount_rub;
   const counterpartyAmountCents = tx.amount_counterparty ?? tx.amount_rub;
   const isCrossWithRub =
@@ -1331,7 +1265,7 @@ function TransactionCardRow({
                     -{amountValue}
                   </div>
                   <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                    {itemCurrencyCode(tx.primary_item_id)}
+                    {itemCurrencyCode(primaryDisplayId)}
                   </div>
                 </div>
               </div>
@@ -1347,7 +1281,7 @@ function TransactionCardRow({
                 <div
                   className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
                 >
-                  {itemName(tx.primary_item_id)}
+                  {itemName(primaryDisplayId)}
                 </div>
               </div>
             </div>
@@ -1372,7 +1306,7 @@ function TransactionCardRow({
                     +{counterpartyAmountValue}
                   </div>
                   <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                    {itemCurrencyCode(tx.counterparty_item_id)}
+                    {itemCurrencyCode(counterpartyDisplayId)}
                   </div>
                 </div>
               </div>
@@ -1388,7 +1322,7 @@ function TransactionCardRow({
                 <div
                   className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
                 >
-                  {itemName(tx.counterparty_item_id)}
+                  {itemName(counterpartyDisplayId)}
                 </div>
               </div>
             </div>
@@ -1467,7 +1401,7 @@ function TransactionCardRow({
                 <div
                   className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
                 >
-                  {itemName(tx.primary_item_id)}
+                  {itemName(primaryDisplayId)}
                 </div>
               </div>
             </div>
@@ -1656,6 +1590,7 @@ export function TransactionsView({
   const initialDateTo = isOverduePreset ? getYesterdayDateKey() : "";
 
   const [items, setItems] = useState<ItemOut[]>([]);
+  const [itemTxCounts, setItemTxCounts] = useState<Map<number, number>>(new Map());
   const [banks, setBanks] = useState<BankOut[]>([]);
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [counterpartyLoading, setCounterpartyLoading] = useState(false);
@@ -1697,7 +1632,7 @@ export function TransactionsView({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState(initialDateTo);
   const [commentFilter, setCommentFilter] = useState("");
-  const [itemFilterQuery, setItemFilterQuery] = useState("");
+  const [itemFilterResetKey, setItemFilterResetKey] = useState(0);
   const [counterpartyFilterQuery, setCounterpartyFilterQuery] = useState("");
   const [isCounterpartyFilterOpen, setIsCounterpartyFilterOpen] = useState(false);
   const [selectedCounterpartyIds, setSelectedCounterpartyIds] = useState<Set<number>>(
@@ -1713,7 +1648,6 @@ export function TransactionsView({
   >(() => new Set());
   const [categoryFilterQuery, setCategoryFilterQuery] = useState("");
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
-  const [isItemsFilterOpen, setIsItemsFilterOpen] = useState(false);
   const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
   const [selectedCurrencyCodes, setSelectedCurrencyCodes] = useState<Set<string>>(
     () => new Set()
@@ -2053,9 +1987,6 @@ export function TransactionsView({
     : false;
   const isImportSupported = isImportBankReady || isImportBankInProgress;
   const isImportFormDisabled = isImporting;
-  const sortedItems = useMemo(() => {
-    return [...activeItems].sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [activeItems]);
   const assetItems = useMemo(
     () => activeItems.filter((item) => item.kind === "ASSET"),
     [activeItems]
@@ -2080,6 +2011,10 @@ export function TransactionsView({
     if (!id) return "-";
     return itemsById.get(id)?.currency_code ?? "-";
   };
+  const getDisplayPrimaryItemId = (tx: TransactionOut) =>
+    tx.primary_card_item_id ?? tx.primary_item_id;
+  const getDisplayCounterpartyItemId = (tx: TransactionOut) =>
+    tx.counterparty_card_item_id ?? tx.counterparty_item_id;
   const itemBank = (id: number | null | undefined) => {
     if (!id) return null;
     const bankId = itemsById.get(id)?.bank_id;
@@ -2089,35 +2024,41 @@ export function TransactionsView({
   const itemBankLogoUrl = (id: number | null | undefined) =>
     itemBank(id)?.logo_url ?? null;
   const itemBankName = (id: number | null | undefined) => itemBank(id)?.name ?? "";
+  const getItemDisplayBalanceCents = useCallback(
+    (item: ItemOut) => {
+      if (item.type_code === "bank_card" && item.card_account_id) {
+        const linked = itemsById.get(item.card_account_id);
+        if (linked) return linked.current_value_rub;
+      }
+      return item.current_value_rub;
+    },
+    [itemsById]
+  );
+  const getEffectiveItemMeta = (itemId: number | null | undefined) => {
+    if (!itemId) return null;
+    const selected = itemsById.get(itemId);
+    if (!selected) return null;
+    let effective = selected;
+    let startDate = selected.start_date || "";
+    if (selected.type_code === "bank_card" && selected.card_account_id) {
+      const account = itemsById.get(selected.card_account_id);
+      if (account) {
+        effective = account;
+        if (account.start_date && startDate) {
+          startDate = account.start_date > startDate ? account.start_date : startDate;
+        } else {
+          startDate = account.start_date || startDate;
+        }
+      }
+    }
+    const currencyCode = effective.currency_code || selected.currency_code || "";
+    return { selected, effective, startDate, currencyCode };
+  };
   const counterpartyLabel = (id: number | null | undefined) => {
     if (!id) return "";
     const counterparty = counterpartiesById.get(id);
     return counterparty ? buildCounterpartyName(counterparty) : "";
   };
-  const normalizedItemFilterQuery = useMemo(
-    () => normalizeItemSearch(itemFilterQuery),
-    [itemFilterQuery]
-  );
-  const filteredItemOptions = useMemo(() => {
-    if (!normalizedItemFilterQuery) return sortedItems;
-    return sortedItems.filter((item) => {
-      const bankName = item.bank_id ? banksById.get(item.bank_id)?.name ?? "" : "";
-      const searchText = [
-        item.name,
-        getItemTypeLabel(item),
-        item.currency_code,
-        bankName,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      return normalizeItemSearch(searchText).includes(normalizedItemFilterQuery);
-    });
-  }, [banksById, normalizedItemFilterQuery, sortedItems]);
-  const selectedItemFilterOptions = useMemo(() => {
-    return Array.from(selectedItemIds)
-      .map((id) => itemsById.get(id))
-      .filter(Boolean) as ItemOut[];
-  }, [itemsById, selectedItemIds]);
 
   const getFxRateForDate = (date: string, currencyCode: string) => {
     if (!currencyCode || currencyCode === "RUB") return 1;
@@ -2143,10 +2084,10 @@ export function TransactionsView({
   const primarySelectItems = isLoanRepayment ? assetItems : activeItems;
   const counterpartySelectItems = isLoanRepayment ? liabilityItems : activeItems;
   const primaryCurrencyCode = primaryItemId
-    ? itemsById.get(primaryItemId)?.currency_code ?? null
+    ? getEffectiveItemMeta(primaryItemId)?.currencyCode ?? null
     : null;
   const counterpartyCurrencyCode = counterpartyItemId
-    ? itemsById.get(counterpartyItemId)?.currency_code ?? null
+    ? getEffectiveItemMeta(counterpartyItemId)?.currencyCode ?? null
     : null;
   const isCrossCurrencyTransfer =
     isTransfer &&
@@ -2287,8 +2228,8 @@ export function TransactionsView({
     setDate(getDateKey(tx.transaction_date));
     setDirection(tx.direction);
     setFormTransactionType(tx.transaction_type);
-    setPrimaryItemId(tx.primary_item_id);
-    setCounterpartyItemId(tx.counterparty_item_id);
+    setPrimaryItemId(getDisplayPrimaryItemId(tx));
+    setCounterpartyItemId(getDisplayCounterpartyItemId(tx));
     setCounterpartyId(tx.counterparty_id);
     setCounterpartySearch(counterpartyLabel(tx.counterparty_id));
     setAmountStr(formatCentsForInput(tx.amount_rub));
@@ -2320,9 +2261,9 @@ export function TransactionsView({
     setDate(getDateKey(tx.transaction_date));
     setDirection(tx.direction);
     setFormTransactionType(tx.transaction_type);
-    setPrimaryItemId(tx.primary_item_id);
+    setPrimaryItemId(getDisplayPrimaryItemId(tx));
     setCounterpartyItemId(
-      tx.direction === "TRANSFER" ? tx.counterparty_item_id : null
+      tx.direction === "TRANSFER" ? getDisplayCounterpartyItemId(tx) : null
     );
     setCounterpartyId(tx.counterparty_id);
     setCounterpartySearch(counterpartyLabel(tx.counterparty_id));
@@ -2355,9 +2296,9 @@ export function TransactionsView({
     setDate(getDateKey(tx.transaction_date));
     setDirection(tx.direction);
     setFormTransactionType("ACTUAL");
-    setPrimaryItemId(tx.primary_item_id);
+    setPrimaryItemId(getDisplayPrimaryItemId(tx));
     setCounterpartyItemId(
-      tx.direction === "TRANSFER" ? tx.counterparty_item_id : null
+      tx.direction === "TRANSFER" ? getDisplayCounterpartyItemId(tx) : null
     );
     setCounterpartyId(tx.counterparty_id);
     setCounterpartySearch(counterpartyLabel(tx.counterparty_id));
@@ -2386,8 +2327,8 @@ export function TransactionsView({
     const baseline = {
       date: getDateKey(baselineTx.transaction_date),
       direction: baselineTx.direction,
-      primaryItemId: baselineTx.primary_item_id,
-      counterpartyItemId: baselineTx.counterparty_item_id,
+      primaryItemId: getDisplayPrimaryItemId(baselineTx),
+      counterpartyItemId: getDisplayCounterpartyItemId(baselineTx),
       counterpartyId: baselineTx.counterparty_id,
       amountStr: formatCentsForInput(baselineTx.amount_rub),
       amountCounterpartyStr:
@@ -2506,15 +2447,17 @@ export function TransactionsView({
     for (const tx of targets) {
       const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
       const nextDate = changes.hasDateChanged ? date : getDateKey(tx.transaction_date);
+      const basePrimaryItemId = getDisplayPrimaryItemId(tx);
+      const baseCounterpartyItemId = getDisplayCounterpartyItemId(tx);
       const nextPrimaryItemId = changes.hasPrimaryItemChanged
         ? primaryItemId
-        : tx.primary_item_id;
-      const resolvedPrimaryItemId = nextPrimaryItemId ?? tx.primary_item_id;
+        : basePrimaryItemId;
+      const resolvedPrimaryItemId = nextPrimaryItemId ?? basePrimaryItemId;
       const nextCounterpartyItemId =
         nextDirection === "TRANSFER"
           ? changes.hasCounterpartyItemChanged
             ? counterpartyItemId
-            : tx.counterparty_item_id
+            : baseCounterpartyItemId
           : null;
 
       if (!resolvedPrimaryItemId) {
@@ -2531,8 +2474,8 @@ export function TransactionsView({
       }
 
       if (changes.hasDateChanged || changes.hasPrimaryItemChanged) {
-        const primaryItem = itemsById.get(resolvedPrimaryItemId);
-        if (primaryItem?.start_date && nextDate < primaryItem.start_date) {
+        const primaryMeta = getEffectiveItemMeta(resolvedPrimaryItemId);
+        if (primaryMeta?.startDate && nextDate < primaryMeta.startDate) {
           return "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства.";
         }
       }
@@ -2544,21 +2487,17 @@ export function TransactionsView({
           changes.hasDirectionChanged)
       ) {
         if (nextCounterpartyItemId) {
-          const counterpartyItem = itemsById.get(nextCounterpartyItemId);
-          if (counterpartyItem?.start_date && nextDate < counterpartyItem.start_date) {
+          const counterpartyMeta = getEffectiveItemMeta(nextCounterpartyItemId);
+          if (counterpartyMeta?.startDate && nextDate < counterpartyMeta.startDate) {
             return "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства.";
           }
         }
       }
 
       const primaryCurrency =
-        resolvedPrimaryItemId != null
-          ? itemsById.get(resolvedPrimaryItemId)?.currency_code
-          : null;
+        getEffectiveItemMeta(resolvedPrimaryItemId)?.currencyCode ?? null;
       const counterpartyCurrency =
-        nextCounterpartyItemId != null
-          ? itemsById.get(nextCounterpartyItemId)?.currency_code
-          : null;
+        getEffectiveItemMeta(nextCounterpartyItemId)?.currencyCode ?? null;
       const isCrossCurrencyTransfer =
         nextDirection === "TRANSFER" &&
         primaryCurrency &&
@@ -2609,28 +2548,26 @@ export function TransactionsView({
           const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
           const baseDate = changes.hasDateChanged ? date : getDateKey(tx.transaction_date);
           const nextDate = mergeDateWithTime(baseDate, tx.transaction_date);
+          const basePrimaryItemId = getDisplayPrimaryItemId(tx);
+          const baseCounterpartyItemId = getDisplayCounterpartyItemId(tx);
           const nextPrimaryItemId = changes.hasPrimaryItemChanged
             ? primaryItemId
-            : tx.primary_item_id;
-          const resolvedPrimaryItemId = nextPrimaryItemId ?? tx.primary_item_id;
+            : basePrimaryItemId;
+          const resolvedPrimaryItemId = nextPrimaryItemId ?? basePrimaryItemId;
           const nextCounterpartyItemId =
             nextDirection === "TRANSFER"
               ? changes.hasCounterpartyItemChanged
                 ? counterpartyItemId
-                : tx.counterparty_item_id
+                : baseCounterpartyItemId
               : null;
           const nextCounterpartyId = changes.hasCounterpartyChanged
             ? counterpartyId
             : tx.counterparty_id;
 
           const primaryCurrency =
-            resolvedPrimaryItemId != null
-              ? itemsById.get(resolvedPrimaryItemId)?.currency_code
-              : null;
+            getEffectiveItemMeta(resolvedPrimaryItemId)?.currencyCode ?? null;
           const counterpartyCurrency =
-            nextCounterpartyItemId != null
-              ? itemsById.get(nextCounterpartyItemId)?.currency_code
-              : null;
+            getEffectiveItemMeta(nextCounterpartyItemId)?.currencyCode ?? null;
           const isCrossCurrencyTransfer =
             nextDirection === "TRANSFER" &&
             primaryCurrency &&
@@ -2648,7 +2585,7 @@ export function TransactionsView({
 
           const payload: TransactionCreate = {
             transaction_date: nextDate,
-            primary_item_id: resolvedPrimaryItemId ?? tx.primary_item_id,
+            primary_item_id: resolvedPrimaryItemId ?? basePrimaryItemId,
             counterparty_item_id: nextCounterpartyItemId,
             counterparty_id: nextCounterpartyId ?? null,
             amount_rub: changes.hasAmountChanged
@@ -2771,6 +2708,7 @@ export function TransactionsView({
     }
     const selectedImportItemId = importItemId;
     const item = itemsById.get(selectedImportItemId);
+    const itemMeta = getEffectiveItemMeta(selectedImportItemId);
     if (!item) {
       setImportError("Выбранный счет недоступен.");
       return;
@@ -2871,7 +2809,7 @@ export function TransactionsView({
               );
             }
           }
-          if (item.start_date && transactionDateKey < item.start_date) {
+          if (itemMeta?.startDate && transactionDateKey < itemMeta.startDate) {
             throw new Error(
               `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
             );
@@ -2963,7 +2901,7 @@ export function TransactionsView({
           }
 
           const transactionDateKey = formatDateForApi(parsedDate);
-          if (item.start_date && transactionDateKey < item.start_date) {
+          if (itemMeta?.startDate && transactionDateKey < itemMeta.startDate) {
             throw new Error(
               `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
             );
@@ -3081,10 +3019,22 @@ export function TransactionsView({
     if (selectedDirections.size === 0) return EMPTY_DIRECTION_ARRAY;
     return Array.from(selectedDirections);
   }, [selectedDirections]);
-  const itemFilterIds = useMemo(() => {
-    if (selectedItemIds.size === 0) return EMPTY_NUMBER_ARRAY;
-    return Array.from(selectedItemIds);
-  }, [selectedItemIds]);
+  const { itemFilterIds, cardItemFilterIds } = useMemo(() => {
+    if (selectedItemIds.size === 0) {
+      return { itemFilterIds: EMPTY_NUMBER_ARRAY, cardItemFilterIds: EMPTY_NUMBER_ARRAY };
+    }
+    const itemIds: number[] = [];
+    const cardIds: number[] = [];
+    selectedItemIds.forEach((id) => {
+      const item = itemsById.get(id);
+      if (item?.type_code === "bank_card" && item.card_account_id) {
+        cardIds.push(id);
+      } else {
+        itemIds.push(id);
+      }
+    });
+    return { itemFilterIds: itemIds, cardItemFilterIds: cardIds };
+  }, [itemsById, selectedItemIds]);
   const counterpartyFilterIds = useMemo(() => {
     if (selectedCounterpartyIds.size === 0) return EMPTY_NUMBER_ARRAY;
     return Array.from(selectedCounterpartyIds);
@@ -3111,6 +3061,7 @@ export function TransactionsView({
         direction: directionFilter,
         transaction_type: transactionTypeFilter,
         item_ids: itemFilterIds,
+        card_item_ids: cardItemFilterIds,
         currency_item_ids: currencyItemIds,
         category_ids: categoryFilterIds,
         counterparty_ids: counterpartyFilterIds,
@@ -3120,6 +3071,7 @@ export function TransactionsView({
       },
     };
   }, [
+    cardItemFilterIds,
     categoryFilterIds,
     commentQuery,
     currencyItemIds,
@@ -3149,6 +3101,15 @@ export function TransactionsView({
       setError(
         e?.message ?? "گ?گç ‘?گ?г?г>г?‘?‘? гْгّг?‘?‘?гْгٌ‘'‘? ‘'‘?гّг?гْгّгَ‘إгٌгٌ."
       );
+    }
+  }, []);
+
+  const loadItemTransactionCounts = useCallback(async () => {
+    try {
+      const txData = await fetchTransactions();
+      setItemTxCounts(buildItemTransactionCounts(txData));
+    } catch {
+      setItemTxCounts(new Map());
     }
   }, []);
 
@@ -3229,7 +3190,8 @@ export function TransactionsView({
   const refreshAfterMutation = useCallback(async () => {
     await loadItems();
     await loadTransactions({ cursor: null, append: false });
-  }, [loadItems, loadTransactions]);
+    await loadItemTransactionCounts();
+  }, [loadItems, loadTransactions, loadItemTransactionCounts]);
 
   async function loadAll() {
     await refreshAfterMutation();
@@ -3260,9 +3222,10 @@ export function TransactionsView({
   useEffect(() => {
     if (!session) return;
     loadItems();
+    loadItemTransactionCounts();
     loadBanks();
     loadCounterparties();
-  }, [session, loadBanks, loadCounterparties, loadItems]);
+  }, [session, loadBanks, loadCounterparties, loadItems, loadItemTransactionCounts]);
 
   useEffect(() => {
     if (!session) return;
@@ -3393,21 +3356,9 @@ export function TransactionsView({
     if (ids.length === 0) return;
     setDeleteIds(ids);
   };
-  const toggleItemSelection = (id: number, checked: boolean) => {
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
-      return next;
-    });
-  };
   const resetItemFilters = () => {
     setSelectedItemIds(new Set());
-    setItemFilterQuery("");
-    setIsItemsFilterOpen(false);
+    setItemFilterResetKey((prev) => prev + 1);
   };
   const toggleAllSelection = (checked: boolean) => {
     setSelectedTxIds((prev) => {
@@ -3565,17 +3516,17 @@ export function TransactionsView({
                           setFormError("Выберите обязательство.");
                           return;
                         }
-                        const primaryItem = itemsById.get(primaryItemId);
-                        if (primaryItem?.start_date && date < primaryItem.start_date) {
+                        const primaryMeta = getEffectiveItemMeta(primaryItemId);
+                        if (primaryMeta?.startDate && date < primaryMeta.startDate) {
                           setFormError(
                             "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
                           );
                           return;
                         }
-                        const counterpartyItem = itemsById.get(counterpartyItemId);
+                        const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
                         if (
-                          counterpartyItem?.start_date &&
-                          date < counterpartyItem.start_date
+                          counterpartyMeta?.startDate &&
+                          date < counterpartyMeta.startDate
                         ) {
                           setFormError(
                             "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
@@ -3583,9 +3534,9 @@ export function TransactionsView({
                           return;
                         }
                         if (
-                          primaryItem?.currency_code &&
-                          counterpartyItem?.currency_code &&
-                          primaryItem.currency_code !== counterpartyItem.currency_code
+                          primaryMeta?.currencyCode &&
+                          counterpartyMeta?.currencyCode &&
+                          primaryMeta.currencyCode !== counterpartyMeta.currencyCode
                         ) {
                           setFormError(
                             "Для погашения кредита выберите актив и обязательство в одной валюте."
@@ -3704,8 +3655,8 @@ export function TransactionsView({
                         setFormError("Выберите актив/обязательство.");
                         return;
                       }
-                      const primaryItem = itemsById.get(primaryItemId);
-                      if (primaryItem?.start_date && date < primaryItem.start_date) {
+                      const primaryMeta = getEffectiveItemMeta(primaryItemId);
+                      if (primaryMeta?.startDate && date < primaryMeta.startDate) {
                         setFormError(
                           "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
                         );
@@ -3720,10 +3671,10 @@ export function TransactionsView({
                         return;
                       }
                       if (isTransfer && counterpartyItemId) {
-                        const counterpartyItem = itemsById.get(counterpartyItemId);
+                        const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
                         if (
-                          counterpartyItem?.start_date &&
-                          date < counterpartyItem.start_date
+                          counterpartyMeta?.startDate &&
+                          date < counterpartyMeta.startDate
                         ) {
                           setFormError(
                             "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
@@ -3939,24 +3890,19 @@ export function TransactionsView({
                           ? "Актив, с которого производится погашение"
                           : "Актив / обязательство"}
                       </Label>
-                      <Select
-                        value={primaryItemId ? String(primaryItemId) : ""}
-                        onValueChange={(v) => setPrimaryItemId(Number(v))}
-                      >
-                        <SelectTrigger
-                          className="border-2 border-border/70 bg-white shadow-none"
-                          disabled={isImportFormDisabled}
-                        >
-                          <SelectValue placeholder="Выберите" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {primarySelectItems.map((it) => (
-                            <SelectItem key={it.id} value={String(it.id)}>
-                              {it.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <ItemSelector
+                        items={primarySelectItems}
+                        selectedIds={primaryItemId ? [primaryItemId] : []}
+                        onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                        selectionMode="single"
+                        placeholder="Выберите"
+                        getItemTypeLabel={getItemTypeLabel}
+                        getBankLogoUrl={itemBankLogoUrl}
+                        getBankName={itemBankName}
+                        getItemBalance={getItemDisplayBalanceCents}
+                        itemCounts={itemTxCounts}
+                        disabled={isImportFormDisabled}
+                      />
                     </div>
 
                     {showCounterpartySelect && (
@@ -3966,27 +3912,22 @@ export function TransactionsView({
                             ? "Обязательство"
                             : "Корреспондирующий актив"}
                         </Label>
-                        <Select
-                          value={
-                            counterpartyItemId ? String(counterpartyItemId) : ""
+                        <ItemSelector
+                          items={counterpartySelectItems.filter(
+                            (it) => it.id !== primaryItemId
+                          )}
+                          selectedIds={
+                            counterpartyItemId ? [counterpartyItemId] : []
                           }
-                          onValueChange={(v) =>
-                            setCounterpartyItemId(Number(v))
-                          }
-                        >
-                          <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                            <SelectValue placeholder="Выберите" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {counterpartySelectItems
-                              .filter((it) => it.id !== primaryItemId)
-                              .map((it) => (
-                                <SelectItem key={it.id} value={String(it.id)}>
-                                  {it.name}
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
+                          onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
+                          selectionMode="single"
+                          placeholder="Выберите"
+                          getItemTypeLabel={getItemTypeLabel}
+                          getBankLogoUrl={itemBankLogoUrl}
+                          getBankName={itemBankName}
+                          getItemBalance={getItemDisplayBalanceCents}
+                          itemCounts={itemTxCounts}
+                        />
                       </div>
                     )}
 
@@ -4410,28 +4351,23 @@ export function TransactionsView({
 
                         <div className="grid gap-2">
                           <Label>Счет</Label>
-                          <Select
-                            value={importItemId ? String(importItemId) : ""}
-                            onValueChange={(v) => {
-                              setImportItemId(Number(v));
+                          <ItemSelector
+                            items={activeItems}
+                            selectedIds={importItemId ? [importItemId] : []}
+                            onChange={(ids) => {
+                              setImportItemId(ids[0] ?? null);
                               setImportError(null);
                             }}
+                            selectionMode="single"
+                            placeholder="Выберите счет"
+                            getItemTypeLabel={getItemTypeLabel}
+                            getBankLogoUrl={itemBankLogoUrl}
+                            getBankName={itemBankName}
+                            getItemBalance={getItemDisplayBalanceCents}
+                            itemCounts={itemTxCounts}
                             disabled={isImportFormDisabled}
-                          >
-                            <SelectTrigger
-                              className="border-2 border-border/70 bg-white shadow-none"
-                              disabled={isImportFormDisabled}
-                            >
-                              <SelectValue placeholder="Выберите счет" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {items.map((it) => (
-                                <SelectItem key={it.id} value={String(it.id)}>
-                                  {it.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            ariaLabel="Счет"
+                          />
                         </div>
 
                         <label className="flex items-center gap-3 px-3 py-2 text-xs text-foreground">
@@ -4471,28 +4407,23 @@ export function TransactionsView({
 
                     <div className="grid gap-2">
                       <Label>Счет</Label>
-                      <Select
-                        value={importItemId ? String(importItemId) : ""}
-                        onValueChange={(v) => {
-                          setImportItemId(Number(v));
+                      <ItemSelector
+                        items={activeItems}
+                        selectedIds={importItemId ? [importItemId] : []}
+                        onChange={(ids) => {
+                          setImportItemId(ids[0] ?? null);
                           setImportError(null);
                         }}
+                        selectionMode="single"
+                        placeholder="Выберите счет"
+                        getItemTypeLabel={getItemTypeLabel}
+                        getBankLogoUrl={itemBankLogoUrl}
+                        getBankName={itemBankName}
+                        getItemBalance={getItemDisplayBalanceCents}
+                        itemCounts={itemTxCounts}
                         disabled={isImportFormDisabled}
-                      >
-                        <SelectTrigger
-                          className="border-2 border-border/70 bg-white shadow-none"
-                          disabled={isImportFormDisabled}
-                        >
-                          <SelectValue placeholder="Выберите счет" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {items.map((it) => (
-                            <SelectItem key={it.id} value={String(it.id)}>
-                              {it.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        ariaLabel="Счет"
+                      />
                     </div>
 
                     <label className="flex items-center gap-3 px-3 py-2 text-xs text-foreground">
@@ -4729,7 +4660,8 @@ export function TransactionsView({
                     )}
                   </div>
                 )}
-              </div><div className="space-y-3">
+              </div>
+              <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="text-sm font-semibold text-foreground">
                     Активы/обязательства
@@ -4743,115 +4675,22 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="relative">
-                  <Input
-                    type="text"
-                    className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
-                    placeholder="Начните вводить название"
-                    value={itemFilterQuery}
-                    onChange={(e) => {
-                      setItemFilterQuery(e.target.value);
-                      setIsItemsFilterOpen(true);
-                    }}
-                    onFocus={() => setIsItemsFilterOpen(true)}
-                    onClick={() => setIsItemsFilterOpen(true)}
-                    onBlur={() => setTimeout(() => setIsItemsFilterOpen(false), 150)}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        isItemsFilterOpen &&
-                        itemFilterQuery.trim()
-                      ) {
-                        const first = filteredItemOptions[0];
-                        if (first) {
-                          event.preventDefault();
-                          toggleItemSelection(
-                            first.id,
-                            !selectedItemIds.has(first.id)
-                          );
-                          setItemFilterQuery("");
-                          setIsItemsFilterOpen(false);
-                        }
-                      }
-                    }}
-                  />
-                  {isItemsFilterOpen ? (
-                    <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
-                      {sortedItems.length === 0 ? (
-                        <div className="px-2 py-1 text-sm text-muted-foreground">
-                          Нет активов или обязательств.
-                        </div>
-                      ) : filteredItemOptions.length === 0 ? (
-                        <div className="px-2 py-1 text-sm text-muted-foreground">
-                          Ничего не найдено
-                        </div>
-                      ) : (
-                        filteredItemOptions.map((item) => {
-                          const isSelected = selectedItemIds.has(item.id);
-                          const bankLogo = itemBankLogoUrl(item.id);
-                          const bankName = itemBankName(item.id);
-                          const typeLabel = getItemTypeLabel(item);
-                          return (
-                            <button
-                              key={item.id}
-                              type="button"
-                              className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                                isSelected
-                                  ? "bg-violet-50 text-violet-700"
-                                  : "text-slate-700 hover:bg-slate-100"
-                              }`}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => {
-                                toggleItemSelection(item.id, !isSelected);
-                                setItemFilterQuery("");
-                                setIsItemsFilterOpen(false);
-                              }}
-                            >
-                              {bankLogo ? (
-                                <img
-                                  src={bankLogo}
-                                  alt={bankName || ""}
-                                  className="h-6 w-6 rounded border border-border/60 bg-white object-contain"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <div className="h-6 w-6 rounded border border-border/60 bg-slate-100" />
-                              )}
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium break-words">
-                                  {item.name}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {typeLabel} · {item.currency_code}
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-                {selectedItemFilterOptions.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {selectedItemFilterOptions.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs text-violet-800"
-                      >
-                        <span>{item.name}</span>
-                        <button
-                          type="button"
-                          className="text-violet-700 hover:text-violet-900"
-                          onClick={() => toggleItemSelection(item.id, false)}
-                          aria-label={`Удалить фильтр ${item.name}`}
-                        >
-                          x
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <ItemSelector
+                  items={activeItems}
+                  selectedIds={Array.from(selectedItemIds)}
+                  onChange={(ids) => setSelectedItemIds(new Set(ids))}
+                  selectionMode="multi"
+                  placeholder="Начните вводить название"
+                  emptyMessage="Нет активов или обязательств."
+                  noResultsMessage="Ничего не найдено"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getBankLogoUrl={itemBankLogoUrl}
+                  getBankName={itemBankName}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  itemCounts={itemTxCounts}
+                  resetSignal={itemFilterResetKey}
+                  ariaLabel="Активы/обязательства"
+                />
               </div>
 <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">

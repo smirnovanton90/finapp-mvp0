@@ -149,7 +149,9 @@ export type TransactionOut = {
 
   transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
   primary_item_id: number;
+  primary_card_item_id: number | null;
   counterparty_item_id: number | null;
+  counterparty_card_item_id: number | null;
   counterparty_id: number | null;
   chain_id: number | null;
   chain_name: string | null;
@@ -186,6 +188,7 @@ export type FetchTransactionsPageParams = {
   direction?: TransactionDirection[];
   transaction_type?: TransactionType[];
   item_ids?: number[];
+  card_item_ids?: number[];
   currency_item_ids?: number[];
   category_ids?: number[];
   counterparty_ids?: number[];
@@ -226,6 +229,8 @@ export type TransactionChainOut = {
   interval_days: number | null;
   primary_item_id: number;
   counterparty_item_id: number | null;
+  primary_card_item_id: number | null;
+  counterparty_card_item_id: number | null;
   counterparty_id: number | null;
   amount_rub: number;
   amount_counterparty: number | null;
@@ -491,8 +496,17 @@ export async function createItem(payload: ItemCreate): Promise<ItemOut> {
   return res.json();
 }
 
-export async function updateItem(id: number, payload: ItemCreate): Promise<ItemOut> {
-  const res = await authFetch(`${API_BASE}/items/${id}`, {
+export async function updateItem(
+  id: number,
+  payload: ItemCreate,
+  options?: { purgeCardTransactions?: boolean }
+): Promise<ItemOut> {
+  const params = new URLSearchParams();
+  if (options?.purgeCardTransactions) {
+    params.set("purge_card_transactions", "true");
+  }
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/items/${id}${qs ? `?${qs}` : ""}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -508,8 +522,14 @@ export async function archiveItem(id: number): Promise<ItemOut> {
     return res.json();
   }
 
-export async function closeItem(id: number): Promise<ItemOut> {
-  const res = await authFetch(`${API_BASE}/items/${id}/close`, {
+export async function closeItem(
+  id: number,
+  options?: { closeCards?: boolean }
+): Promise<ItemOut> {
+  const params = new URLSearchParams();
+  if (options?.closeCards) params.set("close_cards", "true");
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/items/${id}/close${qs ? `?${qs}` : ""}`, {
     method: "PATCH",
   });
   if (!res.ok) throw new Error(await readError(res));
@@ -581,6 +601,9 @@ export async function fetchTransactionsPage(
     params.append("transaction_type", value)
   );
   options.item_ids?.forEach((value) => params.append("item_ids", String(value)));
+  options.card_item_ids?.forEach((value) =>
+    params.append("card_item_ids", String(value))
+  );
   options.currency_item_ids?.forEach((value) =>
     params.append("currency_item_ids", String(value))
   );

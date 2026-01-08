@@ -198,6 +198,8 @@ class TransactionOut(TransactionBase):
     created_at: datetime
     chain_id: int | None = None
     chain_name: str | None = None
+    primary_card_item_id: int | None = None
+    counterparty_card_item_id: int | None = None
     deleted_at: datetime | None = None
 
     class Config:
@@ -294,6 +296,8 @@ class TransactionChainOut(BaseModel):
     interval_days: int | None
     primary_item_id: int
     counterparty_item_id: int | None
+    primary_card_item_id: int | None = None
+    counterparty_card_item_id: int | None = None
     counterparty_id: int | None
     amount_rub: int
     amount_counterparty: int | None

@@ -5,11 +5,19 @@ from datetime import datetime, timedelta, date as date_type
 import requests
 from pathlib import Path
 from sqlalchemy.orm import Session
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from db import get_db
-from models import Item, User, Currency, FxRate, Counterparty, CounterpartyIndustry
+from models import (
+    Item,
+    User,
+    Currency,
+    FxRate,
+    Counterparty,
+    CounterpartyIndustry,
+    Transaction,
+)
 from config import settings
 from schemas import (
     ItemCreate,
@@ -25,7 +33,10 @@ from schemas import (
 )
 from auth import get_current_user, create_access_token, hash_password, verify_password
 
-from transactions import router as transactions_router
+from transactions import (
+    router as transactions_router,
+    purge_card_transactions as purge_card_transactions_fn,
+)
 from transaction_chains import router as transaction_chains_router
 from categories import router as categories_router
 from limits import router as limits_router
@@ -221,6 +232,38 @@ def _apply_logo_url(counterparty: Counterparty) -> None:
         else None
     )
 
+
+def _resolve_card_account_id(
+    db: Session,
+    user: User,
+    payload: ItemCreate,
+    bank_id: int | None,
+) -> int | None:
+    if payload.card_account_id is None:
+        return None
+    if payload.type_code != "bank_card":
+        raise HTTPException(
+            status_code=400,
+            detail="card_account_id is only allowed for bank_card.",
+        )
+    linked = db.get(Item, payload.card_account_id)
+    if (
+        not linked
+        or linked.user_id != user.id
+        or linked.kind != "ASSET"
+        or linked.type_code != "bank_account"
+    ):
+        raise HTTPException(status_code=400, detail="Invalid card_account_id")
+    if bank_id is None or linked.bank_id != bank_id:
+        raise HTTPException(
+            status_code=400, detail="Card and account banks must match"
+        )
+    if linked.currency_code != payload.currency_code:
+        raise HTTPException(
+            status_code=400, detail="Card and account currencies must match"
+        )
+    return linked.id
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -370,22 +413,7 @@ def create_item(
             raise HTTPException(status_code=400, detail="Invalid bank_id")
         bank_id = bank.id
 
-    card_account_id = None
-    if payload.card_account_id is not None:
-        if payload.type_code != "bank_card":
-            raise HTTPException(
-                status_code=400,
-                detail="card_account_id is only allowed for bank_card.",
-            )
-        linked = db.get(Item, payload.card_account_id)
-        if (
-            not linked
-            or linked.user_id != user.id
-            or linked.kind != "ASSET"
-            or linked.type_code != "bank_account"
-        ):
-            raise HTTPException(status_code=400, detail="Invalid card_account_id")
-        card_account_id = linked.id
+    card_account_id = _resolve_card_account_id(db, user, payload, bank_id)
 
     interest_payout_account_id = None
     if payload.interest_payout_account_id is not None:
@@ -434,6 +462,7 @@ def create_item(
 def update_item(
     item_id: int,
     payload: ItemCreate,
+    purge_card_transactions: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -458,22 +487,33 @@ def update_item(
             raise HTTPException(status_code=400, detail="Invalid bank_id")
         bank_id = bank.id
 
-    card_account_id = None
-    if payload.card_account_id is not None:
-        if payload.type_code != "bank_card":
-            raise HTTPException(
-                status_code=400,
-                detail="card_account_id is only allowed for bank_card.",
+    card_account_id = _resolve_card_account_id(db, user, payload, bank_id)
+    if (
+        item.type_code == "bank_card"
+        and payload.card_account_id is not None
+        and card_account_id != item.card_account_id
+    ):
+        tx_exists = (
+            db.query(Transaction.id)
+            .filter(
+                Transaction.user_id == user.id,
+                Transaction.deleted_at.is_(None),
+                or_(
+                    Transaction.primary_item_id == item.id,
+                    Transaction.counterparty_item_id == item.id,
+                    Transaction.primary_card_item_id == item.id,
+                    Transaction.counterparty_card_item_id == item.id,
+                ),
             )
-        linked = db.get(Item, payload.card_account_id)
-        if (
-            not linked
-            or linked.user_id != user.id
-            or linked.kind != "ASSET"
-            or linked.type_code != "bank_account"
-        ):
-            raise HTTPException(status_code=400, detail="Invalid card_account_id")
-        card_account_id = linked.id
+            .first()
+        )
+        if tx_exists and not purge_card_transactions:
+            raise HTTPException(
+                status_code=409,
+                detail="Card has transactions. Confirm purge to change account link.",
+            )
+        if tx_exists:
+            purge_card_transactions_fn(db, user, item.id)
 
     interest_payout_account_id = None
     if payload.interest_payout_account_id is not None:
@@ -543,6 +583,7 @@ def archive_item(
 @app.patch("/items/{item_id}/close", response_model=ItemOut)
 def close_item(
     item_id: int,
+    close_cards: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -551,8 +592,29 @@ def close_item(
         raise HTTPException(status_code=404, detail="Item not found")
     if item.archived_at is not None:
         raise HTTPException(status_code=400, detail="Cannot close deleted item")
-    if item.current_value_rub != 0:
+    if item.type_code != "bank_card" and item.current_value_rub != 0:
         raise HTTPException(status_code=400, detail="Item balance must be zero to close")
+
+    if item.type_code == "bank_account":
+        linked_cards = (
+            db.query(Item)
+            .filter(
+                Item.user_id == user.id,
+                Item.card_account_id == item.id,
+                Item.closed_at.is_(None),
+                Item.archived_at.is_(None),
+            )
+            .all()
+        )
+        if linked_cards and not close_cards:
+            raise HTTPException(
+                status_code=409,
+                detail="Account has active cards. Close cards first.",
+            )
+        if linked_cards and close_cards:
+            now = func.now()
+            for card in linked_cards:
+                card.closed_at = now
 
     if item.closed_at is None:
         item.closed_at = func.now()

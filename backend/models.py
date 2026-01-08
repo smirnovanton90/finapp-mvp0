@@ -268,8 +268,21 @@ class Transaction(Base):
     primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
     primary_item: Mapped["Item"] = relationship(foreign_keys=[primary_item_id])
 
+    primary_card_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    primary_card_item: Mapped[Optional["Item"]] = relationship(
+        foreign_keys=[primary_card_item_id]
+    )
+
     counterparty_item_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=True)
     counterparty_item: Mapped[Optional["Item"]] = relationship(foreign_keys=[counterparty_item_id])
+    counterparty_card_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    counterparty_card_item: Mapped[Optional["Item"]] = relationship(
+        foreign_keys=[counterparty_card_item_id]
+    )
     counterparty_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("counterparties.id"), nullable=True
     )
@@ -332,11 +345,24 @@ class TransactionChain(Base):
     primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
     primary_item: Mapped["Item"] = relationship(foreign_keys=[primary_item_id])
 
+    primary_card_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    primary_card_item: Mapped[Optional["Item"]] = relationship(
+        foreign_keys=[primary_card_item_id]
+    )
+
     counterparty_item_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("items.id"), nullable=True
     )
     counterparty_item: Mapped[Optional["Item"]] = relationship(
         foreign_keys=[counterparty_item_id]
+    )
+    counterparty_card_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    counterparty_card_item: Mapped[Optional["Item"]] = relationship(
+        foreign_keys=[counterparty_card_item_id]
     )
     counterparty_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("counterparties.id"), nullable=True

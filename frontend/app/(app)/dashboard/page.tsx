@@ -755,7 +755,13 @@ export default function DashboardPage() {
   }
 
   const activeItems = useMemo(
-    () => items.filter((item) => !item.archived_at && !item.closed_at),
+    () =>
+      items.filter(
+        (item) =>
+          !item.archived_at &&
+          !item.closed_at &&
+          !(item.type_code === "bank_card" && item.card_account_id)
+      ),
     [items]
   );
 

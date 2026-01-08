@@ -46,6 +46,7 @@ _BANK_TYPE_CODES = {
     "consumer_loan",
     "mortgage",
     "car_loan",
+    "education_loan",
 }
 _BANK_INDUSTRY_NAME = "Банки"
 
@@ -425,6 +426,99 @@ def create_item(
         start_date=payload.start_date,
     )
     db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+@app.patch("/items/{item_id}", response_model=ItemOut)
+def update_item(
+    item_id: int,
+    payload: ItemCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if item.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot edit archived item")
+    if item.closed_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot edit closed item")
+
+    bank_id = None
+    if payload.bank_id is not None:
+        if payload.type_code not in _BANK_TYPE_CODES:
+            raise HTTPException(
+                status_code=400,
+                detail="bank_id is only allowed for bank-related item types.",
+            )
+        bank = db.get(Counterparty, payload.bank_id)
+        bank_industry_id = _get_bank_industry_id(db)
+        if not bank or not bank_industry_id or bank.industry_id != bank_industry_id:
+            raise HTTPException(status_code=400, detail="Invalid bank_id")
+        bank_id = bank.id
+
+    card_account_id = None
+    if payload.card_account_id is not None:
+        if payload.type_code != "bank_card":
+            raise HTTPException(
+                status_code=400,
+                detail="card_account_id is only allowed for bank_card.",
+            )
+        linked = db.get(Item, payload.card_account_id)
+        if (
+            not linked
+            or linked.user_id != user.id
+            or linked.kind != "ASSET"
+            or linked.type_code != "bank_account"
+        ):
+            raise HTTPException(status_code=400, detail="Invalid card_account_id")
+        card_account_id = linked.id
+
+    interest_payout_account_id = None
+    if payload.interest_payout_account_id is not None:
+        if payload.type_code not in {"deposit", "savings_account"}:
+            raise HTTPException(
+                status_code=400,
+                detail="interest_payout_account_id is only allowed for deposit or savings_account.",
+            )
+        payout = db.get(Item, payload.interest_payout_account_id)
+        if not payout or payout.user_id != user.id or payout.kind != "ASSET":
+            raise HTTPException(status_code=400, detail="Invalid interest_payout_account_id")
+        interest_payout_account_id = payout.id
+
+    deposit_end_date = None
+    if payload.type_code == "deposit" and payload.open_date and payload.deposit_term_days:
+        deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
+
+    delta = item.current_value_rub - item.initial_value_rub
+    next_current_value = payload.initial_value_rub + delta
+    if next_current_value < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="New initial value would make current balance negative.",
+        )
+
+    item.kind = payload.kind
+    item.type_code = payload.type_code
+    item.name = payload.name
+    item.currency_code = payload.currency_code
+    item.bank_id = bank_id
+    item.open_date = payload.open_date
+    item.account_last7 = payload.account_last7
+    item.contract_number = payload.contract_number
+    item.card_last4 = payload.card_last4
+    item.card_account_id = card_account_id
+    item.deposit_term_days = payload.deposit_term_days
+    item.deposit_end_date = deposit_end_date
+    item.interest_rate = payload.interest_rate
+    item.interest_payout_order = payload.interest_payout_order
+    item.interest_capitalization = payload.interest_capitalization
+    item.interest_payout_account_id = interest_payout_account_id
+    item.initial_value_rub = payload.initial_value_rub
+    item.current_value_rub = next_current_value
+    item.start_date = payload.start_date
+
     db.commit()
     db.refresh(item)
     return item

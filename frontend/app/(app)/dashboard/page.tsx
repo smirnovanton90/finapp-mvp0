@@ -41,10 +41,45 @@ type DailyRow = {
 
 type CategoryIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 
-const CASH_TYPES = ["cash", "bank_account", "bank_card"];
-const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "savings_account", "brokerage", "securities"];
-const PROPERTY_TYPES = ["real_estate", "car"];
-const OTHER_ASSET_TYPES = ["other_asset"];
+const CASH_TYPES = ["cash", "bank_account", "bank_card", "savings_account", "e_wallet", "brokerage"];
+const FINANCIAL_INSTRUMENTS_TYPES = [
+  "deposit",
+  "securities",
+  "bonds",
+  "etf",
+  "bpif",
+  "pif",
+  "iis",
+  "precious_metals",
+  "crypto",
+];
+const PROPERTY_TYPES = [
+  "real_estate",
+  "townhouse",
+  "land_plot",
+  "garage",
+  "commercial_real_estate",
+  "real_estate_share",
+  "car",
+  "motorcycle",
+  "boat",
+  "trailer",
+  "special_vehicle",
+  "jewelry",
+  "electronics",
+  "art",
+  "collectibles",
+  "other_valuables",
+];
+const OTHER_ASSET_TYPES = [
+  "loan_to_third_party",
+  "third_party_receivables",
+  "npf",
+  "investment_life_insurance",
+  "business_share",
+  "sole_proprietor",
+  "other_asset",
+];
 const DONUT_COLORS = [
   "#7F5CFF",
   "#34D399",
@@ -71,10 +106,26 @@ const LIABILITY_TYPES = [
   { code: "consumer_loan", label: "Потребительский кредит" },
   { code: "mortgage", label: "Ипотека" },
   { code: "car_loan", label: "Автокредит" },
+  { code: "education_loan", label: "Образовательный кредит" },
+  { code: "installment", label: "Рассрочка" },
   { code: "microloan", label: "МФО" },
-  { code: "tax_debt", label: "Налоги / штрафы" },
-  { code: "private_loan", label: "Частный заём" },
-  { code: "other_liability", label: "Другое" },
+  { code: "private_loan", label: "Полученные займы от третьих лиц" },
+  { code: "third_party_payables", label: "Долги третьим лицам" },
+  { code: "tax_debt", label: "Налоги и обязательные платежи" },
+  { code: "personal_income_tax_debt", label: "Задолженность по НДФЛ" },
+  { code: "property_tax_debt", label: "Задолженность по налогу на имущество" },
+  { code: "land_tax_debt", label: "Задолженность по земельному налогу" },
+  { code: "transport_tax_debt", label: "Задолженность по транспортному налогу" },
+  { code: "fns_debt", label: "Задолженности перед ФНС" },
+  { code: "utilities_debt", label: "Задолженность по ЖКХ" },
+  { code: "telecom_debt", label: "Задолженность за интернет / связь" },
+  { code: "traffic_fines_debt", label: "Задолженность по штрафам (ГИБДД и прочие)" },
+  { code: "enforcement_debt", label: "Задолженность по исполнительным листам" },
+  { code: "alimony_debt", label: "Задолженность по алиментам" },
+  { code: "court_debt", label: "Судебные задолженности" },
+  { code: "court_fine_debt", label: "Штрафы по решениям суда" },
+  { code: "business_liability", label: "Бизнес-обязательства" },
+  { code: "other_liability", label: "Прочие обязательства" },
 ];
 
 function toDateKey(date: Date) {

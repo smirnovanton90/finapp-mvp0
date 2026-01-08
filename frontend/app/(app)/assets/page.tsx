@@ -13,6 +13,7 @@ import {
   Landmark,
   MoreVertical,
   Package,
+  Pencil,
   PiggyBank,
   Plus,
   Receipt,
@@ -63,6 +64,7 @@ import {
   fetchCurrencies,
   fetchFxRates,
   createItem,
+  updateItem,
   archiveItem,
   closeItem,
   ItemKind,
@@ -79,34 +81,127 @@ import {
 const ASSET_TYPES = [
   { code: "cash", label: "Наличные" },
   { code: "bank_account", label: "Банковский счёт" },
-  { code: "bank_card", label: "Дебетовая карта" },
-  { code: "deposit", label: "Вклад" },
-  { code: "savings_account", label: "Накопительный счёт" },
+  { code: "bank_card", label: "Банковская карта" },
+  { code: "savings_account", label: "Накопительный счет" },
+  { code: "e_wallet", label: "Электронный кошелек" },
   { code: "brokerage", label: "Брокерский счёт" },
-  { code: "securities", label: "Ценные бумаги" },
-  { code: "real_estate", label: "Недвижимость" },
+  { code: "deposit", label: "Вклад" },
+  { code: "securities", label: "Акции" },
+  { code: "bonds", label: "Облигации" },
+  { code: "etf", label: "ETF" },
+  { code: "bpif", label: "БПИФ" },
+  { code: "pif", label: "ПИФ" },
+  { code: "iis", label: "ИИС" },
+  { code: "precious_metals", label: "Драгоценные металлы" },
+  { code: "crypto", label: "Криптовалюта" },
+  { code: "loan_to_third_party", label: "Предоставленные займы третьим лицам" },
+  { code: "third_party_receivables", label: "Долги третьих лиц" },
+  { code: "real_estate", label: "Квартира" },
+  { code: "townhouse", label: "Дом / таунхаус" },
+  { code: "land_plot", label: "Земельный участок" },
+  { code: "garage", label: "Гараж / машиноместо" },
+  { code: "commercial_real_estate", label: "Коммерческая недвижимость" },
+  { code: "real_estate_share", label: "Доля в недвижимости" },
   { code: "car", label: "Автомобиль" },
-  { code: "other_asset", label: "Другое" },
+  { code: "motorcycle", label: "Мотоцикл" },
+  { code: "boat", label: "Катер / лодка" },
+  { code: "trailer", label: "Прицеп" },
+  { code: "special_vehicle", label: "Спецтехника" },
+  { code: "jewelry", label: "Драгоценности" },
+  { code: "electronics", label: "Техника и электроника" },
+  { code: "art", label: "Ценные предметы искусства" },
+  { code: "collectibles", label: "Коллекционные вещи" },
+  { code: "other_valuables", label: "Прочие ценные вещи" },
+  { code: "npf", label: "НПФ" },
+  { code: "investment_life_insurance", label: "ИСЖ" },
+  { code: "business_share", label: "Доля в бизнесе" },
+  { code: "sole_proprietor", label: "ИП (оценка бизнеса)" },
+  { code: "other_asset", label: "Прочие активы" },
 ];
+
+const ASSET_TYPE_CODES = ASSET_TYPES.map((type) => type.code);
 
 const LIABILITY_TYPES = [
   { code: "credit_card_debt", label: "Задолженность по кредитной карте" },
   { code: "consumer_loan", label: "Потребительский кредит" },
   { code: "mortgage", label: "Ипотека" },
   { code: "car_loan", label: "Автокредит" },
+  { code: "education_loan", label: "Образовательный кредит" },
+  { code: "installment", label: "Рассрочка" },
   { code: "microloan", label: "МФО" },
-  { code: "tax_debt", label: "Налоги / штрафы" },
-  { code: "private_loan", label: "Частный заём" },
-  { code: "other_liability", label: "Другое" },
+  { code: "private_loan", label: "Полученные займы от третьих лиц" },
+  { code: "third_party_payables", label: "Долги третьим лицам" },
+  { code: "tax_debt", label: "Налоги и обязательные платежи" },
+  { code: "personal_income_tax_debt", label: "Задолженность по НДФЛ" },
+  { code: "property_tax_debt", label: "Задолженность по налогу на имущество" },
+  { code: "land_tax_debt", label: "Задолженность по земельному налогу" },
+  { code: "transport_tax_debt", label: "Задолженность по транспортному налогу" },
+  { code: "fns_debt", label: "Задолженности перед ФНС" },
+  { code: "utilities_debt", label: "Задолженность по ЖКХ" },
+  { code: "telecom_debt", label: "Задолженность за интернет / связь" },
+  { code: "traffic_fines_debt", label: "Задолженность по штрафам (ГИБДД и прочие)" },
+  { code: "enforcement_debt", label: "Задолженность по исполнительным листам" },
+  { code: "alimony_debt", label: "Задолженность по алиментам" },
+  { code: "court_debt", label: "Судебные задолженности" },
+  { code: "court_fine_debt", label: "Штрафы по решениям суда" },
+  { code: "business_liability", label: "Бизнес-обязательства" },
+  { code: "other_liability", label: "Прочие обязательства" },
 ];
 
 const LIABILITY_TYPE_CODES = LIABILITY_TYPES.map((type) => type.code);
 
 // Категории активов
-const CASH_TYPES = ["cash", "bank_account", "bank_card"];
-const FINANCIAL_INSTRUMENTS_TYPES = ["deposit", "savings_account", "brokerage", "securities"];
-const PROPERTY_TYPES = ["real_estate", "car"];
-const OTHER_ASSET_TYPES = ["other_asset"];
+const CASH_TYPES = ["cash", "bank_account", "bank_card", "savings_account", "e_wallet", "brokerage"];
+const INVESTMENT_TYPES = [
+  "deposit",
+  "securities",
+  "bonds",
+  "etf",
+  "bpif",
+  "pif",
+  "iis",
+  "precious_metals",
+  "crypto",
+];
+const THIRD_PARTY_DEBT_TYPES = ["loan_to_third_party", "third_party_receivables"];
+const REAL_ESTATE_TYPES = [
+  "real_estate",
+  "townhouse",
+  "land_plot",
+  "garage",
+  "commercial_real_estate",
+  "real_estate_share",
+];
+const TRANSPORT_TYPES = ["car", "motorcycle", "boat", "trailer", "special_vehicle"];
+const VALUABLES_TYPES = ["jewelry", "electronics", "art", "collectibles", "other_valuables"];
+const PENSION_TYPES = ["npf", "investment_life_insurance"];
+const OTHER_ASSET_TYPES = ["business_share", "sole_proprietor", "other_asset"];
+const CREDIT_LIABILITY_TYPES = [
+  "credit_card_debt",
+  "consumer_loan",
+  "mortgage",
+  "car_loan",
+  "education_loan",
+  "installment",
+  "microloan",
+];
+const THIRD_PARTY_LOAN_TYPES = ["private_loan", "third_party_payables"];
+const TAX_LIABILITY_TYPES = [
+  "tax_debt",
+  "personal_income_tax_debt",
+  "property_tax_debt",
+  "land_tax_debt",
+  "transport_tax_debt",
+  "fns_debt",
+];
+const UTILITY_LIABILITY_TYPES = ["utilities_debt", "telecom_debt", "traffic_fines_debt"];
+const LEGAL_LIABILITY_TYPES = [
+  "enforcement_debt",
+  "alimony_debt",
+  "court_debt",
+  "court_fine_debt",
+];
+const OTHER_LIABILITY_TYPES = ["business_liability", "other_liability"];
 const BANK_TYPE_CODES = [
   "bank_account",
   "bank_card",
@@ -117,6 +212,7 @@ const BANK_TYPE_CODES = [
   "consumer_loan",
   "mortgage",
   "car_loan",
+  "education_loan",
 ];
 
 const TYPE_ICON_BY_CODE: Record<
@@ -128,18 +224,62 @@ const TYPE_ICON_BY_CODE: Record<
   bank_card: CreditCard,
   deposit: PiggyBank,
   savings_account: Wallet,
+  e_wallet: Wallet,
   brokerage: LineChart,
   securities: BarChart3,
+  bonds: BarChart3,
+  etf: BarChart3,
+  bpif: BarChart3,
+  pif: BarChart3,
+  iis: LineChart,
+  precious_metals: Coins,
+  crypto: Coins,
+  loan_to_third_party: Users,
+  third_party_receivables: Users,
   real_estate: Home,
+  townhouse: Home,
+  land_plot: Home,
+  garage: Home,
+  commercial_real_estate: Home,
+  real_estate_share: Home,
   car: Car,
+  motorcycle: Car,
+  boat: Car,
+  trailer: Car,
+  special_vehicle: Car,
+  jewelry: Package,
+  electronics: Package,
+  art: Package,
+  collectibles: Package,
+  other_valuables: Package,
+  npf: PiggyBank,
+  investment_life_insurance: PiggyBank,
+  business_share: TrendingUp,
+  sole_proprietor: TrendingUp,
   other_asset: Package,
   credit_card_debt: CreditCard,
   consumer_loan: Coins,
   mortgage: Home,
   car_loan: Car,
+  education_loan: Coins,
+  installment: Receipt,
   microloan: Coins,
-  tax_debt: Receipt,
   private_loan: Users,
+  third_party_payables: Users,
+  tax_debt: Receipt,
+  personal_income_tax_debt: Receipt,
+  property_tax_debt: Receipt,
+  land_tax_debt: Receipt,
+  transport_tax_debt: Receipt,
+  fns_debt: Receipt,
+  utilities_debt: Receipt,
+  telecom_debt: Receipt,
+  traffic_fines_debt: Receipt,
+  enforcement_debt: AlertCircle,
+  alimony_debt: AlertCircle,
+  court_debt: AlertCircle,
+  court_fine_debt: AlertCircle,
+  business_liability: AlertCircle,
   other_liability: AlertCircle,
 };
 
@@ -201,6 +341,7 @@ export default function Page() {
   const [showArchived, setShowArchived] = useState(false);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<ItemOut | null>(null);
 
   const [kind, setKind] = useState<ItemKind>("ASSET");
   const [allowedTypeCodes, setAllowedTypeCodes] = useState<string[]>(CASH_TYPES);
@@ -228,6 +369,7 @@ export default function Page() {
   const [logoOverlayHeight, setLogoOverlayHeight] = useState(0);
   const logoNaturalSizeRef = useRef<{ width: number; height: number } | null>(null);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
+  const isEditing = Boolean(editingItem);
 
   function resetCreateForm() {
     setName("");
@@ -468,18 +610,50 @@ export default function Page() {
     [visibleItems]
   );
 
-  const financialInstrumentsItems = useMemo(
+  const investmentItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)
+        (x) => x.kind === "ASSET" && INVESTMENT_TYPES.includes(x.type_code)
       ),
     [visibleItems]
   );
 
-  const propertyItems = useMemo(
+  const thirdPartyDebtItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && PROPERTY_TYPES.includes(x.type_code)
+        (x) => x.kind === "ASSET" && THIRD_PARTY_DEBT_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
+  const realEstateItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "ASSET" && REAL_ESTATE_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
+  const transportItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "ASSET" && TRANSPORT_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
+  const valuablesItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "ASSET" && VALUABLES_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
+  const pensionItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "ASSET" && PENSION_TYPES.includes(x.type_code)
       ),
     [visibleItems]
   );
@@ -492,12 +666,54 @@ export default function Page() {
     [visibleItems]
   );
 
-  const liabilityItems = useMemo(
-    () => visibleItems.filter((x) => x.kind === "LIABILITY"),
+  const creditLiabilityItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "LIABILITY" && CREDIT_LIABILITY_TYPES.includes(x.type_code)
+      ),
     [visibleItems]
   );
 
-  // Итоги по категориям
+  const thirdPartyLoanItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "LIABILITY" && THIRD_PARTY_LOAN_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
+  const taxLiabilityItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "LIABILITY" && TAX_LIABILITY_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
+  const utilityLiabilityItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "LIABILITY" && UTILITY_LIABILITY_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
+  const legalLiabilityItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "LIABILITY" && LEGAL_LIABILITY_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
+  const otherLiabilityItems = useMemo(
+    () =>
+      visibleItems.filter(
+        (x) => x.kind === "LIABILITY" && OTHER_LIABILITY_TYPES.includes(x.type_code)
+      ),
+    [visibleItems]
+  );
+
   const cashTotal = useMemo(
     () =>
       activeItems
@@ -506,21 +722,50 @@ export default function Page() {
     [activeItems, rateByCode]
   );
 
-  const financialInstrumentsTotal = useMemo(
+  const investmentTotal = useMemo(
     () =>
       activeItems
-        .filter(
-          (x) =>
-            x.kind === "ASSET" && FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)
-        )
+        .filter((x) => x.kind === "ASSET" && INVESTMENT_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItems, rateByCode]
   );
 
-  const propertyTotal = useMemo(
+  const thirdPartyDebtTotal = useMemo(
     () =>
       activeItems
-        .filter((x) => x.kind === "ASSET" && PROPERTY_TYPES.includes(x.type_code))
+        .filter((x) => x.kind === "ASSET" && THIRD_PARTY_DEBT_TYPES.includes(x.type_code))
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const realEstateTotal = useMemo(
+    () =>
+      activeItems
+        .filter((x) => x.kind === "ASSET" && REAL_ESTATE_TYPES.includes(x.type_code))
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const transportTotal = useMemo(
+    () =>
+      activeItems
+        .filter((x) => x.kind === "ASSET" && TRANSPORT_TYPES.includes(x.type_code))
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const valuablesTotal = useMemo(
+    () =>
+      activeItems
+        .filter((x) => x.kind === "ASSET" && VALUABLES_TYPES.includes(x.type_code))
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const pensionTotal = useMemo(
+    () =>
+      activeItems
+        .filter((x) => x.kind === "ASSET" && PENSION_TYPES.includes(x.type_code))
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItems, rateByCode]
   );
@@ -533,10 +778,60 @@ export default function Page() {
     [activeItems, rateByCode]
   );
 
-  const liabilityTotal = useMemo(
+  const creditLiabilityTotal = useMemo(
     () =>
       activeItems
-        .filter((x) => x.kind === "LIABILITY")
+        .filter(
+          (x) => x.kind === "LIABILITY" && CREDIT_LIABILITY_TYPES.includes(x.type_code)
+        )
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const thirdPartyLoanTotal = useMemo(
+    () =>
+      activeItems
+        .filter(
+          (x) => x.kind === "LIABILITY" && THIRD_PARTY_LOAN_TYPES.includes(x.type_code)
+        )
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const taxLiabilityTotal = useMemo(
+    () =>
+      activeItems
+        .filter((x) => x.kind === "LIABILITY" && TAX_LIABILITY_TYPES.includes(x.type_code))
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const utilityLiabilityTotal = useMemo(
+    () =>
+      activeItems
+        .filter(
+          (x) => x.kind === "LIABILITY" && UTILITY_LIABILITY_TYPES.includes(x.type_code)
+        )
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const legalLiabilityTotal = useMemo(
+    () =>
+      activeItems
+        .filter(
+          (x) => x.kind === "LIABILITY" && LEGAL_LIABILITY_TYPES.includes(x.type_code)
+        )
+        .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    [activeItems, rateByCode]
+  );
+
+  const otherLiabilityTotal = useMemo(
+    () =>
+      activeItems
+        .filter(
+          (x) => x.kind === "LIABILITY" && OTHER_LIABILITY_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItems, rateByCode]
   );
@@ -714,6 +1009,7 @@ export default function Page() {
   }, [currencies, currencyCode]);
 
   const openCreateModal = (nextKind: ItemKind, nextTypeCodes: string[]) => {
+    setEditingItem(null);
     setKind(nextKind);
     setAllowedTypeCodes(nextTypeCodes);
     setTypeCode("");
@@ -735,6 +1031,44 @@ export default function Page() {
     setInterestPayoutOrder("");
     setInterestCapitalization("");
     setInterestPayoutAccountId("");
+    setFormError(null);
+    setIsCreateOpen(true);
+  };
+
+  const openEditModal = (item: ItemOut) => {
+    setEditingItem(item);
+    setKind(item.kind);
+    setAllowedTypeCodes(item.kind === "ASSET" ? ASSET_TYPE_CODES : LIABILITY_TYPE_CODES);
+    setTypeCode(item.type_code);
+    setCurrencyCode(item.currency_code);
+    setName(item.name);
+    setAmountStr(formatAmount(item.initial_value_rub));
+    setStartDate(item.start_date);
+    setBankId(item.bank_id);
+    const bankName = item.bank_id ? banksById.get(item.bank_id)?.name ?? "" : "";
+    setBankSearch(bankName);
+    setBankDropdownOpen(false);
+    setBankError(null);
+    setAccountLast7(item.account_last7 ?? "");
+    setContractNumber(item.contract_number ?? "");
+    setOpenDate(item.open_date ?? "");
+    setCardLast4(item.card_last4 ?? "");
+    setCardAccountId(item.card_account_id ? String(item.card_account_id) : "");
+    setDepositTermDays(item.deposit_term_days != null ? String(item.deposit_term_days) : "");
+    setInterestRate(
+      item.interest_rate != null ? String(item.interest_rate).replace(".", ",") : ""
+    );
+    setInterestPayoutOrder(item.interest_payout_order ?? "");
+    setInterestCapitalization(
+      item.interest_capitalization == null
+        ? ""
+        : item.interest_capitalization
+        ? "true"
+        : "false"
+    );
+    setInterestPayoutAccountId(
+      item.interest_payout_account_id ? String(item.interest_payout_account_id) : ""
+    );
     setFormError(null);
     setIsCreateOpen(true);
   };
@@ -852,12 +1186,17 @@ export default function Page() {
         }
       }
 
-      await createItem(payload);
+      if (editingItem) {
+        await updateItem(editingItem.id, payload);
+      } else {
+        await createItem(payload);
+      }
   
       // очищаем форму и закрываем модалку
       setName("");
       setAmountStr("");
       setIsCreateOpen(false);
+      setEditingItem(null);
   
       await loadItems();
     } catch (e: any) {
@@ -978,6 +1317,7 @@ export default function Page() {
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
                   const isArchived = Boolean(it.archived_at);
                   const isClosed = Boolean(it.closed_at);
+                  const canEdit = !isArchived && !isClosed;
                   const canClose = !isArchived && !isClosed && it.current_value_rub === 0;
                   const canDelete = !isArchived;
                   const rowToneClass = isArchived
@@ -1139,6 +1479,13 @@ export default function Page() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuItem
+                              onSelect={() => openEditModal(it)}
+                              disabled={!canEdit}
+                            >
+                              <Pencil className="h-4 w-4" />
+                              Редактировать
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
                               onSelect={() => onClose(it.id)}
                               disabled={!canClose}
                             >
@@ -1199,6 +1546,7 @@ export default function Page() {
           if (!open) {
             setFormError(null);
             resetCreateForm();
+            setEditingItem(null);
           }
         }}
       >
@@ -1216,7 +1564,11 @@ export default function Page() {
 
           <div className="relative z-10 grid gap-4">
             <DialogHeader>
-              <DialogTitle>Добавление актива/обязательства</DialogTitle>
+              <DialogTitle>
+                {isEditing
+                  ? "Редактирование актива/обязательства"
+                  : "Добавление актива/обязательства"}
+              </DialogTitle>
             </DialogHeader>
 
             <form onSubmit={onCreate} noValidate className="grid gap-4">
@@ -1576,7 +1928,7 @@ export default function Page() {
                 disabled={loading}
                 className="bg-violet-600 hover:bg-violet-700 text-white"
               >
-                {loading ? "Добавляем..." : "Добавить"}
+                {loading ? "Сохраняем..." : isEditing ? "Сохранить" : "Добавить"}
               </Button>
             </div>
             </form>
@@ -1647,7 +1999,7 @@ export default function Page() {
         </div>
 
         <CategoryTable
-          title="Денежные средства"
+          title="Денежные активы"
           items={cashItems}
           total={cashTotal}
           icon={Wallet}
@@ -1655,23 +2007,55 @@ export default function Page() {
         />
 
         <CategoryTable
-          title="Финансовые инструменты"
-          items={financialInstrumentsItems}
-          total={financialInstrumentsTotal}
+          title="Инвестиционные активы"
+          items={investmentItems}
+          total={investmentTotal}
           icon={TrendingUp}
-          onAdd={() => openCreateModal("ASSET", FINANCIAL_INSTRUMENTS_TYPES)}
+          onAdd={() => openCreateModal("ASSET", INVESTMENT_TYPES)}
+        />
+
+        <CategoryTable
+          title="Долги третьих лиц"
+          items={thirdPartyDebtItems}
+          total={thirdPartyDebtTotal}
+          icon={Users}
+          onAdd={() => openCreateModal("ASSET", THIRD_PARTY_DEBT_TYPES)}
+        />
+
+        <CategoryTable
+          title="Недвижимость"
+          items={realEstateItems}
+          total={realEstateTotal}
+          icon={Home}
+          onAdd={() => openCreateModal("ASSET", REAL_ESTATE_TYPES)}
+        />
+
+        <CategoryTable
+          title="Транспорт"
+          items={transportItems}
+          total={transportTotal}
+          icon={Car}
+          onAdd={() => openCreateModal("ASSET", TRANSPORT_TYPES)}
         />
 
         <CategoryTable
           title="Имущество"
-          items={propertyItems}
-          total={propertyTotal}
-          icon={Home}
-          onAdd={() => openCreateModal("ASSET", PROPERTY_TYPES)}
+          items={valuablesItems}
+          total={valuablesTotal}
+          icon={Package}
+          onAdd={() => openCreateModal("ASSET", VALUABLES_TYPES)}
         />
 
         <CategoryTable
-          title="Другие активы"
+          title="Пенсионные и страховые активы"
+          items={pensionItems}
+          total={pensionTotal}
+          icon={PiggyBank}
+          onAdd={() => openCreateModal("ASSET", PENSION_TYPES)}
+        />
+
+        <CategoryTable
+          title="Прочие активы"
           items={otherAssetItems}
           total={otherAssetTotal}
           icon={Package}
@@ -1679,12 +2063,57 @@ export default function Page() {
         />
 
         <CategoryTable
-          title="Обязательства"
-          items={liabilityItems}
-          total={liabilityTotal}
+          title="Кредитные обязательства"
+          items={creditLiabilityItems}
+          total={creditLiabilityTotal}
+          isLiability={true}
+          icon={CreditCard}
+          onAdd={() => openCreateModal("LIABILITY", CREDIT_LIABILITY_TYPES)}
+        />
+
+        <CategoryTable
+          title="Займы от третьих лиц"
+          items={thirdPartyLoanItems}
+          total={thirdPartyLoanTotal}
+          isLiability={true}
+          icon={Users}
+          onAdd={() => openCreateModal("LIABILITY", THIRD_PARTY_LOAN_TYPES)}
+        />
+
+        <CategoryTable
+          title="Налоги и обязательные платежи"
+          items={taxLiabilityItems}
+          total={taxLiabilityTotal}
+          isLiability={true}
+          icon={Receipt}
+          onAdd={() => openCreateModal("LIABILITY", TAX_LIABILITY_TYPES)}
+        />
+
+        <CategoryTable
+          title="Коммунальные и бытовые долги"
+          items={utilityLiabilityItems}
+          total={utilityLiabilityTotal}
+          isLiability={true}
+          icon={Receipt}
+          onAdd={() => openCreateModal("LIABILITY", UTILITY_LIABILITY_TYPES)}
+        />
+
+        <CategoryTable
+          title="Судебные и иные обязательства"
+          items={legalLiabilityItems}
+          total={legalLiabilityTotal}
           isLiability={true}
           icon={AlertCircle}
-          onAdd={() => openCreateModal("LIABILITY", LIABILITY_TYPE_CODES)}
+          onAdd={() => openCreateModal("LIABILITY", LEGAL_LIABILITY_TYPES)}
+        />
+
+        <CategoryTable
+          title="Прочие обязательства"
+          items={otherLiabilityItems}
+          total={otherLiabilityTotal}
+          isLiability={true}
+          icon={AlertCircle}
+          onAdd={() => openCreateModal("LIABILITY", OTHER_LIABILITY_TYPES)}
         />
       </div>
 

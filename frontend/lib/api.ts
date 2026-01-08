@@ -491,6 +491,15 @@ export async function createItem(payload: ItemCreate): Promise<ItemOut> {
   return res.json();
 }
 
+export async function updateItem(id: number, payload: ItemCreate): Promise<ItemOut> {
+  const res = await authFetch(`${API_BASE}/items/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function archiveItem(id: number): Promise<ItemOut> {
     const res = await authFetch(`${API_BASE}/items/${id}/archive`, {
       method: "PATCH",

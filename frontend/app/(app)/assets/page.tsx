@@ -5,7 +5,6 @@ import {
   Archive,
   Banknote,
   BarChart3,
-  Calculator,
   Car,
   Coins,
   CreditCard,
@@ -22,6 +21,7 @@ import {
   Users,
   Wallet,
   LineChart,
+  Info,
 } from "lucide-react";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -149,6 +149,7 @@ const LIABILITY_TYPES = [
 ];
 
 const LIABILITY_TYPE_CODES = LIABILITY_TYPES.map((type) => type.code);
+const ALL_TYPE_CODES = [...ASSET_TYPE_CODES, ...LIABILITY_TYPE_CODES];
 
 // Категории активов
 const CASH_TYPES = ["cash", "bank_account", "bank_card", "savings_account", "e_wallet", "brokerage"];
@@ -213,6 +214,73 @@ const BANK_TYPE_CODES = [
   "mortgage",
   "car_loan",
   "education_loan",
+];
+
+const ITEM_SECTIONS: {
+  id: string;
+  kind: ItemKind;
+  label: string;
+  typeCodes: string[];
+}[] = [
+  { id: "cash_assets", kind: "ASSET", label: "Денежные активы", typeCodes: CASH_TYPES },
+  {
+    id: "investment_assets",
+    kind: "ASSET",
+    label: "Инвестиционные активы",
+    typeCodes: INVESTMENT_TYPES,
+  },
+  {
+    id: "third_party_assets",
+    kind: "ASSET",
+    label: "Долги третьих лиц",
+    typeCodes: THIRD_PARTY_DEBT_TYPES,
+  },
+  { id: "real_estate", kind: "ASSET", label: "Недвижимость", typeCodes: REAL_ESTATE_TYPES },
+  { id: "transport", kind: "ASSET", label: "Транспорт", typeCodes: TRANSPORT_TYPES },
+  { id: "valuables", kind: "ASSET", label: "Имущество", typeCodes: VALUABLES_TYPES },
+  {
+    id: "pension_assets",
+    kind: "ASSET",
+    label: "Пенсионные и страховые активы",
+    typeCodes: PENSION_TYPES,
+  },
+  { id: "other_assets", kind: "ASSET", label: "Прочие активы", typeCodes: OTHER_ASSET_TYPES },
+  {
+    id: "credit_liabilities",
+    kind: "LIABILITY",
+    label: "Кредитные обязательства",
+    typeCodes: CREDIT_LIABILITY_TYPES,
+  },
+  {
+    id: "third_party_loans",
+    kind: "LIABILITY",
+    label: "Займы от третьих лиц",
+    typeCodes: THIRD_PARTY_LOAN_TYPES,
+  },
+  {
+    id: "tax_liabilities",
+    kind: "LIABILITY",
+    label: "Налоги и обязательные платежи",
+    typeCodes: TAX_LIABILITY_TYPES,
+  },
+  {
+    id: "utility_liabilities",
+    kind: "LIABILITY",
+    label: "Коммунальные и бытовые долги",
+    typeCodes: UTILITY_LIABILITY_TYPES,
+  },
+  {
+    id: "legal_liabilities",
+    kind: "LIABILITY",
+    label: "Судебные и иные обязательства",
+    typeCodes: LEGAL_LIABILITY_TYPES,
+  },
+  {
+    id: "other_liabilities",
+    kind: "LIABILITY",
+    label: "Прочие обязательства",
+    typeCodes: OTHER_LIABILITY_TYPES,
+  },
 ];
 
 const TYPE_ICON_BY_CODE: Record<
@@ -342,6 +410,8 @@ export default function Page() {
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ItemOut | null>(null);
+  const [isGeneralCreate, setIsGeneralCreate] = useState(false);
+  const [sectionId, setSectionId] = useState("");
 
   const [kind, setKind] = useState<ItemKind>("ASSET");
   const [allowedTypeCodes, setAllowedTypeCodes] = useState<string[]>(CASH_TYPES);
@@ -370,6 +440,8 @@ export default function Page() {
   const logoNaturalSizeRef = useRef<{ width: number; height: number } | null>(null);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const isEditing = Boolean(editingItem);
+  const segmentedButtonBase =
+    "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
 
   function resetCreateForm() {
     setName("");
@@ -391,7 +463,9 @@ export default function Page() {
     setInterestPayoutOrder("");
     setInterestCapitalization("");
     setInterestPayoutAccountId("");
-  }  
+    setSectionId("");
+    setIsGeneralCreate(false);
+  }
 
   function parseRubToCents(input: string): number {
     const normalized = input
@@ -481,12 +555,25 @@ export default function Page() {
     return Math.round(amount * rate * 100);
   }
 
+  const sectionOptions = useMemo(
+    () => ITEM_SECTIONS.filter((section) => section.kind === kind),
+    [kind]
+  );
+  const selectedSection = useMemo(
+    () => sectionOptions.find((section) => section.id === sectionId) ?? null,
+    [sectionOptions, sectionId]
+  );
+  const sectionTypeCodes = selectedSection?.typeCodes ?? [];
+  const effectiveAllowedTypeCodes = isGeneralCreate ? sectionTypeCodes : allowedTypeCodes;
+
   const typeOptions = useMemo(() => {
     const base = kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES;
-    if (!allowedTypeCodes.length) return base;
-    const allowed = new Set(allowedTypeCodes);
+    if (!effectiveAllowedTypeCodes.length) {
+      return isGeneralCreate ? [] : base;
+    }
+    const allowed = new Set(effectiveAllowedTypeCodes);
     return base.filter((option) => allowed.has(option.code));
-  }, [kind, allowedTypeCodes]);
+  }, [kind, effectiveAllowedTypeCodes, isGeneralCreate]);
 
   const showBankField = useMemo(
     () => BANK_TYPE_CODES.includes(typeCode),
@@ -836,28 +923,17 @@ export default function Page() {
     [activeItems, rateByCode]
   );
 
-  const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
-    const assets = activeItems
-      .filter((x) => x.kind === "ASSET")
-      .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
-  
-    const liabilities = activeItems
-      .filter((x) => x.kind === "LIABILITY")
-      .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
-  
-    return {
-      totalAssets: assets,
-      totalLiabilities: liabilities,
-      netTotal: assets - liabilities, // обязательства вычитаем
-    };
-  }, [activeItems, rateByCode]);
-
   useEffect(() => {
     if (!isCreateOpen || typeOptions.length === 0) return;
-    if (!typeCode || !typeOptions.some((option) => option.code === typeCode)) {
+    if (isGeneralCreate) return;
+    if (!typeCode) {
+      setTypeCode(typeOptions[0].code);
+      return;
+    }
+    if (!typeOptions.some((option) => option.code === typeCode)) {
       setTypeCode(typeOptions[0].code);
     }
-  }, [isCreateOpen, typeOptions, typeCode]);
+  }, [isCreateOpen, typeOptions, typeCode, isGeneralCreate]);
 
   async function loadItems() {
     setLoading(true);
@@ -1008,8 +1084,14 @@ export default function Page() {
     }
   }, [currencies, currencyCode]);
 
-  const openCreateModal = (nextKind: ItemKind, nextTypeCodes: string[]) => {
+  const openCreateModal = (
+    nextKind: ItemKind,
+    nextTypeCodes: string[],
+    options?: { general?: boolean; sectionId?: string }
+  ) => {
     setEditingItem(null);
+    setIsGeneralCreate(Boolean(options?.general));
+    setSectionId(options?.sectionId ?? "");
     setKind(nextKind);
     setAllowedTypeCodes(nextTypeCodes);
     setTypeCode("");
@@ -1037,6 +1119,8 @@ export default function Page() {
 
   const openEditModal = (item: ItemOut) => {
     setEditingItem(item);
+    setIsGeneralCreate(false);
+    setSectionId("");
     setKind(item.kind);
     setAllowedTypeCodes(item.kind === "ASSET" ? ASSET_TYPE_CODES : LIABILITY_TYPE_CODES);
     setTypeCode(item.type_code);
@@ -1076,7 +1160,17 @@ export default function Page() {
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
-  
+
+    if (isGeneralCreate && !sectionId) {
+      setFormError("Выберите раздел.");
+      return;
+    }
+
+    if (!typeCode) {
+      setFormError("Выберите вид.");
+      return;
+    }
+
     if (!name.trim()) {
       setFormError("Название не может быть пустым");
       return;
@@ -1578,11 +1672,88 @@ export default function Page() {
               </div>
             )}
 
+            {isGeneralCreate && (
+              <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+                  <button
+                    type="button"
+                    aria-pressed={kind === "ASSET"}
+                    onClick={() => {
+                      setKind("ASSET");
+                      setSectionId("");
+                      setTypeCode("");
+                    }}
+                    className={`${segmentedButtonBase} ${
+                      kind === "ASSET"
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Актив
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={kind === "LIABILITY"}
+                    onClick={() => {
+                      setKind("LIABILITY");
+                      setSectionId("");
+                      setTypeCode("");
+                    }}
+                    className={`${segmentedButtonBase} ${
+                      kind === "LIABILITY"
+                        ? "bg-rose-50 text-rose-700"
+                        : "bg-white text-muted-foreground hover:bg-white"
+                    }`}
+                  >
+                    Обязательство
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {isGeneralCreate && (
+              <div className="grid gap-2">
+                <Label>Раздел</Label>
+                <Select
+                  value={sectionId}
+                  onValueChange={(value) => {
+                    setSectionId(value);
+                    setTypeCode("");
+                  }}
+                >
+                  <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                    <SelectValue
+                      placeholder={
+                        kind === "ASSET"
+                          ? "Выберите раздел актива"
+                          : "Выберите раздел обязательства"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sectionOptions.map((section) => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="grid gap-2">
               <Label>Вид</Label>
-              <Select value={typeCode} onValueChange={setTypeCode}>
+              <Select
+                value={typeCode}
+                onValueChange={setTypeCode}
+                disabled={isGeneralCreate && !sectionId}
+              >
                 <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                  <SelectValue placeholder="Выберите вид" />
+                  <SelectValue
+                    placeholder={
+                      isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {typeOptions.map((t) => (
@@ -1592,6 +1763,16 @@ export default function Page() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Название</Label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Например: Кошелек / Ипотека Газпромбанк"
+                className="border-2 border-border/70 bg-white shadow-none"
+              />
             </div>
 
             {showBankField && (
@@ -1880,7 +2061,16 @@ export default function Page() {
             </div>
 
             <div className="grid gap-2">
-              <Label>Дата начала действия актива/обязательства</Label>
+              <div className="flex items-center gap-2">
+                <Label>Дата начала действия</Label>
+                <span
+                  className="text-muted-foreground"
+                  title="Дата, с которой актив или обязательство участвуют в расчетах. Нужна для корректной истории и отчетов."
+                  aria-label="Подсказка по дате начала действия"
+                >
+                  <Info className="h-4 w-4" />
+                </span>
+              </div>
               <Input
                 type="date"
                 value={startDate}
@@ -1891,17 +2081,7 @@ export default function Page() {
             </div>
 
             <div className="grid gap-2">
-              <Label>Название</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Например: Кошелек / Ипотека Газпромбанк"
-                className="border-2 border-border/70 bg-white shadow-none"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Текущая сумма</Label>
+              <Label>Сумма на дату начала действия</Label>
               <Input
                 value={amountStr}
                 onChange={(e) => {
@@ -1937,45 +2117,6 @@ export default function Page() {
       </Dialog>
 
       <div className="space-y-6">
-        {/* Общая итоговая плашка */}
-        <Card className="pb-0">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Calculator className="h-7 w-7 text-violet-600" strokeWidth={1.5} />
-              ИТОГО
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-0">
-            <div className="space-y-2">
-              <div className="px-6 flex justify-between items-center">
-                <span className="text-muted-foreground">Активы:</span>
-                <span className="font-semibold tabular-nums">{formatRub(totalAssets)}</span>
-              </div>
-              <div className="px-6 flex justify-between items-center">
-                <span className="text-muted-foreground">Обязательства:</span>
-                <span className="font-semibold tabular-nums text-red-600">
-                  -{formatRub(totalLiabilities)}
-                </span>
-              </div>
-              <div className="border-t-2 border-border/70 bg-violet-50/70">
-                <div className="px-6 py-2 flex justify-between items-center">
-                  <span className="font-medium">Чистые активы:</span>
-                  <span
-                    className={[
-                      "font-semibold tabular-nums",
-                      netTotal < 0 ? "text-red-600" : "",
-                    ].join(" ")}
-                  >
-                    {netTotal < 0
-                      ? `-${formatRub(Math.abs(netTotal))}`
-                      : formatRub(netTotal)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/70 bg-white px-4 py-3">
           <span className="text-sm font-medium text-muted-foreground">Показывать:</span>
           <label className="flex items-center gap-2 text-sm text-foreground">
@@ -1996,125 +2137,162 @@ export default function Page() {
             />
             Удаленные
           </label>
+          <Button
+            type="button"
+            size="sm"
+            className="ml-auto h-8 bg-violet-600 hover:bg-violet-700 text-white"
+            onClick={() => openCreateModal("ASSET", ALL_TYPE_CODES, { general: true })}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Добавить
+          </Button>
         </div>
 
-        <CategoryTable
-          title="Денежные активы"
-          items={cashItems}
-          total={cashTotal}
-          icon={Wallet}
-          onAdd={() => openCreateModal("ASSET", CASH_TYPES)}
-        />
+        {cashItems.length > 0 && (
+          <CategoryTable
+            title="Денежные активы"
+            items={cashItems}
+            total={cashTotal}
+            icon={Wallet}
+            onAdd={() => openCreateModal("ASSET", CASH_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Инвестиционные активы"
-          items={investmentItems}
-          total={investmentTotal}
-          icon={TrendingUp}
-          onAdd={() => openCreateModal("ASSET", INVESTMENT_TYPES)}
-        />
+        {investmentItems.length > 0 && (
+          <CategoryTable
+            title="Инвестиционные активы"
+            items={investmentItems}
+            total={investmentTotal}
+            icon={TrendingUp}
+            onAdd={() => openCreateModal("ASSET", INVESTMENT_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Долги третьих лиц"
-          items={thirdPartyDebtItems}
-          total={thirdPartyDebtTotal}
-          icon={Users}
-          onAdd={() => openCreateModal("ASSET", THIRD_PARTY_DEBT_TYPES)}
-        />
+        {thirdPartyDebtItems.length > 0 && (
+          <CategoryTable
+            title="Долги третьих лиц"
+            items={thirdPartyDebtItems}
+            total={thirdPartyDebtTotal}
+            icon={Users}
+            onAdd={() => openCreateModal("ASSET", THIRD_PARTY_DEBT_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Недвижимость"
-          items={realEstateItems}
-          total={realEstateTotal}
-          icon={Home}
-          onAdd={() => openCreateModal("ASSET", REAL_ESTATE_TYPES)}
-        />
+        {realEstateItems.length > 0 && (
+          <CategoryTable
+            title="Недвижимость"
+            items={realEstateItems}
+            total={realEstateTotal}
+            icon={Home}
+            onAdd={() => openCreateModal("ASSET", REAL_ESTATE_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Транспорт"
-          items={transportItems}
-          total={transportTotal}
-          icon={Car}
-          onAdd={() => openCreateModal("ASSET", TRANSPORT_TYPES)}
-        />
+        {transportItems.length > 0 && (
+          <CategoryTable
+            title="Транспорт"
+            items={transportItems}
+            total={transportTotal}
+            icon={Car}
+            onAdd={() => openCreateModal("ASSET", TRANSPORT_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Имущество"
-          items={valuablesItems}
-          total={valuablesTotal}
-          icon={Package}
-          onAdd={() => openCreateModal("ASSET", VALUABLES_TYPES)}
-        />
+        {valuablesItems.length > 0 && (
+          <CategoryTable
+            title="Имущество"
+            items={valuablesItems}
+            total={valuablesTotal}
+            icon={Package}
+            onAdd={() => openCreateModal("ASSET", VALUABLES_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Пенсионные и страховые активы"
-          items={pensionItems}
-          total={pensionTotal}
-          icon={PiggyBank}
-          onAdd={() => openCreateModal("ASSET", PENSION_TYPES)}
-        />
+        {pensionItems.length > 0 && (
+          <CategoryTable
+            title="Пенсионные и страховые активы"
+            items={pensionItems}
+            total={pensionTotal}
+            icon={PiggyBank}
+            onAdd={() => openCreateModal("ASSET", PENSION_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Прочие активы"
-          items={otherAssetItems}
-          total={otherAssetTotal}
-          icon={Package}
-          onAdd={() => openCreateModal("ASSET", OTHER_ASSET_TYPES)}
-        />
+        {otherAssetItems.length > 0 && (
+          <CategoryTable
+            title="Прочие активы"
+            items={otherAssetItems}
+            total={otherAssetTotal}
+            icon={Package}
+            onAdd={() => openCreateModal("ASSET", OTHER_ASSET_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Кредитные обязательства"
-          items={creditLiabilityItems}
-          total={creditLiabilityTotal}
-          isLiability={true}
-          icon={CreditCard}
-          onAdd={() => openCreateModal("LIABILITY", CREDIT_LIABILITY_TYPES)}
-        />
+        {creditLiabilityItems.length > 0 && (
+          <CategoryTable
+            title="Кредитные обязательства"
+            items={creditLiabilityItems}
+            total={creditLiabilityTotal}
+            isLiability={true}
+            icon={CreditCard}
+            onAdd={() => openCreateModal("LIABILITY", CREDIT_LIABILITY_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Займы от третьих лиц"
-          items={thirdPartyLoanItems}
-          total={thirdPartyLoanTotal}
-          isLiability={true}
-          icon={Users}
-          onAdd={() => openCreateModal("LIABILITY", THIRD_PARTY_LOAN_TYPES)}
-        />
+        {thirdPartyLoanItems.length > 0 && (
+          <CategoryTable
+            title="Займы от третьих лиц"
+            items={thirdPartyLoanItems}
+            total={thirdPartyLoanTotal}
+            isLiability={true}
+            icon={Users}
+            onAdd={() => openCreateModal("LIABILITY", THIRD_PARTY_LOAN_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Налоги и обязательные платежи"
-          items={taxLiabilityItems}
-          total={taxLiabilityTotal}
-          isLiability={true}
-          icon={Receipt}
-          onAdd={() => openCreateModal("LIABILITY", TAX_LIABILITY_TYPES)}
-        />
+        {taxLiabilityItems.length > 0 && (
+          <CategoryTable
+            title="Налоги и обязательные платежи"
+            items={taxLiabilityItems}
+            total={taxLiabilityTotal}
+            isLiability={true}
+            icon={Receipt}
+            onAdd={() => openCreateModal("LIABILITY", TAX_LIABILITY_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Коммунальные и бытовые долги"
-          items={utilityLiabilityItems}
-          total={utilityLiabilityTotal}
-          isLiability={true}
-          icon={Receipt}
-          onAdd={() => openCreateModal("LIABILITY", UTILITY_LIABILITY_TYPES)}
-        />
+        {utilityLiabilityItems.length > 0 && (
+          <CategoryTable
+            title="Коммунальные и бытовые долги"
+            items={utilityLiabilityItems}
+            total={utilityLiabilityTotal}
+            isLiability={true}
+            icon={Receipt}
+            onAdd={() => openCreateModal("LIABILITY", UTILITY_LIABILITY_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Судебные и иные обязательства"
-          items={legalLiabilityItems}
-          total={legalLiabilityTotal}
-          isLiability={true}
-          icon={AlertCircle}
-          onAdd={() => openCreateModal("LIABILITY", LEGAL_LIABILITY_TYPES)}
-        />
+        {legalLiabilityItems.length > 0 && (
+          <CategoryTable
+            title="Судебные и иные обязательства"
+            items={legalLiabilityItems}
+            total={legalLiabilityTotal}
+            isLiability={true}
+            icon={AlertCircle}
+            onAdd={() => openCreateModal("LIABILITY", LEGAL_LIABILITY_TYPES)}
+          />
+        )}
 
-        <CategoryTable
-          title="Прочие обязательства"
-          items={otherLiabilityItems}
-          total={otherLiabilityTotal}
-          isLiability={true}
-          icon={AlertCircle}
-          onAdd={() => openCreateModal("LIABILITY", OTHER_LIABILITY_TYPES)}
-        />
+        {otherLiabilityItems.length > 0 && (
+          <CategoryTable
+            title="Прочие обязательства"
+            items={otherLiabilityItems}
+            total={otherLiabilityTotal}
+            isLiability={true}
+            icon={AlertCircle}
+            onAdd={() => openCreateModal("LIABILITY", OTHER_LIABILITY_TYPES)}
+          />
+        )}
       </div>
 
       {error && (

@@ -1,6 +1,24 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import {
+  Briefcase,
+  Building2,
+  Factory,
+  GraduationCap,
+  HeartPulse,
+  Home,
+  Landmark,
+  Plus,
+  Shield,
+  ShoppingCart,
+  Trash2,
+  Trophy,
+  Truck,
+  User,
+  Wifi,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
 
@@ -42,10 +60,12 @@ import {
   createTransactionChain,
   deleteTransactionChain,
   fetchCategories,
+  fetchCounterparties,
   fetchItems,
   fetchTransactions,
   fetchDeletedTransactions,
   fetchTransactionChains,
+  CounterpartyOut,
   ItemOut,
   TransactionChainFrequency,
   TransactionChainMonthlyRule,
@@ -72,6 +92,46 @@ const FREQUENCY_LABELS: Record<TransactionChainFrequency, string> = {
 };
 
 const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+const INDUSTRY_ICON_BY_ID: Record<number, LucideIcon> = {
+  1: Zap,
+  2: Truck,
+  3: ShoppingCart,
+  4: Shield,
+  5: Landmark,
+  6: Wifi,
+  7: Building2,
+  8: GraduationCap,
+  9: HeartPulse,
+  10: Briefcase,
+  11: Trophy,
+  12: Home,
+};
+
+function getLegalDefaultIcon(industryId: number | null): LucideIcon {
+  if (!industryId) return Factory;
+  return INDUSTRY_ICON_BY_ID[industryId] ?? Factory;
+}
+
+function buildCounterpartyName(counterparty: CounterpartyOut) {
+  if (counterparty.entity_type !== "PERSON") return counterparty.name;
+  const parts = [
+    counterparty.last_name,
+    counterparty.first_name,
+    counterparty.middle_name,
+  ].filter(Boolean);
+  return parts.join(" ") || counterparty.name;
+}
+
+function normalizeCounterpartySearch(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+}
+
+function getCounterpartyFilterText(counterparty: CounterpartyOut) {
+  const base = buildCounterpartyName(counterparty);
+  const extra = counterparty.entity_type === "LEGAL" ? counterparty.full_name : null;
+  return [base, extra].filter(Boolean).join(" ");
+}
 
 function formatAmount(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
@@ -169,6 +229,7 @@ export default function FinancialPlanningPage() {
 
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [items, setItems] = useState<ItemOut[]>([]);
+  const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
   const [loading, setLoading] = useState(false);
@@ -198,6 +259,11 @@ export default function FinancialPlanningPage() {
   );
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
+  const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
+  const [counterpartySearch, setCounterpartySearch] = useState("");
+  const [counterpartyDropdownOpen, setCounterpartyDropdownOpen] = useState(false);
+  const [counterpartyLoading, setCounterpartyLoading] = useState(false);
+  const [counterpartyError, setCounterpartyError] = useState<string | null>(null);
   const [amountStr, setAmountStr] = useState("");
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
   const [cat1, setCat1] = useState("");
@@ -292,6 +358,33 @@ export default function FinancialPlanningPage() {
     () => [...items].sort((a, b) => a.name.localeCompare(b.name, "ru")),
     [items]
   );
+  const counterpartiesById = useMemo(
+    () => new Map(counterparties.map((counterparty) => [counterparty.id, counterparty])),
+    [counterparties]
+  );
+  const selectableCounterparties = useMemo(
+    () => counterparties.filter((counterparty) => !counterparty.deleted_at),
+    [counterparties]
+  );
+  const sortedCounterparties = useMemo(() => {
+    return [...selectableCounterparties].sort((a, b) =>
+      buildCounterpartyName(a).localeCompare(buildCounterpartyName(b), "ru", {
+        sensitivity: "base",
+      })
+    );
+  }, [selectableCounterparties]);
+  const normalizedCounterpartySearch = useMemo(
+    () => normalizeCounterpartySearch(counterpartySearch),
+    [counterpartySearch]
+  );
+  const filteredCounterparties = useMemo(() => {
+    if (!normalizedCounterpartySearch) return sortedCounterparties;
+    return sortedCounterparties.filter((counterparty) =>
+      normalizeCounterpartySearch(getCounterpartyFilterText(counterparty)).includes(
+        normalizedCounterpartySearch
+      )
+    );
+  }, [normalizedCounterpartySearch, sortedCounterparties]);
 
   const primaryCurrency = primaryItemId
     ? itemsById.get(primaryItemId)?.currency_code ?? null
@@ -314,6 +407,14 @@ export default function FinancialPlanningPage() {
     }
   }, [isCrossCurrencyTransfer]);
 
+  useEffect(() => {
+    if (!counterpartyId || counterpartySearch.trim()) return;
+    const selected = counterpartiesById.get(counterpartyId);
+    if (selected) {
+      setCounterpartySearch(buildCounterpartyName(selected));
+    }
+  }, [counterpartyId, counterpartySearch, counterpartiesById]);
+
   const reloadPlanningData = async () => {
     const [chainsData, txData, deletedData] = await Promise.all([
       fetchTransactionChains(),
@@ -330,24 +431,39 @@ export default function FinancialPlanningPage() {
     const loadAll = async () => {
       setLoading(true);
       setError(null);
+      setCounterpartyLoading(true);
+      setCounterpartyError(null);
       try {
-        const [itemsData, chainsData, txData, deletedData, categoriesData] =
+        const [
+          itemsData,
+          chainsData,
+          txData,
+          deletedData,
+          categoriesData,
+          counterpartiesData,
+        ] =
           await Promise.all([
             fetchItems(),
             fetchTransactionChains(),
             fetchTransactions(),
             fetchDeletedTransactions(),
             fetchCategories(),
+            fetchCounterparties({ include_deleted: true }),
           ]);
         setItems(itemsData);
         setChains(chainsData);
         setTxs(txData);
         setDeletedTxs(deletedData);
         setCategoryNodes(categoriesData);
+        setCounterparties(counterpartiesData);
       } catch (e: any) {
+        setCounterpartyError(
+          e?.message ?? "Не удалось загрузить контрагентов."
+        );
         setError(e?.message ?? "Не удалось загрузить планирование.");
       } finally {
         setLoading(false);
+        setCounterpartyLoading(false);
       }
     };
     loadAll();
@@ -377,6 +493,9 @@ export default function FinancialPlanningPage() {
     setDirection("EXPENSE");
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
+    setCounterpartyId(null);
+    setCounterpartySearch("");
+    setCounterpartyDropdownOpen(false);
     setAmountStr("");
     setAmountCounterpartyStr("");
     setCategoryQuery("");
@@ -547,6 +666,7 @@ export default function FinancialPlanningPage() {
       interval_days: frequency === "REGULAR" ? intervalValue : null,
       primary_item_id: primaryItemId,
       counterparty_item_id: direction === "TRANSFER" ? counterpartyItemId : null,
+      counterparty_id: counterpartyId ?? null,
       amount_rub: amountCents,
       amount_counterparty: direction === "TRANSFER" ? counterpartyCents : null,
       direction,
@@ -734,6 +854,16 @@ export default function FinancialPlanningPage() {
               chain.category_id,
               chain.direction
             );
+            const counterparty = chain.counterparty_id
+              ? counterpartiesById.get(chain.counterparty_id) ?? null
+              : null;
+            const counterpartyName = counterparty
+              ? buildCounterpartyName(counterparty)
+              : null;
+            const CounterpartyIcon =
+              counterparty?.entity_type === "PERSON"
+                ? User
+                : getLegalDefaultIcon(counterparty?.industry_id ?? null);
 
             return (
               <Card key={chain.id} className="bg-white">
@@ -794,6 +924,28 @@ export default function FinancialPlanningPage() {
                         </span>
                       </div>
                     )}
+                    {counterpartyName && (
+                      <div className="flex items-center gap-2">
+                        {counterparty?.logo_url ? (
+                          <img
+                            src={counterparty.logo_url}
+                            alt=""
+                            className="h-5 w-5 rounded border border-border/60 bg-white object-contain"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-white text-slate-500">
+                            <CounterpartyIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                          </div>
+                        )}
+                        <span>
+                          Контрагент:{" "}
+                          <span className="font-medium text-slate-900">
+                            {counterpartyName}
+                          </span>
+                        </span>
+                      </div>
+                    )}
                     {chain.description && (
                       <div className="text-muted-foreground">
                         {chain.description}
@@ -840,6 +992,16 @@ export default function FinancialPlanningPage() {
                 chain.category_id,
                 chain.direction
               );
+              const counterparty = chain.counterparty_id
+                ? counterpartiesById.get(chain.counterparty_id) ?? null
+                : null;
+              const counterpartyName = counterparty
+                ? buildCounterpartyName(counterparty)
+                : null;
+              const CounterpartyIcon =
+                counterparty?.entity_type === "PERSON"
+                  ? User
+                  : getLegalDefaultIcon(counterparty?.industry_id ?? null);
               const chainDirectionLabel =
                 chain.direction === "INCOME"
                   ? "Доход"
@@ -893,12 +1055,34 @@ export default function FinancialPlanningPage() {
                       {chain.direction === "TRANSFER" && (
                         <div>
                           Контрагент:{" "}
+                        <span className="font-medium text-slate-700">
+                          {getItemName(chain.counterparty_item_id)}
+                        </span>
+                      </div>
+                    )}
+                    {counterpartyName && (
+                      <div className="flex items-center gap-2">
+                        {counterparty?.logo_url ? (
+                          <img
+                            src={counterparty.logo_url}
+                            alt=""
+                            className="h-5 w-5 rounded border border-border/60 bg-white object-contain"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-white text-slate-500">
+                            <CounterpartyIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                          </div>
+                        )}
+                        <span>
+                          Контрагент:{" "}
                           <span className="font-medium text-slate-700">
-                            {getItemName(chain.counterparty_item_id)}
+                            {counterpartyName}
                           </span>
-                        </div>
-                      )}
-                    </div>
+                        </span>
+                      </div>
+                    )}
+                  </div>
                   </CardContent>
                 </Card>
               );
@@ -1130,6 +1314,94 @@ export default function FinancialPlanningPage() {
                   </Select>
                 </div>
               )}
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Контрагент</Label>
+              <div className="relative">
+                <Input
+                  value={counterpartySearch}
+                  onChange={(e) => {
+                    setCounterpartySearch(e.target.value);
+                    setCounterpartyId(null);
+                    setCounterpartyDropdownOpen(true);
+                  }}
+                  onFocus={() => setCounterpartyDropdownOpen(true)}
+                  onBlur={() =>
+                    setTimeout(() => setCounterpartyDropdownOpen(false), 150)
+                  }
+                  placeholder="Начните вводить название"
+                  className="border-2 border-border/70 bg-white shadow-none"
+                />
+                {counterpartyDropdownOpen && (
+                  <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
+                    {counterpartyLoading && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        Загрузка...
+                      </div>
+                    )}
+                    {!counterpartyLoading && counterpartyError && (
+                      <div className="px-3 py-2 text-sm text-red-600">
+                        {counterpartyError}
+                      </div>
+                    )}
+                    {!counterpartyLoading &&
+                      !counterpartyError &&
+                      filteredCounterparties.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          Ничего не найдено
+                        </div>
+                      )}
+                    {!counterpartyLoading &&
+                      !counterpartyError &&
+                      filteredCounterparties.map((counterparty) => {
+                        const name = buildCounterpartyName(counterparty);
+                        const DefaultIcon =
+                          counterparty.entity_type === "PERSON"
+                            ? User
+                            : getLegalDefaultIcon(counterparty.industry_id);
+                        return (
+                          <button
+                            key={counterparty.id}
+                            type="button"
+                            className={[
+                              "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50",
+                              counterpartyId === counterparty.id ? "bg-slate-50" : "",
+                            ].join(" ")}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              setCounterpartyId(counterparty.id);
+                              setCounterpartySearch(name);
+                              setCounterpartyDropdownOpen(false);
+                            }}
+                          >
+                            {counterparty.logo_url ? (
+                              <img
+                                src={counterparty.logo_url}
+                                alt=""
+                                className="h-8 w-8 rounded border border-border/60 bg-white object-contain"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="flex h-8 w-8 items-center justify-center rounded border border-border/60 bg-white text-slate-500">
+                                <DefaultIcon className="h-4 w-4" aria-hidden="true" />
+                              </div>
+                            )}
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium">{name}</span>
+                              {counterparty.entity_type === "LEGAL" &&
+                                counterparty.full_name && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {counterparty.full_name}
+                                  </span>
+                                )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
             </div>
 
             {isTransfer && isCrossCurrencyTransfer ? (

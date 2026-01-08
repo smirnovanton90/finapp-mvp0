@@ -15,6 +15,7 @@ import {
   LayoutDashboard,
   Folder,
   Gauge,
+  Users,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
@@ -47,6 +48,11 @@ const nav = [
     href: "/categories",
     label: "\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0438",
     icon: Folder,
+  },
+  {
+    href: "/counterparties",
+    label: "\u041a\u043e\u043d\u0442\u0440\u0430\u0433\u0435\u043d\u0442\u044b",
+    icon: Users,
   },
   {
     href: "/reports",

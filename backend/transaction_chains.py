@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_user
 from category_service import resolve_category_or_400
 from db import get_db
-from models import Item, Transaction, TransactionChain, User
+from models import Item, Transaction, TransactionChain, User, Counterparty
 from schemas import TransactionChainCreate, TransactionChainOut
 
 router = APIRouter(prefix="/transaction-chains", tags=["transaction-chains"])
@@ -83,6 +83,26 @@ def build_schedule_dates(
     return []
 
 
+def resolve_counterparty(
+    db: Session,
+    user: User,
+    counterparty_id: int | None,
+) -> Counterparty | None:
+    if counterparty_id is None:
+        return None
+    counterparty = db.get(Counterparty, counterparty_id)
+    if (
+        not counterparty
+        or counterparty.deleted_at is not None
+        or (
+            counterparty.owner_user_id is not None
+            and counterparty.owner_user_id != user.id
+        )
+    ):
+        raise HTTPException(status_code=400, detail="Invalid counterparty_id")
+    return counterparty
+
+
 @router.get("", response_model=list[TransactionChainOut])
 def list_transaction_chains(
     db: Session = Depends(get_db),
@@ -102,6 +122,7 @@ def create_transaction_chain(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    resolve_counterparty(db, user, data.counterparty_id)
     primary = (
         db.query(Item)
         .filter(Item.id == data.primary_item_id, Item.user_id == user.id)
@@ -192,6 +213,7 @@ def create_transaction_chain(
         counterparty_item_id=data.counterparty_item_id
         if data.direction == "TRANSFER"
         else None,
+        counterparty_id=data.counterparty_id,
         amount_rub=data.amount_rub,
         amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
         direction=data.direction,
@@ -213,6 +235,7 @@ def create_transaction_chain(
                 counterparty_item_id=data.counterparty_item_id
                 if data.direction == "TRANSFER"
                 else None,
+                counterparty_id=data.counterparty_id,
                 amount_rub=data.amount_rub,
                 amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
                 direction=data.direction,

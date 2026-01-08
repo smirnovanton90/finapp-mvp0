@@ -2,27 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { ChevronDown } from "lucide-react";
-
 import {
+  fetchBanks,
   fetchFxRates,
   fetchItems,
   fetchTransactions,
+  BankOut,
   FxRateOut,
   ItemOut,
   TransactionOut,
 } from "@/lib/api";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -247,15 +237,33 @@ function getItemStartKey(item: ItemOut) {
     : toDateKey(new Date(item.created_at));
 }
 
-function buildSelectionLabel(
-  items: ItemOut[],
-  selectedIds: number[],
-  placeholder: string
-) {
-  const selected = items.filter((item) => selectedIds.includes(item.id));
-  if (selected.length === 0) return placeholder;
-  if (selected.length <= 2) return selected.map((item) => item.name).join(", ");
-  return `${placeholder}: ${selected.length}`;
+const ITEM_TYPE_LABELS: Record<string, string> = {
+  cash: "Наличные",
+  bank_account: "Банковский счёт",
+  bank_card: "Дебетовая карта",
+  deposit: "Вклад",
+  savings_account: "Сберегательный счёт",
+  brokerage: "Брокерский счёт",
+  securities: "Ценные бумаги",
+  real_estate: "Недвижимость",
+  car: "Автомобиль",
+  other_asset: "Другое",
+  credit_card_debt: "Задолженность по кредитной карте",
+  consumer_loan: "Потребительский кредит",
+  mortgage: "Ипотека",
+  car_loan: "Автокредит",
+  microloan: "Микрозайм",
+  tax_debt: "Налоги / штрафы",
+  private_loan: "Частный займ",
+  other_liability: "Другое",
+};
+
+function getItemTypeLabel(item: ItemOut) {
+  return ITEM_TYPE_LABELS[item.type_code] ?? item.type_code;
+}
+
+function normalizeItemSearch(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
 }
 
 function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number) {
@@ -331,11 +339,14 @@ function buildDeltasByDate(
 export default function AssetsDynamicsPage() {
   const { data: session } = useSession();
   const [items, setItems] = useState<ItemOut[]>([]);
+  const [banks, setBanks] = useState<BankOut[]>([]);
   const [transactions, setTransactions] = useState<TransactionOut[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
     {}
   );
   const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+  const [itemFilterQuery, setItemFilterQuery] = useState("");
+  const [isItemFilterOpen, setIsItemFilterOpen] = useState(false);
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [loading, setLoading] = useState(false);
@@ -354,11 +365,16 @@ export default function AssetsDynamicsPage() {
     setLoading(true);
     setError(null);
 
-    Promise.all([fetchItems({ includeClosed: true }), fetchTransactions()])
-      .then(([itemsData, txData]) => {
+    Promise.all([
+      fetchItems({ includeClosed: true }),
+      fetchTransactions(),
+      fetchBanks().catch(() => []),
+    ])
+      .then(([itemsData, txData, banksData]) => {
         if (!active) return;
         setItems(itemsData);
         setTransactions(txData);
+        setBanks(banksData);
       })
       .catch((e: any) => {
         if (!active) return;
@@ -377,14 +393,48 @@ export default function AssetsDynamicsPage() {
   }, [session]);
 
   const sortedItems = useMemo(() => sortItems(items), [items]);
-  const assetItems = useMemo(
-    () => sortedItems.filter((item) => item.kind === "ASSET"),
-    [sortedItems]
+  const itemsById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items]
   );
-  const liabilityItems = useMemo(
-    () => sortedItems.filter((item) => item.kind === "LIABILITY"),
-    [sortedItems]
+  const banksById = useMemo(
+    () => new Map(banks.map((bank) => [bank.id, bank])),
+    [banks]
   );
+  const itemBankLogoUrl = (id: number) => {
+    const bankId = itemsById.get(id)?.bank_id;
+    if (!bankId) return null;
+    return banksById.get(bankId)?.logo_url ?? null;
+  };
+  const itemBankName = (id: number) => {
+    const bankId = itemsById.get(id)?.bank_id;
+    if (!bankId) return "";
+    return banksById.get(bankId)?.name ?? "";
+  };
+  const normalizedItemFilterQuery = useMemo(
+    () => normalizeItemSearch(itemFilterQuery),
+    [itemFilterQuery]
+  );
+  const filteredItemOptions = useMemo(() => {
+    if (!normalizedItemFilterQuery) return sortedItems;
+    return sortedItems.filter((item) => {
+      const bankName = item.bank_id ? banksById.get(item.bank_id)?.name ?? "" : "";
+      const searchText = [
+        item.name,
+        getItemTypeLabel(item),
+        item.currency_code,
+        bankName,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return normalizeItemSearch(searchText).includes(normalizedItemFilterQuery);
+    });
+  }, [banksById, normalizedItemFilterQuery, sortedItems]);
+  const selectedItemFilterOptions = useMemo(() => {
+    return selectedItemIds
+      .map((id) => itemsById.get(id))
+      .filter(Boolean) as ItemOut[];
+  }, [itemsById, selectedItemIds]);
 
   useEffect(() => {
     const itemIds = new Set(sortedItems.map((item) => item.id));
@@ -402,6 +452,12 @@ export default function AssetsDynamicsPage() {
     const selected = new Set(selectedItemIds);
     return sortedItems.filter((item) => selected.has(item.id));
   }, [sortedItems, selectedItemIds]);
+  const addItemSelection = (id: number) => {
+    setSelectedItemIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+  const removeItemSelection = (id: number) => {
+    setSelectedItemIds((prev) => prev.filter((itemId) => itemId !== id));
+  };
 
   const selectedCurrencyCodes = useMemo(() => {
     const set = new Set<string>();
@@ -786,16 +842,6 @@ export default function AssetsDynamicsPage() {
     setHoverIndex(Math.min(Math.max(index, 0), chartData.length - 1));
   };
 
-  const selectionLabel = useMemo(
-    () =>
-      buildSelectionLabel(
-        sortedItems,
-        selectedItemIds,
-        "Активы и обязательства"
-      ),
-    [sortedItems, selectedItemIds]
-  );
-
   return (
     <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
@@ -812,101 +858,127 @@ export default function AssetsDynamicsPage() {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-1.5">
             <Label>Активы и обязательства</Label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full justify-between"
-                >
-                  <span className="truncate">{selectionLabel}</span>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-80">
-                {assetItems.length === 0 && liabilityItems.length === 0 ? (
-                  <DropdownMenuItem disabled>
-                    Нет активов и обязательств
-                  </DropdownMenuItem>
-                ) : (
-                  <>
-                    <DropdownMenuLabel>Активы</DropdownMenuLabel>
-                    {assetItems.length === 0 && (
-                      <DropdownMenuItem disabled>Нет активов</DropdownMenuItem>
-                    )}
-                    {assetItems.map((item) => {
+            <div className="relative">
+              <Input
+                type="text"
+                className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
+                placeholder="Начните вводить название"
+                value={itemFilterQuery}
+                onChange={(event) => {
+                  setItemFilterQuery(event.target.value);
+                  setIsItemFilterOpen(true);
+                }}
+                onFocus={() => setIsItemFilterOpen(true)}
+                onClick={() => setIsItemFilterOpen(true)}
+                onBlur={() => setTimeout(() => setIsItemFilterOpen(false), 150)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    isItemFilterOpen &&
+                    itemFilterQuery.trim()
+                  ) {
+                    const first = filteredItemOptions[0];
+                    if (first) {
+                      event.preventDefault();
+                      addItemSelection(first.id);
+                      setItemFilterQuery("");
+                      setIsItemFilterOpen(false);
+                    }
+                  }
+                }}
+              />
+              {isItemFilterOpen ? (
+                <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
+                  {sortedItems.length === 0 ? (
+                    <div className="px-2 py-1 text-sm text-muted-foreground">
+                      Нет активов и обязательств
+                    </div>
+                  ) : filteredItemOptions.length === 0 ? (
+                    <div className="px-2 py-1 text-sm text-muted-foreground">
+                      Ничего не найдено
+                    </div>
+                  ) : (
+                    filteredItemOptions.map((item) => {
+                      const isSelected = selectedItemIds.includes(item.id);
                       const isClosed = Boolean(item.closed_at);
+                      const bankLogo = itemBankLogoUrl(item.id);
+                      const bankName = itemBankName(item.id);
+                      const typeLabel = getItemTypeLabel(item);
                       return (
-                      <DropdownMenuCheckboxItem
-                        key={item.id}
-                        checked={selectedItemIds.includes(item.id)}
-                        className={isClosed ? "bg-slate-100/80" : ""}
-                        onSelect={(event) => event.preventDefault()}
-                        onCheckedChange={() =>
-                          setSelectedItemIds((prev) =>
-                            prev.includes(item.id)
-                              ? prev.filter((id) => id !== item.id)
-                              : [...prev, item.id]
-                          )
-                        }
-                      >
-                        <span className="flex w-full items-center justify-between gap-3">
-                          <span className={["truncate", isClosed ? "text-slate-500" : ""].join(" ")}>
-                            {item.name}
-                          </span>
-                          <span
-                            className={[
-                              "text-xs",
-                              isClosed ? "text-slate-400" : "text-muted-foreground",
-                            ].join(" ")}
-                          >
-                            {item.currency_code}
-                          </span>
-                        </span>
-                      </DropdownMenuCheckboxItem>
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+                            isSelected
+                              ? "bg-violet-50 text-violet-700"
+                              : "text-slate-700 hover:bg-slate-100"
+                          }`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            if (isSelected) {
+                              removeItemSelection(item.id);
+                            } else {
+                              addItemSelection(item.id);
+                            }
+                            setItemFilterQuery("");
+                            setIsItemFilterOpen(false);
+                          }}
+                        >
+                          {bankLogo ? (
+                            <img
+                              src={bankLogo}
+                              alt={bankName || ""}
+                              className="h-6 w-6 rounded border border-border/60 bg-white object-contain"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="h-6 w-6 rounded border border-border/60 bg-slate-100" />
+                          )}
+                          <div className="min-w-0">
+                            <div
+                              className={[
+                                "text-sm font-medium break-words",
+                                isClosed ? "text-slate-500" : "",
+                              ].join(" ")}
+                            >
+                              {item.name}
+                            </div>
+                            <div
+                              className={[
+                                "text-xs",
+                                isClosed ? "text-slate-400" : "text-muted-foreground",
+                              ].join(" ")}
+                            >
+                              {typeLabel} · {item.currency_code}
+                            </div>
+                          </div>
+                        </button>
                       );
-                    })}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel>Обязательства</DropdownMenuLabel>
-                    {liabilityItems.length === 0 && (
-                      <DropdownMenuItem disabled>Нет обязательств</DropdownMenuItem>
-                    )}
-                    {liabilityItems.map((item) => {
-                      const isClosed = Boolean(item.closed_at);
-                      return (
-                      <DropdownMenuCheckboxItem
-                        key={item.id}
-                        checked={selectedItemIds.includes(item.id)}
-                        className={isClosed ? "bg-slate-100/80" : ""}
-                        onSelect={(event) => event.preventDefault()}
-                        onCheckedChange={() =>
-                          setSelectedItemIds((prev) =>
-                            prev.includes(item.id)
-                              ? prev.filter((id) => id !== item.id)
-                              : [...prev, item.id]
-                          )
-                        }
-                      >
-                        <span className="flex w-full items-center justify-between gap-3">
-                          <span className={["truncate", isClosed ? "text-slate-500" : ""].join(" ")}>
-                            {item.name}
-                          </span>
-                          <span
-                            className={[
-                              "text-xs",
-                              isClosed ? "text-slate-400" : "text-muted-foreground",
-                            ].join(" ")}
-                          >
-                            {item.currency_code}
-                          </span>
-                        </span>
-                      </DropdownMenuCheckboxItem>
-                      );
-                    })}
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                    })
+                  )}
+                </div>
+              ) : null}
+            </div>
+            {selectedItemFilterOptions.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selectedItemFilterOptions.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs text-violet-800"
+                  >
+                    <span>{item.name}</span>
+                    <button
+                      type="button"
+                      className="text-violet-700 hover:text-violet-900"
+                      onClick={() => removeItemSelection(item.id)}
+                      aria-label={`Удалить фильтр ${item.name}`}
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="space-y-1.5">

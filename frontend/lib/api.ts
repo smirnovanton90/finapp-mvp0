@@ -56,6 +56,52 @@ export type BankOut = {
   logo_url: string | null;
 };
 
+export type CounterpartyType = "LEGAL" | "PERSON";
+
+export type CounterpartyOut = {
+  id: number;
+  entity_type: CounterpartyType;
+  industry_id: number | null;
+  name: string;
+  full_name: string | null;
+  legal_form: string | null;
+  inn: string | null;
+  ogrn: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  middle_name: string | null;
+  license_status: string | null;
+  logo_url: string | null;
+  owner_user_id: number | null;
+  created_at: string;
+  deleted_at: string | null;
+};
+
+export type CounterpartyCreate = {
+  entity_type: CounterpartyType;
+  industry_id?: number | null;
+  name?: string | null;
+  full_name?: string | null;
+  legal_form?: string | null;
+  inn?: string | null;
+  ogrn?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  middle_name?: string | null;
+};
+
+export type CounterpartyUpdate = CounterpartyCreate;
+
+export type LegalFormOut = {
+  code: string;
+  label: string;
+};
+
+export type CounterpartyIndustryOut = {
+  id: number;
+  name: string;
+};
+
 export type CurrencyOut = {
   iso_char_code: string;
   iso_num_code: string;
@@ -104,6 +150,7 @@ export type TransactionOut = {
   transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
   primary_item_id: number;
   counterparty_item_id: number | null;
+  counterparty_id: number | null;
   chain_id: number | null;
   chain_name: string | null;
 
@@ -141,6 +188,7 @@ export type FetchTransactionsPageParams = {
   item_ids?: number[];
   currency_item_ids?: number[];
   category_ids?: number[];
+  counterparty_ids?: number[];
   comment_query?: string;
   min_amount?: number;
   max_amount?: number;
@@ -157,6 +205,7 @@ export type TransactionChainCreate = {
   interval_days?: number | null;
   primary_item_id: number;
   counterparty_item_id?: number | null;
+  counterparty_id?: number | null;
   amount_rub: number;
   amount_counterparty?: number | null;
   direction: TransactionDirection;
@@ -177,6 +226,7 @@ export type TransactionChainOut = {
   interval_days: number | null;
   primary_item_id: number;
   counterparty_item_id: number | null;
+  counterparty_id: number | null;
   amount_rub: number;
   amount_counterparty: number | null;
   direction: TransactionDirection;
@@ -214,6 +264,7 @@ export type TransactionCreate = {
   transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
   primary_item_id: number;
   counterparty_item_id?: number | null;
+  counterparty_id?: number | null;
 
   amount_rub: number; // в копейках
   amount_counterparty?: number | null;
@@ -237,7 +288,11 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
 
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${idToken}`);
-  headers.set("Content-Type", "application/json");
+  const isFormData =
+    typeof FormData !== "undefined" && init?.body instanceof FormData;
+  if (!headers.has("Content-Type") && !isFormData) {
+    headers.set("Content-Type", "application/json");
+  }
 
   return fetch(input, { ...init, headers, cache: init?.cache ?? "no-store" });
 }
@@ -258,6 +313,77 @@ export async function fetchItems(options?: {
 export async function fetchBanks(query?: string): Promise<BankOut[]> {
   const qs = query ? `?q=${encodeURIComponent(query)}` : "";
   const res = await authFetch(`${API_BASE}/banks${qs}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchCounterparties(options?: {
+  include_deleted?: boolean;
+  deleted_only?: boolean;
+}): Promise<CounterpartyOut[]> {
+  const params = new URLSearchParams();
+  if (options?.include_deleted) params.set("include_deleted", "true");
+  if (options?.deleted_only) params.set("deleted_only", "true");
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/counterparties${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchLegalForms(): Promise<LegalFormOut[]> {
+  const res = await authFetch(`${API_BASE}/counterparties/legal-forms`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchCounterpartyIndustries(): Promise<
+  CounterpartyIndustryOut[]
+> {
+  const res = await authFetch(`${API_BASE}/counterparties/industries`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createCounterparty(
+  payload: CounterpartyCreate
+): Promise<CounterpartyOut> {
+  const res = await authFetch(`${API_BASE}/counterparties`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateCounterparty(
+  id: number,
+  payload: CounterpartyUpdate
+): Promise<CounterpartyOut> {
+  const res = await authFetch(`${API_BASE}/counterparties/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function deleteCounterparty(id: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/counterparties/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function uploadCounterpartyLogo(
+  id: number,
+  file: File
+): Promise<CounterpartyOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await authFetch(`${API_BASE}/counterparties/${id}/logo`, {
+    method: "POST",
+    body: formData,
+  });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
@@ -451,6 +577,9 @@ export async function fetchTransactionsPage(
   );
   options.category_ids?.forEach((value) =>
     params.append("category_ids", String(value))
+  );
+  options.counterparty_ids?.forEach((value) =>
+    params.append("counterparty_ids", String(value))
   );
   const qs = params.toString();
   const res = await authFetch(`${API_BASE}/transactions/page${qs ? `?${qs}` : ""}`);

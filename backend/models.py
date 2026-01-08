@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     Float,
     Boolean,
+    LargeBinary,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db import Base
@@ -43,6 +44,7 @@ class User(Base):
     category_states: Mapped[list["UserCategoryState"]] = relationship(
         back_populates="user"
     )
+    counterparties: Mapped[list["Counterparty"]] = relationship(back_populates="owner")
 
 
 class Currency(Base):
@@ -78,20 +80,58 @@ class FxRate(Base):
     )
 
 
-class Bank(Base):
-    __tablename__ = "banks"
+class CounterpartyIndustry(Base):
+    __tablename__ = "counterparty_industries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+
+    counterparties: Mapped[list["Counterparty"]] = relationship(
+        back_populates="industry"
+    )
+
+
+class Counterparty(Base):
+    __tablename__ = "counterparties"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ogrn: Mapped[str] = mapped_column(String(13), unique=True, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(10), nullable=False)
     name: Mapped[str] = mapped_column(String(300), nullable=False)
-    license_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    legal_form: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    inn: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    ogrn: Mapped[str | None] = mapped_column(String(15), unique=True, nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    middle_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    license_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logo_mime: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    logo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    industry_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("counterparty_industries.id"), nullable=True
+    )
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    owner: Mapped[Optional["User"]] = relationship(back_populates="counterparties")
     items: Mapped[list["Item"]] = relationship(back_populates="bank")
+    industry: Mapped[Optional["CounterpartyIndustry"]] = relationship(
+        back_populates="counterparties"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type in ('LEGAL','PERSON')",
+            name="ck_counterparties_entity_type",
+        ),
+    )
 
 
 class Category(Base):
@@ -170,8 +210,10 @@ class Item(Base):
     )
     currency: Mapped[Currency] = relationship(back_populates="items")
 
-    bank_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("banks.id"), nullable=True)
-    bank: Mapped[Optional["Bank"]] = relationship(back_populates="items")
+    bank_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("counterparties.id"), nullable=True
+    )
+    bank: Mapped[Optional["Counterparty"]] = relationship(back_populates="items")
 
     account_last7: Mapped[str | None] = mapped_column(String(7), nullable=True)
     contract_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -228,6 +270,12 @@ class Transaction(Base):
 
     counterparty_item_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=True)
     counterparty_item: Mapped[Optional["Item"]] = relationship(foreign_keys=[counterparty_item_id])
+    counterparty_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("counterparties.id"), nullable=True
+    )
+    counterparty: Mapped[Optional["Counterparty"]] = relationship(
+        foreign_keys=[counterparty_id]
+    )
 
     amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)  # в копейках
     amount_counterparty: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -289,6 +337,12 @@ class TransactionChain(Base):
     )
     counterparty_item: Mapped[Optional["Item"]] = relationship(
         foreign_keys=[counterparty_item_id]
+    )
+    counterparty_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("counterparties.id"), nullable=True
+    )
+    counterparty: Mapped[Optional["Counterparty"]] = relationship(
+        foreign_keys=[counterparty_id]
     )
 
     amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)

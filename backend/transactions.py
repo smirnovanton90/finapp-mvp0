@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, selectinload
 from db import get_db
 from auth import get_current_user
 from category_service import resolve_category_or_400
-from models import Transaction, Item, User
+from models import Transaction, Item, User, Counterparty
 from schemas import (
     TransactionCreate,
     TransactionOut,
@@ -57,6 +57,26 @@ def format_tx_datetime(value: datetime | date) -> str:
     return dt.strftime("%d.%m.%Y %H:%M")
 
 
+def resolve_counterparty(
+    db: Session,
+    user: User,
+    counterparty_id: int | None,
+) -> Counterparty | None:
+    if counterparty_id is None:
+        return None
+    counterparty = db.get(Counterparty, counterparty_id)
+    if (
+        not counterparty
+        or counterparty.deleted_at is not None
+        or (
+            counterparty.owner_user_id is not None
+            and counterparty.owner_user_id != user.id
+        )
+    ):
+        raise HTTPException(status_code=400, detail="Invalid counterparty_id")
+    return counterparty
+
+
 def insufficient_funds_detail(amount: int, balance: int, item_name: str, tx_date) -> str:
     amount_label = format_amount_value(amount)
     balance_label = format_amount_value(balance)
@@ -98,6 +118,7 @@ def list_transactions_page(
     item_ids: list[int] | None = Query(default=None),
     currency_item_ids: list[int] | None = Query(default=None),
     category_ids: list[int] | None = Query(default=None),
+    counterparty_ids: list[int] | None = Query(default=None),
     comment_query: str | None = None,
     min_amount: int | None = Query(default=None, ge=0),
     max_amount: int | None = Query(default=None, ge=0),
@@ -127,6 +148,8 @@ def list_transactions_page(
         stmt = stmt.where(Transaction.transaction_type.in_(transaction_type))
     if category_ids:
         stmt = stmt.where(Transaction.category_id.in_(category_ids))
+    if counterparty_ids:
+        stmt = stmt.where(Transaction.counterparty_id.in_(counterparty_ids))
     if item_ids:
         stmt = stmt.where(
             or_(
@@ -219,6 +242,8 @@ def create_transaction(
             detail="Дата транзакции не может быть раньше даты начала действия актива/обязательства.",
         )
 
+    resolve_counterparty(db, user, data.counterparty_id)
+
     counter = None
     amount_counterparty = None
 
@@ -283,6 +308,7 @@ def create_transaction(
         transaction_date=data.transaction_date,
         primary_item_id=data.primary_item_id,
         counterparty_item_id=data.counterparty_item_id,
+        counterparty_id=data.counterparty_id,
         amount_rub=data.amount_rub,
         amount_counterparty=amount_counterparty,
         direction=data.direction,
@@ -401,6 +427,8 @@ def update_transaction(
             detail="Transaction date cannot be earlier than the item's start date.",
         )
 
+    resolve_counterparty(db, user, data.counterparty_id)
+
     new_counter = None
     amount_counterparty = None
 
@@ -509,6 +537,7 @@ def update_transaction(
     tx.transaction_date = data.transaction_date
     tx.primary_item_id = data.primary_item_id
     tx.counterparty_item_id = data.counterparty_item_id if data.direction == "TRANSFER" else None
+    tx.counterparty_id = data.counterparty_id
     tx.amount_rub = data.amount_rub
     tx.amount_counterparty = amount_counterparty if data.direction == "TRANSFER" else None
     tx.direction = data.direction

@@ -1,15 +1,22 @@
 import argparse
+import mimetypes
 from html import unescape
 from html.parser import HTMLParser
+from pathlib import Path
+import sys
 
 import requests
 from sqlalchemy import delete, select
 
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 from db import SessionLocal
-from models import Bank
+from config import settings
+from models import Counterparty, CounterpartyIndustry
 
 CBR_URL = "https://cbr.ru/banking_sector/credit/FullCoList/"
 ALLOWED_STATUSES = {"Действующая", "Отозванная"}
+LOGO_MAX_BYTES = 2 * 1024 * 1024
 LOGO_BY_OGRN = {
     "1027700132195": "https://habrastorage.org/getpro/moikrug/uploads/company/100/006/341/2/logo/32156f1572916e1f7fb432e67e1defc2.png",
     "1027700067328": "https://cdn-gc.type.today/storage/post_image/2/2/2238/preview_image-EXYKTzwLxK5OXIa-bYnGJjO_wYVJ2I-WOg.jpg",
@@ -29,6 +36,8 @@ LOGO_BY_OGRN = {
     "1227700133792": "https://upload.wikimedia.org/wikipedia/commons/f/f2/%D0%9B%D0%BE%D0%B3%D0%BE%D1%82%D0%B8%D0%BF_Ozon_%D0%B1%D0%B0%D0%BD%D0%BA.jpg",
     "1027700342890": "https://krainov-vrn.ru/upload/iblock/1e0/j49jwhnhbuo7b6nttn0v0qvm9e3jr9ig.png",
 }
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FRONTEND_PUBLIC = PROJECT_ROOT / "frontend" / "public"
 
 
 def load_html(path: str | None) -> str:
@@ -114,11 +123,48 @@ def parse_banks(html_text: str) -> list[dict]:
                 "ogrn": ogrn,
                 "name": name,
                 "license_status": status,
-                "logo_url": LOGO_BY_OGRN.get(ogrn),
+                "logo_source": LOGO_BY_OGRN.get(ogrn),
+                "entity_type": "LEGAL",
             }
         )
 
     return rows
+
+
+def load_logo_payload(source: str | None) -> tuple[bytes | None, str | None]:
+    if not source:
+        return None, None
+
+    if source.startswith("/"):
+        logo_path = FRONTEND_PUBLIC / source.lstrip("/")
+        if not logo_path.exists():
+            return None, None
+        data = logo_path.read_bytes()
+        if len(data) > LOGO_MAX_BYTES:
+            return None, None
+        mime = mimetypes.guess_type(logo_path.name)[0] or "image/png"
+        return data, mime
+
+    try:
+        response = requests.get(
+            source,
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0 (FinApp Bank Seeder)"},
+        )
+        if not response.ok:
+            return None, None
+    except requests.RequestException:
+        return None, None
+
+    data = response.content
+    if len(data) > LOGO_MAX_BYTES:
+        return None, None
+    mime = response.headers.get("content-type")
+    if mime:
+        mime = mime.split(";")[0].strip()
+    if not mime:
+        mime = mimetypes.guess_type(source)[0]
+    return data, mime
 
 
 def upsert_banks(rows: list[dict], dry_run: bool) -> int:
@@ -127,20 +173,56 @@ def upsert_banks(rows: list[dict], dry_run: bool) -> int:
 
     session = SessionLocal()
     try:
+        bank_industry = session.execute(
+            select(CounterpartyIndustry).where(CounterpartyIndustry.name == "Банки")
+        ).scalar_one_or_none()
+        if bank_industry is None:
+            bank_industry = CounterpartyIndustry(name="Банки")
+            session.add(bank_industry)
+            session.flush()
+
         ogrns = {row["ogrn"] for row in rows}
-        session.execute(delete(Bank).where(Bank.ogrn.notin_(ogrns)))
+        session.execute(
+            delete(Counterparty).where(
+                Counterparty.industry_id == bank_industry.id,
+                Counterparty.ogrn.isnot(None),
+                Counterparty.ogrn.notin_(ogrns),
+            )
+        )
 
         for data in rows:
+            logo_data, logo_mime = load_logo_payload(data.get("logo_source"))
             existing = session.execute(
-                select(Bank).where(Bank.ogrn == data["ogrn"])
+                select(Counterparty).where(
+                    Counterparty.ogrn == data["ogrn"],
+                    Counterparty.industry_id == bank_industry.id,
+                )
             ).scalar_one_or_none()
             if existing:
                 existing.name = data["name"]
                 existing.license_status = data["license_status"]
-                if data["logo_url"]:
-                    existing.logo_url = data["logo_url"]
+                existing.entity_type = "LEGAL"
+                existing.industry_id = bank_industry.id
+                if logo_data:
+                    existing.logo_data = logo_data
+                    existing.logo_mime = logo_mime
+                existing.logo_url = (
+                    f"{settings.public_base_url}/counterparties/{existing.id}/logo"
+                    if existing.logo_data
+                    else None
+                )
             else:
-                session.add(Bank(**data))
+                data["industry_id"] = bank_industry.id
+                data["logo_data"] = logo_data
+                data["logo_mime"] = logo_mime
+                data.pop("logo_source", None)
+                bank = Counterparty(**data)
+                session.add(bank)
+                session.flush()
+                if bank.logo_data:
+                    bank.logo_url = (
+                        f"{settings.public_base_url}/counterparties/{bank.id}/logo"
+                    )
 
         if dry_run:
             session.rollback()

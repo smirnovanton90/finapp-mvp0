@@ -11,6 +11,7 @@ TransactionChainFrequency = Literal["DAILY", "WEEKLY", "MONTHLY", "REGULAR"]
 TransactionChainMonthlyRule = Literal["FIRST_DAY", "LAST_DAY"]
 CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
 LimitPeriod = Literal["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"]
+CounterpartyType = Literal["LEGAL", "PERSON"]
 
 
 class AuthRegister(BaseModel):
@@ -169,6 +170,7 @@ class TransactionBase(BaseModel):
     transaction_date: datetime
     primary_item_id: int
     counterparty_item_id: int | None = None
+    counterparty_id: int | None = None
     amount_rub: int = Field(ge=0)
     amount_counterparty: int | None = Field(default=None, ge=0)
     direction: TransactionDirection
@@ -221,6 +223,7 @@ class TransactionChainCreate(BaseModel):
     interval_days: int | None = Field(default=None, ge=1)
     primary_item_id: int
     counterparty_item_id: int | None = None
+    counterparty_id: int | None = None
     amount_rub: int = Field(ge=0)
     amount_counterparty: int | None = Field(default=None, ge=0)
     direction: TransactionDirection
@@ -291,6 +294,7 @@ class TransactionChainOut(BaseModel):
     interval_days: int | None
     primary_item_id: int
     counterparty_item_id: int | None
+    counterparty_id: int | None
     amount_rub: int
     amount_counterparty: int | None
     direction: TransactionDirection
@@ -407,3 +411,69 @@ class BankOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CounterpartyIndustryOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class CounterpartyBase(BaseModel):
+    entity_type: CounterpartyType
+    industry_id: int | None = Field(default=None, ge=1)
+    name: str | None = Field(default=None, max_length=300)
+    full_name: str | None = Field(default=None, max_length=300)
+    legal_form: str | None = Field(default=None, max_length=200)
+    inn: str | None = Field(default=None, max_length=12)
+    ogrn: str | None = Field(default=None, max_length=15)
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    middle_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator(
+        "name",
+        "full_name",
+        "legal_form",
+        "inn",
+        "ogrn",
+        "first_name",
+        "last_name",
+        "middle_name",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: object) -> object | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return value
+
+
+class CounterpartyCreate(CounterpartyBase):
+    pass
+
+
+class CounterpartyUpdate(CounterpartyBase):
+    pass
+
+
+class CounterpartyOut(CounterpartyBase):
+    id: int
+    license_status: str | None
+    logo_url: str | None
+    owner_user_id: int | None
+    created_at: datetime
+    deleted_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class LegalFormOut(BaseModel):
+    code: str
+    label: str

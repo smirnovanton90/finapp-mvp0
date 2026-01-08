@@ -1,13 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.staticfiles import StaticFiles
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date as date_type
 import requests
+from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import select, delete, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from db import get_db
-from models import Item, User, Currency, FxRate, Bank
+from models import Item, User, Currency, FxRate, Counterparty, CounterpartyIndustry
+from config import settings
 from schemas import (
     ItemCreate,
     ItemOut,
@@ -26,6 +29,7 @@ from transactions import router as transactions_router
 from transaction_chains import router as transaction_chains_router
 from categories import router as categories_router
 from limits import router as limits_router
+from counterparties import router as counterparties_router
 
 app = FastAPI(title="FinApp API", version="0.1.0")
 
@@ -43,11 +47,17 @@ _BANK_TYPE_CODES = {
     "mortgage",
     "car_loan",
 }
+_BANK_INDUSTRY_NAME = "Банки"
 
 app.include_router(transactions_router)
 app.include_router(transaction_chains_router)
 app.include_router(categories_router)
 app.include_router(limits_router)
+app.include_router(counterparties_router)
+
+UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -194,6 +204,22 @@ def _get_fx_rates(date_req: str | None, db: Session) -> list[FxRateOut]:
     _FX_CACHE[cache_key] = (now, rates)
     return rates
 
+
+def _get_bank_industry_id(db: Session) -> int | None:
+    return db.execute(
+        select(CounterpartyIndustry.id).where(
+            CounterpartyIndustry.name == _BANK_INDUSTRY_NAME
+        )
+    ).scalar_one_or_none()
+
+
+def _apply_logo_url(counterparty: Counterparty) -> None:
+    counterparty.logo_url = (
+        f"{settings.public_base_url}/counterparties/{counterparty.id}/logo"
+        if counterparty.logo_data
+        else None
+    )
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -273,11 +299,23 @@ def list_banks(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    stmt = select(Bank).where(Bank.license_status.in_(_BANK_LICENSE_STATUSES))
+    bank_industry_id = _get_bank_industry_id(db)
+    if not bank_industry_id:
+        return []
+    stmt = select(Counterparty).where(
+        Counterparty.industry_id == bank_industry_id,
+        Counterparty.entity_type == "LEGAL",
+        Counterparty.license_status.in_(_BANK_LICENSE_STATUSES),
+        Counterparty.ogrn.isnot(None),
+        Counterparty.deleted_at.is_(None),
+    )
     if q:
-        stmt = stmt.where(Bank.name.ilike(f"%{q}%"))
-    stmt = stmt.order_by(Bank.name.asc())
-    return list(db.execute(stmt).scalars())
+        stmt = stmt.where(Counterparty.name.ilike(f"%{q}%"))
+    stmt = stmt.order_by(Counterparty.name.asc())
+    rows = list(db.execute(stmt).scalars())
+    for row in rows:
+        _apply_logo_url(row)
+    return rows
 
 
 @app.get("/fx-rates", response_model=list[FxRateOut])
@@ -325,8 +363,9 @@ def create_item(
                 status_code=400,
                 detail="bank_id is only allowed for bank-related item types.",
             )
-        bank = db.get(Bank, payload.bank_id)
-        if not bank:
+        bank = db.get(Counterparty, payload.bank_id)
+        bank_industry_id = _get_bank_industry_id(db)
+        if not bank or not bank_industry_id or bank.industry_id != bank_industry_id:
             raise HTTPException(status_code=400, detail="Invalid bank_id")
         bank_id = bank.id
 

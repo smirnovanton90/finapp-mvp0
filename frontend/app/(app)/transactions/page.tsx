@@ -96,7 +96,7 @@ import {
   updateTransaction,
   updateTransactionStatus,
 } from "@/lib/api";
-import { buildItemTransactionCounts } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import {
   buildCategoryLookup,
@@ -1987,13 +1987,17 @@ export function TransactionsView({
     : false;
   const isImportSupported = isImportBankReady || isImportBankInProgress;
   const isImportFormDisabled = isImporting;
+  const resolveItemEffectiveKind = useCallback(
+    (item: ItemOut) => getEffectiveItemKind(item, item.current_value_rub),
+    []
+  );
   const assetItems = useMemo(
-    () => activeItems.filter((item) => item.kind === "ASSET"),
-    [activeItems]
+    () => activeItems.filter((item) => resolveItemEffectiveKind(item) === "ASSET"),
+    [activeItems, resolveItemEffectiveKind]
   );
   const liabilityItems = useMemo(
-    () => activeItems.filter((item) => item.kind === "LIABILITY"),
-    [activeItems]
+    () => activeItems.filter((item) => resolveItemEffectiveKind(item) === "LIABILITY"),
+    [activeItems, resolveItemEffectiveKind]
   );
   const currencyOptions = useMemo(() => {
     const values = new Set<string>();
@@ -3897,6 +3901,7 @@ export function TransactionsView({
                         selectionMode="single"
                         placeholder="Выберите"
                         getItemTypeLabel={getItemTypeLabel}
+                        getItemKind={resolveItemEffectiveKind}
                         getBankLogoUrl={itemBankLogoUrl}
                         getBankName={itemBankName}
                         getItemBalance={getItemDisplayBalanceCents}
@@ -3923,6 +3928,7 @@ export function TransactionsView({
                           selectionMode="single"
                           placeholder="Выберите"
                           getItemTypeLabel={getItemTypeLabel}
+                          getItemKind={resolveItemEffectiveKind}
                           getBankLogoUrl={itemBankLogoUrl}
                           getBankName={itemBankName}
                           getItemBalance={getItemDisplayBalanceCents}
@@ -4361,6 +4367,7 @@ export function TransactionsView({
                             selectionMode="single"
                             placeholder="Выберите счет"
                             getItemTypeLabel={getItemTypeLabel}
+                            getItemKind={resolveItemEffectiveKind}
                             getBankLogoUrl={itemBankLogoUrl}
                             getBankName={itemBankName}
                             getItemBalance={getItemDisplayBalanceCents}
@@ -4416,8 +4423,9 @@ export function TransactionsView({
                         }}
                         selectionMode="single"
                         placeholder="Выберите счет"
-                        getItemTypeLabel={getItemTypeLabel}
-                        getBankLogoUrl={itemBankLogoUrl}
+                      getItemTypeLabel={getItemTypeLabel}
+                      getItemKind={resolveItemEffectiveKind}
+                      getBankLogoUrl={itemBankLogoUrl}
                         getBankName={itemBankName}
                         getItemBalance={getItemDisplayBalanceCents}
                         itemCounts={itemTxCounts}
@@ -4684,6 +4692,7 @@ export function TransactionsView({
                   emptyMessage="Нет активов или обязательств."
                   noResultsMessage="Ничего не найдено"
                   getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
                   getBankLogoUrl={itemBankLogoUrl}
                   getBankName={itemBankName}
                   getItemBalance={getItemDisplayBalanceCents}

@@ -53,7 +53,6 @@ _BANK_TYPE_CODES = {
     "deposit",
     "savings_account",
     "brokerage",
-    "credit_card_debt",
     "consumer_loan",
     "mortgage",
     "car_loan",
@@ -264,6 +263,51 @@ def _resolve_card_account_id(
         )
     return linked.id
 
+
+def _resolve_card_kind_and_limit(
+    payload: ItemCreate,
+    existing_item: Item | None = None,
+) -> tuple[str | None, int | None, str]:
+    if payload.type_code != "bank_card":
+        if payload.card_kind is not None:
+            raise HTTPException(
+                status_code=400, detail="card_kind is only allowed for bank_card."
+            )
+        if payload.credit_limit is not None:
+            raise HTTPException(
+                status_code=400, detail="credit_limit is only allowed for bank_card."
+            )
+        return None, None, payload.kind
+
+    if payload.kind != "ASSET":
+        raise HTTPException(status_code=400, detail="bank_card kind must be ASSET.")
+
+    card_kind = payload.card_kind or "DEBIT"
+    if existing_item and existing_item.type_code == "bank_card":
+        existing_kind = existing_item.card_kind or "DEBIT"
+        if card_kind != existing_kind:
+            raise HTTPException(
+                status_code=400, detail="card_kind cannot be changed for bank_card."
+            )
+
+    if card_kind == "CREDIT":
+        credit_limit = (
+            payload.credit_limit
+            if payload.credit_limit is not None
+            else existing_item.credit_limit if existing_item else None
+        )
+        if credit_limit is None:
+            raise HTTPException(
+                status_code=400, detail="credit_limit is required for credit bank_card."
+            )
+        return card_kind, credit_limit, "ASSET"
+
+    if payload.credit_limit is not None:
+        raise HTTPException(
+            status_code=400, detail="credit_limit is only allowed for credit bank_card."
+        )
+    return card_kind, None, "ASSET"
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -414,6 +458,7 @@ def create_item(
         bank_id = bank.id
 
     card_account_id = _resolve_card_account_id(db, user, payload, bank_id)
+    card_kind, credit_limit, item_kind = _resolve_card_kind_and_limit(payload)
 
     interest_payout_account_id = None
     if payload.interest_payout_account_id is not None:
@@ -431,9 +476,16 @@ def create_item(
     if payload.type_code == "deposit" and payload.open_date and payload.deposit_term_days:
         deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
 
+    min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
+    if payload.initial_value_rub < min_balance:
+        detail = "Initial balance must be non-negative."
+        if min_balance < 0:
+            detail = "Initial balance cannot be below credit limit."
+        raise HTTPException(status_code=400, detail=detail)
+
     item = Item(
         user_id=user.id,
-        kind=payload.kind,
+        kind=item_kind,
         type_code=payload.type_code,
         name=payload.name,
         currency_code=payload.currency_code,
@@ -443,6 +495,8 @@ def create_item(
         contract_number=payload.contract_number,
         card_last4=payload.card_last4,
         card_account_id=card_account_id,
+        card_kind=card_kind,
+        credit_limit=credit_limit,
         deposit_term_days=payload.deposit_term_days,
         deposit_end_date=deposit_end_date,
         interest_rate=payload.interest_rate,
@@ -515,6 +569,10 @@ def update_item(
         if tx_exists:
             purge_card_transactions_fn(db, user, item.id)
 
+    card_kind, credit_limit, item_kind = _resolve_card_kind_and_limit(
+        payload, existing_item=item
+    )
+
     interest_payout_account_id = None
     if payload.interest_payout_account_id is not None:
         if payload.type_code not in {"deposit", "savings_account"}:
@@ -533,13 +591,14 @@ def update_item(
 
     delta = item.current_value_rub - item.initial_value_rub
     next_current_value = payload.initial_value_rub + delta
-    if next_current_value < 0:
-        raise HTTPException(
-            status_code=400,
-            detail="New initial value would make current balance negative.",
-        )
+    min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
+    if next_current_value < min_balance:
+        detail = "New initial value would make current balance negative."
+        if min_balance < 0:
+            detail = "New initial value would exceed the credit limit."
+        raise HTTPException(status_code=400, detail=detail)
 
-    item.kind = payload.kind
+    item.kind = item_kind
     item.type_code = payload.type_code
     item.name = payload.name
     item.currency_code = payload.currency_code
@@ -549,6 +608,8 @@ def update_item(
     item.contract_number = payload.contract_number
     item.card_last4 = payload.card_last4
     item.card_account_id = card_account_id
+    item.card_kind = card_kind
+    item.credit_limit = credit_limit
     item.deposit_term_days = payload.deposit_term_days
     item.deposit_end_date = deposit_end_date
     item.interest_rate = payload.interest_rate

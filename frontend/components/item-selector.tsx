@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Input } from "@/components/ui/input";
-import { ItemOut } from "@/lib/api";
+import { ItemKind, ItemOut } from "@/lib/api";
 import {
   formatAmount,
   normalizeItemSearch,
@@ -20,6 +20,7 @@ type ItemSelectorProps = {
   noResultsMessage?: string;
   clearLabel?: string;
   getItemTypeLabel: (item: ItemOut) => string;
+  getItemKind?: (item: ItemOut) => ItemKind;
   getBankLogoUrl?: (id: number | null | undefined) => string | null;
   getBankName?: (id: number | null | undefined) => string;
   getItemBalance?: (item: ItemOut) => number;
@@ -43,6 +44,7 @@ export function ItemSelector({
   noResultsMessage = DEFAULT_NO_RESULTS_MESSAGE,
   clearLabel,
   getItemTypeLabel,
+  getItemKind,
   getBankLogoUrl,
   getBankName,
   getItemBalance,
@@ -204,9 +206,9 @@ export function ItemSelector({
                 const bankName = getBankName ? getBankName(item.id) : "";
                 const typeLabel = getItemTypeLabel(item);
                 const balance = getItemBalance ? getItemBalance(item) : item.current_value_rub;
-                const amount = formatAmount(balance);
-                const signedAmount =
-                  item.kind === "LIABILITY" ? `-${amount}` : amount;
+                const amount = formatAmount(Math.abs(balance));
+                const itemKind = getItemKind ? getItemKind(item) : item.kind;
+                const signedAmount = itemKind === "LIABILITY" ? `-${amount}` : amount;
                 const amountLabel = item.currency_code
                   ? `${signedAmount} ${item.currency_code}`
                   : signedAmount;

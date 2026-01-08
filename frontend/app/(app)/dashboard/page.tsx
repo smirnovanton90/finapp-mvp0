@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { AlertCircle, Target, Wallet } from "lucide-react";
@@ -27,6 +34,7 @@ import {
   LimitOut,
   TransactionOut,
 } from "@/lib/api";
+import { getEffectiveItemKind } from "@/lib/item-utils";
 
 type ChartPoint = {
   x: number;
@@ -750,7 +758,7 @@ export default function DashboardPage() {
   function getRubEquivalentCents(item: ItemOut): number | null {
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
-    const amount = item.current_value_rub / 100;
+    const amount = Math.abs(item.current_value_rub) / 100;
     return Math.round(amount * rate * 100);
   }
 
@@ -764,33 +772,52 @@ export default function DashboardPage() {
       ),
     [items]
   );
+  const resolveItemEffectiveKind = useCallback(
+    (item: ItemOut, balanceCents?: number) =>
+      getEffectiveItemKind(item, balanceCents ?? item.current_value_rub),
+    []
+  );
 
   const cashItems = useMemo(
-    () => activeItems.filter((x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code)),
-    [activeItems]
+    () =>
+      activeItems.filter(
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" && CASH_TYPES.includes(x.type_code)
+      ),
+    [activeItems, resolveItemEffectiveKind]
   );
 
   const financialInstrumentsItems = useMemo(
     () =>
       activeItems.filter(
-        (x) => x.kind === "ASSET" && FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" &&
+          FINANCIAL_INSTRUMENTS_TYPES.includes(x.type_code)
       ),
-    [activeItems]
+    [activeItems, resolveItemEffectiveKind]
   );
 
   const propertyItems = useMemo(
-    () => activeItems.filter((x) => x.kind === "ASSET" && PROPERTY_TYPES.includes(x.type_code)),
-    [activeItems]
+    () =>
+      activeItems.filter(
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" && PROPERTY_TYPES.includes(x.type_code)
+      ),
+    [activeItems, resolveItemEffectiveKind]
   );
 
   const otherAssetItems = useMemo(
-    () => activeItems.filter((x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code)),
-    [activeItems]
+    () =>
+      activeItems.filter(
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code)
+      ),
+    [activeItems, resolveItemEffectiveKind]
   );
 
   const liabilityItems = useMemo(
-    () => activeItems.filter((x) => x.kind === "LIABILITY"),
-    [activeItems]
+    () => activeItems.filter((x) => resolveItemEffectiveKind(x) === "LIABILITY"),
+    [activeItems, resolveItemEffectiveKind]
   );
 
   const cashTotal = useMemo(
@@ -830,11 +857,11 @@ export default function DashboardPage() {
 
   const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
     const assets = activeItems
-      .filter((x) => x.kind === "ASSET")
+      .filter((x) => resolveItemEffectiveKind(x) === "ASSET")
       .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
 
     const liabilities = activeItems
-      .filter((x) => x.kind === "LIABILITY")
+      .filter((x) => resolveItemEffectiveKind(x) === "LIABILITY")
       .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
 
     return {
@@ -842,7 +869,7 @@ export default function DashboardPage() {
       totalLiabilities: liabilities,
       netTotal: assets - liabilities,
     };
-  }, [activeItems, rateByCode]);
+  }, [activeItems, rateByCode, resolveItemEffectiveKind]);
 
   const incomeBreakdown = useMemo(
     () =>
@@ -1211,7 +1238,8 @@ export default function DashboardPage() {
           if (item.currency_code !== "RUB") missingRate = true;
         } else {
           const rubValueCents = Math.round((valueCents / 100) * rate * 100);
-          const signedRub = item.kind === "LIABILITY" ? -rubValueCents : rubValueCents;
+          const effectiveKind = resolveItemEffectiveKind(item, valueCents);
+          const signedRub = effectiveKind === "LIABILITY" ? -rubValueCents : rubValueCents;
           if (totalRubCents !== null) totalRubCents += signedRub;
         }
       });
@@ -1231,6 +1259,7 @@ export default function DashboardPage() {
     latestRatesByCurrency,
     rangeEndKey,
     rangeStartKey,
+    resolveItemEffectiveKind,
     todayKey,
     txs,
   ]);

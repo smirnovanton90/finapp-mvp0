@@ -4,6 +4,7 @@ from typing import Literal
 
 ItemKind = Literal["ASSET", "LIABILITY"]
 InterestPayoutOrder = Literal["END_OF_TERM", "MONTHLY"]
+CardKind = Literal["DEBIT", "CREDIT"]
 TransactionDirection = Literal["INCOME", "EXPENSE", "TRANSFER"]
 TransactionType = Literal["ACTUAL", "PLANNED"]
 TransactionStatus = Literal["CONFIRMED", "UNCONFIRMED", "REALIZED"]
@@ -74,12 +75,14 @@ class ItemCreate(BaseModel):
     contract_number: str | None = Field(default=None, max_length=100)
     card_last4: str | None = Field(default=None, min_length=4, max_length=4, pattern=r"^\d{4}$")
     card_account_id: int | None = None
+    card_kind: CardKind | None = None
+    credit_limit: int | None = Field(default=None, ge=0)
     deposit_term_days: int | None = Field(default=None, ge=1)
     interest_rate: float | None = Field(default=None, ge=0)
     interest_payout_order: InterestPayoutOrder | None = None
     interest_capitalization: bool | None = None
     interest_payout_account_id: int | None = None
-    initial_value_rub: int = Field(ge=0)
+    initial_value_rub: int
     start_date: date
 
     @field_validator("account_last7", "contract_number", "card_last4", mode="before")
@@ -116,6 +119,12 @@ class ItemCreate(BaseModel):
         if self.card_account_id is not None and self.type_code not in card_types:
             raise ValueError("card_account_id is only allowed for bank_card")
 
+        if self.card_kind is not None and self.type_code not in card_types:
+            raise ValueError("card_kind is only allowed for bank_card")
+
+        if self.credit_limit is not None and self.type_code not in card_types:
+            raise ValueError("credit_limit is only allowed for bank_card")
+
         if self.deposit_term_days is not None and self.type_code not in deposit_types:
             raise ValueError("deposit_term_days is only allowed for deposit")
 
@@ -129,6 +138,27 @@ class ItemCreate(BaseModel):
             or self.interest_payout_account_id is not None
         ) and self.type_code not in interest_types:
             raise ValueError("interest fields are only allowed for deposit or savings_account")
+
+        if self.type_code in card_types:
+            if self.kind != "ASSET":
+                raise ValueError("bank_card kind must be ASSET")
+            if self.card_kind is None:
+                self.card_kind = "DEBIT"
+            if self.card_kind == "CREDIT":
+                if self.card_account_id is not None:
+                    raise ValueError("card_account_id is not allowed for credit bank_card")
+                if self.credit_limit is None:
+                    raise ValueError("credit_limit is required for credit bank_card")
+                if self.initial_value_rub < -self.credit_limit:
+                    raise ValueError("initial_value_rub cannot be below credit_limit")
+            else:
+                if self.credit_limit is not None:
+                    raise ValueError("credit_limit is only allowed for credit bank_card")
+                if self.initial_value_rub < 0:
+                    raise ValueError("initial_value_rub must be non-negative")
+        else:
+            if self.initial_value_rub < 0:
+                raise ValueError("initial_value_rub must be non-negative")
         return self
 
     @field_validator("start_date")
@@ -150,6 +180,8 @@ class ItemOut(BaseModel):
     contract_number: str | None
     card_last4: str | None
     card_account_id: int | None
+    card_kind: CardKind | None
+    credit_limit: int | None
     deposit_term_days: int | None
     deposit_end_date: date | None
     interest_rate: float | None

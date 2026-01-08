@@ -90,6 +90,12 @@ def transfer_delta(kind: str, is_primary: bool, amount: int) -> int:
     return -amount if is_primary else amount
 
 
+def get_min_balance(item: Item) -> int:
+    if item.type_code == "bank_card" and item.card_kind == "CREDIT":
+        return -(item.credit_limit or 0)
+    return 0
+
+
 def format_amount_value(value: int) -> str:
     abs_value = abs(value)
     if abs_value % 100 == 0:
@@ -137,6 +143,22 @@ def insufficient_funds_detail(amount: int, balance: int, item_name: str, tx_date
         f"Недостаточно средств для добавления транзакции по счету \"{item_name}\". "
         f"Сумма: {amount_label}, остаток на дату {date_label}: {balance_label}. "
         "Добавление транзакции приведет к отрицательному остатку."
+    )
+
+
+def balance_violation_detail(item: Item, amount: int, tx_date) -> str:
+    min_balance = get_min_balance(item)
+    if min_balance < 0:
+        limit_label = format_amount_value(abs(min_balance))
+        return (
+            "Сумма транзакции превышает кредитный лимит по "
+            f"{item.name}. Текущий кредитный лимит: {limit_label}."
+        )
+    return insufficient_funds_detail(
+        amount=amount,
+        balance=item.current_value_rub,
+        item_name=item.name,
+        tx_date=tx_date,
     )
 
 
@@ -382,17 +404,13 @@ def create_transaction(
             primary.current_value_rub += amt
 
         elif data.direction == "EXPENSE":
-            if primary.current_value_rub < amt:
+            next_balance = primary.current_value_rub - amt
+            if next_balance < get_min_balance(primary):
                 raise HTTPException(
                     status_code=400,
-                    detail=insufficient_funds_detail(
-                        amount=amt,
-                        balance=primary.current_value_rub,
-                        item_name=primary.name,
-                        tx_date=data.transaction_date,
-                    ),
+                    detail=balance_violation_detail(primary, amt, data.transaction_date),
                 )
-            primary.current_value_rub -= amt
+            primary.current_value_rub = next_balance
 
         elif data.direction == "TRANSFER":
             if not counter:
@@ -400,28 +418,20 @@ def create_transaction(
             amt_counterparty = amount_counterparty or amt
             primary_delta = transfer_delta(primary.kind, True, amt)
             counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
-            if primary_delta < 0 and primary.current_value_rub < -primary_delta:
+            primary_next = primary.current_value_rub + primary_delta
+            if primary_next < get_min_balance(primary):
                 raise HTTPException(
                     status_code=400,
-                    detail=insufficient_funds_detail(
-                        amount=-primary_delta,
-                        balance=primary.current_value_rub,
-                        item_name=primary.name,
-                        tx_date=data.transaction_date,
-                    ),
+                    detail=balance_violation_detail(primary, -primary_delta, data.transaction_date),
                 )
-            if counter_delta < 0 and counter.current_value_rub < -counter_delta:
+            counter_next = counter.current_value_rub + counter_delta
+            if counter_next < get_min_balance(counter):
                 raise HTTPException(
                     status_code=400,
-                    detail=insufficient_funds_detail(
-                        amount=-counter_delta,
-                        balance=counter.current_value_rub,
-                        item_name=counter.name,
-                        tx_date=data.transaction_date,
-                    ),
+                    detail=balance_violation_detail(counter, -counter_delta, data.transaction_date),
                 )
-            primary.current_value_rub += primary_delta
-            counter.current_value_rub += counter_delta
+            primary.current_value_rub = primary_next
+            counter.current_value_rub = counter_next
 
     db.add(tx)
     db.commit()
@@ -587,10 +597,14 @@ def update_transaction(
         item = items_by_id.get(item_id)
         if not item:
             raise HTTPException(status_code=400, detail="Item not found")
-        if item.current_value_rub + delta < 0:
+        min_balance = get_min_balance(item)
+        if item.current_value_rub + delta < min_balance:
+            detail = "Cannot update: would make balance negative. Update later transactions first."
+            if min_balance < 0:
+                detail = "Cannot update: would exceed credit limit. Update later transactions first."
             raise HTTPException(
                 status_code=409,
-                detail="Cannot update: would make balance negative. Update later transactions first.",
+                detail=detail,
             )
 
     for item_id, delta in deltas.items():
@@ -656,23 +670,24 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
         amt_counterparty = tx.amount_counterparty or amt
 
         if tx.direction == "INCOME":
-            if primary.current_value_rub < amt:
+            next_balance = primary.current_value_rub - amt
+            if next_balance < get_min_balance(primary):
                 raise HTTPException(
                     status_code=409,
                     detail="Cannot delete: would make balance negative. Delete later transactions first.",
                 )
-            primary.current_value_rub -= amt
+            primary.current_value_rub = next_balance
         elif tx.direction == "EXPENSE":
             primary.current_value_rub += amt
         elif tx.direction == "TRANSFER":
             primary_delta = -transfer_delta(primary.kind, True, amt)
             counter_delta = -transfer_delta(counter.kind, False, amt_counterparty)
-            if primary.current_value_rub + primary_delta < 0:
+            if primary.current_value_rub + primary_delta < get_min_balance(primary):
                 raise HTTPException(
                     status_code=409,
                     detail="Cannot delete: would make balance negative. Delete later transactions first.",
                 )
-            if counter.current_value_rub + counter_delta < 0:
+            if counter.current_value_rub + counter_delta < get_min_balance(counter):
                 raise HTTPException(
                     status_code=409,
                     detail="Cannot delete: would make counterparty balance negative. Delete later transactions first.",

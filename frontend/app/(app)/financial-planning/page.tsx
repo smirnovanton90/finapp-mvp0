@@ -73,7 +73,7 @@ import {
   TransactionChainOut,
   TransactionOut,
 } from "@/lib/api";
-import { buildItemTransactionCounts } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 
 const CATEGORY_PLACEHOLDER = "-";
@@ -358,6 +358,8 @@ export default function FinancialPlanningPage() {
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
+  const resolveItemEffectiveKind = (item: ItemOut) =>
+    getEffectiveItemKind(item, item.current_value_rub);
   const counterpartiesById = useMemo(
     () => new Map(counterparties.map((counterparty) => [counterparty.id, counterparty])),
     [counterparties]
@@ -1283,6 +1285,7 @@ export default function FinancialPlanningPage() {
                   selectionMode="single"
                   placeholder="Выберите счет"
                   getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
                   itemCounts={itemTxCounts}
                 />
               </div>
@@ -1296,6 +1299,7 @@ export default function FinancialPlanningPage() {
                     selectionMode="single"
                     placeholder="Выберите счет"
                     getItemTypeLabel={getItemTypeLabel}
+                    getItemKind={resolveItemEffectiveKind}
                     itemCounts={itemTxCounts}
                   />
                 </div>

@@ -222,6 +222,8 @@ class Item(Base):
     card_account_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("items.id"), nullable=True
     )
+    card_kind: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    credit_limit: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     deposit_term_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     deposit_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     interest_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -247,8 +249,34 @@ class Item(Base):
 
     __table_args__ = (
         CheckConstraint("kind in ('ASSET','LIABILITY')", name="ck_items_kind"),
-        CheckConstraint("initial_value_rub >= 0", name="ck_items_initial_non_negative"),
-        CheckConstraint("current_value_rub >= 0", name="ck_items_current_non_negative"),
+        CheckConstraint(
+            "(initial_value_rub >= 0) or (type_code = 'bank_card' and card_kind = 'CREDIT')",
+            name="ck_items_initial_non_negative",
+        ),
+        CheckConstraint(
+            "(current_value_rub >= 0) or (type_code = 'bank_card' and card_kind = 'CREDIT')",
+            name="ck_items_current_non_negative",
+        ),
+        CheckConstraint(
+            "card_kind is null or card_kind in ('DEBIT','CREDIT')",
+            name="ck_items_card_kind",
+        ),
+        CheckConstraint(
+            "credit_limit is null or credit_limit >= 0",
+            name="ck_items_credit_limit_non_negative",
+        ),
+        CheckConstraint(
+            "(card_kind != 'CREDIT') or (credit_limit is not null)",
+            name="ck_items_credit_limit_required",
+        ),
+        CheckConstraint(
+            "(card_kind = 'CREDIT') or (credit_limit is null)",
+            name="ck_items_credit_limit_only_credit",
+        ),
+        CheckConstraint(
+            "card_kind is null or type_code = 'bank_card'",
+            name="ck_items_card_kind_only_bank_card",
+        ),
     )
 class Transaction(Base):
     __tablename__ = "transactions"

@@ -1,6 +1,7 @@
 import { getSession } from "next-auth/react";
 
 export type ItemKind = "ASSET" | "LIABILITY";
+export type CardKind = "DEBIT" | "CREDIT";
 
 export type ItemOut = {
   id: number;
@@ -14,6 +15,8 @@ export type ItemOut = {
   contract_number: string | null;
   card_last4: string | null;
   card_account_id: number | null;
+  card_kind: CardKind | null;
+  credit_limit: number | null;
   deposit_term_days: number | null;
   deposit_end_date: string | null;
   interest_rate: number | null;
@@ -39,6 +42,8 @@ export type ItemCreate = {
   contract_number?: string | null;
   card_last4?: string | null;
   card_account_id?: number | null;
+  card_kind?: CardKind | null;
+  credit_limit?: number | null;
   deposit_term_days?: number | null;
   interest_rate?: number | null;
   interest_payout_order?: "END_OF_TERM" | "MONTHLY" | null;

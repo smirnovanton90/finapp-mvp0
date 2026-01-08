@@ -24,7 +24,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { buildItemTransactionCounts, sortItemsByTransactionCount } from "@/lib/item-utils";
+import {
+  buildItemTransactionCounts,
+  getEffectiveItemKind,
+  sortItemsByTransactionCount,
+} from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { cn } from "@/lib/utils";
 
@@ -391,6 +395,10 @@ export default function AssetsDynamicsPage() {
     },
     [itemsById]
   );
+  const resolveItemEffectiveKind = useCallback(
+    (item: ItemOut, balanceCents: number) => getEffectiveItemKind(item, balanceCents),
+    []
+  );
   const getItemDisplayInitialCents = useCallback(
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
@@ -671,12 +679,14 @@ export default function AssetsDynamicsPage() {
         } else {
           const rubValueCents = Math.round((valueCents / 100) * rate * 100);
           itemRubValues[item.id] = rubValueCents;
-          const signedRub = item.kind === "LIABILITY" ? -rubValueCents : rubValueCents;
+          const effectiveKind = resolveItemEffectiveKind(item, valueCents);
+          const signedRub = effectiveKind === "LIABILITY" ? -rubValueCents : rubValueCents;
           if (totalRubCents !== null) totalRubCents += signedRub;
         }
 
         if (showCurrencyColumns && singleCurrencyCode) {
-          const signedValue = item.kind === "LIABILITY" ? -valueCents : valueCents;
+          const effectiveKind = resolveItemEffectiveKind(item, valueCents);
+          const signedValue = effectiveKind === "LIABILITY" ? -valueCents : valueCents;
           if (totalCurrencyCents !== null) totalCurrencyCents += signedValue;
         }
       });
@@ -704,6 +714,7 @@ export default function AssetsDynamicsPage() {
     earliestStartKey,
     rangeEndKey,
     rangeStartKey,
+    resolveItemEffectiveKind,
     selectedItems,
     showCurrencyColumns,
     singleCurrencyCode,
@@ -718,6 +729,7 @@ export default function AssetsDynamicsPage() {
         value: (row.totalRubCents ?? 0) / 100,
         totalRubCents: row.totalRubCents,
         itemRubValues: row.itemRubValues,
+        itemValues: row.itemValues,
       })),
     [dailyRows]
   );
@@ -856,6 +868,7 @@ export default function AssetsDynamicsPage() {
               emptyMessage="Нет активов и обязательств"
               noResultsMessage="Ничего не найдено"
               getItemTypeLabel={getItemTypeLabel}
+              getItemKind={(item) => resolveItemEffectiveKind(item, item.current_value_rub)}
               getBankLogoUrl={itemBankLogoUrl}
               getBankName={itemBankName}
               getItemBalance={getItemDisplayBalanceCents}
@@ -961,10 +974,15 @@ export default function AssetsDynamicsPage() {
                       <div className="mt-2 space-y-1 text-xs">
                         {selectedItems.map((item) => {
                           const rubValue = hoverData.itemRubValues[item.id];
+                          const valueCents = hoverData.itemValues[item.id];
+                          const effectiveKind =
+                            valueCents === null || valueCents === undefined
+                              ? item.kind
+                              : resolveItemEffectiveKind(item, valueCents);
                           const signedRub =
                             rubValue === null
                               ? null
-                              : item.kind === "LIABILITY"
+                              : effectiveKind === "LIABILITY"
                               ? -rubValue
                               : rubValue;
                           return (
@@ -1235,10 +1253,15 @@ export default function AssetsDynamicsPage() {
                             </TableCell>
                             {selectedItems.map((item, index) => {
                               const rubValue = row.itemRubValues[item.id];
+                              const valueCents = row.itemValues[item.id];
+                              const effectiveKind =
+                                valueCents === null || valueCents === undefined
+                                  ? item.kind
+                                  : resolveItemEffectiveKind(item, valueCents);
                               const signedValue =
                                 rubValue === null
                                   ? null
-                                  : item.kind === "LIABILITY"
+                                  : effectiveKind === "LIABILITY"
                                   ? -rubValue
                                   : rubValue;
                               return (
@@ -1246,7 +1269,7 @@ export default function AssetsDynamicsPage() {
                                   key={`${row.date}-${item.id}`}
                                   className={cn(
                                     "text-right tabular-nums",
-                                    item.kind === "LIABILITY" && "text-red-600",
+                                    effectiveKind === "LIABILITY" && "text-red-600",
                                     index === selectedItems.length - 1 && "pr-8"
                                   )}
                                 >

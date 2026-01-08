@@ -69,6 +69,7 @@ import {
   updateItem,
   archiveItem,
   closeItem,
+  CardKind,
   ItemKind,
   ItemCreate,
   ItemOut,
@@ -77,7 +78,7 @@ import {
   FxRateOut,
   TransactionOut,
 } from "@/lib/api";
-import { buildItemTransactionCounts } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 
 
@@ -127,7 +128,6 @@ const ASSET_TYPES = [
 const ASSET_TYPE_CODES = ASSET_TYPES.map((type) => type.code);
 
 const LIABILITY_TYPES = [
-  { code: "credit_card_debt", label: "Задолженность по кредитной карте" },
   { code: "consumer_loan", label: "Потребительский кредит" },
   { code: "mortgage", label: "Ипотека" },
   { code: "car_loan", label: "Автокредит" },
@@ -183,7 +183,6 @@ const VALUABLES_TYPES = ["jewelry", "electronics", "art", "collectibles", "other
 const PENSION_TYPES = ["npf", "investment_life_insurance"];
 const OTHER_ASSET_TYPES = ["business_share", "sole_proprietor", "other_asset"];
 const CREDIT_LIABILITY_TYPES = [
-  "credit_card_debt",
   "consumer_loan",
   "mortgage",
   "car_loan",
@@ -214,7 +213,6 @@ const BANK_TYPE_CODES = [
   "deposit",
   "savings_account",
   "brokerage",
-  "credit_card_debt",
   "consumer_loan",
   "mortgage",
   "car_loan",
@@ -330,7 +328,6 @@ const TYPE_ICON_BY_CODE: Record<
   business_share: TrendingUp,
   sole_proprietor: TrendingUp,
   other_asset: Package,
-  credit_card_debt: CreditCard,
   consumer_loan: Coins,
   mortgage: Home,
   car_loan: Car,
@@ -437,6 +434,8 @@ export default function Page() {
   const [openDate, setOpenDate] = useState("");
   const [cardLast4, setCardLast4] = useState("");
   const [cardAccountId, setCardAccountId] = useState("");
+  const [cardKind, setCardKind] = useState<CardKind>("DEBIT");
+  const [creditLimit, setCreditLimit] = useState("");
   const [depositTermDays, setDepositTermDays] = useState("");
   const [interestRate, setInterestRate] = useState("");
   const [interestPayoutOrder, setInterestPayoutOrder] = useState("");
@@ -464,6 +463,8 @@ export default function Page() {
     setOpenDate("");
     setCardLast4("");
     setCardAccountId("");
+    setCardKind("DEBIT");
+    setCreditLimit("");
     setDepositTermDays("");
     setInterestRate("");
     setInterestPayoutOrder("");
@@ -487,9 +488,12 @@ export default function Page() {
 
   function formatRubInput(raw: string): string {
     if (!raw) return "";
+    const trimmed = raw.trim();
+    const isNegative = trimmed.startsWith("-");
   
     // оставляем только цифры и разделители
-    const cleaned = raw.replace(/[^\d.,]/g, "");
+    const cleaned = trimmed.replace(/[^\d.,]/g, "");
+    if (!cleaned) return isNegative ? "-" : "";
   
     // запоминаем: пользователь только что ввёл разделитель в конце
     const endsWithSep = /[.,]$/.test(cleaned);
@@ -522,28 +526,44 @@ export default function Page() {
   
     // если пользователь только что ввёл запятую, показываем её
     if (endsWithSep && formattedDec.length === 0) {
-      return `${formattedInt},`;
+      const value = `${formattedInt},`;
+      return isNegative ? `-${value}` : value;
     }
   
-    return formattedDec.length > 0 ? `${formattedInt},${formattedDec}` : formattedInt;
+    const value =
+      formattedDec.length > 0 ? `${formattedInt},${formattedDec}` : formattedInt;
+    return isNegative ? `-${value}` : value;
   }  
   
   function normalizeRubOnBlur(value: string): string {
     const v = value.trim();
     if (!v) return "";
+    const isNegative = v.startsWith("-");
+    const absValue = isNegative ? v.slice(1).trim() : v;
+    if (!absValue) return "";
   
     // если заканчивается запятой: "123," -> "123,00"
-    if (v.endsWith(",")) return `${v}00`;
+    if (absValue.endsWith(",")) {
+      const result = `${absValue}00`;
+      return isNegative ? `-${result}` : result;
+    }
   
-    const parts = v.split(",");
+    const parts = absValue.split(",");
     const intPart = parts[0] || "0";
     const decPart = parts[1] ?? "";
   
-    if (decPart.length === 0) return `${intPart},00`;
-    if (decPart.length === 1) return `${intPart},${decPart}0`;
+    const normalized =
+      decPart.length === 0
+        ? `${intPart},00`
+        : decPart.length === 1
+        ? `${intPart},${decPart}0`
+        : `${intPart},${decPart.slice(0, 2)}`;
+    if (isNegative && normalized !== "0,00") {
+      return `-${normalized}`;
+    }
+    return normalized;
   
     // если больше 2 — обрежем
-    return `${intPart},${decPart.slice(0, 2)}`;
   }  
 
   const rateByCode = useMemo(() => {
@@ -570,10 +590,16 @@ export default function Page() {
     [itemsById]
   );
 
+  const resolveItemEffectiveKind = useCallback(
+    (item: ItemOut, balanceCents?: number) =>
+      getEffectiveItemKind(item, balanceCents ?? item.current_value_rub),
+    []
+  );
+
   function getRubEquivalentCents(item: ItemOut): number | null {
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
-    const amount = getItemDisplayBalanceCents(item) / 100;
+    const amount = Math.abs(getItemDisplayBalanceCents(item)) / 100;
     return Math.round(amount * rate * 100);
   }
 
@@ -606,6 +632,10 @@ export default function Page() {
     [typeCode]
   );
   const showBankCardFields = useMemo(() => typeCode === "bank_card", [typeCode]);
+  const isCreditCard = useMemo(
+    () => showBankCardFields && cardKind === "CREDIT",
+    [showBankCardFields, cardKind]
+  );
   const showDepositFields = useMemo(() => typeCode === "deposit", [typeCode]);
   const showInterestFields = useMemo(
     () => typeCode === "deposit" || typeCode === "savings_account",
@@ -691,8 +721,11 @@ export default function Page() {
     [items, showArchived, showClosed]
   );
   const activeAssetItems = useMemo(
-    () => activeItems.filter((item) => item.kind === "ASSET"),
-    [activeItems]
+    () =>
+      activeItems.filter(
+        (item) => resolveItemEffectiveKind(item) === "ASSET"
+      ),
+    [activeItems, resolveItemEffectiveKind]
   );
   const bankAccountItems = useMemo(() => {
     const filtered = activeAssetItems.filter((item) => {
@@ -758,119 +791,149 @@ export default function Page() {
   const cashItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code)
+        (x) => resolveItemEffectiveKind(x) === "ASSET" && CASH_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const investmentItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && INVESTMENT_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" &&
+          INVESTMENT_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const thirdPartyDebtItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && THIRD_PARTY_DEBT_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" &&
+          THIRD_PARTY_DEBT_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const realEstateItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && REAL_ESTATE_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" &&
+          REAL_ESTATE_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const transportItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && TRANSPORT_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" &&
+          TRANSPORT_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const valuablesItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && VALUABLES_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" &&
+          VALUABLES_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const pensionItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && PENSION_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" &&
+          PENSION_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const otherAssetItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "ASSET" &&
+          OTHER_ASSET_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const creditLiabilityItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "LIABILITY" && CREDIT_LIABILITY_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "LIABILITY" &&
+          (CREDIT_LIABILITY_TYPES.includes(x.type_code) || x.type_code === "bank_card")
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const thirdPartyLoanItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "LIABILITY" && THIRD_PARTY_LOAN_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "LIABILITY" &&
+          THIRD_PARTY_LOAN_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const taxLiabilityItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "LIABILITY" && TAX_LIABILITY_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "LIABILITY" &&
+          TAX_LIABILITY_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const utilityLiabilityItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "LIABILITY" && UTILITY_LIABILITY_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "LIABILITY" &&
+          UTILITY_LIABILITY_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const legalLiabilityItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "LIABILITY" && LEGAL_LIABILITY_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "LIABILITY" &&
+          LEGAL_LIABILITY_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const otherLiabilityItems = useMemo(
     () =>
       visibleItems.filter(
-        (x) => x.kind === "LIABILITY" && OTHER_LIABILITY_TYPES.includes(x.type_code)
+        (x) =>
+          resolveItemEffectiveKind(x) === "LIABILITY" &&
+          OTHER_LIABILITY_TYPES.includes(x.type_code)
       ),
-    [visibleItems]
+    [visibleItems, resolveItemEffectiveKind]
   );
 
   const cashTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "ASSET" && CASH_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "ASSET" &&
+            CASH_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -878,7 +941,11 @@ export default function Page() {
   const investmentTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "ASSET" && INVESTMENT_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "ASSET" &&
+            INVESTMENT_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -886,7 +953,11 @@ export default function Page() {
   const thirdPartyDebtTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "ASSET" && THIRD_PARTY_DEBT_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "ASSET" &&
+            THIRD_PARTY_DEBT_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -894,7 +965,11 @@ export default function Page() {
   const realEstateTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "ASSET" && REAL_ESTATE_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "ASSET" &&
+            REAL_ESTATE_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -902,7 +977,11 @@ export default function Page() {
   const transportTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "ASSET" && TRANSPORT_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "ASSET" &&
+            TRANSPORT_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -910,7 +989,11 @@ export default function Page() {
   const valuablesTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "ASSET" && VALUABLES_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "ASSET" &&
+            VALUABLES_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -918,7 +1001,11 @@ export default function Page() {
   const pensionTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "ASSET" && PENSION_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "ASSET" &&
+            PENSION_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -926,7 +1013,11 @@ export default function Page() {
   const otherAssetTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "ASSET" && OTHER_ASSET_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "ASSET" &&
+            OTHER_ASSET_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -935,7 +1026,9 @@ export default function Page() {
     () =>
       activeItemsForTotals
         .filter(
-          (x) => x.kind === "LIABILITY" && CREDIT_LIABILITY_TYPES.includes(x.type_code)
+          (x) =>
+            resolveItemEffectiveKind(x) === "LIABILITY" &&
+            (CREDIT_LIABILITY_TYPES.includes(x.type_code) || x.type_code === "bank_card")
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
@@ -945,7 +1038,9 @@ export default function Page() {
     () =>
       activeItemsForTotals
         .filter(
-          (x) => x.kind === "LIABILITY" && THIRD_PARTY_LOAN_TYPES.includes(x.type_code)
+          (x) =>
+            resolveItemEffectiveKind(x) === "LIABILITY" &&
+            THIRD_PARTY_LOAN_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
@@ -954,7 +1049,11 @@ export default function Page() {
   const taxLiabilityTotal = useMemo(
     () =>
       activeItemsForTotals
-        .filter((x) => x.kind === "LIABILITY" && TAX_LIABILITY_TYPES.includes(x.type_code))
+        .filter(
+          (x) =>
+            resolveItemEffectiveKind(x) === "LIABILITY" &&
+            TAX_LIABILITY_TYPES.includes(x.type_code)
+        )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
   );
@@ -963,7 +1062,9 @@ export default function Page() {
     () =>
       activeItemsForTotals
         .filter(
-          (x) => x.kind === "LIABILITY" && UTILITY_LIABILITY_TYPES.includes(x.type_code)
+          (x) =>
+            resolveItemEffectiveKind(x) === "LIABILITY" &&
+            UTILITY_LIABILITY_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
@@ -973,7 +1074,9 @@ export default function Page() {
     () =>
       activeItemsForTotals
         .filter(
-          (x) => x.kind === "LIABILITY" && LEGAL_LIABILITY_TYPES.includes(x.type_code)
+          (x) =>
+            resolveItemEffectiveKind(x) === "LIABILITY" &&
+            LEGAL_LIABILITY_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
@@ -983,7 +1086,9 @@ export default function Page() {
     () =>
       activeItemsForTotals
         .filter(
-          (x) => x.kind === "LIABILITY" && OTHER_LIABILITY_TYPES.includes(x.type_code)
+          (x) =>
+            resolveItemEffectiveKind(x) === "LIABILITY" &&
+            OTHER_LIABILITY_TYPES.includes(x.type_code)
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
@@ -1097,7 +1202,19 @@ export default function Page() {
     if (showBankCardFields) return;
     if (cardLast4) setCardLast4("");
     if (cardAccountId) setCardAccountId("");
-  }, [showBankCardFields, cardLast4, cardAccountId]);
+    if (cardKind !== "DEBIT") setCardKind("DEBIT");
+    if (creditLimit) setCreditLimit("");
+  }, [showBankCardFields, cardLast4, cardAccountId, cardKind, creditLimit]);
+  useEffect(() => {
+    if (!showBankCardFields) return;
+    if (cardKind !== "DEBIT") return;
+    if (creditLimit) setCreditLimit("");
+  }, [showBankCardFields, cardKind, creditLimit]);
+  useEffect(() => {
+    if (!showBankCardFields) return;
+    if (!isCreditCard) return;
+    if (cardAccountId) setCardAccountId("");
+  }, [showBankCardFields, isCreditCard, cardAccountId]);
 
   useEffect(() => {
     if (!showBankCardFields) return;
@@ -1191,6 +1308,8 @@ export default function Page() {
     setOpenDate("");
     setCardLast4("");
     setCardAccountId("");
+    setCardKind("DEBIT");
+    setCreditLimit("");
     setDepositTermDays("");
     setInterestRate("");
     setInterestPayoutOrder("");
@@ -1221,6 +1340,8 @@ export default function Page() {
     setOpenDate(item.open_date ?? "");
     setCardLast4(item.card_last4 ?? "");
     setCardAccountId(item.card_account_id ? String(item.card_account_id) : "");
+    setCardKind(item.card_kind ?? "DEBIT");
+    setCreditLimit(item.credit_limit != null ? formatAmount(item.credit_limit) : "");
     setDepositTermDays(item.deposit_term_days != null ? String(item.deposit_term_days) : "");
     setInterestRate(
       item.interest_rate != null ? String(item.interest_rate).replace(".", ",") : ""
@@ -1290,7 +1411,7 @@ export default function Page() {
       return;
     }
 
-    if (showBankCardFields && cardAccountId) {
+    if (showBankCardFields && !isCreditCard && cardAccountId) {
       const linkedAccount = itemsById.get(Number(cardAccountId));
       if (!linkedAccount) {
         setFormError("Привязанный счет не найден.");
@@ -1334,15 +1455,43 @@ export default function Page() {
       interestRateValue = parsed;
     }
 
+    let creditLimitCents: number | null = null;
+    if (showBankCardFields && cardKind === "CREDIT") {
+      const trimmedCreditLimit = creditLimit.trim();
+      if (!trimmedCreditLimit) {
+        setFormError("Укажите кредитный лимит для кредитной карты.");
+        return;
+      }
+      const parsedLimit = parseRubToCents(trimmedCreditLimit);
+      if (!Number.isFinite(parsedLimit) || parsedLimit <= 0) {
+        setFormError("Кредитный лимит должен быть больше нуля.");
+        return;
+      }
+      creditLimitCents = parsedLimit;
+    }
+
     const amountValue = hideInitialAmountField
       ? amountStr.trim() || "0"
       : amountStr;
     const cents = parseRubToCents(amountValue);
-    if (!Number.isFinite(cents) || cents < 0) {
+    if (
+      !Number.isFinite(cents) ||
+      (cents < 0 && !(showBankCardFields && cardKind === "CREDIT"))
+    ) {
       setFormError("Сумма должна быть числом (например 1234,56)");
       return;
     }
   
+    if (
+      showBankCardFields &&
+      cardKind === "CREDIT" &&
+      creditLimitCents !== null &&
+      cents < -creditLimitCents
+    ) {
+      setFormError("Сумма не может быть ниже кредитного лимита.");
+      return;
+    }
+
     setLoading(true);
     try {
       const payload: ItemCreate = {
@@ -1367,7 +1516,15 @@ export default function Page() {
 
       if (showBankCardFields) {
         if (trimmedCardLast4) payload.card_last4 = trimmedCardLast4;
-        payload.card_account_id = cardAccountId ? Number(cardAccountId) : null;
+        payload.card_account_id = isCreditCard
+          ? null
+          : cardAccountId
+          ? Number(cardAccountId)
+          : null;
+        payload.card_kind = cardKind;
+        if (cardKind === "CREDIT" && creditLimitCents !== null) {
+          payload.credit_limit = creditLimitCents;
+        }
       }
 
       if (showDepositFields && depositTermDaysValue !== null) {
@@ -1565,9 +1722,7 @@ export default function Page() {
 
               <TableBody>
                 {orderedItems.map((it) => {
-                  const typeLabel = (it.kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES).find(
-                    (t) => t.code === it.type_code
-                  )?.label || it.type_code;
+                  const typeLabel = getItemTypeLabel(it);
                   const typeMeta = typeLabel;
                   const rate = rateByCode[it.currency_code];
                   const rubEquivalent = getRubEquivalentCents(it);
@@ -1704,7 +1859,7 @@ export default function Page() {
                         {isLinkedCard
                           ? "-"
                           : isLiability
-                          ? `-${formatAmount(displayBalanceCents)}`
+                          ? `-${formatAmount(Math.abs(displayBalanceCents))}`
                           : formatAmount(displayBalanceCents)}
                       </TableCell>
 
@@ -2060,6 +2215,45 @@ export default function Page() {
 
             {showBankCardFields && (
               <>
+                {!isCreditCard && (
+                  <div className="grid gap-2">
+                  <Label>Вид карты</Label>
+                  <Select
+                    value={cardKind}
+                    onValueChange={(value) => setCardKind(value as CardKind)}
+                    disabled={isEditing}
+                  >
+                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                      <SelectValue placeholder="Выберите вид карты" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="DEBIT">Дебетовая</SelectItem>
+                      <SelectItem value="CREDIT">Кредитная</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  </div>
+                )}
+
+                {isCreditCard && (
+                  <div className="grid gap-2">
+                    <Label>Кредитный лимит</Label>
+                    <Input
+                      value={creditLimit}
+                      onChange={(e) => {
+                        const formatted = formatRubInput(e.target.value).replace(/^-/, "");
+                        setCreditLimit(formatted);
+                      }}
+                      onBlur={() =>
+                        setCreditLimit((prev) =>
+                          normalizeRubOnBlur(prev.replace(/^-/, ""))
+                        )
+                      }
+                      inputMode="decimal"
+                      placeholder="Например: 120 000"
+                      className="border-2 border-border/70 bg-white shadow-none"
+                    />
+                  </div>
+                )}
                 <div className="grid gap-2">
                   <Label>Последние 4 цифры номера карты</Label>
                   <Input
@@ -2103,6 +2297,8 @@ export default function Page() {
                     placeholder="Выберите счет"
                     clearLabel="Не выбрано"
                     getItemTypeLabel={getItemTypeLabel}
+                    getItemKind={resolveItemEffectiveKind}
+                    getItemBalance={getItemDisplayBalanceCents}
                     getBankLogoUrl={itemBankLogoUrl}
                     getBankName={itemBankName}
                     itemCounts={itemTxCounts}

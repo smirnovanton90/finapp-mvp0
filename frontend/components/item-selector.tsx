@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 
 import { Input } from "@/components/ui/input";
 import { ItemKind, ItemOut } from "@/lib/api";
@@ -56,6 +64,8 @@ export function ItemSelector({
 }: ItemSelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties | null>(null);
 
   useEffect(() => {
     if (resetSignal === undefined) return;
@@ -133,9 +143,64 @@ export function ItemSelector({
     setOpen(false);
   };
 
+  const updateDropdownPosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const container = anchor.closest("[data-slot=\"dialog-content\"]");
+    const containerRect = container?.getBoundingClientRect();
+    const containerTop = containerRect ? containerRect.top : 0;
+    const containerBottom = containerRect
+      ? containerRect.bottom
+      : window.innerHeight;
+    const padding = 8;
+    const maxHeight = 256;
+    const spaceBelow = containerBottom - rect.bottom - padding;
+    const spaceAbove = rect.top - containerTop - padding;
+    const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+    const availableSpace = Math.max(0, openUp ? spaceAbove : spaceBelow);
+    const height = Math.min(maxHeight, availableSpace);
+    const resolvedHeight = height > 0 ? height : maxHeight;
+    setDropdownStyle({
+      position: "absolute",
+      top: openUp ? "auto" : "calc(100% + 4px)",
+      bottom: openUp ? "calc(100% + 4px)" : "auto",
+      left: 0,
+      right: 0,
+      maxHeight: resolvedHeight,
+      zIndex: 50,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updateDropdownPosition();
+  }, [open, updateDropdownPosition, filteredItems.length, selectedItems.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = () => updateDropdownPosition();
+    window.addEventListener("resize", handle);
+    window.addEventListener("scroll", handle, true);
+    return () => {
+      window.removeEventListener("resize", handle);
+      window.removeEventListener("scroll", handle, true);
+    };
+  }, [open, updateDropdownPosition]);
+
+
+  const resolvedDropdownStyle: CSSProperties = dropdownStyle ?? {
+    position: "absolute",
+    top: "calc(100% + 4px)",
+    left: 0,
+    right: 0,
+    maxHeight: 256,
+    zIndex: 50,
+  };
+
   return (
     <div className="space-y-3">
-      <div className="relative">
+      <div className="relative" ref={anchorRef}>
         <Input
           type="text"
           aria-label={ariaLabel}
@@ -179,8 +244,11 @@ export function ItemSelector({
             }
           }}
         />
-        {open ? (
-          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
+        {open && (
+          <div
+            className="absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-md border border-border/70 bg-white p-1 shadow-lg"
+            style={resolvedDropdownStyle}
+          >
             {clearLabel && (
               <button
                 type="button"
@@ -205,14 +273,19 @@ export function ItemSelector({
                 const bankLogo = getBankLogoUrl ? getBankLogoUrl(item.id) : null;
                 const bankName = getBankName ? getBankName(item.id) : "";
                 const typeLabel = getItemTypeLabel(item);
-                const balance = getItemBalance ? getItemBalance(item) : item.current_value_rub;
+                const balance = getItemBalance
+                  ? getItemBalance(item)
+                  : item.current_value_rub;
                 const amount = formatAmount(Math.abs(balance));
                 const itemKind = getItemKind ? getItemKind(item) : item.kind;
-                const signedAmount = itemKind === "LIABILITY" ? `-${amount}` : amount;
+                const signedAmount =
+                  itemKind === "LIABILITY" ? `-${amount}` : amount;
                 const amountLabel = item.currency_code
                   ? `${signedAmount} ${item.currency_code}`
                   : signedAmount;
-                const details = [typeLabel, amountLabel].filter(Boolean).join(" · ");
+                const details = [typeLabel, amountLabel]
+                  .filter(Boolean)
+                  .join(" • ");
                 const isClosed = Boolean(item.closed_at);
                 const isArchived = Boolean(item.archived_at);
                 const nameToneClass = isClosed
@@ -251,17 +324,21 @@ export function ItemSelector({
                       <div className="h-6 w-6 rounded border border-border/60 bg-slate-100" />
                     )}
                     <div className="min-w-0">
-                      <div className={`text-sm font-medium break-words ${nameToneClass}`}>
+                      <div
+                        className={`text-sm font-medium break-words ${nameToneClass}`}
+                      >
                         {item.name}
                       </div>
-                      <div className={`text-xs ${detailsToneClass}`}>{details}</div>
+                      <div className={`text-xs ${detailsToneClass}`}>
+                        {details}
+                      </div>
                     </div>
                   </button>
                 );
               })
             )}
           </div>
-        ) : null}
+        )}
       </div>
       {showChips && selectionMode === "multi" && selectedItems.length > 0 && (
         <div className="flex flex-wrap gap-2">

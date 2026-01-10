@@ -2,6 +2,26 @@ import { getSession } from "next-auth/react";
 
 export type ItemKind = "ASSET" | "LIABILITY";
 export type CardKind = "DEBIT" | "CREDIT";
+export type ItemHistoryStatus = "NEW" | "HISTORICAL";
+export type FirstPayoutRule = "OPEN_DATE" | "MONTH_END" | "SHIFT_ONE_MONTH";
+export type RepaymentType = "ANNUITY" | "DIFFERENTIATED";
+export type PaymentAmountKind = "TOTAL" | "PRINCIPAL";
+
+export type ItemPlanSettings = {
+  enabled: boolean;
+  first_payout_rule?: FirstPayoutRule | null;
+  plan_end_date?: string | null;
+  loan_end_date?: string | null;
+  repayment_frequency?: TransactionChainFrequency | null;
+  repayment_weekly_day?: number | null;
+  repayment_monthly_day?: number | null;
+  repayment_monthly_rule?: TransactionChainMonthlyRule | null;
+  repayment_interval_days?: number | null;
+  repayment_account_id?: number | null;
+  repayment_type?: RepaymentType | null;
+  payment_amount_kind?: PaymentAmountKind | null;
+  payment_amount_rub?: number | null;
+};
 
 export type ItemOut = {
   id: number;
@@ -10,7 +30,8 @@ export type ItemOut = {
   name: string;
   currency_code: string;
   bank_id: number | null;
-  open_date: string | null;
+  open_date: string;
+  opening_counterparty_item_id: number | null;
   account_last7: string | null;
   contract_number: string | null;
   card_last4: string | null;
@@ -26,9 +47,11 @@ export type ItemOut = {
   initial_value_rub: number;
   current_value_rub: number;
   start_date: string;
+  history_status: ItemHistoryStatus;
   created_at: string;
   closed_at: string | null;
   archived_at: string | null;
+  plan_settings?: ItemPlanSettings | null;
 };
 
 export type ItemCreate = {
@@ -37,7 +60,8 @@ export type ItemCreate = {
   name: string;
   currency_code: string;
   bank_id?: number | null;
-  open_date?: string | null;
+  open_date: string;
+  opening_counterparty_item_id?: number | null;
   account_last7?: string | null;
   contract_number?: string | null;
   card_last4?: string | null;
@@ -50,7 +74,7 @@ export type ItemCreate = {
   interest_capitalization?: boolean | null;
   interest_payout_account_id?: number | null;
   initial_value_rub: number;
-  start_date: string;
+  plan_settings?: ItemPlanSettings | null;
 };
 
 export type BankOut = {
@@ -146,6 +170,10 @@ export type CategoryCreate = {
 export type TransactionDirection = "INCOME" | "EXPENSE" | "TRANSFER";
 export type TransactionType = "ACTUAL" | "PLANNED";
 export type TransactionStatus = "CONFIRMED" | "UNCONFIRMED" | "REALIZED";
+export type TransactionSource =
+  | "AUTO_ITEM_OPENING"
+  | "AUTO_ITEM_CLOSING"
+  | "MANUAL";
 export type TransactionChainFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "REGULAR";
 export type TransactionChainMonthlyRule = "FIRST_DAY" | "LAST_DAY";
 
@@ -174,6 +202,17 @@ export type TransactionOut = {
 
   created_at: string;
   deleted_at: string | null;
+  linked_item_id?: number | null;
+  source?: TransactionSource | null;
+};
+
+export type UserMeOut = {
+  id: number;
+  accounting_start_date: string | null;
+};
+
+export type AccountingStartDateUpdate = {
+  accounting_start_date: string;
 };
 
 export type TransactionPageOut = {
@@ -245,6 +284,12 @@ export type TransactionChainOut = {
   comment: string | null;
   deleted_at: string | null;
   created_at: string;
+  linked_item_id?: number | null;
+  source?: "AUTO_ITEM" | "MANUAL" | null;
+  purpose?: "INTEREST" | "PRINCIPAL" | null;
+  amount_is_variable?: boolean | null;
+  amount_min_rub?: number | null;
+  amount_max_rub?: number | null;
 };
 
 export type LimitPeriod = "MONTHLY" | "WEEKLY" | "YEARLY" | "CUSTOM";
@@ -305,6 +350,23 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
   }
 
   return fetch(input, { ...init, headers, cache: init?.cache ?? "no-store" });
+}
+
+export async function fetchUserMe(): Promise<UserMeOut> {
+  const res = await authFetch(`${API_BASE}/users/me`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function setAccountingStartDate(
+  payload: AccountingStartDateUpdate
+): Promise<UserMeOut> {
+  const res = await authFetch(`${API_BASE}/users/me/accounting-start-date`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
 }
 
 export async function fetchItems(options?: {
@@ -672,8 +734,17 @@ export async function updateTransactionStatus(
   return res.json();
 }
 
-export async function fetchTransactionChains(): Promise<TransactionChainOut[]> {
-  const res = await authFetch(`${API_BASE}/transaction-chains`);
+export async function fetchTransactionChains(options?: {
+  linked_item_id?: number;
+}): Promise<TransactionChainOut[]> {
+  const params = new URLSearchParams();
+  if (options?.linked_item_id) {
+    params.set("linked_item_id", String(options.linked_item_id));
+  }
+  const qs = params.toString();
+  const res = await authFetch(
+    `${API_BASE}/transaction-chains${qs ? `?${qs}` : ""}`
+  );
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

@@ -4,8 +4,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date as date_type
 import requests
 from pathlib import Path
-from sqlalchemy.orm import Session
-from sqlalchemy import select, delete, func, or_
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import select, delete, func, or_, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from db import get_db
@@ -30,6 +30,8 @@ from schemas import (
     AuthLogin,
     AuthResponse,
     AuthUserOut,
+    UserMeOut,
+    AccountingStartDateUpdate,
 )
 from auth import get_current_user, create_access_token, hash_password, verify_password
 
@@ -41,6 +43,14 @@ from transaction_chains import router as transaction_chains_router
 from categories import router as categories_router
 from limits import router as limits_router
 from counterparties import router as counterparties_router
+from item_plan_service import (
+    create_item_chains,
+    delete_auto_chains,
+    plan_signature,
+    rebuild_item_chains,
+    upsert_plan_settings,
+)
+from item_opening_service import create_opening_transactions, delete_opening_transactions
 
 app = FastAPI(title="FinApp API", version="0.1.0")
 
@@ -308,6 +318,43 @@ def _resolve_card_kind_and_limit(
         )
     return card_kind, None, "ASSET"
 
+def _ensure_accounting_start_date(user: User) -> date_type:
+    if not user.accounting_start_date:
+        raise HTTPException(
+            status_code=400,
+            detail="Accounting start date is not set.",
+        )
+    return user.accounting_start_date
+
+
+def _resolve_history_status(open_date: date_type, accounting_start_date: date_type) -> str:
+    return "NEW" if open_date > accounting_start_date else "HISTORICAL"
+
+
+def _resolve_opening_counterparty(
+    db: Session,
+    user: User,
+    counterparty_item_id: int | None,
+    currency_code: str,
+) -> Item | None:
+    if counterparty_item_id is None:
+        return None
+    counterparty = db.get(Item, counterparty_item_id)
+    if (
+        not counterparty
+        or counterparty.user_id != user.id
+        or counterparty.kind != "ASSET"
+        or counterparty.archived_at is not None
+        or counterparty.closed_at is not None
+    ):
+        raise HTTPException(status_code=400, detail="Invalid opening_counterparty_item_id")
+    if counterparty.currency_code != currency_code:
+        raise HTTPException(
+            status_code=400,
+            detail="Opening counterparty item currency must match the item currency.",
+        )
+    return counterparty
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -353,6 +400,48 @@ def login(
         user=AuthUserOut(id=user.id, login=user.login, name=user.name),
     )
 
+@app.get("/users/me", response_model=UserMeOut)
+def get_me(
+    user: User = Depends(get_current_user),
+):
+    return user
+
+
+@app.post("/users/me/accounting-start-date", response_model=UserMeOut)
+def set_accounting_start_date(
+    payload: AccountingStartDateUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.accounting_start_date is not None:
+        raise HTTPException(status_code=400, detail="Accounting start date is already set.")
+    if payload.accounting_start_date > date_type.today():
+        raise HTTPException(
+            status_code=400,
+            detail="Accounting start date cannot be later than today.",
+        )
+    user.accounting_start_date = payload.accounting_start_date
+    db.add(user)
+
+    db.execute(
+        text(
+            """
+            update items
+               set start_date = :start_date,
+                   history_status = case
+                       when open_date > :start_date then 'NEW'
+                       else 'HISTORICAL'
+                   end
+             where user_id = :user_id
+            """
+        ),
+        {"start_date": payload.accounting_start_date, "user_id": user.id},
+    )
+
+    db.commit()
+    db.refresh(user)
+    return user
+
 
 @app.get("/items", response_model=list[ItemOut])
 def list_items(
@@ -361,7 +450,9 @@ def list_items(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    stmt = select(Item).where(Item.user_id == user.id)
+    stmt = select(Item).where(Item.user_id == user.id).options(
+        selectinload(Item.plan_settings)
+    )
 
     if not include_archived:
         stmt = stmt.where(Item.archived_at.is_(None))
@@ -444,6 +535,7 @@ def create_item(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    accounting_start_date = _ensure_accounting_start_date(user)
     bank_id = None
     if payload.bank_id is not None:
         if payload.type_code not in _BANK_TYPE_CODES:
@@ -473,8 +565,18 @@ def create_item(
         interest_payout_account_id = payout.id
 
     deposit_end_date = None
-    if payload.type_code == "deposit" and payload.open_date and payload.deposit_term_days:
+    if payload.type_code == "deposit" and payload.deposit_term_days:
         deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
+
+    history_status = _resolve_history_status(payload.open_date, accounting_start_date)
+    opening_counterparty = None
+    if history_status == "NEW" and payload.initial_value_rub > 0:
+        opening_counterparty = _resolve_opening_counterparty(
+            db,
+            user,
+            payload.opening_counterparty_item_id,
+            payload.currency_code,
+        )
 
     min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
     if payload.initial_value_rub < min_balance:
@@ -504,10 +606,31 @@ def create_item(
         interest_capitalization=payload.interest_capitalization,
         interest_payout_account_id=interest_payout_account_id,
         initial_value_rub=payload.initial_value_rub,
-        current_value_rub=payload.initial_value_rub,
-        start_date=payload.start_date,
+        current_value_rub=0 if history_status == "NEW" else payload.initial_value_rub,
+        start_date=accounting_start_date,
+        history_status=history_status,
+        opening_counterparty_item_id=opening_counterparty.id
+        if opening_counterparty
+        else None,
     )
     db.add(item)
+    db.flush()
+
+    settings = upsert_plan_settings(db, item, payload.plan_settings)
+    if settings and settings.enabled:
+        create_item_chains(db, user, item, settings)
+
+    if history_status == "NEW" and payload.initial_value_rub > 0:
+        create_opening_transactions(
+            db=db,
+            user=user,
+            item=item,
+            counterparty=opening_counterparty,
+            amount_rub=payload.initial_value_rub,
+            deposit_end_date=deposit_end_date,
+            plan_settings=settings,
+        )
+
     db.commit()
     db.refresh(item)
     return item
@@ -527,6 +650,11 @@ def update_item(
         raise HTTPException(status_code=400, detail="Cannot edit archived item")
     if item.closed_at is not None:
         raise HTTPException(status_code=400, detail="Cannot edit closed item")
+
+    accounting_start_date = _ensure_accounting_start_date(user)
+    existing_settings = item.plan_settings
+    old_signature = plan_signature(item, existing_settings)
+    was_plan_enabled = existing_settings.enabled if existing_settings else False
 
     bank_id = None
     if payload.bank_id is not None:
@@ -586,11 +714,36 @@ def update_item(
         interest_payout_account_id = payout.id
 
     deposit_end_date = None
-    if payload.type_code == "deposit" and payload.open_date and payload.deposit_term_days:
+    if payload.type_code == "deposit" and payload.deposit_term_days:
         deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
 
-    delta = item.current_value_rub - item.initial_value_rub
-    next_current_value = payload.initial_value_rub + delta
+    new_history_status = _resolve_history_status(payload.open_date, accounting_start_date)
+    opening_counterparty = None
+    if new_history_status == "NEW" and payload.initial_value_rub > 0:
+        opening_counterparty = _resolve_opening_counterparty(
+            db,
+            user,
+            payload.opening_counterparty_item_id,
+            payload.currency_code,
+        )
+
+    open_date_changed = payload.open_date != item.open_date
+    amount_changed = payload.initial_value_rub != item.initial_value_rub
+    opening_counterparty_changed = (
+        payload.opening_counterparty_item_id != item.opening_counterparty_item_id
+    )
+    history_changed = new_history_status != item.history_status
+    should_rebuild_opening = (
+        (item.history_status == "NEW" or new_history_status == "NEW")
+        and (open_date_changed or amount_changed or opening_counterparty_changed or history_changed)
+    )
+    if should_rebuild_opening:
+        delete_opening_transactions(db, user, item.id)
+
+    old_base = 0 if item.history_status == "NEW" else item.initial_value_rub
+    delta = item.current_value_rub - old_base
+    new_base = 0 if new_history_status == "NEW" else payload.initial_value_rub
+    next_current_value = new_base + delta
     min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
     if next_current_value < min_balance:
         detail = "New initial value would make current balance negative."
@@ -618,7 +771,32 @@ def update_item(
     item.interest_payout_account_id = interest_payout_account_id
     item.initial_value_rub = payload.initial_value_rub
     item.current_value_rub = next_current_value
-    item.start_date = payload.start_date
+    item.start_date = accounting_start_date
+    item.history_status = new_history_status
+    item.opening_counterparty_item_id = (
+        opening_counterparty.id if opening_counterparty else None
+    )
+
+    settings = upsert_plan_settings(db, item, payload.plan_settings)
+    is_plan_enabled = settings.enabled if settings else False
+    new_signature = plan_signature(item, settings)
+
+    if is_plan_enabled:
+        if old_signature != new_signature:
+            rebuild_item_chains(db, user, item, settings)
+    elif was_plan_enabled:
+        delete_auto_chains(db, user, item.id, keep_realized=True)
+
+    if should_rebuild_opening and new_history_status == "NEW" and payload.initial_value_rub > 0:
+        create_opening_transactions(
+            db=db,
+            user=user,
+            item=item,
+            counterparty=opening_counterparty,
+            amount_rub=payload.initial_value_rub,
+            deposit_end_date=deposit_end_date,
+            plan_settings=settings,
+        )
 
     db.commit()
     db.refresh(item)
@@ -636,6 +814,8 @@ def archive_item(
 
     if item.archived_at is None:
         item.archived_at = func.now()
+
+    delete_auto_chains(db, user, item.id, keep_realized=True)
 
     db.commit()
     db.refresh(item)
@@ -679,6 +859,8 @@ def close_item(
 
     if item.closed_at is None:
         item.closed_at = func.now()
+
+    delete_auto_chains(db, user, item.id, keep_realized=True)
 
     db.commit()
     db.refresh(item)

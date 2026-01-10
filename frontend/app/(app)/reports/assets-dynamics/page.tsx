@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useAccountingStart } from "@/components/accounting-start-context";
 import {
   fetchBanks,
   fetchFxRates,
@@ -231,10 +232,12 @@ function formatSignedValue(valueInCents: number, formatter: (value: number) => s
   return valueInCents < 0 ? `-${formatted}` : formatted;
 }
 
-function getItemStartKey(item: ItemOut) {
-  return item.start_date
-    ? toTxDateKey(item.start_date)
-    : toDateKey(new Date(item.created_at));
+function getItemStartKey(item: ItemOut, accountingStartDate?: string | null) {
+  let minDate = accountingStartDate ?? item.open_date ?? "";
+  if (item.open_date && item.open_date > minDate) {
+    minDate = item.open_date;
+  }
+  return minDate ? toTxDateKey(minDate) : toDateKey(new Date(item.created_at));
 }
 
 function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number) {
@@ -276,6 +279,9 @@ function buildDeltasByDate(
   txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
+    if (tx.source === "AUTO_ITEM_OPENING" || tx.source === "AUTO_ITEM_CLOSING") {
+      return;
+    }
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
     if (dateKey <= todayKey && !isRealized) return;
 
@@ -317,6 +323,7 @@ function buildDeltasByDate(
 
 export default function AssetsDynamicsPage() {
   const { data: session } = useSession();
+  const { accountingStartDate } = useAccountingStart();
   const [items, setItems] = useState<ItemOut[]>([]);
   const [banks, setBanks] = useState<BankOut[]>([]);
   const [transactions, setTransactions] = useState<TransactionOut[]>([]);
@@ -411,19 +418,19 @@ export default function AssetsDynamicsPage() {
   );
   const getEffectiveStartKey = useCallback(
     (item: ItemOut) => {
-      const startKey = getItemStartKey(item);
+      const startKey = getItemStartKey(item, accountingStartDate);
       if (item.type_code !== "bank_card" || !item.card_account_id) {
         return startKey;
       }
       const account = itemsById.get(item.card_account_id);
       if (!account) return startKey;
-      const accountStartKey = getItemStartKey(account);
+      const accountStartKey = getItemStartKey(account, accountingStartDate);
       if (accountStartKey && startKey) {
         return accountStartKey > startKey ? accountStartKey : startKey;
       }
       return accountStartKey || startKey;
     },
-    [itemsById]
+    [accountingStartDate, itemsById]
   );
   const itemBankLogoUrl = (id: number | null | undefined) => {
     if (!id) return null;

@@ -9,6 +9,7 @@ import {
   type ComponentType,
 } from "react";
 import { useSession } from "next-auth/react";
+import { useAccountingStart } from "@/components/accounting-start-context";
 import Link from "next/link";
 import { AlertCircle, Target, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -150,6 +151,14 @@ function toTxDateKey(value: string) {
 function parseDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
   return new Date(year, month - 1, day);
+}
+
+function formatShortDate(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (!year || !month || !day) return dateKey;
+  const paddedDay = String(day).padStart(2, "0");
+  const paddedMonth = String(month).padStart(2, "0");
+  return `${paddedDay}.${paddedMonth}.${year}`;
 }
 
 function addDays(date: Date, days: number) {
@@ -535,10 +544,12 @@ function transferDelta(kind: ItemKind, isPrimary: boolean, amount: number) {
   return isPrimary ? -amount : amount;
 }
 
-function getItemStartKey(item: ItemOut) {
-  return item.start_date
-    ? toTxDateKey(item.start_date)
-    : toDateKey(new Date(item.created_at));
+function getItemStartKey(item: ItemOut, accountingStartDate?: string | null) {
+  let minDate = accountingStartDate ?? item.open_date ?? "";
+  if (item.open_date && item.open_date > minDate) {
+    minDate = item.open_date;
+  }
+  return minDate ? toTxDateKey(minDate) : toDateKey(new Date(item.created_at));
 }
 
 function getRateForDate(
@@ -575,6 +586,9 @@ function buildDeltasByDate(
   txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
+    if (tx.source === "AUTO_ITEM_OPENING" || tx.source === "AUTO_ITEM_CLOSING") {
+      return;
+    }
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
     if (dateKey <= todayKey && !isRealized) return;
 
@@ -608,6 +622,7 @@ function buildDeltasByDate(
 
 export default function DashboardPage() {
   const { data: session } = useSession();
+  const { accountingStartDate } = useAccountingStart();
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [limits, setLimits] = useState<LimitOut[]>([]);
@@ -1161,7 +1176,7 @@ export default function DashboardPage() {
     const selectedIds = new Set(chartItems.map((item) => item.id));
     const itemKindById = new Map(chartItems.map((item) => [item.id, item.kind]));
     const itemStartKeyById = new Map(
-      chartItems.map((item) => [item.id, getItemStartKey(item)])
+      chartItems.map((item) => [item.id, getItemStartKey(item, accountingStartDate)])
     );
     const itemsByStartDate = new Map<string, ItemOut[]>();
     chartItems.forEach((item) => {
@@ -1172,7 +1187,7 @@ export default function DashboardPage() {
     });
 
     const deltasByDate = buildDeltasByDate(txs, selectedIds, itemKindById, todayKey);
-    const startKeys = chartItems.map((item) => getItemStartKey(item)).sort();
+    const startKeys = chartItems.map((item) => getItemStartKey(item, accountingStartDate)).sort();
     const earliestStartKey = startKeys[0] ?? "";
     const startKey =
       earliestStartKey && earliestStartKey < rangeStartKey
@@ -1254,6 +1269,7 @@ export default function DashboardPage() {
 
     return rows;
   }, [
+    accountingStartDate,
     chartItems,
     fxRatesByDate,
     latestRatesByCurrency,
@@ -1352,6 +1368,11 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Дэшборд</h1>
           <p className="text-sm text-muted-foreground">Ключевые метрики за последние дни.</p>
+          {accountingStartDate && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Дата начала учета: {formatShortDate(accountingStartDate)}
+            </p>
+          )}
         </div>
 
         <div

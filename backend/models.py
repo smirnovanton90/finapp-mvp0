@@ -28,6 +28,7 @@ class User(Base):
     google_sub: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    accounting_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -217,7 +218,6 @@ class Item(Base):
 
     account_last7: Mapped[str | None] = mapped_column(String(7), nullable=True)
     contract_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    open_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     card_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
     card_account_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("items.id"), nullable=True
@@ -239,6 +239,11 @@ class Item(Base):
     start_date: Mapped[date] = mapped_column(
         Date, server_default=func.current_date(), nullable=False
     )
+    open_date: Mapped[date] = mapped_column(Date, nullable=False)
+    history_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    opening_counterparty_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
     
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -246,6 +251,13 @@ class Item(Base):
 
     closed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    plan_settings: Mapped[Optional["ItemPlanSettings"]] = relationship(
+        back_populates="item",
+        uselist=False,
+        cascade="all, delete-orphan",
+        foreign_keys="ItemPlanSettings.item_id",
+    )
 
     __table_args__ = (
         CheckConstraint("kind in ('ASSET','LIABILITY')", name="ck_items_kind"),
@@ -277,6 +289,80 @@ class Item(Base):
             "card_kind is null or type_code = 'bank_card'",
             name="ck_items_card_kind_only_bank_card",
         ),
+        CheckConstraint(
+            "history_status in ('NEW','HISTORICAL')",
+            name="ck_items_history_status",
+        ),
+    )
+
+
+class ItemPlanSettings(Base):
+    __tablename__ = "item_plan_settings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    item_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=False, unique=True
+    )
+    item: Mapped["Item"] = relationship(back_populates="plan_settings", foreign_keys=[item_id])
+
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    first_payout_rule: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    plan_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    loan_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    repayment_frequency: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    repayment_weekly_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    repayment_monthly_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    repayment_monthly_rule: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    repayment_interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    repayment_account_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    repayment_account: Mapped[Optional["Item"]] = relationship(
+        foreign_keys=[repayment_account_id]
+    )
+    repayment_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payment_amount_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payment_amount_rub: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(first_payout_rule is null) or (first_payout_rule in ('OPEN_DATE','MONTH_END','SHIFT_ONE_MONTH'))",
+            name="ck_item_plan_settings_first_payout_rule",
+        ),
+        CheckConstraint(
+            "(repayment_frequency is null) or (repayment_frequency in ('DAILY','WEEKLY','MONTHLY','REGULAR'))",
+            name="ck_item_plan_settings_repayment_frequency",
+        ),
+        CheckConstraint(
+            "(repayment_weekly_day is null) or (repayment_weekly_day between 0 and 6)",
+            name="ck_item_plan_settings_weekly_day_range",
+        ),
+        CheckConstraint(
+            "(repayment_monthly_day is null) or (repayment_monthly_day between 1 and 31)",
+            name="ck_item_plan_settings_monthly_day_range",
+        ),
+        CheckConstraint(
+            "(repayment_monthly_rule is null) or (repayment_monthly_rule in ('FIRST_DAY','LAST_DAY'))",
+            name="ck_item_plan_settings_monthly_rule",
+        ),
+        CheckConstraint(
+            "(repayment_interval_days is null) or (repayment_interval_days >= 1)",
+            name="ck_item_plan_settings_interval_days",
+        ),
+        CheckConstraint(
+            "(repayment_type is null) or (repayment_type in ('ANNUITY','DIFFERENTIATED'))",
+            name="ck_item_plan_settings_repayment_type",
+        ),
+        CheckConstraint(
+            "(payment_amount_kind is null) or (payment_amount_kind in ('TOTAL','PRINCIPAL'))",
+            name="ck_item_plan_settings_payment_amount_kind",
+        ),
+        CheckConstraint(
+            "(payment_amount_rub is null) or (payment_amount_rub >= 0)",
+            name="ck_item_plan_settings_payment_amount_non_negative",
+        ),
     )
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -292,6 +378,10 @@ class Transaction(Base):
     chain: Mapped[Optional["TransactionChain"]] = relationship(back_populates="transactions")
 
     transaction_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    linked_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    source: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
     primary_item: Mapped["Item"] = relationship(foreign_keys=[primary_item_id])
@@ -350,6 +440,10 @@ class Transaction(Base):
         CheckConstraint("transaction_type in ('ACTUAL','PLANNED')", name="ck_transactions_type"),
         CheckConstraint("status in ('CONFIRMED','UNCONFIRMED','REALIZED')", name="ck_transactions_status"),
         CheckConstraint("amount_rub >= 0", name="ck_transactions_amount_non_negative"),
+        CheckConstraint(
+            "(source is null) or (source in ('AUTO_ITEM_OPENING','AUTO_ITEM_CLOSING','MANUAL'))",
+            name="ck_transactions_source",
+        ),
     )
 
 
@@ -369,6 +463,14 @@ class TransactionChain(Base):
     monthly_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     monthly_rule: Mapped[str | None] = mapped_column(String(20), nullable=True)
     interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    linked_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    linked_item: Mapped[Optional["Item"]] = relationship(foreign_keys=[linked_item_id])
+
+    source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    purpose: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
     primary_item: Mapped["Item"] = relationship(foreign_keys=[primary_item_id])
@@ -401,6 +503,11 @@ class TransactionChain(Base):
 
     amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     amount_counterparty: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    amount_is_variable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    amount_min_rub: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    amount_max_rub: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     direction: Mapped[str] = mapped_column(String(20), nullable=False)
 
@@ -430,6 +537,22 @@ class TransactionChain(Base):
             name="ck_transaction_chains_direction",
         ),
         CheckConstraint("amount_rub >= 0", name="ck_transaction_chains_amount_non_negative"),
+        CheckConstraint(
+            "(source is null) or (source in ('AUTO_ITEM','MANUAL'))",
+            name="ck_transaction_chains_source",
+        ),
+        CheckConstraint(
+            "(purpose is null) or (purpose in ('INTEREST','PRINCIPAL'))",
+            name="ck_transaction_chains_purpose",
+        ),
+        CheckConstraint(
+            "(amount_min_rub is null) or (amount_min_rub >= 0)",
+            name="ck_transaction_chains_amount_min_non_negative",
+        ),
+        CheckConstraint(
+            "(amount_max_rub is null) or (amount_max_rub >= 0)",
+            name="ck_transaction_chains_amount_max_non_negative",
+        ),
         CheckConstraint(
             "(weekly_day is null) or (weekly_day between 0 and 6)",
             name="ck_transaction_chains_weekly_day_range",

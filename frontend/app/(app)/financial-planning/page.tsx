@@ -19,8 +19,9 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
+import { useAccountingStart } from "@/components/accounting-start-context";
 
 import {
   AlertDialog,
@@ -143,6 +144,20 @@ function formatAmount(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
+function formatChainAmount(chain: TransactionChainOut) {
+  if (
+    chain.amount_is_variable &&
+    chain.amount_min_rub != null &&
+    chain.amount_max_rub != null
+  ) {
+    if (chain.amount_min_rub === chain.amount_max_rub) {
+      return formatAmount(chain.amount_min_rub);
+    }
+    return `${formatAmount(chain.amount_min_rub)}–${formatAmount(chain.amount_max_rub)}`;
+  }
+  return formatAmount(chain.amount_rub);
+}
+
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -229,6 +244,7 @@ function getTodayKey() {
 
 export default function FinancialPlanningPage() {
   const { data: session } = useSession();
+  const { accountingStartDate } = useAccountingStart();
 
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [items, setItems] = useState<ItemOut[]>([]);
@@ -357,6 +373,23 @@ export default function FinancialPlanningPage() {
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
     [items]
+  );
+  const resolveMinDate = useCallback(
+    (item: ItemOut | null | undefined) => {
+      if (!item) return null;
+      let minDate = accountingStartDate ?? item.open_date ?? "";
+      if (item.open_date && item.open_date > minDate) {
+        minDate = item.open_date;
+      }
+      if (item.type_code === "bank_card" && item.card_account_id) {
+        const account = itemsById.get(item.card_account_id);
+        if (account?.open_date && account.open_date > minDate) {
+          minDate = account.open_date;
+        }
+      }
+      return minDate || null;
+    },
+    [accountingStartDate, itemsById]
   );
   const resolveItemEffectiveKind = (item: ItemOut) =>
     getEffectiveItemKind(item, item.current_value_rub);
@@ -587,7 +620,8 @@ export default function FinancialPlanningPage() {
     }
 
     const primaryItem = itemsById.get(primaryItemId);
-    if (primaryItem?.start_date && startDate < primaryItem.start_date) {
+    const primaryMinDate = resolveMinDate(primaryItem);
+    if (primaryMinDate && startDate < primaryMinDate) {
       setFormError("Дата начала раньше даты открытия основного счета.");
       return;
     }
@@ -602,7 +636,8 @@ export default function FinancialPlanningPage() {
         return;
       }
       const counterpartyItem = itemsById.get(counterpartyItemId);
-      if (counterpartyItem?.start_date && startDate < counterpartyItem.start_date) {
+      const counterpartyMinDate = resolveMinDate(counterpartyItem);
+      if (counterpartyMinDate && startDate < counterpartyMinDate) {
         setFormError("Дата начала раньше даты открытия счета контрагента.");
         return;
       }
@@ -710,6 +745,9 @@ export default function FinancialPlanningPage() {
   };
 
   const getFrequencyLabel = (chain: TransactionChainOut) => {
+    if (chain.start_date === chain.end_date) {
+      return "Разово";
+    }
     if (chain.frequency === "DAILY") return FREQUENCY_LABELS.DAILY;
     if (chain.frequency === "WEEKLY") {
       const dayLabel =
@@ -831,7 +869,7 @@ export default function FinancialPlanningPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {activeChains.map((chain) => {
-            const amountLabel = formatAmount(chain.amount_rub);
+            const amountLabel = formatChainAmount(chain);
             const currency = itemsById.get(chain.primary_item_id)?.currency_code ?? "";
             const stats = chainStatsById.get(chain.id) ?? {
               total: 0,
@@ -974,7 +1012,7 @@ export default function FinancialPlanningPage() {
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {deletedChains.map((chain) => {
-              const amountLabel = formatAmount(chain.amount_rub);
+              const amountLabel = formatChainAmount(chain);
               const currency =
                 itemsById.get(chain.primary_item_id)?.currency_code ?? "";
               const stats = chainStatsById.get(chain.id) ?? {

@@ -3,13 +3,19 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
 
 ItemKind = Literal["ASSET", "LIABILITY"]
+ItemHistoryStatus = Literal["NEW", "HISTORICAL"]
 InterestPayoutOrder = Literal["END_OF_TERM", "MONTHLY"]
 CardKind = Literal["DEBIT", "CREDIT"]
+FirstPayoutRule = Literal["OPEN_DATE", "MONTH_END", "SHIFT_ONE_MONTH"]
+RepaymentType = Literal["ANNUITY", "DIFFERENTIATED"]
+PaymentAmountKind = Literal["TOTAL", "PRINCIPAL"]
 TransactionDirection = Literal["INCOME", "EXPENSE", "TRANSFER"]
 TransactionType = Literal["ACTUAL", "PLANNED"]
 TransactionStatus = Literal["CONFIRMED", "UNCONFIRMED", "REALIZED"]
 TransactionChainFrequency = Literal["DAILY", "WEEKLY", "MONTHLY", "REGULAR"]
 TransactionChainMonthlyRule = Literal["FIRST_DAY", "LAST_DAY"]
+TransactionChainSource = Literal["AUTO_ITEM", "MANUAL"]
+TransactionChainPurpose = Literal["INTEREST", "PRINCIPAL"]
 CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
 LimitPeriod = Literal["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"]
 CounterpartyType = Literal["LEGAL", "PERSON"]
@@ -63,6 +69,91 @@ class AuthResponse(BaseModel):
     token_type: str = "Bearer"
     user: AuthUserOut
 
+class UserMeOut(BaseModel):
+    id: int
+    accounting_start_date: date | None
+
+    class Config:
+        from_attributes = True
+
+class AccountingStartDateUpdate(BaseModel):
+    accounting_start_date: date
+
+
+class ItemPlanSettingsBase(BaseModel):
+    enabled: bool = False
+    first_payout_rule: FirstPayoutRule | None = None
+    plan_end_date: date | None = None
+    loan_end_date: date | None = None
+    repayment_frequency: TransactionChainFrequency | None = None
+    repayment_weekly_day: int | None = Field(default=None, ge=0, le=6)
+    repayment_monthly_day: int | None = Field(default=None, ge=1, le=31)
+    repayment_monthly_rule: TransactionChainMonthlyRule | None = None
+    repayment_interval_days: int | None = Field(default=None, ge=1)
+    repayment_account_id: int | None = None
+    repayment_type: RepaymentType | None = None
+    payment_amount_kind: PaymentAmountKind | None = None
+    payment_amount_rub: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_repayment_frequency_details(self) -> "ItemPlanSettingsBase":
+        if self.repayment_frequency is None:
+            if (
+                self.repayment_weekly_day is not None
+                or self.repayment_monthly_day is not None
+                or self.repayment_monthly_rule is not None
+                or self.repayment_interval_days is not None
+            ):
+                raise ValueError("repayment frequency details require repayment_frequency")
+            return self
+
+        if self.repayment_frequency == "WEEKLY":
+            if self.repayment_weekly_day is None:
+                raise ValueError("repayment_weekly_day is required for WEEKLY frequency")
+            if (
+                self.repayment_monthly_day is not None
+                or self.repayment_monthly_rule is not None
+                or self.repayment_interval_days is not None
+            ):
+                raise ValueError("monthly fields are not allowed for WEEKLY frequency")
+        elif self.repayment_frequency == "MONTHLY":
+            if self.repayment_weekly_day is not None:
+                raise ValueError("repayment_weekly_day is only allowed for WEEKLY frequency")
+            if (
+                self.repayment_monthly_day is not None
+                and self.repayment_monthly_rule is not None
+            ):
+                raise ValueError(
+                    "repayment_monthly_day and repayment_monthly_rule cannot be used together"
+                )
+            if self.repayment_monthly_day is None and self.repayment_monthly_rule is None:
+                raise ValueError(
+                    "repayment_monthly_day or repayment_monthly_rule is required for MONTHLY frequency"
+                )
+            if self.repayment_interval_days is not None:
+                raise ValueError("repayment_interval_days is not allowed for MONTHLY frequency")
+        elif self.repayment_frequency == "REGULAR":
+            if self.repayment_interval_days is None:
+                raise ValueError("repayment_interval_days is required for REGULAR frequency")
+            if (
+                self.repayment_weekly_day is not None
+                or self.repayment_monthly_day is not None
+                or self.repayment_monthly_rule is not None
+            ):
+                raise ValueError("weekly/monthly fields are not allowed for REGULAR frequency")
+        else:
+            if (
+                self.repayment_weekly_day is not None
+                or self.repayment_monthly_day is not None
+                or self.repayment_monthly_rule is not None
+                or self.repayment_interval_days is not None
+            ):
+                raise ValueError("weekly/monthly/interval fields are not allowed for DAILY frequency")
+
+        if self.payment_amount_rub is not None and self.payment_amount_kind is None:
+            raise ValueError("payment_amount_kind is required when payment_amount_rub is provided")
+        return self
+
 
 class ItemCreate(BaseModel):
     kind: ItemKind
@@ -70,7 +161,8 @@ class ItemCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     currency_code: str = Field(default="RUB", min_length=3, max_length=3)
     bank_id: int | None = None
-    open_date: date | None = None
+    open_date: date
+    opening_counterparty_item_id: int | None = None
     account_last7: str | None = Field(default=None, min_length=7, max_length=7, pattern=r"^\d{7}$")
     contract_number: str | None = Field(default=None, max_length=100)
     card_last4: str | None = Field(default=None, min_length=4, max_length=4, pattern=r"^\d{4}$")
@@ -83,7 +175,7 @@ class ItemCreate(BaseModel):
     interest_capitalization: bool | None = None
     interest_payout_account_id: int | None = None
     initial_value_rub: int
-    start_date: date
+    plan_settings: ItemPlanSettingsBase | None = None
 
     @field_validator("account_last7", "contract_number", "card_last4", mode="before")
     @classmethod
@@ -99,19 +191,43 @@ class ItemCreate(BaseModel):
     def validate_bank_account_fields(self) -> "ItemCreate":
         bank_account_types = {"bank_account", "savings_account"}
         contract_number_types = {"bank_account", "bank_card", "deposit", "savings_account"}
-        open_date_types = {"bank_account", "deposit", "savings_account"}
+        loan_types = {
+            "loan_to_third_party",
+            "third_party_receivables",
+            "credit_card_debt",
+            "consumer_loan",
+            "mortgage",
+            "car_loan",
+            "education_loan",
+            "installment",
+            "microloan",
+            "private_loan",
+            "third_party_payables",
+        }
         card_types = {"bank_card"}
         deposit_types = {"deposit"}
-        interest_types = {"deposit", "savings_account"}
+        interest_rate_types = {
+            "deposit",
+            "savings_account",
+            "loan_to_third_party",
+            "third_party_receivables",
+            "credit_card_debt",
+            "consumer_loan",
+            "mortgage",
+            "car_loan",
+            "education_loan",
+            "installment",
+            "microloan",
+            "private_loan",
+            "third_party_payables",
+        }
+        interest_details_types = {"deposit", "savings_account"}
 
         if self.account_last7 is not None and self.type_code not in bank_account_types:
             raise ValueError("account_last7 is only allowed for bank_account or savings_account")
 
         if self.contract_number is not None and self.type_code not in contract_number_types:
             raise ValueError("contract_number is only allowed for bank-related assets")
-
-        if self.open_date is not None and self.type_code not in open_date_types:
-            raise ValueError("open_date is only allowed for bank_account, deposit, or savings_account")
 
         if self.card_last4 is not None and self.type_code not in card_types:
             raise ValueError("card_last4 is only allowed for bank_card")
@@ -128,16 +244,19 @@ class ItemCreate(BaseModel):
         if self.deposit_term_days is not None and self.type_code not in deposit_types:
             raise ValueError("deposit_term_days is only allowed for deposit")
 
-        if self.deposit_term_days is not None and self.open_date is None:
-            raise ValueError("open_date is required when deposit_term_days is provided")
+        if self.interest_rate is not None and self.type_code not in interest_rate_types:
+            raise ValueError(
+                "interest_rate is only allowed for deposit, savings_account, or loan types"
+            )
 
         if (
-            self.interest_rate is not None
-            or self.interest_payout_order is not None
+            self.interest_payout_order is not None
             or self.interest_capitalization is not None
             or self.interest_payout_account_id is not None
-        ) and self.type_code not in interest_types:
-            raise ValueError("interest fields are only allowed for deposit or savings_account")
+        ) and self.type_code not in interest_details_types:
+            raise ValueError(
+                "interest payout fields are only allowed for deposit or savings_account"
+            )
 
         if self.type_code in card_types:
             if self.kind != "ASSET":
@@ -161,13 +280,6 @@ class ItemCreate(BaseModel):
                 raise ValueError("initial_value_rub must be non-negative")
         return self
 
-    @field_validator("start_date")
-    @classmethod
-    def validate_start_date(cls, value: date) -> date:
-        if value > date.today():
-            raise ValueError("Дата начала действия не может быть позже сегодняшней даты.")
-        return value
-
 class ItemOut(BaseModel):
     id: int
     kind: ItemKind
@@ -175,7 +287,8 @@ class ItemOut(BaseModel):
     name: str
     currency_code: str
     bank_id: int | None
-    open_date: date | None
+    open_date: date
+    opening_counterparty_item_id: int | None
     account_last7: str | None
     contract_number: str | None
     card_last4: str | None
@@ -191,9 +304,11 @@ class ItemOut(BaseModel):
     initial_value_rub: int
     current_value_rub: int
     start_date: date
+    history_status: ItemHistoryStatus
     created_at: datetime
     closed_at: datetime | None
     archived_at: datetime | None
+    plan_settings: ItemPlanSettingsBase | None = None
 
     class Config:
         from_attributes = True
@@ -233,6 +348,8 @@ class TransactionOut(TransactionBase):
     primary_card_item_id: int | None = None
     counterparty_card_item_id: int | None = None
     deleted_at: datetime | None = None
+    linked_item_id: int | None = None
+    source: str | None = None
 
     class Config:
         from_attributes = True
@@ -339,6 +456,12 @@ class TransactionChainOut(BaseModel):
     comment: str | None
     deleted_at: datetime | None
     created_at: datetime
+    linked_item_id: int | None = None
+    source: TransactionChainSource | None = None
+    purpose: TransactionChainPurpose | None = None
+    amount_is_variable: bool | None = None
+    amount_min_rub: int | None = None
+    amount_max_rub: int | None = None
 
     class Config:
         from_attributes = True

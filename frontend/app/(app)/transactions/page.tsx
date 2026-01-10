@@ -10,6 +10,7 @@ import {
   type FormEvent,
 } from "react";
 import { useSession } from "next-auth/react";
+import { useAccountingStart } from "@/components/accounting-start-context";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
@@ -1570,6 +1571,7 @@ export function TransactionsView({
 }) {
   const searchParams = useSearchParams();
   const { data: session } = useSession();
+  const { accountingStartDate } = useAccountingStart();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
   const defaultShowPlannedRealized = isPlanningView;
@@ -2043,20 +2045,21 @@ export function TransactionsView({
     const selected = itemsById.get(itemId);
     if (!selected) return null;
     let effective = selected;
-    let startDate = selected.start_date || "";
+    let minDate = accountingStartDate ?? selected.open_date ?? "";
+    if (selected.open_date && selected.open_date > minDate) {
+      minDate = selected.open_date;
+    }
     if (selected.type_code === "bank_card" && selected.card_account_id) {
       const account = itemsById.get(selected.card_account_id);
       if (account) {
         effective = account;
-        if (account.start_date && startDate) {
-          startDate = account.start_date > startDate ? account.start_date : startDate;
-        } else {
-          startDate = account.start_date || startDate;
+        if (account.open_date && account.open_date > minDate) {
+          minDate = account.open_date;
         }
       }
     }
     const currencyCode = effective.currency_code || selected.currency_code || "";
-    return { selected, effective, startDate, currencyCode };
+    return { selected, effective, minDate, currencyCode };
   };
   const counterpartyLabel = (id: number | null | undefined) => {
     if (!id) return "";
@@ -2479,7 +2482,7 @@ export function TransactionsView({
 
       if (changes.hasDateChanged || changes.hasPrimaryItemChanged) {
         const primaryMeta = getEffectiveItemMeta(resolvedPrimaryItemId);
-        if (primaryMeta?.startDate && nextDate < primaryMeta.startDate) {
+        if (primaryMeta?.minDate && nextDate < primaryMeta.minDate) {
           return "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства.";
         }
       }
@@ -2492,7 +2495,7 @@ export function TransactionsView({
       ) {
         if (nextCounterpartyItemId) {
           const counterpartyMeta = getEffectiveItemMeta(nextCounterpartyItemId);
-          if (counterpartyMeta?.startDate && nextDate < counterpartyMeta.startDate) {
+          if (counterpartyMeta?.minDate && nextDate < counterpartyMeta.minDate) {
             return "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства.";
           }
         }
@@ -2813,7 +2816,7 @@ export function TransactionsView({
               );
             }
           }
-          if (itemMeta?.startDate && transactionDateKey < itemMeta.startDate) {
+          if (itemMeta?.minDate && transactionDateKey < itemMeta.minDate) {
             throw new Error(
               `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
             );
@@ -2905,7 +2908,7 @@ export function TransactionsView({
           }
 
           const transactionDateKey = formatDateForApi(parsedDate);
-          if (itemMeta?.startDate && transactionDateKey < itemMeta.startDate) {
+          if (itemMeta?.minDate && transactionDateKey < itemMeta.minDate) {
             throw new Error(
               `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
             );
@@ -3521,7 +3524,7 @@ export function TransactionsView({
                           return;
                         }
                         const primaryMeta = getEffectiveItemMeta(primaryItemId);
-                        if (primaryMeta?.startDate && date < primaryMeta.startDate) {
+                        if (primaryMeta?.minDate && date < primaryMeta.minDate) {
                           setFormError(
                             "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
                           );
@@ -3529,8 +3532,8 @@ export function TransactionsView({
                         }
                         const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
                         if (
-                          counterpartyMeta?.startDate &&
-                          date < counterpartyMeta.startDate
+                          counterpartyMeta?.minDate &&
+                          date < counterpartyMeta.minDate
                         ) {
                           setFormError(
                             "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
@@ -3660,7 +3663,7 @@ export function TransactionsView({
                         return;
                       }
                       const primaryMeta = getEffectiveItemMeta(primaryItemId);
-                      if (primaryMeta?.startDate && date < primaryMeta.startDate) {
+                      if (primaryMeta?.minDate && date < primaryMeta.minDate) {
                         setFormError(
                           "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
                         );
@@ -3677,8 +3680,8 @@ export function TransactionsView({
                       if (isTransfer && counterpartyItemId) {
                         const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
                         if (
-                          counterpartyMeta?.startDate &&
-                          date < counterpartyMeta.startDate
+                          counterpartyMeta?.minDate &&
+                          date < counterpartyMeta.minDate
                         ) {
                           setFormError(
                             "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."

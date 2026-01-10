@@ -3,6 +3,7 @@
 import { Sidebar } from "@/components/ui/sidebar";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
+import { AccountingStartGate } from "@/components/accounting-start-gate";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -61,18 +62,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7F8FA]" key={sessionKey}>
-      <div className="flex">
-        <Sidebar />
-        <div
-          className={cn(
-            "flex-1 transition-all duration-300",
-            isCollapsed ? "ml-16" : "ml-72"
-          )}
-        >
-          {children}
+    <AccountingStartGate>
+      <div className="min-h-screen bg-[#F7F8FA]" key={sessionKey}>
+        <div className="flex">
+          <Sidebar />
+          <div
+            className={cn(
+              "flex-1 transition-all duration-300",
+              isCollapsed ? "ml-16" : "ml-72"
+            )}
+          >
+            {children}
+          </div>
         </div>
       </div>
-    </div>
+    </AccountingStartGate>
   );
 }

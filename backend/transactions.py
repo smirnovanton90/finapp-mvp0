@@ -29,6 +29,17 @@ class ResolvedSide:
     start_date: date
 
 
+def _resolve_min_date(user: User, item: Item, account: Item | None = None) -> date:
+    if not user.accounting_start_date:
+        raise HTTPException(status_code=400, detail="Accounting start date is not set.")
+    min_date = user.accounting_start_date
+    if item.open_date and item.open_date > min_date:
+        min_date = item.open_date
+    if account and account.open_date and account.open_date > min_date:
+        min_date = account.open_date
+    return min_date
+
+
 def _load_item(
     db: Session, user: User, item_id: int, lock: bool, role_label: str
 ) -> Item:
@@ -50,7 +61,7 @@ def _resolve_effective_side(
             selected_item=item,
             effective_item=item,
             card_item=None,
-            start_date=item.start_date,
+            start_date=_resolve_min_date(user, item),
         )
 
     account = _load_item(db, user, item.card_account_id, lock, role_label)
@@ -63,7 +74,7 @@ def _resolve_effective_side(
     if account.bank_id != item.bank_id:
         raise HTTPException(status_code=400, detail="Card and account banks must match")
 
-    start_date = max(item.start_date, account.start_date)
+    start_date = _resolve_min_date(user, item, account)
     return ResolvedSide(
         selected_item=item,
         effective_item=account,

@@ -22,6 +22,17 @@ class ResolvedSide:
     start_date: date
 
 
+def _resolve_min_date(user: User, item: Item, account: Item | None = None) -> date:
+    if not user.accounting_start_date:
+        raise HTTPException(status_code=400, detail="Accounting start date is not set.")
+    min_date = user.accounting_start_date
+    if item.open_date and item.open_date > min_date:
+        min_date = item.open_date
+    if account and account.open_date and account.open_date > min_date:
+        min_date = account.open_date
+    return min_date
+
+
 def _resolve_effective_side(
     db: Session, user: User, item_id: int, role_label: str
 ) -> ResolvedSide:
@@ -38,7 +49,7 @@ def _resolve_effective_side(
             selected_item=item,
             effective_item=item,
             card_item=None,
-            start_date=item.start_date,
+            start_date=_resolve_min_date(user, item),
         )
 
     account = (
@@ -55,7 +66,7 @@ def _resolve_effective_side(
     if account.bank_id != item.bank_id:
         raise HTTPException(status_code=400, detail="Card and account banks must match")
 
-    start_date = max(item.start_date, account.start_date)
+    start_date = _resolve_min_date(user, item, account)
     return ResolvedSide(
         selected_item=item,
         effective_item=account,
@@ -155,15 +166,14 @@ def resolve_counterparty(
 
 @router.get("", response_model=list[TransactionChainOut])
 def list_transaction_chains(
+    linked_item_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return (
-        db.query(TransactionChain)
-        .filter(TransactionChain.user_id == user.id)
-        .order_by(TransactionChain.created_at.desc(), TransactionChain.id.desc())
-        .all()
-    )
+    query = db.query(TransactionChain).filter(TransactionChain.user_id == user.id)
+    if linked_item_id is not None:
+        query = query.filter(TransactionChain.linked_item_id == linked_item_id)
+    return query.order_by(TransactionChain.created_at.desc(), TransactionChain.id.desc()).all()
 
 
 @router.post("", response_model=TransactionChainOut)
@@ -252,6 +262,9 @@ def create_transaction_chain(
         monthly_day=data.monthly_day,
         monthly_rule=data.monthly_rule,
         interval_days=data.interval_days,
+        linked_item_id=None,
+        source="MANUAL",
+        purpose=None,
         primary_item_id=primary.id,
         primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
         counterparty_item_id=counter.id if data.direction == "TRANSFER" else None,
@@ -261,6 +274,9 @@ def create_transaction_chain(
         counterparty_id=data.counterparty_id,
         amount_rub=data.amount_rub,
         amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
+        amount_is_variable=False,
+        amount_min_rub=None,
+        amount_max_rub=None,
         direction=data.direction,
         category_id=category.id if category else None,
         description=data.description,

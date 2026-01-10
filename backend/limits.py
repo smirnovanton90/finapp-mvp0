@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as date_type
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -20,6 +20,23 @@ def _resolve_expense_category(db: Session, user: User, category_id: int | None):
     if category.scope not in ("EXPENSE", "BOTH"):
         raise HTTPException(status_code=400, detail="Limit category must be EXPENSE")
     return category
+
+
+def _ensure_accounting_start_date(user: User) -> date_type:
+    if not user.accounting_start_date:
+        raise HTTPException(status_code=400, detail="Accounting start date is not set.")
+    return user.accounting_start_date
+
+
+def _validate_custom_start_date(user: User, start_date: date_type | None) -> None:
+    if start_date is None:
+        return
+    min_date = _ensure_accounting_start_date(user)
+    if start_date < min_date:
+        raise HTTPException(
+            status_code=400,
+            detail="custom_start_date cannot be earlier than accounting start date",
+        )
 
 
 @router.get("", response_model=list[LimitOut])
@@ -45,6 +62,8 @@ def create_limit(
     user: User = Depends(get_current_user),
 ):
     category = _resolve_expense_category(db, user, data.category_id)
+    if data.period == "CUSTOM":
+        _validate_custom_start_date(user, data.custom_start_date)
     limit = Limit(
         user_id=user.id,
         name=data.name,
@@ -78,6 +97,8 @@ def update_limit(
         raise HTTPException(status_code=400, detail="Cannot edit deleted limit")
 
     category = _resolve_expense_category(db, user, data.category_id)
+    if data.period == "CUSTOM":
+        _validate_custom_start_date(user, data.custom_start_date)
 
     limit.name = data.name
     limit.period = data.period

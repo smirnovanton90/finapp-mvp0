@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
+import { useAccountingStart } from "@/components/accounting-start-context";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import {
@@ -242,6 +243,7 @@ function getLimitRange(limit: LimitOut, today: Date) {
 
 export default function LimitsPage() {
   const { data: session } = useSession();
+  const { accountingStartDate } = useAccountingStart();
 
   const [limits, setLimits] = useState<LimitOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
@@ -503,6 +505,10 @@ export default function LimitsPage() {
         setFormError("Дата окончания не может быть раньше даты начала.");
         return;
       }
+      if (accountingStartDate && customStartDate < accountingStartDate) {
+        setFormError("Дата начала лимита не может быть раньше даты начала учета.");
+        return;
+      }
     }
 
     const payload: LimitCreate = {
@@ -611,6 +617,7 @@ export default function LimitsPage() {
                     className="border-2 border-border/70 bg-white shadow-none"
                     value={customStartDate}
                     onChange={(e) => setCustomStartDate(e.target.value)}
+                    min={accountingStartDate ?? undefined}
                   />
                 </div>
                 <div className="grid gap-2">
@@ -620,6 +627,7 @@ export default function LimitsPage() {
                     className="border-2 border-border/70 bg-white shadow-none"
                     value={customEndDate}
                     onChange={(e) => setCustomEndDate(e.target.value)}
+                    min={accountingStartDate ?? undefined}
                   />
                 </div>
               </div>

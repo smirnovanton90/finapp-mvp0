@@ -29,6 +29,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ItemSelector } from "@/components/item-selector";
+import { useAccountingStart } from "@/components/accounting-start-context";
 
 import {
   Select,
@@ -65,6 +66,7 @@ import {
   fetchCurrencies,
   fetchFxRates,
   fetchTransactions,
+  fetchTransactionChains,
   createItem,
   updateItem,
   archiveItem,
@@ -76,7 +78,13 @@ import {
   BankOut,
   CurrencyOut,
   FxRateOut,
+  TransactionChainOut,
   TransactionOut,
+  TransactionChainFrequency,
+  TransactionChainMonthlyRule,
+  FirstPayoutRule,
+  RepaymentType,
+  PaymentAmountKind,
 } from "@/lib/api";
 import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
@@ -191,6 +199,7 @@ const CREDIT_LIABILITY_TYPES = [
   "microloan",
 ];
 const THIRD_PARTY_LOAN_TYPES = ["private_loan", "third_party_payables"];
+const LOAN_LIABILITY_TYPES = [...CREDIT_LIABILITY_TYPES, ...THIRD_PARTY_LOAN_TYPES];
 const TAX_LIABILITY_TYPES = [
   "tax_debt",
   "personal_income_tax_debt",
@@ -217,6 +226,14 @@ const BANK_TYPE_CODES = [
   "mortgage",
   "car_loan",
   "education_loan",
+];
+
+const AUTO_PLAN_INTEREST_TYPES = ["deposit", "savings_account"];
+const AUTO_PLAN_LOAN_TYPES = [
+  ...CREDIT_LIABILITY_TYPES,
+  ...THIRD_PARTY_LOAN_TYPES,
+  "loan_to_third_party",
+  "third_party_receivables",
 ];
 
 const ITEM_SECTIONS: {
@@ -381,6 +398,67 @@ function formatAmount(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
+const CHAIN_FREQUENCY_LABELS: Record<TransactionChainFrequency, string> = {
+  DAILY: "Ежедневно",
+  WEEKLY: "Еженедельно",
+  MONTHLY: "Ежемесячно",
+  REGULAR: "Регулярно",
+};
+
+const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+function formatChainAmount(chain: TransactionChainOut) {
+  if (
+    chain.amount_is_variable &&
+    chain.amount_min_rub != null &&
+    chain.amount_max_rub != null
+  ) {
+    if (chain.amount_min_rub === chain.amount_max_rub) {
+      return formatAmount(chain.amount_min_rub);
+    }
+    return `${formatAmount(chain.amount_min_rub)}-${formatAmount(chain.amount_max_rub)}`;
+  }
+  return formatAmount(chain.amount_rub);
+}
+
+function formatChainFrequency(chain: TransactionChainOut) {
+  if (chain.start_date === chain.end_date) {
+    return "Разово";
+  }
+  if (chain.frequency === "REGULAR" && chain.interval_days) {
+    return `Каждые ${chain.interval_days} дн.`;
+  }
+  let label = CHAIN_FREQUENCY_LABELS[chain.frequency] ?? chain.frequency;
+  if (chain.frequency === "WEEKLY" && chain.weekly_day != null) {
+    const weekday = WEEKDAY_LABELS[chain.weekly_day] ?? String(chain.weekly_day);
+    label = `${label} (${weekday})`;
+  }
+  if (chain.frequency === "MONTHLY") {
+    if (chain.monthly_rule === "LAST_DAY") {
+      label = `${label} (посл. день)`;
+    } else if (chain.monthly_day != null) {
+      label = `${label} (${chain.monthly_day}-е)`;
+    }
+  }
+  return label;
+}
+
+function formatShortDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  });
+}
+
+function getChainPurposeLabel(chain: TransactionChainOut) {
+  if (chain.purpose === "INTEREST") return "Проценты";
+  if (chain.purpose === "PRINCIPAL") return "Основной долг";
+  return null;
+}
+
 function formatRate(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 4,
@@ -400,6 +478,7 @@ function getTodayDateKey() {
 
 export default function Page() {
   const { data: session } = useSession();
+  const { accountingStartDate } = useAccountingStart();
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
@@ -422,7 +501,6 @@ export default function Page() {
   const [currencyCode, setCurrencyCode] = useState("RUB");
   const [name, setName] = useState("");
   const [amountStr, setAmountStr] = useState(""); // строка: "1234.56" / "1 234,56"
-  const [startDate, setStartDate] = useState(() => getTodayDateKey());
   const [banks, setBanks] = useState<BankOut[]>([]);
   const [bankId, setBankId] = useState<number | null>(null);
   const [bankSearch, setBankSearch] = useState("");
@@ -431,7 +509,7 @@ export default function Page() {
   const [bankError, setBankError] = useState<string | null>(null);
   const [accountLast7, setAccountLast7] = useState("");
   const [contractNumber, setContractNumber] = useState("");
-  const [openDate, setOpenDate] = useState("");
+  const [openDate, setOpenDate] = useState(() => getTodayDateKey());
   const [cardLast4, setCardLast4] = useState("");
   const [cardAccountId, setCardAccountId] = useState("");
   const [cardKind, setCardKind] = useState<CardKind>("DEBIT");
@@ -441,6 +519,24 @@ export default function Page() {
   const [interestPayoutOrder, setInterestPayoutOrder] = useState("");
   const [interestCapitalization, setInterestCapitalization] = useState("");
   const [interestPayoutAccountId, setInterestPayoutAccountId] = useState("");
+  const [planEnabled, setPlanEnabled] = useState(false);
+  const [firstPayoutRule, setFirstPayoutRule] = useState<FirstPayoutRule | "">("");
+  const [planEndDate, setPlanEndDate] = useState("");
+  const [loanEndDate, setLoanEndDate] = useState("");
+  const [repaymentFrequency, setRepaymentFrequency] =
+    useState<TransactionChainFrequency>("MONTHLY");
+  const [repaymentWeeklyDay, setRepaymentWeeklyDay] = useState<number>(() => {
+    const jsDay = new Date().getDay();
+    return (jsDay + 6) % 7;
+  });
+  const [repaymentIntervalDays, setRepaymentIntervalDays] = useState("1");
+  const [repaymentAccountId, setRepaymentAccountId] = useState("");
+  const [repaymentType, setRepaymentType] = useState<RepaymentType | "">("");
+  const [paymentAmountKind, setPaymentAmountKind] = useState<PaymentAmountKind | "">("");
+  const [paymentAmountStr, setPaymentAmountStr] = useState("");
+  const [openingCounterpartyId, setOpeningCounterpartyId] = useState("");
+  const [linkedChains, setLinkedChains] = useState<TransactionChainOut[]>([]);
+  const [originalPlanSignature, setOriginalPlanSignature] = useState<string | null>(null);
   const [logoOverlayHeight, setLogoOverlayHeight] = useState(0);
   const logoNaturalSizeRef = useRef<{ width: number; height: number } | null>(null);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
@@ -453,14 +549,13 @@ export default function Page() {
     setAmountStr("");
     setTypeCode("");
     setCurrencyCode("RUB");
-    setStartDate(getTodayDateKey());
     setBankId(null);
     setBankSearch("");
     setBankDropdownOpen(false);
     setBankError(null);
     setAccountLast7("");
     setContractNumber("");
-    setOpenDate("");
+    setOpenDate(getTodayDateKey());
     setCardLast4("");
     setCardAccountId("");
     setCardKind("DEBIT");
@@ -470,6 +565,20 @@ export default function Page() {
     setInterestPayoutOrder("");
     setInterestCapitalization("");
     setInterestPayoutAccountId("");
+    setPlanEnabled(false);
+    setFirstPayoutRule("");
+    setPlanEndDate("");
+    setLoanEndDate("");
+    setRepaymentFrequency("MONTHLY");
+    setRepaymentWeeklyDay((new Date().getDay() + 6) % 7);
+    setRepaymentIntervalDays("1");
+    setRepaymentAccountId("");
+    setRepaymentType("");
+    setPaymentAmountKind("");
+    setPaymentAmountStr("");
+    setOpeningCounterpartyId("");
+    setLinkedChains([]);
+    setOriginalPlanSignature(null);
     setSectionId("");
     setIsGeneralCreate(false);
   }
@@ -563,8 +672,88 @@ export default function Page() {
     }
     return normalized;
   
-    // если больше 2 — обрежем
+    // если больше 2 - обрежем
   }  
+
+  function buildPlanSignatureFromState(): string {
+    const amountCents = parseRubToCents(amountStr);
+    const paymentAmountCents = parseRubToCents(paymentAmountStr);
+    const planStartDate =
+      accountingStartDate ?? editingItem?.start_date ?? getTodayDateKey();
+    return JSON.stringify({
+      item: {
+        kind,
+        typeCode,
+        currencyCode,
+        initialValue: Number.isFinite(amountCents) ? amountCents : null,
+        openDate: openDate || null,
+        depositTermDays: depositTermDays ? Number(depositTermDays) : null,
+        interestRate: interestRate ? interestRate.trim() : null,
+        interestPayoutOrder: interestPayoutOrder || null,
+        interestCapitalization: interestCapitalization || null,
+        interestPayoutAccountId: interestPayoutAccountId
+          ? Number(interestPayoutAccountId)
+          : null,
+        startDate: planStartDate,
+      },
+      plan: {
+        enabled: planEnabled,
+        firstPayoutRule: firstPayoutRule || null,
+        planEndDate: planEndDate || null,
+        loanEndDate: loanEndDate || null,
+        repaymentFrequency: repaymentFrequency || null,
+        repaymentWeeklyDay: repaymentFrequency === "WEEKLY" ? repaymentWeeklyDay : null,
+        repaymentIntervalDays:
+          repaymentFrequency === "REGULAR" && repaymentIntervalDays.trim()
+            ? Number(repaymentIntervalDays)
+            : null,
+        repaymentAccountId: repaymentAccountId ? Number(repaymentAccountId) : null,
+        repaymentType: repaymentType || null,
+        paymentAmountKind: requiresLoanPaymentInput ? paymentAmountKind || null : null,
+        paymentAmountRub: requiresLoanPaymentInput && Number.isFinite(paymentAmountCents)
+          ? paymentAmountCents
+          : null,
+      },
+    });
+  }
+
+  function buildPlanSignatureFromItem(item: ItemOut): string {
+    const settings = item.plan_settings ?? null;
+    return JSON.stringify({
+      item: {
+        kind: item.kind,
+        typeCode: item.type_code,
+        currencyCode: item.currency_code,
+        initialValue: item.initial_value_rub,
+        openDate: item.open_date ?? null,
+        depositTermDays: item.deposit_term_days ?? null,
+        interestRate:
+          item.interest_rate != null ? String(item.interest_rate) : null,
+        interestPayoutOrder: item.interest_payout_order ?? null,
+        interestCapitalization:
+          item.interest_capitalization == null
+            ? null
+            : String(item.interest_capitalization),
+        interestPayoutAccountId: item.interest_payout_account_id ?? null,
+        startDate: item.start_date,
+      },
+      plan: {
+        enabled: settings?.enabled ?? false,
+        firstPayoutRule: settings?.first_payout_rule ?? null,
+        planEndDate: settings?.plan_end_date ?? null,
+        loanEndDate: settings?.loan_end_date ?? null,
+        repaymentFrequency: settings?.repayment_frequency ?? null,
+        repaymentWeeklyDay: settings?.repayment_weekly_day ?? null,
+        repaymentIntervalDays: settings?.repayment_interval_days ?? null,
+        repaymentAccountId: settings?.repayment_account_id ?? null,
+        repaymentType: settings?.repayment_type ?? null,
+        paymentAmountKind:
+          item.kind === "ASSET" ? settings?.payment_amount_kind ?? null : null,
+        paymentAmountRub:
+          item.kind === "ASSET" ? settings?.payment_amount_rub ?? null : null,
+      },
+    });
+  }
 
   const rateByCode = useMemo(() => {
     const map: Record<string, number> = { RUB: 1 };
@@ -636,14 +825,44 @@ export default function Page() {
     () => showBankCardFields && cardKind === "CREDIT",
     [showBankCardFields, cardKind]
   );
+  const isLoanLiabilityType = useMemo(
+    () => LOAN_LIABILITY_TYPES.includes(typeCode),
+    [typeCode]
+  );
   const showDepositFields = useMemo(() => typeCode === "deposit", [typeCode]);
   const showInterestFields = useMemo(
     () => typeCode === "deposit" || typeCode === "savings_account",
     [typeCode]
   );
-  const showOpenDateField = useMemo(
-    () => typeCode === "bank_account" || typeCode === "deposit" || typeCode === "savings_account",
+  const showPlanSection = useMemo(
+    () =>
+      AUTO_PLAN_INTEREST_TYPES.includes(typeCode) ||
+      AUTO_PLAN_LOAN_TYPES.includes(typeCode),
     [typeCode]
+  );
+  const showInterestPlanSettings = useMemo(
+    () => AUTO_PLAN_INTEREST_TYPES.includes(typeCode),
+    [typeCode]
+  );
+  const showLoanPlanSettings = useMemo(
+    () => AUTO_PLAN_LOAN_TYPES.includes(typeCode),
+    [typeCode]
+  );
+  const openDateLabel = "\u0414\u0430\u0442\u0430 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f";
+  const accountingStartLabel = accountingStartDate
+    ? `\u0414\u0430\u0442\u0430 \u043d\u0430\u0447\u0430\u043b\u0430 \u0443\u0447\u0435\u0442\u0430 (${formatShortDate(accountingStartDate)})`
+    : "\u0414\u0430\u0442\u0430 \u043d\u0430\u0447\u0430\u043b\u0430 \u0443\u0447\u0435\u0442\u0430";
+  const openDateHelpText = `\u0424\u0430\u043a\u0442\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0434\u0430\u0442\u0430, \u043a\u043e\u0433\u0434\u0430 \u043f\u043e\u044f\u0432\u0438\u043b\u0441\u044f \u0430\u043a\u0442\u0438\u0432 \u0438\u043b\u0438 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u043e, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, \u0434\u0430\u0442\u0430 \u043e\u0442\u043a\u0440\u044b\u0442\u0438\u044f \u0441\u0447\u0435\u0442\u0430 \u0438\u043b\u0438 \u0432\u043a\u043b\u0430\u0434\u0430, \u0434\u0430\u0442\u0430 \u043f\u0440\u0438\u043e\u0431\u0440\u0435\u0442\u0435\u043d\u0438\u044f \u0438\u043c\u0443\u0449\u0435\u0441\u0442\u0432\u0430, \u0434\u0430\u0442\u0430 \u043f\u043e\u043b\u0443\u0447\u0435\u043d\u0438\u044f \u043a\u0440\u0435\u0434\u0438\u0442\u0430/\u0437\u0430\u0439\u043c\u0430, \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f \u0434\u043e\u043b\u0433\u0430 \u0438\u043b\u0438 \u0437\u0430\u0434\u043e\u043b\u0436\u0435\u043d\u043d\u043e\u0441\u0442\u0438 \u0438 \u0442.\u0434. \u0414\u043e \u044d\u0442\u043e\u0439 \u0434\u0430\u0442\u044b \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0438 \u043d\u0435 \u0441\u043e\u0437\u0434\u0430\u044e\u0442\u0441\u044f. \u0415\u0441\u043b\u0438 \u0430\u043a\u0442\u0438\u0432/\u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u043e \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u043e\u0432\u0430\u043b \u043d\u0430 \u0434\u0430\u0442\u0443 ${accountingStartLabel}, \u0438 \u0432\u044b \u043d\u0435 \u043f\u043e\u043c\u043d\u0438\u0442\u0435 \u043a\u043e\u043d\u043a\u0440\u0435\u0442\u043d\u0443\u044e \u0435\u0433\u043e \u0434\u0430\u0442\u0443 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f, \u0442\u043e \u043c\u043e\u0436\u0435\u0442\u0435 \u0443\u043a\u0430\u0437\u0430\u0442\u044c \u0434\u0430\u0442\u0443 ${accountingStartLabel}.`;
+  const minPlanDate = useMemo(() => {
+    let minDate = openDate || "";
+    if (accountingStartDate && (!minDate || accountingStartDate > minDate)) {
+      minDate = accountingStartDate;
+    }
+    return minDate;
+  }, [accountingStartDate, openDate]);
+  const requiresLoanPaymentInput = useMemo(
+    () => showLoanPlanSettings && kind === "ASSET",
+    [showLoanPlanSettings, kind]
   );
   const hideInitialAmountField = showBankCardFields && Boolean(cardAccountId);
   const showContractNumberField = useMemo(
@@ -654,6 +873,33 @@ export default function Page() {
       typeCode === "savings_account",
     [typeCode]
   );
+
+  useEffect(() => {
+    if (!showPlanSection) {
+      setPlanEnabled(false);
+      setFirstPayoutRule("");
+      setPlanEndDate("");
+      setLoanEndDate("");
+      setRepaymentFrequency("MONTHLY");
+      setRepaymentIntervalDays("1");
+      setRepaymentAccountId("");
+      setRepaymentType("");
+      setPaymentAmountKind("");
+      setPaymentAmountStr("");
+    }
+  }, [showPlanSection]);
+
+  useEffect(() => {
+    if (requiresLoanPaymentInput) return;
+    if (paymentAmountKind) setPaymentAmountKind("");
+    if (paymentAmountStr) setPaymentAmountStr("");
+  }, [requiresLoanPaymentInput, paymentAmountKind, paymentAmountStr]);
+  useEffect(() => {
+    if (!showLoanPlanSettings) return;
+    if (loanEndDate && planEndDate) {
+      setPlanEndDate("");
+    }
+  }, [loanEndDate, planEndDate, showLoanPlanSettings]);
 
   const filteredBanks = useMemo(() => {
     const query = bankSearch.trim().toLowerCase();
@@ -703,6 +949,55 @@ export default function Page() {
     () => items.filter((item) => !item.archived_at && !item.closed_at),
     [items]
   );
+  const resolvedHistoryStatus = useMemo(() => {
+    if (openDate && accountingStartDate) {
+      return openDate > accountingStartDate ? "NEW" : "HISTORICAL";
+    }
+    return editingItem?.history_status ?? null;
+  }, [openDate, accountingStartDate, editingItem]);
+  const normalizedAmountValue = hideInitialAmountField
+    ? amountStr.trim() || "0"
+    : amountStr;
+  const amountCents = useMemo(
+    () => parseRubToCents(normalizedAmountValue),
+    [normalizedAmountValue]
+  );
+  const hasNonZeroAmount = Number.isFinite(amountCents) && amountCents !== 0;
+  const showOpeningCounterparty = resolvedHistoryStatus === "NEW" && hasNonZeroAmount;
+  const openingCounterpartyItems = useMemo(
+    () =>
+      activeItems.filter(
+        (item) =>
+          item.kind === "ASSET" &&
+          item.id !== editingItem?.id &&
+          item.currency_code === currencyCode
+      ),
+    [activeItems, editingItem, currencyCode]
+  );
+  const openingCounterpartyLabel =
+    kind === "LIABILITY"
+      ? "\u0410\u043a\u0442\u0438\u0432 \u0434\u043b\u044f \u0437\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u0438\u044f (\u043e\u043f\u0446\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u043e)"
+      : "\u0410\u043a\u0442\u0438\u0432-\u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0441\u0440\u0435\u0434\u0441\u0442\u0432";
+  const openingWarning =
+    showOpeningCounterparty && !openingCounterpartyId
+      ? kind === "LIABILITY"
+        ? "Если не выбрать актив, будет создана фактическая транзакция с категорией «Прочие расходы»."
+        : "Если не выбрать актив, будет создана фактическая транзакция с категорией «Прочие доходы»."
+      : null;
+  const amountLabel = useMemo(() => {
+    if (resolvedHistoryStatus === "HISTORICAL") {
+      const dateLabel = accountingStartDate
+        ? formatShortDate(accountingStartDate)
+        : "";
+      return dateLabel
+        ? `Сумма на дату начала учета (${dateLabel})`
+        : "Сумма на дату начала учета";
+    }
+    if (resolvedHistoryStatus === "NEW") {
+      return "\u0421\u0443\u043c\u043c\u0430 \u043d\u0430 \u0434\u0430\u0442\u0443 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f";
+    }
+    return "Сумма";
+  }, [resolvedHistoryStatus, accountingStartDate, kind]);
   const activeItemsForTotals = useMemo(
     () =>
       activeItems.filter(
@@ -727,6 +1022,49 @@ export default function Page() {
       ),
     [activeItems, resolveItemEffectiveKind]
   );
+  const interestPayoutItems = useMemo(() => {
+    const filtered = activeAssetItems.filter((item) => {
+      if (editingItem && item.id === editingItem.id) return false;
+      if (currencyCode && item.currency_code !== currencyCode) return false;
+      return true;
+    });
+    const selectedId = interestPayoutAccountId ? Number(interestPayoutAccountId) : null;
+    if (selectedId) {
+      const selected = itemsById.get(selectedId);
+      if (selected && !filtered.some((item) => item.id === selectedId)) {
+        filtered.push(selected);
+      }
+    }
+    return filtered;
+  }, [
+    activeAssetItems,
+    currencyCode,
+    editingItem,
+    interestPayoutAccountId,
+    itemsById,
+  ]);
+  const repaymentAccountItems = useMemo(() => {
+    const filtered = activeAssetItems.filter((item) => {
+      if (editingItem && item.id === editingItem.id) return false;
+      if (item.type_code !== "bank_account") return false;
+      if (currencyCode && item.currency_code !== currencyCode) return false;
+      return true;
+    });
+    const selectedId = repaymentAccountId ? Number(repaymentAccountId) : null;
+    if (selectedId) {
+      const selected = itemsById.get(selectedId);
+      if (selected && !filtered.some((item) => item.id === selectedId)) {
+        filtered.push(selected);
+      }
+    }
+    return filtered;
+  }, [
+    activeAssetItems,
+    currencyCode,
+    editingItem,
+    repaymentAccountId,
+    itemsById,
+  ]);
   const bankAccountItems = useMemo(() => {
     const filtered = activeAssetItems.filter((item) => {
       if (item.type_code !== "bank_account") return false;
@@ -1119,6 +1457,15 @@ export default function Page() {
     }
   }
 
+  async function loadLinkedChains(itemId: number) {
+    try {
+      const data = await fetchTransactionChains({ linked_item_id: itemId });
+      setLinkedChains(data.filter((chain) => !chain.deleted_at));
+    } catch {
+      setLinkedChains([]);
+    }
+  }
+
   async function loadTransactions() {
     try {
       const data = await fetchTransactions();
@@ -1194,17 +1541,30 @@ export default function Page() {
   }, [showContractNumberField, contractNumber]);
 
   useEffect(() => {
-    if (showOpenDateField) return;
-    if (openDate) setOpenDate("");
-  }, [showOpenDateField, openDate]);
-
-  useEffect(() => {
     if (showBankCardFields) return;
     if (cardLast4) setCardLast4("");
     if (cardAccountId) setCardAccountId("");
     if (cardKind !== "DEBIT") setCardKind("DEBIT");
     if (creditLimit) setCreditLimit("");
   }, [showBankCardFields, cardLast4, cardAccountId, cardKind, creditLimit]);
+
+  useEffect(() => {
+    if (!showOpeningCounterparty) {
+      if (openingCounterpartyId) setOpeningCounterpartyId("");
+      return;
+    }
+    if (!openingCounterpartyId) return;
+    const selected = itemsById.get(Number(openingCounterpartyId));
+    if (
+      !selected ||
+      selected.kind !== "ASSET" ||
+      selected.archived_at ||
+      selected.closed_at ||
+      selected.currency_code !== currencyCode
+    ) {
+      setOpeningCounterpartyId("");
+    }
+  }, [showOpeningCounterparty, openingCounterpartyId, itemsById, currencyCode]);
   useEffect(() => {
     if (!showBankCardFields) return;
     if (cardKind !== "DEBIT") return;
@@ -1229,18 +1589,44 @@ export default function Page() {
   }, [showDepositFields, depositTermDays]);
 
   useEffect(() => {
-    if (showInterestFields) return;
+    if (showInterestFields || showLoanPlanSettings) return;
     if (interestRate) setInterestRate("");
     if (interestPayoutOrder) setInterestPayoutOrder("");
     if (interestCapitalization) setInterestCapitalization("");
     if (interestPayoutAccountId) setInterestPayoutAccountId("");
   }, [
     showInterestFields,
+    showLoanPlanSettings,
     interestRate,
     interestPayoutOrder,
     interestCapitalization,
     interestPayoutAccountId,
   ]);
+  useEffect(() => {
+    if (interestCapitalization === "true" && interestPayoutAccountId) {
+      setInterestPayoutAccountId("");
+    }
+  }, [interestCapitalization, interestPayoutAccountId]);
+  useEffect(() => {
+    if (!interestPayoutAccountId) return;
+    const selected = itemsById.get(Number(interestPayoutAccountId));
+    if (
+      !selected ||
+      selected.kind !== "ASSET" ||
+      selected.archived_at ||
+      selected.closed_at ||
+      (currencyCode && selected.currency_code !== currencyCode)
+    ) {
+      setInterestPayoutAccountId("");
+    }
+  }, [interestPayoutAccountId, itemsById, currencyCode]);
+  useEffect(() => {
+    if (!repaymentAccountId) return;
+    const selected = itemsById.get(Number(repaymentAccountId));
+    if (!selected || selected.type_code !== "bank_account") {
+      setRepaymentAccountId("");
+    }
+  }, [repaymentAccountId, itemsById]);
 
   useEffect(() => {
     if (!selectedBank?.logo_url || !isCreateOpen) {
@@ -1298,14 +1684,13 @@ export default function Page() {
     setCurrencyCode("RUB");
     setName("");
     setAmountStr("");
-    setStartDate(getTodayDateKey());
     setBankId(null);
     setBankSearch("");
     setBankDropdownOpen(false);
     setBankError(null);
     setAccountLast7("");
     setContractNumber("");
-    setOpenDate("");
+    setOpenDate(getTodayDateKey());
     setCardLast4("");
     setCardAccountId("");
     setCardKind("DEBIT");
@@ -1315,6 +1700,20 @@ export default function Page() {
     setInterestPayoutOrder("");
     setInterestCapitalization("");
     setInterestPayoutAccountId("");
+    setPlanEnabled(false);
+    setFirstPayoutRule("");
+    setPlanEndDate("");
+    setLoanEndDate("");
+    setRepaymentFrequency("MONTHLY");
+    setRepaymentWeeklyDay((new Date().getDay() + 6) % 7);
+    setRepaymentIntervalDays("1");
+    setRepaymentAccountId("");
+    setRepaymentType("");
+    setPaymentAmountKind("");
+    setPaymentAmountStr("");
+    setOpeningCounterpartyId("");
+    setLinkedChains([]);
+    setOriginalPlanSignature(null);
     setFormError(null);
     setIsCreateOpen(true);
   };
@@ -1329,7 +1728,6 @@ export default function Page() {
     setCurrencyCode(item.currency_code);
     setName(item.name);
     setAmountStr(formatAmount(item.initial_value_rub));
-    setStartDate(item.start_date);
     setBankId(item.bank_id);
     const bankName = item.bank_id ? banksById.get(item.bank_id)?.name ?? "" : "";
     setBankSearch(bankName);
@@ -1357,6 +1755,39 @@ export default function Page() {
     setInterestPayoutAccountId(
       item.interest_payout_account_id ? String(item.interest_payout_account_id) : ""
     );
+    const planSettings = item.plan_settings ?? null;
+    setPlanEnabled(planSettings?.enabled ?? false);
+    setFirstPayoutRule(planSettings?.first_payout_rule ?? "");
+    setPlanEndDate(planSettings?.plan_end_date ?? "");
+    setLoanEndDate(planSettings?.loan_end_date ?? "");
+    setRepaymentFrequency(planSettings?.repayment_frequency ?? "MONTHLY");
+    setRepaymentWeeklyDay(
+      planSettings?.repayment_weekly_day ?? (new Date().getDay() + 6) % 7
+    );
+    setRepaymentIntervalDays(
+      planSettings?.repayment_interval_days != null
+        ? String(planSettings.repayment_interval_days)
+        : "1"
+    );
+    setRepaymentAccountId(
+      planSettings?.repayment_account_id != null
+        ? String(planSettings.repayment_account_id)
+        : ""
+    );
+    setRepaymentType(planSettings?.repayment_type ?? "");
+    setPaymentAmountKind(planSettings?.payment_amount_kind ?? "");
+    setPaymentAmountStr(
+      planSettings?.payment_amount_rub != null
+        ? formatAmount(planSettings.payment_amount_rub)
+        : ""
+    );
+    setOpeningCounterpartyId(
+      item.opening_counterparty_item_id != null
+        ? String(item.opening_counterparty_item_id)
+        : ""
+    );
+    setOriginalPlanSignature(buildPlanSignatureFromItem(item));
+    loadLinkedChains(item.id);
     setFormError(null);
     setIsCreateOpen(true);
   };
@@ -1385,14 +1816,12 @@ export default function Page() {
       return;
     }
 
-    if (!startDate) {
-      setFormError("Укажите дату начала действия.");
+    const todayKey = getTodayDateKey();    if (!openDate) {
+      setFormError("\u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u0434\u0430\u0442\u0443 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f.");
       return;
     }
-
-    const todayKey = getTodayDateKey();
-    if (startDate > todayKey) {
-      setFormError("Дата начала действия не может быть позже сегодняшней даты.");
+    if (openDate > todayKey) {
+      setFormError("\u0414\u0430\u0442\u0430 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0431\u044b\u0442\u044c \u043f\u043e\u0437\u0434\u043d\u0435\u0435 \u0441\u0435\u0433\u043e\u0434\u043d\u044f\u0448\u043d\u0435\u0439 \u0434\u0430\u0442\u044b.");
       return;
     }
 
@@ -1439,14 +1868,15 @@ export default function Page() {
         return;
       }
       if (!openDate) {
-        setFormError("Дата открытия вклада обязательна при заполнении срока вклада.");
+        setFormError("Дата появления вклада обязательна при заполнении срока вклада.");
         return;
       }
       depositTermDaysValue = Math.trunc(parsed);
     }
 
     let interestRateValue: number | null = null;
-    if (showInterestFields && trimmedInterestRate) {
+    const shouldParseInterestRate = showInterestFields || showLoanPlanSettings;
+    if (shouldParseInterestRate && trimmedInterestRate) {
       const parsed = Number(trimmedInterestRate.replace(",", "."));
       if (!Number.isFinite(parsed) || parsed < 0) {
         setFormError("Процентная ставка должна быть числом.");
@@ -1492,19 +1922,149 @@ export default function Page() {
       return;
     }
 
+    const normalizedIntervalDays = repaymentIntervalDays.trim();
+    const intervalDaysValue =
+      normalizedIntervalDays && Number.isFinite(Number(normalizedIntervalDays))
+        ? Math.trunc(Number(normalizedIntervalDays))
+        : null;
+    const paymentAmountCents = parseRubToCents(paymentAmountStr);
+
+    if (planEnabled && !showPlanSection) {
+      setFormError("Для выбранного вида нельзя настроить плановые транзакции.");
+      return;
+    }
+
+    if (planEnabled && showInterestPlanSettings) {
+      if (interestRateValue === null) {
+        setFormError("Укажите процентную ставку для расчета процентов.");
+        return;
+      }
+      if (!openDate) {
+        setFormError("Укажите дату открытия для расчета процентов.");
+        return;
+      }
+      if (!interestPayoutOrder) {
+        setFormError("Выберите порядок выплаты процентов.");
+        return;
+      }
+      if (interestPayoutOrder === "MONTHLY" && !firstPayoutRule) {
+        setFormError("Выберите правило первой даты выплаты процентов.");
+        return;
+      }
+      if (typeCode === "deposit" && depositTermDaysValue === null) {
+        setFormError("Для вклада нужен срок для расчета процентов.");
+        return;
+      }
+      if (typeCode === "savings_account" && !planEndDate) {
+        setFormError("Для накопительного счета нужен горизонт планирования.");
+        return;
+      }
+      if (interestCapitalization !== "true" && !interestPayoutAccountId) {
+        setFormError("Укажите счет выплаты процентов или включите капитализацию.");
+        return;
+      }
+    }
+
+    if (planEnabled && showLoanPlanSettings) {
+      if (interestRateValue === null) {
+        setFormError("Укажите процентную ставку по кредиту или займу.");
+        return;
+      }
+      if (isLoanLiabilityType && !openDate) {
+        setFormError("Укажите дату появления обязательства.");
+        return;
+      }
+      if (!repaymentAccountId) {
+        setFormError("Выберите счет погашения.");
+        return;
+      }
+      if (!repaymentFrequency) {
+        setFormError("Выберите периодичность погашения.");
+        return;
+      }
+      if (repaymentFrequency === "MONTHLY" && !firstPayoutRule) {
+        setFormError("Выберите правило первой даты погашения.");
+        return;
+      }
+      if (repaymentFrequency === "REGULAR") {
+        if (!intervalDaysValue || intervalDaysValue < 1) {
+          setFormError("Укажите интервал в днях.");
+          return;
+        }
+      }
+      if (!loanEndDate && !planEndDate) {
+        setFormError(
+          "Укажите плановую дату погашения или дату окончания создания плановых транзакций."
+        );
+        return;
+      }
+      if (requiresLoanPaymentInput) {
+        if (!paymentAmountKind) {
+          setFormError("Укажите тип суммы погашения.");
+          return;
+        }
+        if (!Number.isFinite(paymentAmountCents) || paymentAmountCents <= 0) {
+          setFormError("Сумма погашения должна быть больше нуля.");
+          return;
+        }
+      }
+    }
+
+    if (
+      planEnabled &&
+      showInterestPlanSettings &&
+      interestCapitalization !== "true" &&
+      interestPayoutAccountId
+    ) {
+      const payoutAccount = itemsById.get(Number(interestPayoutAccountId));
+      if (!payoutAccount) {
+        setFormError("Счет выплаты процентов не найден.");
+        return;
+      }
+      if (payoutAccount.kind !== "ASSET") {
+        setFormError("Счет выплаты процентов должен быть активом.");
+        return;
+      }
+      if (payoutAccount.currency_code !== currencyCode) {
+        setFormError(
+          "Валюта счета выплаты процентов должна совпадать с валютой вклада или счета."
+        );
+        return;
+      }
+    }
+
+    if (planEnabled && showLoanPlanSettings && repaymentAccountId) {
+      const repaymentAccount = itemsById.get(Number(repaymentAccountId));
+      if (!repaymentAccount) {
+        setFormError("Счет погашения не найден.");
+        return;
+      }
+      if (repaymentAccount.type_code !== "bank_account") {
+        setFormError("Счет погашения должен быть банковским счетом.");
+        return;
+      }
+      if (repaymentAccount.currency_code !== currencyCode) {
+        setFormError("Валюта счета погашения должна совпадать с валютой кредита или займа.");
+        return;
+      }
+    }
+
     setLoading(true);
     try {
+      const openingCounterpartyValue =
+        showOpeningCounterparty && openingCounterpartyId
+          ? Number(openingCounterpartyId)
+          : null;
       const payload: ItemCreate = {
         kind,
         type_code: typeCode,
         name: name.trim(),
         currency_code: currencyCode,
         bank_id: showBankField ? bankId : null,
-        initial_value_rub: cents, // копейки
-        start_date: startDate,
+        open_date: openDate,
+        opening_counterparty_item_id: openingCounterpartyValue,
+        initial_value_rub: cents,
       };
-
-      if (showOpenDateField && openDate) payload.open_date = openDate;
 
       if (showBankAccountFields) {
         if (trimmedAccountLast7) payload.account_last7 = trimmedAccountLast7;
@@ -1531,8 +2091,11 @@ export default function Page() {
         payload.deposit_term_days = depositTermDaysValue;
       }
 
-      if (showInterestFields) {
+      if (showInterestFields || showLoanPlanSettings) {
         if (interestRateValue !== null) payload.interest_rate = interestRateValue;
+      }
+
+      if (showInterestFields) {
         if (interestPayoutOrder) {
           payload.interest_payout_order = interestPayoutOrder as "END_OF_TERM" | "MONTHLY";
         }
@@ -1543,7 +2106,100 @@ export default function Page() {
         }
       }
 
+      const shouldSendPlanSettings =
+        planEnabled || (editingItem?.plan_settings?.enabled ?? false);
+      if (shouldSendPlanSettings) {
+        let repaymentMonthlyDay: number | null = null;
+        let repaymentMonthlyRule: TransactionChainMonthlyRule | null = null;
+        if (
+          planEnabled &&
+          showLoanPlanSettings &&
+          repaymentFrequency === "MONTHLY" &&
+          firstPayoutRule
+        ) {
+          if (firstPayoutRule === "MONTH_END") {
+            repaymentMonthlyRule = "LAST_DAY";
+          } else {
+            const baseDate = new Date(`${openDate}T00:00:00`);
+            if (!Number.isNaN(baseDate.getTime())) {
+              repaymentMonthlyDay = baseDate.getDate();
+            }
+          }
+        }
+        const planSettings = {
+          enabled: planEnabled,
+          first_payout_rule:
+            planEnabled &&
+            ((showInterestPlanSettings && interestPayoutOrder === "MONTHLY") ||
+              (showLoanPlanSettings && repaymentFrequency === "MONTHLY"))
+              ? (firstPayoutRule as FirstPayoutRule)
+              : null,
+          plan_end_date: planEnabled ? (planEndDate || null) : null,
+          loan_end_date: planEnabled ? (loanEndDate || null) : null,
+          repayment_frequency:
+            planEnabled && showLoanPlanSettings ? repaymentFrequency : null,
+          repayment_weekly_day:
+            planEnabled && showLoanPlanSettings && repaymentFrequency === "WEEKLY"
+              ? repaymentWeeklyDay
+              : null,
+          repayment_monthly_day:
+            planEnabled && showLoanPlanSettings && repaymentFrequency === "MONTHLY"
+              ? repaymentMonthlyDay
+              : null,
+          repayment_monthly_rule:
+            planEnabled && showLoanPlanSettings && repaymentFrequency === "MONTHLY"
+              ? repaymentMonthlyRule
+              : null,
+          repayment_interval_days:
+            planEnabled && showLoanPlanSettings && repaymentFrequency === "REGULAR"
+              ? intervalDaysValue
+              : null,
+          repayment_account_id:
+            planEnabled && showLoanPlanSettings && repaymentAccountId
+              ? Number(repaymentAccountId)
+              : null,
+          repayment_type:
+            planEnabled && showLoanPlanSettings
+              ? (repaymentType as RepaymentType)
+              : null,
+          payment_amount_kind:
+            planEnabled && showLoanPlanSettings && requiresLoanPaymentInput
+              ? (paymentAmountKind as PaymentAmountKind)
+              : null,
+          payment_amount_rub:
+            planEnabled &&
+            showLoanPlanSettings &&
+            requiresLoanPaymentInput &&
+            Number.isFinite(paymentAmountCents)
+              ? paymentAmountCents
+              : null,
+        };
+        payload.plan_settings = planSettings;
+      }
+
       if (editingItem) {
+        const nextPlanSignature = buildPlanSignatureFromState();
+        const wasPlanEnabled = editingItem.plan_settings?.enabled ?? false;
+        if (originalPlanSignature && nextPlanSignature !== originalPlanSignature) {
+          if (wasPlanEnabled && planEnabled) {
+            const confirmed = window.confirm(
+              "Параметры плана изменились. Плановые транзакции будут перестроены, а нереализованные удалены. Продолжить?"
+            );
+            if (!confirmed) {
+              setLoading(false);
+              return;
+            }
+          }
+          if (wasPlanEnabled && !planEnabled) {
+            const confirmed = window.confirm(
+              "Плановые транзакции будут отключены, нереализованные будут удалены. Продолжить?"
+            );
+            if (!confirmed) {
+              setLoading(false);
+              return;
+            }
+          }
+        }
         const nextCardAccountId =
           payload.card_account_id !== undefined ? payload.card_account_id : null;
         const isCardLinkChange =
@@ -1582,11 +2238,20 @@ export default function Page() {
     }
   }
   
-  async function onArchive(id: number) {
+  async function onArchive(item: ItemOut) {
     setLoading(true);
     setError(null);
     try {
-      await archiveItem(id);
+      if (item.plan_settings?.enabled) {
+        const confirmed = window.confirm(
+          "Есть плановые транзакции. Нереализованные будут удалены. Продолжить?"
+        );
+        if (!confirmed) {
+          setLoading(false);
+          return;
+        }
+      }
+      await archiveItem(item.id);
       await loadItems();
     } catch (e: any) {
       setError(e?.message ?? "Ошибка архивации");
@@ -1599,6 +2264,15 @@ export default function Page() {
     setLoading(true);
     setError(null);
     try {
+      if (item.plan_settings?.enabled) {
+        const confirmed = window.confirm(
+          "Есть плановые транзакции. Нереализованные будут удалены. Продолжить?"
+        );
+        if (!confirmed) {
+          setLoading(false);
+          return;
+        }
+      }
       if (item.type_code === "bank_account") {
         const linkedCards = linkedCardsByAccountId.get(item.id) ?? [];
         if (linkedCards.length > 0) {
@@ -1692,7 +2366,7 @@ export default function Page() {
               Пока нет записей
             </div>
           ) : (
-            <Table className="table-fixed">
+            <Table className="w-full table-fixed">
               <TableHeader className="[&_tr]:border-b-2 [&_tr]:border-border/70">
                 <TableRow className="border-b-2 border-border/70">
                   <TableHead className="w-40 min-w-40 pl-6 font-medium text-muted-foreground whitespace-normal">
@@ -1704,6 +2378,12 @@ export default function Page() {
                   <TableHead className="w-16 min-w-16 font-medium text-muted-foreground text-center whitespace-normal">
                     
                   </TableHead>
+                  <TableHead className="w-28 min-w-28 font-medium text-muted-foreground whitespace-normal text-center">
+                    Дата появления
+                  </TableHead>
+                  <TableHead className="w-24 min-w-24 font-medium text-muted-foreground whitespace-normal text-center">
+                    Статус
+                  </TableHead>
                   <TableHead className="w-36 min-w-36 text-right font-medium text-muted-foreground whitespace-normal">
                     Текущая сумма в валюте
                   </TableHead>
@@ -1712,9 +2392,6 @@ export default function Page() {
                   </TableHead>
                   <TableHead className="w-36 min-w-36 text-right font-medium text-muted-foreground whitespace-normal">
                     Текущая сумма в руб. экв.
-                  </TableHead>
-                  <TableHead className="w-28 min-w-28 text-right font-medium text-muted-foreground whitespace-normal">
-                    Дата начала действия
                   </TableHead>
                   <TableHead className="w-12 min-w-12 pr-6" />
                 </TableRow>
@@ -1745,6 +2422,16 @@ export default function Page() {
                     it.type_code === "bank_card" && it.card_account_id
                       ? itemsById.get(it.card_account_id)
                       : null;
+                  const historyStatus =
+                    it.history_status ??
+                    (accountingStartDate && it.open_date
+                      ? it.open_date > accountingStartDate
+                        ? "NEW"
+                        : "HISTORICAL"
+                      : null);
+                  const openDateLabel = it.open_date
+                    ? formatShortDate(it.open_date)
+                    : "—";
                   const rowToneClass = isArchived
                     ? "bg-rose-50/80"
                     : isClosed
@@ -1845,6 +2532,30 @@ export default function Page() {
                       </TableCell>
 
                       <TableCell
+                        className={["w-28 min-w-28 text-center text-sm", mutedToneClass].join(
+                          " "
+                        )}
+                      >
+                        {openDateLabel}
+                      </TableCell>
+
+                      <TableCell className="w-24 min-w-24 text-center text-sm">
+                        {historyStatus ? (
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                              historyStatus === "NEW"
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {historyStatus === "NEW" ? "Новый" : "Исторический"}
+                          </span>
+                        ) : (
+                          <span className={["text-sm", mutedToneClass].join(" ")}>-</span>
+                        )}
+                      </TableCell>
+
+                      <TableCell
                         className={[
                           "w-36 min-w-36 text-right font-semibold tabular-nums",
                           isArchived
@@ -1892,14 +2603,6 @@ export default function Page() {
                           : formatRub(rubEquivalent)}
                       </TableCell>
 
-                      <TableCell
-                        className={["w-28 min-w-28 text-right text-sm", mutedToneClass].join(
-                          " "
-                        )}
-                      >
-                        {new Date(`${it.start_date}T00:00:00`).toLocaleDateString("ru-RU")}
-                      </TableCell>
-
                       <TableCell className="w-12 min-w-12 pr-6 text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -1938,7 +2641,7 @@ export default function Page() {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               variant="destructive"
-                              onSelect={() => onArchive(it.id)}
+                              onSelect={() => onArchive(it)}
                               disabled={!canDelete}
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1959,6 +2662,8 @@ export default function Page() {
                   <TableCell />
                   <TableCell />
                   <TableCell />
+                  <TableCell />
+                  <TableCell />
                   <TableCell
                     className={[
                       "text-right font-semibold tabular-nums",
@@ -1967,7 +2672,6 @@ export default function Page() {
                   >
                     {isLiability ? `-${formatRub(total)}` : formatRub(total)}
                   </TableCell>
-                  <TableCell />
                   <TableCell className="pr-6" />
                 </TableRow>
               </TableFooter>
@@ -1995,7 +2699,7 @@ export default function Page() {
       >
         <DialogContent
           ref={dialogContentRef}
-          className="overflow-hidden sm:max-w-[520px]"
+          className="max-h-[90vh] overflow-y-auto overflow-x-hidden sm:max-w-[1040px]"
         >
           {selectedBank?.logo_url && logoOverlayHeight > 0 && (
             <div
@@ -2014,13 +2718,15 @@ export default function Page() {
               </DialogTitle>
             </DialogHeader>
 
-            <form onSubmit={onCreate} noValidate className="grid gap-4">
+            <form onSubmit={onCreate} noValidate className="grid gap-6">
             {formError && (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
                 {formError}
               </div>
             )}
 
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="grid gap-4">
             {isGeneralCreate && (
               <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
                 <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
@@ -2196,27 +2902,9 @@ export default function Page() {
               </div>
             )}
 
-            {showBankAccountFields && (
-              <div className="grid gap-2">
-                <Label>Последние 7 цифр номера счета</Label>
-                <Input
-                  value={accountLast7}
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/\D/g, "").slice(0, 7);
-                    setAccountLast7(digits);
-                  }}
-                  inputMode="numeric"
-                  maxLength={7}
-                  placeholder="Например: 1234567"
-                  className="border-2 border-border/70 bg-white shadow-none"
-                />
-              </div>
-            )}
-
             {showBankCardFields && (
               <>
-                {!isCreditCard && (
-                  <div className="grid gap-2">
+                <div className="grid gap-2">
                   <Label>Вид карты</Label>
                   <Select
                     value={cardKind}
@@ -2231,8 +2919,7 @@ export default function Page() {
                       <SelectItem value="CREDIT">Кредитная</SelectItem>
                     </SelectContent>
                   </Select>
-                  </div>
-                )}
+                </div>
 
                 {isCreditCard && (
                   <div className="grid gap-2">
@@ -2254,6 +2941,110 @@ export default function Page() {
                     />
                   </div>
                 )}
+              </>
+            )}
+
+            <div className="grid gap-2">
+              <div className="flex items-center gap-2">
+                <Label>{openDateLabel}</Label>
+                <span
+                  className="text-muted-foreground"
+                  title={openDateHelpText}
+                  aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u0434\u0430\u0442\u0435 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f"
+                >
+                  <Info className="h-4 w-4" />
+                </span>
+              </div>
+              <Input
+                type="date"
+                value={openDate}
+                onChange={(e) => setOpenDate(e.target.value)}
+                max={getTodayDateKey()}
+                className="border-2 border-border/70 bg-white shadow-none"
+              />
+              {resolvedHistoryStatus && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      resolvedHistoryStatus === "NEW"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
+                  </span>
+                  {resolvedHistoryStatus === "HISTORICAL" && accountingStartDate && (
+                    <span>Дата начала учета: {formatShortDate(accountingStartDate)}</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+
+
+            <div className="grid gap-2">
+              <Label>Валюта</Label>
+              <Select
+                value={currencyCode}
+                onValueChange={setCurrencyCode}
+                disabled={currencies.length === 0}
+              >
+                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                  <SelectValue placeholder="Выберите валюту" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencies.map((c) => (
+                    <SelectItem key={c.iso_char_code} value={c.iso_char_code}>
+                      {c.iso_char_code} — {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {!hideInitialAmountField && (
+              <div className="grid gap-2">
+                <Label>{amountLabel}</Label>
+                <Input
+                  value={amountStr}
+                  onChange={(e) => {
+                    const formatted = formatRubInput(e.target.value);
+                    setAmountStr(formatted);
+                  }}
+                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                  inputMode="decimal"
+                  placeholder="Например: 1 234 567,89"
+                  className="border-2 border-border/70 bg-white shadow-none"
+                />
+                {showLoanPlanSettings && (
+                  <div className="text-xs text-muted-foreground">
+                    Указывайте задолженность по основному долгу без процентов.
+                  </div>
+                )}
+              </div>
+            )}
+
+            </div>
+            <div className="grid gap-4">
+            {showBankAccountFields && (
+              <div className="grid gap-2">
+                <Label>Последние 7 цифр номера счета</Label>
+                <Input
+                  value={accountLast7}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "").slice(0, 7);
+                    setAccountLast7(digits);
+                  }}
+                  inputMode="numeric"
+                  maxLength={7}
+                  placeholder="Например: 1234567"
+                  className="border-2 border-border/70 bg-white shadow-none"
+                />
+              </div>
+            )}
+
+            {showBankCardFields && (
+              <>
                 <div className="grid gap-2">
                   <Label>Последние 4 цифры номера карты</Label>
                   <Input
@@ -2269,42 +3060,44 @@ export default function Page() {
                   />
                 </div>
 
-                <div className="grid gap-2">
-                  <Label>Привязка карты к банковскому счету</Label>
-                  <ItemSelector
-                    items={bankAccountItems}
-                    selectedIds={cardAccountId ? [Number(cardAccountId)] : []}
-                    onChange={(ids) => {
-                      const nextId = ids[0] ?? null;
-                      if (!nextId) {
-                        setCardAccountId("");
-                        return;
-                      }
-                      setCardAccountId(String(nextId));
-                      const account = itemsById.get(nextId);
-                      if (account) {
-                        setCurrencyCode(account.currency_code ?? "RUB");
-                        setBankId(account.bank_id ?? null);
-                        if (account.bank_id) {
-                          const name = banksById.get(account.bank_id)?.name ?? "";
-                          setBankSearch(name);
-                        } else {
-                          setBankSearch("");
+                {!isCreditCard && (
+                  <div className="grid gap-2">
+                    <Label>Привязка карты к банковскому счету</Label>
+                    <ItemSelector
+                      items={bankAccountItems}
+                      selectedIds={cardAccountId ? [Number(cardAccountId)] : []}
+                      onChange={(ids) => {
+                        const nextId = ids[0] ?? null;
+                        if (!nextId) {
+                          setCardAccountId("");
+                          return;
                         }
-                      }
-                    }}
-                    selectionMode="single"
-                    placeholder="Выберите счет"
-                    clearLabel="Не выбрано"
-                    getItemTypeLabel={getItemTypeLabel}
-                    getItemKind={resolveItemEffectiveKind}
-                    getItemBalance={getItemDisplayBalanceCents}
-                    getBankLogoUrl={itemBankLogoUrl}
-                    getBankName={itemBankName}
-                    itemCounts={itemTxCounts}
-                    ariaLabel="Привязка карты к банковскому счету"
-                  />
-                </div>
+                        setCardAccountId(String(nextId));
+                        const account = itemsById.get(nextId);
+                        if (account) {
+                          setCurrencyCode(account.currency_code ?? "RUB");
+                          setBankId(account.bank_id ?? null);
+                          if (account.bank_id) {
+                            const name = banksById.get(account.bank_id)?.name ?? "";
+                            setBankSearch(name);
+                          } else {
+                            setBankSearch("");
+                          }
+                        }
+                      }}
+                      selectionMode="single"
+                      placeholder="Выберите счет"
+                      clearLabel="Не выбрано"
+                      getItemTypeLabel={getItemTypeLabel}
+                      getItemKind={resolveItemEffectiveKind}
+                      getItemBalance={getItemDisplayBalanceCents}
+                      getBankLogoUrl={itemBankLogoUrl}
+                      getBankName={itemBankName}
+                      itemCounts={itemTxCounts}
+                      ariaLabel="Привязка карты к банковскому счету"
+                    />
+                  </div>
+                )}
               </>
             )}
 
@@ -2315,18 +3108,6 @@ export default function Page() {
                   value={contractNumber}
                   onChange={(e) => setContractNumber(e.target.value)}
                   placeholder="Например: 01-2025/123"
-                  className="border-2 border-border/70 bg-white shadow-none"
-                />
-              </div>
-            )}
-
-            {showOpenDateField && (
-              <div className="grid gap-2">
-                <Label>Дата открытия</Label>
-                <Input
-                  type="date"
-                  value={openDate}
-                  onChange={(e) => setOpenDate(e.target.value)}
                   className="border-2 border-border/70 bg-white shadow-none"
                 />
               </div>
@@ -2345,8 +3126,8 @@ export default function Page() {
                   />
                   <div className="text-sm text-muted-foreground min-w-[140px]">
                     {depositEndDateText
-                      ? `Окончание: ${depositEndDateText}`
-                      : "Окончание: —"}
+                      ? `Дата окончания: ${depositEndDateText}`
+                      : "Дата окончания: —"}
                   </div>
                 </div>
               </div>
@@ -2403,95 +3184,313 @@ export default function Page() {
                   </Select>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label>Счет выплаты процентов</Label>
-                  <Select
-                    value={interestPayoutAccountId}
-                    onValueChange={(value) =>
-                      setInterestPayoutAccountId(value === "__none" ? "" : value)
-                    }
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                      <SelectValue placeholder="Выберите счет" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">Не выбрано</SelectItem>
-                      {activeAssetItems.map((item) => {
-                        const typeLabel =
-                          ASSET_TYPES.find((t) => t.code === item.type_code)?.label ||
-                          item.type_code;
-                        return (
-                          <SelectItem key={item.id} value={String(item.id)}>
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium">{item.name}</span>
-                              <span className="text-xs text-muted-foreground">{typeLabel}</span>
-                            </div>
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {interestCapitalization !== "true" && (
+                  <div className="grid gap-2">
+                    <Label>Счет выплаты процентов</Label>
+                    <ItemSelector
+                      items={interestPayoutItems}
+                      selectedIds={
+                        interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []
+                      }
+                      onChange={(ids) => {
+                        const nextId = ids[0] ?? null;
+                        setInterestPayoutAccountId(nextId ? String(nextId) : "");
+                      }}
+                      selectionMode="single"
+                      placeholder="Выберите актив"
+                      clearLabel="Не выбрано"
+                      getItemTypeLabel={getItemTypeLabel}
+                      getItemKind={resolveItemEffectiveKind}
+                      getItemBalance={getItemDisplayBalanceCents}
+                      getBankLogoUrl={itemBankLogoUrl}
+                      getBankName={itemBankName}
+                      itemCounts={itemTxCounts}
+                      ariaLabel="Счет выплаты процентов"
+                    />
+                  </div>
+                )}
               </>
             )}
 
-
-            <div className="grid gap-2">
-              <Label>Валюта</Label>
-              <Select
-                value={currencyCode}
-                onValueChange={setCurrencyCode}
-                disabled={currencies.length === 0}
-              >
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                  <SelectValue placeholder="Выберите валюту" />
-                </SelectTrigger>
-                <SelectContent>
-                  {currencies.map((c) => (
-                    <SelectItem key={c.iso_char_code} value={c.iso_char_code}>
-                      {c.iso_char_code} — {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid gap-2">
-              <div className="flex items-center gap-2">
-                <Label>Дата начала действия</Label>
-                <span
-                  className="text-muted-foreground"
-                  title="Дата, с которой актив или обязательство участвуют в расчетах. Нужна для корректной истории и отчетов."
-                  aria-label="Подсказка по дате начала действия"
-                >
-                  <Info className="h-4 w-4" />
-                </span>
-              </div>
-              <Input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                max={getTodayDateKey()}
-                className="border-2 border-border/70 bg-white shadow-none"
-              />
-            </div>
-
-            {!hideInitialAmountField && (
-              <div className="grid gap-2">
-                <Label>Сумма на дату начала действия</Label>
-                <Input
-                  value={amountStr}
-                  onChange={(e) => {
-                    const formatted = formatRubInput(e.target.value);
-                    setAmountStr(formatted);
-                  }}
-                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                  inputMode="decimal"
-                  placeholder="Например: 1 234 567,89"
-                  className="border-2 border-border/70 bg-white shadow-none"
-                />
+            {showPlanSection && (
+              <div className="rounded-lg border border-border/70 bg-slate-50/60 p-4 grid gap-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Плановые транзакции</div>
+                    <div className="text-xs text-muted-foreground">
+                      Настройте автоматическое создание плановых транзакций.
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={planEnabled}
+                      onChange={(event) => setPlanEnabled(event.target.checked)}
+                    />
+                    Включить
+                  </label>
+                </div>
+                {planEnabled && (
+                  <>
+                    {showInterestPlanSettings && (
+                      <>
+                        {interestPayoutOrder === "MONTHLY" && (
+                          <div className="grid gap-2">
+                            <Label>Правило первой выплаты</Label>
+                            <Select
+                              value={firstPayoutRule || "__none"}
+                              onValueChange={(value) =>
+                                setFirstPayoutRule(
+                                  value === "__none" ? "" : (value as FirstPayoutRule)
+                                )
+                              }
+                            >
+                              <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                                <SelectValue placeholder="Выберите правило" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none">Не выбрано</SelectItem>
+                                <SelectItem value="OPEN_DATE">В дату открытия</SelectItem>
+                                <SelectItem value="MONTH_END">В конце месяца</SelectItem>
+                                <SelectItem value="SHIFT_ONE_MONTH">
+                                  В конце следующего месяца
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                        {typeCode === "savings_account" && (
+                          <div className="grid gap-2">
+                            <Label>Дата окончания планирования</Label>
+                            <Input
+                              type="date"
+                              value={planEndDate}
+                              min={minPlanDate || undefined}
+                              onChange={(e) => setPlanEndDate(e.target.value)}
+                              className="border-2 border-border/70 bg-white shadow-none"
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {showLoanPlanSettings && (
+                      <>
+                        <div className="grid gap-2">
+                          <Label>Счет погашения</Label>
+                          <ItemSelector
+                            items={repaymentAccountItems}
+                            selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []}
+                            onChange={(ids) => {
+                              const nextId = ids[0] ?? null;
+                              setRepaymentAccountId(nextId ? String(nextId) : "");
+                            }}
+                            selectionMode="single"
+                            placeholder="Выберите актив"
+                            clearLabel="Не выбрано"
+                            getItemTypeLabel={getItemTypeLabel}
+                            getItemKind={resolveItemEffectiveKind}
+                            getItemBalance={getItemDisplayBalanceCents}
+                            getBankLogoUrl={itemBankLogoUrl}
+                            getBankName={itemBankName}
+                            itemCounts={itemTxCounts}
+                            ariaLabel="Счет погашения"
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>Частота выплат</Label>
+                          <Select
+                            value={repaymentFrequency}
+                            onValueChange={(value) =>
+                              setRepaymentFrequency(value as TransactionChainFrequency)
+                            }
+                          >
+                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                              <SelectValue placeholder="Выберите вариант" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="DAILY">Ежедневно</SelectItem>
+                              <SelectItem value="WEEKLY">Еженедельно</SelectItem>
+                              <SelectItem value="MONTHLY">Ежемесячно</SelectItem>
+                              <SelectItem value="REGULAR">Регулярно</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {repaymentFrequency === "WEEKLY" && (
+                          <div className="grid gap-2">
+                            <Label>День недели</Label>
+                            <Select
+                              value={String(repaymentWeeklyDay)}
+                              onValueChange={(value) => setRepaymentWeeklyDay(Number(value))}
+                            >
+                              <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                                <SelectValue placeholder="Выберите день" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {WEEKDAY_LABELS.map((label, index) => (
+                                  <SelectItem key={label} value={String(index)}>
+                                    {label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                        {repaymentFrequency === "REGULAR" && (
+                          <div className="grid gap-2">
+                            <Label>Интервал, дней</Label>
+                            <Input
+                              value={repaymentIntervalDays}
+                              onChange={(e) =>
+                                setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))
+                              }
+                              inputMode="numeric"
+                              placeholder="Например: 30"
+                              className="border-2 border-border/70 bg-white shadow-none"
+                            />
+                          </div>
+                        )}
+                        {repaymentFrequency === "MONTHLY" && (
+                          <div className="grid gap-2">
+                            <Label>Правило первого платежа</Label>
+                            <Select
+                              value={firstPayoutRule || "__none"}
+                              onValueChange={(value) =>
+                                setFirstPayoutRule(
+                                  value === "__none" ? "" : (value as FirstPayoutRule)
+                                )
+                              }
+                            >
+                              <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                                <SelectValue placeholder="Выберите правило" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none">Не выбрано</SelectItem>
+                                <SelectItem value="OPEN_DATE">В дату открытия</SelectItem>
+                                <SelectItem value="MONTH_END">В конце месяца</SelectItem>
+                                <SelectItem value="SHIFT_ONE_MONTH">
+                                  В конце следующего месяца
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                        <div className="grid gap-2">
+                          <Label>Тип выплат</Label>
+                          <Select
+                            value={repaymentType || "__none"}
+                            onValueChange={(value) =>
+                              setRepaymentType(value === "__none" ? "" : (value as RepaymentType))
+                            }
+                          >
+                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                              <SelectValue placeholder="Выберите тип" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none">Не выбрано</SelectItem>
+                              <SelectItem value="ANNUITY">Аннуитетный</SelectItem>
+                              <SelectItem value="DIFFERENTIATED">Дифференцированный</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>Дата окончания планирования</Label>
+                          <Input
+                            type="date"
+                            value={planEndDate}
+                            min={minPlanDate || undefined}
+                            onChange={(e) => setPlanEndDate(e.target.value)}
+                            className="border-2 border-border/70 bg-white shadow-none"
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>Дата окончания кредита</Label>
+                          <Input
+                            type="date"
+                            value={loanEndDate}
+                            min={minPlanDate || undefined}
+                            onChange={(e) => setLoanEndDate(e.target.value)}
+                            className="border-2 border-border/70 bg-white shadow-none"
+                          />
+                        </div>
+                        {requiresLoanPaymentInput && (
+                          <>
+                            <div className="grid gap-2">
+                              <Label>Тип платежей</Label>
+                              <Select
+                                value={paymentAmountKind || "__none"}
+                                onValueChange={(value) =>
+                                  setPaymentAmountKind(
+                                    value === "__none" ? "" : (value as PaymentAmountKind)
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                                  <SelectValue placeholder="Выберите вариант" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none">Не выбрано</SelectItem>
+                                  <SelectItem value="TOTAL">Полный платеж</SelectItem>
+                                  <SelectItem value="PRINCIPAL">Только тело</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="grid gap-2">
+                              <Label>Сумма платежа</Label>
+                              <Input
+                                value={paymentAmountStr}
+                                onChange={(e) => {
+                                  const formatted = formatRubInput(e.target.value);
+                                  setPaymentAmountStr(formatted);
+                                }}
+                                onBlur={() =>
+                                  setPaymentAmountStr((prev) => normalizeRubOnBlur(prev))
+                                }
+                                inputMode="decimal"
+                                placeholder="Например: 10 000,00"
+                                className="border-2 border-border/70 bg-white shadow-none"
+                              />
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
               </div>
             )}
+            {showOpeningCounterparty && (
+              <div className="grid gap-2">
+                <Label>{openingCounterpartyLabel}</Label>
+                <ItemSelector
+                  items={openingCounterpartyItems}
+                  selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
+                  onChange={(ids) => {
+                    const nextId = ids[0] ?? null;
+                    setOpeningCounterpartyId(nextId ? String(nextId) : "");
+                  }}
+                  selectionMode="single"
+                  placeholder="Выберите актив"
+                  clearLabel="Не выбрано"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  getBankLogoUrl={itemBankLogoUrl}
+                  getBankName={itemBankName}
+                  itemCounts={itemTxCounts}
+                  ariaLabel={openingCounterpartyLabel}
+                />
+                {openingWarning && (
+                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4" />
+                    <span>{openingWarning}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            </div>
+            </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <Button
@@ -2515,6 +3514,11 @@ export default function Page() {
       </Dialog>
 
       <div className="space-y-6">
+        {accountingStartDate && (
+          <div className="text-sm text-muted-foreground">
+            Дата начала учета: {formatShortDate(accountingStartDate)}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/70 bg-white px-4 py-3">
           <span className="text-sm font-medium text-muted-foreground">Показывать:</span>
           <label className="flex items-center gap-2 text-sm text-foreground">

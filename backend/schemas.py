@@ -174,6 +174,9 @@ class ItemCreate(BaseModel):
     interest_payout_order: InterestPayoutOrder | None = None
     interest_capitalization: bool | None = None
     interest_payout_account_id: int | None = None
+    instrument_id: str | None = None
+    instrument_board_id: str | None = None
+    position_lots: int | None = Field(default=None, ge=0)
     initial_value_rub: int
     plan_settings: ItemPlanSettingsBase | None = None
 
@@ -301,6 +304,11 @@ class ItemOut(BaseModel):
     interest_payout_order: InterestPayoutOrder | None
     interest_capitalization: bool | None
     interest_payout_account_id: int | None
+    instrument_id: str | None
+    instrument_board_id: str | None
+    position_lots: int | None
+    lot_size: int | None
+    face_value_cents: int | None
     initial_value_rub: int
     current_value_rub: int
     start_date: date
@@ -320,6 +328,8 @@ class TransactionBase(BaseModel):
     counterparty_id: int | None = None
     amount_rub: int = Field(ge=0)
     amount_counterparty: int | None = Field(default=None, ge=0)
+    primary_quantity_lots: int | None = Field(default=None, ge=0)
+    counterparty_quantity_lots: int | None = Field(default=None, ge=0)
     direction: TransactionDirection
     transaction_type: TransactionType
     category_id: int | None = None
@@ -555,6 +565,51 @@ class FxRateOut(BaseModel):
     nominal: int
     value: float
     rate: float
+
+
+class MarketInstrumentOut(BaseModel):
+    secid: str
+    provider: str
+    isin: str | None
+    short_name: str | None
+    name: str | None
+    type_code: str | None
+    engine: str | None
+    market: str | None
+    default_board_id: str | None
+    currency_code: str | None
+    lot_size: int | None
+    face_value_cents: int | None
+    is_traded: bool | None
+
+    class Config:
+        from_attributes = True
+
+
+class MarketBoardOut(BaseModel):
+    board_id: str
+    title: str | None
+    engine: str | None
+    market: str | None
+    currency_code: str | None
+    is_primary: bool | None
+
+
+class MarketInstrumentDetailsOut(BaseModel):
+    instrument: MarketInstrumentOut
+    boards: list[MarketBoardOut]
+
+
+class MarketPriceOut(BaseModel):
+    instrument_id: str
+    board_id: str
+    price_date: date
+    price_time: datetime | None
+    price_cents: int | None
+    price_percent_bp: int | None
+    accint_cents: int | None
+    yield_bp: int | None
+    currency_code: str | None
 
 
 class FxRatesBatchRequest(BaseModel):

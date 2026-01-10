@@ -65,6 +65,9 @@ import {
   fetchBanks,
   fetchCurrencies,
   fetchFxRates,
+  fetchMarketInstruments,
+  fetchMarketInstrumentDetails,
+  fetchMarketInstrumentPrice,
   fetchTransactions,
   fetchTransactionChains,
   createItem,
@@ -78,6 +81,9 @@ import {
   BankOut,
   CurrencyOut,
   FxRateOut,
+  MarketBoardOut,
+  MarketInstrumentOut,
+  MarketPriceOut,
   TransactionChainOut,
   TransactionOut,
   TransactionChainFrequency,
@@ -176,6 +182,14 @@ const INVESTMENT_TYPES = [
   "iis",
   "precious_metals",
   "crypto",
+];
+const MOEX_TYPE_CODES = [
+  "securities",
+  "bonds",
+  "etf",
+  "bpif",
+  "pif",
+  "precious_metals",
 ];
 const THIRD_PARTY_DEBT_TYPES = ["loan_to_third_party", "third_party_receivables"];
 const REAL_ESTATE_TYPES = [
@@ -466,6 +480,13 @@ function formatRate(value: number) {
   }).format(value);
 }
 
+function formatPercent(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 function getTodayDateKey() {
   const now = new Date();
   const year = now.getFullYear();
@@ -507,6 +528,18 @@ export default function Page() {
   const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
   const [bankLoading, setBankLoading] = useState(false);
   const [bankError, setBankError] = useState<string | null>(null);
+  const [instrumentQuery, setInstrumentQuery] = useState("");
+  const [instrumentOptions, setInstrumentOptions] = useState<MarketInstrumentOut[]>([]);
+  const [instrumentLoading, setInstrumentLoading] = useState(false);
+  const [instrumentError, setInstrumentError] = useState<string | null>(null);
+  const [instrumentDropdownOpen, setInstrumentDropdownOpen] = useState(false);
+  const [selectedInstrument, setSelectedInstrument] = useState<MarketInstrumentOut | null>(
+    null
+  );
+  const [instrumentBoards, setInstrumentBoards] = useState<MarketBoardOut[]>([]);
+  const [instrumentBoardId, setInstrumentBoardId] = useState("");
+  const [positionLots, setPositionLots] = useState("");
+  const [marketPrice, setMarketPrice] = useState<MarketPriceOut | null>(null);
   const [accountLast7, setAccountLast7] = useState("");
   const [contractNumber, setContractNumber] = useState("");
   const [openDate, setOpenDate] = useState(() => getTodayDateKey());
@@ -553,6 +586,16 @@ export default function Page() {
     setBankSearch("");
     setBankDropdownOpen(false);
     setBankError(null);
+    setInstrumentQuery("");
+    setInstrumentOptions([]);
+    setInstrumentLoading(false);
+    setInstrumentError(null);
+    setInstrumentDropdownOpen(false);
+    setSelectedInstrument(null);
+    setInstrumentBoards([]);
+    setInstrumentBoardId("");
+    setPositionLots("");
+    setMarketPrice(null);
     setAccountLast7("");
     setContractNumber("");
     setOpenDate(getTodayDateKey());
@@ -816,6 +859,7 @@ export default function Page() {
     () => BANK_TYPE_CODES.includes(typeCode),
     [typeCode]
   );
+  const isMoexType = useMemo(() => MOEX_TYPE_CODES.includes(typeCode), [typeCode]);
   const showBankAccountFields = useMemo(
     () => typeCode === "bank_account" || typeCode === "savings_account",
     [typeCode]
@@ -1670,6 +1714,108 @@ export default function Page() {
     }
   }, [currencies, currencyCode]);
 
+  useEffect(() => {
+    if (!isMoexType) {
+      setInstrumentOptions([]);
+      setInstrumentQuery("");
+      setInstrumentError(null);
+      setSelectedInstrument(null);
+      setInstrumentBoards([]);
+      setInstrumentBoardId("");
+      setPositionLots("");
+      setMarketPrice(null);
+      return;
+    }
+    const query = instrumentQuery.trim();
+    if (!query) {
+      setInstrumentOptions([]);
+      setInstrumentError(null);
+      return;
+    }
+    let cancelled = false;
+    setInstrumentLoading(true);
+    setInstrumentError(null);
+    const handle = setTimeout(() => {
+      fetchMarketInstruments({ q: query, type_code: typeCode, limit: 20 })
+        .then((results) => {
+          if (cancelled) return;
+          setInstrumentOptions(results);
+        })
+        .catch((e: any) => {
+          if (cancelled) return;
+          setInstrumentError(e?.message ?? "Не удалось загрузить инструменты.");
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setInstrumentLoading(false);
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [instrumentQuery, isMoexType, typeCode]);
+
+  useEffect(() => {
+    if (!selectedInstrument) {
+      setInstrumentBoards([]);
+      setInstrumentBoardId("");
+      setMarketPrice(null);
+      return;
+    }
+    let active = true;
+    fetchMarketInstrumentDetails(selectedInstrument.secid)
+      .then((data) => {
+        if (!active) return;
+        setInstrumentBoards(data.boards ?? []);
+        const defaultBoard =
+          data.instrument.default_board_id || data.boards?.[0]?.board_id || "";
+        if (!instrumentBoardId) {
+          setInstrumentBoardId(defaultBoard);
+        } else if (
+          data.boards?.length &&
+          !data.boards.some((board) => board.board_id === instrumentBoardId)
+        ) {
+          setInstrumentBoardId(defaultBoard);
+        }
+        if (!name.trim()) {
+          const nextName = data.instrument.short_name || data.instrument.name || "";
+          if (nextName) setName(nextName);
+        }
+        if (data.instrument.currency_code) {
+          setCurrencyCode(data.instrument.currency_code);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setInstrumentBoards([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedInstrument, instrumentBoardId, name]);
+
+  useEffect(() => {
+    if (!selectedInstrument || !instrumentBoardId) {
+      setMarketPrice(null);
+      return;
+    }
+    let active = true;
+    fetchMarketInstrumentPrice(selectedInstrument.secid, instrumentBoardId)
+      .then((price) => {
+        if (!active) return;
+        setMarketPrice(price);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMarketPrice(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedInstrument, instrumentBoardId]);
+
   const openCreateModal = (
     nextKind: ItemKind,
     nextTypeCodes: string[],
@@ -1688,6 +1834,16 @@ export default function Page() {
     setBankSearch("");
     setBankDropdownOpen(false);
     setBankError(null);
+    setInstrumentQuery("");
+    setInstrumentOptions([]);
+    setInstrumentLoading(false);
+    setInstrumentError(null);
+    setInstrumentDropdownOpen(false);
+    setSelectedInstrument(null);
+    setInstrumentBoards([]);
+    setInstrumentBoardId("");
+    setPositionLots("");
+    setMarketPrice(null);
     setAccountLast7("");
     setContractNumber("");
     setOpenDate(getTodayDateKey());
@@ -1733,6 +1889,35 @@ export default function Page() {
     setBankSearch(bankName);
     setBankDropdownOpen(false);
     setBankError(null);
+    setInstrumentQuery(
+      item.instrument_id ? `${item.instrument_id} - ${item.name ?? ""}`.trim() : ""
+    );
+    setInstrumentOptions([]);
+    setInstrumentLoading(false);
+    setInstrumentError(null);
+    if (item.instrument_id) {
+      setSelectedInstrument({
+        secid: item.instrument_id,
+        provider: "MOEX",
+        isin: null,
+        short_name: item.name,
+        name: item.name,
+        type_code: item.type_code,
+        engine: null,
+        market: null,
+        default_board_id: item.instrument_board_id,
+        currency_code: item.currency_code,
+        lot_size: item.lot_size,
+        face_value_cents: item.face_value_cents,
+        is_traded: null,
+      });
+      setInstrumentBoardId(item.instrument_board_id ?? "");
+    } else {
+      setSelectedInstrument(null);
+      setInstrumentBoardId("");
+    }
+    setInstrumentBoards([]);
+    setMarketPrice(null);
     setAccountLast7(item.account_last7 ?? "");
     setContractNumber(item.contract_number ?? "");
     setOpenDate(item.open_date ?? "");
@@ -1741,6 +1926,7 @@ export default function Page() {
     setCardKind(item.card_kind ?? "DEBIT");
     setCreditLimit(item.credit_limit != null ? formatAmount(item.credit_limit) : "");
     setDepositTermDays(item.deposit_term_days != null ? String(item.deposit_term_days) : "");
+    setPositionLots(item.position_lots != null ? String(item.position_lots) : "");
     setInterestRate(
       item.interest_rate != null ? String(item.interest_rate).replace(".", ",") : ""
     );
@@ -1816,7 +2002,30 @@ export default function Page() {
       return;
     }
 
-    const todayKey = getTodayDateKey();    if (!openDate) {
+    if (isMoexType) {
+      if (!selectedInstrument) {
+        setFormError("Выберите инструмент MOEX.");
+        return;
+      }
+      if (!instrumentBoardId) {
+        setFormError("Выберите торговый режим.");
+        return;
+      }
+      const trimmedLots = positionLots.trim();
+      if (!trimmedLots) {
+        setFormError("Укажите количество лотов.");
+        return;
+      }
+      const cleanedLots = trimmedLots.replace(/\s/g, "");
+      const parsedLots = Number(cleanedLots);
+      if (!Number.isFinite(parsedLots) || parsedLots < 0 || !Number.isInteger(parsedLots)) {
+        setFormError("Количество лотов должно быть целым неотрицательным числом.");
+        return;
+      }
+    }
+
+    const todayKey = getTodayDateKey();
+    if (!openDate) {
       setFormError("\u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u0434\u0430\u0442\u0443 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f.");
       return;
     }
@@ -2065,6 +2274,12 @@ export default function Page() {
         opening_counterparty_item_id: openingCounterpartyValue,
         initial_value_rub: cents,
       };
+
+      if (isMoexType && selectedInstrument) {
+        payload.instrument_id = selectedInstrument.secid;
+        payload.instrument_board_id = instrumentBoardId || null;
+        payload.position_lots = Number(positionLots.replace(/\s/g, ""));
+      }
 
       if (showBankAccountFields) {
         if (trimmedAccountLast7) payload.account_last7 = trimmedAccountLast7;
@@ -2819,6 +3034,152 @@ export default function Page() {
                 </SelectContent>
               </Select>
             </div>
+
+
+            {isMoexType && (
+              <div className="grid gap-3 rounded-lg border border-dashed border-violet-200 bg-violet-50/40 p-3">
+                <div className="grid gap-2">
+                  <Label>Инструмент MOEX</Label>
+                  <div className="relative">
+                    <Input
+                      value={instrumentQuery}
+                      onChange={(e) => {
+                        setInstrumentQuery(e.target.value);
+                        setSelectedInstrument(null);
+                        setInstrumentDropdownOpen(true);
+                      }}
+                      onFocus={() => setInstrumentDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setInstrumentDropdownOpen(false), 150)}
+                      placeholder="Введите тикер или название"
+                      className="border-2 border-border/70 bg-white shadow-none"
+                    />
+                    {instrumentDropdownOpen && (
+                      <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
+                        {instrumentLoading && (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">
+                            Загружаем инструменты...
+                          </div>
+                        )}
+                        {!instrumentLoading && instrumentError && (
+                          <div className="px-3 py-2 text-sm text-red-600">{instrumentError}</div>
+                        )}
+                        {!instrumentLoading && !instrumentError && instrumentOptions.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">
+                            Ничего не найдено
+                          </div>
+                        )}
+                        {!instrumentLoading &&
+                          !instrumentError &&
+                          instrumentOptions.map((option) => {
+                            const title = option.short_name || option.name || option.secid;
+                            const subtitle =
+                              option.name &&
+                              option.short_name &&
+                              option.name !== option.short_name
+                                ? option.name
+                                : null;
+                            return (
+                              <button
+                                key={option.secid}
+                                type="button"
+                                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-slate-50"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  setSelectedInstrument(option);
+                                  setInstrumentQuery(`${option.secid} - ${title}`);
+                                  setInstrumentDropdownOpen(false);
+                                }}
+                              >
+                                <span className="text-sm font-medium">{option.secid} - {title}</span>
+                                {subtitle && (
+                                  <span className="text-xs text-muted-foreground">{subtitle}</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Торговый режим</Label>
+                  <Select
+                    value={instrumentBoardId}
+                    onValueChange={setInstrumentBoardId}
+                    disabled={instrumentBoards.length === 0}
+                  >
+                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                      <SelectValue placeholder="Выберите режим" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {instrumentBoards.map((board) => {
+                        const boardLabel = board.title
+                          ? `${board.board_id} - ${board.title}`
+                          : board.board_id;
+                        return (
+                          <SelectItem key={board.board_id} value={board.board_id}>
+                            {boardLabel}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Количество лотов</Label>
+                  <Input
+                    value={positionLots}
+                    onChange={(e) => setPositionLots(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="Например: 10"
+                    className="border-2 border-border/70 bg-white shadow-none"
+                  />
+                </div>
+
+                <div className="rounded-md border border-border/60 bg-white/80 p-2 text-xs text-muted-foreground">
+                  {marketPrice ? (
+                    <div className="flex flex-wrap gap-3">
+                      <span>
+                        Цена:{" "}
+                        {marketPrice.price_percent_bp != null
+                          ? `${formatPercent(marketPrice.price_percent_bp / 100)}%`
+                          : marketPrice.price_cents != null
+                            ? `${formatAmount(marketPrice.price_cents)} ${
+                                marketPrice.currency_code ??
+                                selectedInstrument?.currency_code ??
+                                currencyCode
+                              }`
+                            : "-"}
+                      </span>
+                      {marketPrice.accint_cents != null && (
+                        <span>
+                          НКД: {formatAmount(marketPrice.accint_cents)}{" "}
+                          {marketPrice.currency_code ??
+                            selectedInstrument?.currency_code ??
+                            currencyCode}
+                        </span>
+                      )}
+                      {marketPrice.yield_bp != null && (
+                        <span>Доходность: {formatPercent(marketPrice.yield_bp / 100)}%</span>
+                      )}
+                      {selectedInstrument?.lot_size != null && (
+                        <span>Лот: {selectedInstrument.lot_size}</span>
+                      )}
+                      {selectedInstrument?.face_value_cents != null && (
+                        <span>
+                          Номинал: {formatAmount(selectedInstrument.face_value_cents)}{" "}
+                          {selectedInstrument.currency_code ?? currencyCode}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span>Цена не найдена для выбранного режима.</span>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label>Название</Label>
@@ -3703,3 +4064,4 @@ export default function Page() {
     </main>
   );
 }
+

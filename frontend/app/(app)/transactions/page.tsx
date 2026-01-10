@@ -123,6 +123,8 @@ type BulkEditBaseline = {
   counterpartyId: number | null;
   amountStr: string;
   amountCounterpartyStr: string;
+  primaryQuantityLots: string;
+  counterpartyQuantityLots: string;
   cat1: string;
   cat2: string;
   cat3: string;
@@ -178,6 +180,14 @@ const PDF_DATE_TIME_REGEX = /\b\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\b/;
 const PDF_DATE_REGEX = /^\d{2}\.\d{2}\.\d{4}$/;
 const EMPTY_NUMBER_ARRAY: number[] = [];
 const EMPTY_DIRECTION_ARRAY: TransactionOut["direction"][] = [];
+const MOEX_TYPE_CODES = new Set([
+  "securities",
+  "bonds",
+  "etf",
+  "bpif",
+  "pif",
+  "precious_metals",
+]);
 const INDUSTRY_ICON_BY_ID: Record<number, LucideIcon> = {
   1: Zap,
   2: Truck,
@@ -196,6 +206,12 @@ const INDUSTRY_ICON_BY_ID: Record<number, LucideIcon> = {
 function getLegalDefaultIcon(industryId: number | null): LucideIcon {
   if (!industryId) return Factory;
   return INDUSTRY_ICON_BY_ID[industryId] ?? Factory;
+}
+
+function isMoexItem(item?: ItemOut | null) {
+  if (!item) return false;
+  if (item.instrument_id) return true;
+  return MOEX_TYPE_CODES.has(item.type_code);
 }
 
 function buildCounterpartyName(counterparty: CounterpartyOut) {
@@ -1010,6 +1026,15 @@ function parseRubToCents(input: string): number {
   return Math.round(value * 100);
 }
 
+function parseLots(input: string): number {
+  const trimmed = input.trim();
+  if (!trimmed) return NaN;
+  const cleaned = trimmed.replace(/\s/g, "");
+  const value = Number(cleaned);
+  if (!Number.isFinite(value) || !Number.isInteger(value)) return NaN;
+  return value;
+}
+
 function formatRubInput(raw: string): string {
   if (!raw) return "";
 
@@ -1670,6 +1695,8 @@ export function TransactionsView({
   const [counterpartyDropdownOpen, setCounterpartyDropdownOpen] = useState(false);
   const [amountStr, setAmountStr] = useState("");
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
+  const [primaryQuantityLots, setPrimaryQuantityLots] = useState("");
+  const [counterpartyQuantityLots, setCounterpartyQuantityLots] = useState("");
   const [loanTotalStr, setLoanTotalStr] = useState("");
   const [loanInterestStr, setLoanInterestStr] = useState("");
   const [cat1, setCat1] = useState("");
@@ -2066,6 +2093,10 @@ export function TransactionsView({
     const counterparty = counterpartiesById.get(id);
     return counterparty ? buildCounterpartyName(counterparty) : "";
   };
+  const primaryItem = primaryItemId ? itemsById.get(primaryItemId) ?? null : null;
+  const counterpartyItem = counterpartyItemId
+    ? itemsById.get(counterpartyItemId) ?? null
+    : null;
 
   const getFxRateForDate = (date: string, currencyCode: string) => {
     if (!currencyCode || currencyCode === "RUB") return 1;
@@ -2084,6 +2115,8 @@ export function TransactionsView({
   };
 
   const isTransfer = direction === "TRANSFER";
+  const primaryIsMoex = isMoexItem(primaryItem);
+  const counterpartyIsMoex = isTransfer && isMoexItem(counterpartyItem);
   const isLoanRepayment = formMode === "LOAN_REPAYMENT";
   const isActualTransaction = formTransactionType === "ACTUAL";
   const isPlannedTransaction = formTransactionType === "PLANNED";
@@ -2130,6 +2163,16 @@ export function TransactionsView({
       setAmountCounterpartyStr("");
     }
   }, [isCrossCurrencyTransfer]);
+
+  useEffect(() => {
+    if (primaryIsMoex) return;
+    if (primaryQuantityLots) setPrimaryQuantityLots("");
+  }, [primaryIsMoex, primaryQuantityLots]);
+
+  useEffect(() => {
+    if (isTransfer && counterpartyIsMoex) return;
+    if (counterpartyQuantityLots) setCounterpartyQuantityLots("");
+  }, [counterpartyIsMoex, counterpartyQuantityLots, isTransfer]);
 
   const segmentedButtonBase =
     "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
@@ -2181,6 +2224,8 @@ export function TransactionsView({
     setCounterpartyDropdownOpen(false);
     setAmountStr("");
     setAmountCounterpartyStr("");
+    setPrimaryQuantityLots("");
+    setCounterpartyQuantityLots("");
     setLoanTotalStr("");
     setLoanInterestStr("");
     setIsCategorySearchOpen(false);
@@ -2245,6 +2290,14 @@ export function TransactionsView({
         ? formatCentsForInput(tx.amount_counterparty)
         : ""
     );
+    setPrimaryQuantityLots(
+      tx.primary_quantity_lots != null ? String(tx.primary_quantity_lots) : ""
+    );
+    setCounterpartyQuantityLots(
+      tx.direction === "TRANSFER" && tx.counterparty_quantity_lots != null
+        ? String(tx.counterparty_quantity_lots)
+        : ""
+    );
     applyCategorySelectionById(tx.category_id);
     setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
@@ -2278,6 +2331,14 @@ export function TransactionsView({
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
         ? formatCentsForInput(tx.amount_counterparty)
+        : ""
+    );
+    setPrimaryQuantityLots(
+      tx.primary_quantity_lots != null ? String(tx.primary_quantity_lots) : ""
+    );
+    setCounterpartyQuantityLots(
+      tx.direction === "TRANSFER" && tx.counterparty_quantity_lots != null
+        ? String(tx.counterparty_quantity_lots)
         : ""
     );
     applyCategorySelectionById(tx.category_id);
@@ -2315,6 +2376,14 @@ export function TransactionsView({
         ? formatCentsForInput(tx.amount_counterparty)
         : ""
     );
+    setPrimaryQuantityLots(
+      tx.primary_quantity_lots != null ? String(tx.primary_quantity_lots) : ""
+    );
+    setCounterpartyQuantityLots(
+      tx.direction === "TRANSFER" && tx.counterparty_quantity_lots != null
+        ? String(tx.counterparty_quantity_lots)
+        : ""
+    );
     applyCategorySelectionById(tx.category_id);
     setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
@@ -2343,6 +2412,15 @@ export function TransactionsView({
         baselineTx.amount_counterparty != null
           ? formatCentsForInput(baselineTx.amount_counterparty)
           : "",
+      primaryQuantityLots:
+        baselineTx.primary_quantity_lots != null
+          ? String(baselineTx.primary_quantity_lots)
+          : "",
+      counterpartyQuantityLots:
+        baselineTx.direction === "TRANSFER" &&
+        baselineTx.counterparty_quantity_lots != null
+          ? String(baselineTx.counterparty_quantity_lots)
+          : "",
       cat1: baselineCat1,
       cat2: baselineCat2 || CATEGORY_PLACEHOLDER,
       cat3: baselineCat3 || CATEGORY_PLACEHOLDER,
@@ -2367,6 +2445,8 @@ export function TransactionsView({
     setCounterpartySearch(counterpartyLabel(baseline.counterpartyId));
     setAmountStr(baseline.amountStr);
     setAmountCounterpartyStr(baseline.amountCounterpartyStr);
+    setPrimaryQuantityLots(baseline.primaryQuantityLots);
+    setCounterpartyQuantityLots(baseline.counterpartyQuantityLots);
     applyCategorySelection(baseline.cat1, baseline.cat2, baseline.cat3);
     setDescription(baseline.description);
     setComment(baseline.comment);
@@ -2402,6 +2482,10 @@ export function TransactionsView({
       hasAmountChanged: amountStr !== bulkEditBaseline.amountStr,
       hasAmountCounterpartyChanged:
         amountCounterpartyStr !== bulkEditBaseline.amountCounterpartyStr,
+      hasPrimaryQuantityLotsChanged:
+        primaryQuantityLots !== bulkEditBaseline.primaryQuantityLots,
+      hasCounterpartyQuantityLotsChanged:
+        counterpartyQuantityLots !== bulkEditBaseline.counterpartyQuantityLots,
       hasCat1Changed: cat1 !== bulkEditBaseline.cat1,
       hasCat2Changed: cat2 !== bulkEditBaseline.cat2,
       hasCat3Changed: cat3 !== bulkEditBaseline.cat3,
@@ -2472,6 +2556,40 @@ export function TransactionsView({
       }
       if (nextDirection === "TRANSFER" && !nextCounterpartyItemId) {
         return "Выберите корреспондирующий актив.";
+      }
+
+      
+
+      const primaryMoex = resolvedPrimaryItemId
+        ? isMoexItem(itemsById.get(resolvedPrimaryItemId))
+        : false;
+      if (primaryMoex) {
+        const lotsValue = changes.hasPrimaryQuantityLotsChanged
+          ? parseLots(primaryQuantityLots)
+          : tx.primary_quantity_lots ?? NaN;
+        if (!Number.isFinite(lotsValue) || lotsValue < 0) {
+          return "Укажите корректное количество лотов для MOEX инструмента.";
+        }
+      } else if (changes.hasPrimaryQuantityLotsChanged && primaryQuantityLots.trim()) {
+        return "Количество лотов можно указывать только для MOEX инструментов.";
+      }
+
+      const counterpartyMoex =
+        nextDirection === "TRANSFER" && nextCounterpartyItemId
+          ? isMoexItem(itemsById.get(nextCounterpartyItemId))
+          : false;
+      if (counterpartyMoex) {
+        const lotsValue = changes.hasCounterpartyQuantityLotsChanged
+          ? parseLots(counterpartyQuantityLots)
+          : tx.counterparty_quantity_lots ?? NaN;
+        if (!Number.isFinite(lotsValue) || lotsValue < 0) {
+          return "Укажите корректное количество лотов для MOEX инструмента.";
+        }
+      } else if (
+        changes.hasCounterpartyQuantityLotsChanged &&
+        counterpartyQuantityLots.trim()
+      ) {
+        return "Количество лотов можно указывать только для MOEX инструментов.";
       }
 
       if (changes.hasDateChanged && tx.transaction_type === "PLANNED") {
@@ -2590,6 +2708,24 @@ export function TransactionsView({
                   : tx.amount_counterparty ?? null
                 : null;
 
+          const primaryMoex = resolvedPrimaryItemId
+            ? isMoexItem(itemsById.get(resolvedPrimaryItemId))
+            : false;
+          const counterpartyMoex =
+            nextDirection === "TRANSFER" && nextCounterpartyItemId
+              ? isMoexItem(itemsById.get(nextCounterpartyItemId))
+              : false;
+          const nextPrimaryLots = primaryMoex
+            ? changes.hasPrimaryQuantityLotsChanged
+              ? parseLots(primaryQuantityLots)
+              : tx.primary_quantity_lots ?? 0
+            : null;
+          const nextCounterpartyLots = counterpartyMoex
+            ? changes.hasCounterpartyQuantityLotsChanged
+              ? parseLots(counterpartyQuantityLots)
+              : tx.counterparty_quantity_lots ?? 0
+            : null;
+
           const payload: TransactionCreate = {
             transaction_date: nextDate,
             primary_item_id: resolvedPrimaryItemId ?? basePrimaryItemId,
@@ -2599,6 +2735,8 @@ export function TransactionsView({
               ? (amountCents as number)
               : tx.amount_rub,
             amount_counterparty: nextAmountCounterparty,
+            primary_quantity_lots: primaryMoex ? nextPrimaryLots : null,
+            counterparty_quantity_lots: counterpartyMoex ? nextCounterpartyLots : null,
             direction: nextDirection,
             transaction_type: tx.transaction_type,
             category_id: (() => {
@@ -3523,6 +3661,11 @@ export function TransactionsView({
                           setFormError("Выберите обязательство.");
                           return;
                         }
+                        if (primaryIsMoex || counterpartyIsMoex) {
+                          setFormError("Операции погашения не поддерживают MOEX инструменты.");
+                          return;
+                        }
+
                         const primaryMeta = getEffectiveItemMeta(primaryItemId);
                         if (primaryMeta?.minDate && date < primaryMeta.minDate) {
                           setFormError(
@@ -3662,6 +3805,33 @@ export function TransactionsView({
                         setFormError("Выберите актив/обязательство.");
                         return;
                       }
+                      let primaryLotsValue: number | null = null;
+                      let counterpartyLotsValue: number | null = null;
+
+                      if (primaryIsMoex) {
+                        const parsedLots = parseLots(primaryQuantityLots);
+                        if (!Number.isFinite(parsedLots) || parsedLots < 0) {
+                          setFormError("Укажите корректное количество лотов для MOEX инструмента.");
+                          return;
+                        }
+                        primaryLotsValue = parsedLots;
+                      } else if (primaryQuantityLots.trim()) {
+                        setFormError("Количество лотов можно указывать только для MOEX инструментов.");
+                        return;
+                      }
+
+                      if (isTransfer && counterpartyIsMoex) {
+                        const parsedLots = parseLots(counterpartyQuantityLots);
+                        if (!Number.isFinite(parsedLots) || parsedLots < 0) {
+                          setFormError("Укажите корректное количество лотов для MOEX инструмента.");
+                          return;
+                        }
+                        counterpartyLotsValue = parsedLots;
+                      } else if (counterpartyQuantityLots.trim()) {
+                        setFormError("Количество лотов можно указывать только для MOEX инструментов.");
+                        return;
+                      }
+
                       const primaryMeta = getEffectiveItemMeta(primaryItemId);
                       if (primaryMeta?.minDate && date < primaryMeta.minDate) {
                         setFormError(
@@ -3731,6 +3901,8 @@ export function TransactionsView({
                           counterparty_id: counterpartyId ?? null,
                           amount_rub: cents,
                           amount_counterparty: isTransfer ? counterpartyCents : null,
+                          primary_quantity_lots: primaryIsMoex ? primaryLotsValue : null,
+                          counterparty_quantity_lots: isTransfer && counterpartyIsMoex ? counterpartyLotsValue : null,
                           direction,
                           transaction_type: payloadTransactionType,
                           category_id: resolvedCategoryId,
@@ -4133,6 +4305,37 @@ export function TransactionsView({
                         />
                       </div>
                     )}
+                    {!isBulkEdit &&
+                      !isLoanRepayment &&
+                      (primaryIsMoex || (isTransfer && counterpartyIsMoex)) && (
+                        <div className="grid gap-3 rounded-lg border border-dashed border-violet-200 bg-violet-50/40 p-3">
+                          {primaryIsMoex && (
+                            <div className="grid gap-2">
+                              <Label>Количество лотов (основной актив)</Label>
+                              <Input
+                                className="border-2 border-border/70 bg-white shadow-none"
+                                value={primaryQuantityLots}
+                                onChange={(e) => setPrimaryQuantityLots(e.target.value)}
+                                inputMode="numeric"
+                                placeholder="Например: 10"
+                              />
+                            </div>
+                          )}
+                          {isTransfer && counterpartyIsMoex && (
+                            <div className="grid gap-2">
+                              <Label>Количество лотов (контрагент)</Label>
+                              <Input
+                                className="border-2 border-border/70 bg-white shadow-none"
+                                value={counterpartyQuantityLots}
+                                onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
+                                inputMode="numeric"
+                                placeholder="Например: 10"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                     {!isTransfer && (
                       <div className="grid gap-2">
                         <Label>Категория</Label>

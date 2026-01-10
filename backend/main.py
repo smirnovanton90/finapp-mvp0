@@ -17,6 +17,7 @@ from models import (
     Counterparty,
     CounterpartyIndustry,
     Transaction,
+    MarketPrice,
 )
 from config import settings
 from schemas import (
@@ -43,6 +44,8 @@ from transaction_chains import router as transaction_chains_router
 from categories import router as categories_router
 from limits import router as limits_router
 from counterparties import router as counterparties_router
+from market import router as market_router, resolve_market_instrument
+from market_utils import is_moex_item, is_moex_type
 from item_plan_service import (
     create_item_chains,
     delete_auto_chains,
@@ -75,6 +78,7 @@ app.include_router(transaction_chains_router)
 app.include_router(categories_router)
 app.include_router(limits_router)
 app.include_router(counterparties_router)
+app.include_router(market_router)
 
 UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -224,6 +228,78 @@ def _get_fx_rates(date_req: str | None, db: Session) -> list[FxRateOut]:
         db.rollback()
     _FX_CACHE[cache_key] = (now, rates)
     return rates
+
+
+def _get_fx_rate_for_date(
+    rate_date: date_type,
+    currency_code: str,
+    db: Session,
+) -> float | None:
+    if currency_code == "RUB":
+        return 1.0
+    date_req = rate_date.strftime("%d/%m/%Y")
+    rates = _get_fx_rates(date_req, db)
+    for rate in rates:
+        if rate.char_code == currency_code:
+            return rate.rate
+    return None
+
+
+def _get_latest_market_price(
+    db: Session,
+    instrument_id: str,
+    board_id: str | None,
+) -> MarketPrice | None:
+    if not board_id:
+        return None
+    return (
+        db.execute(
+            select(MarketPrice)
+            .where(
+                MarketPrice.instrument_id == instrument_id,
+                MarketPrice.board_id == board_id,
+            )
+            .order_by(MarketPrice.price_date.desc())
+        )
+        .scalars()
+        .first()
+    )
+
+
+def _compute_market_value_rub(
+    item: Item,
+    price: MarketPrice | None,
+    db: Session,
+) -> int | None:
+    if not price:
+        return None
+    if item.position_lots is None:
+        return None
+    lot_size = item.lot_size or 1
+    units = item.position_lots * lot_size
+    if units <= 0:
+        return 0
+    if item.type_code == "bonds":
+        if price.price_cents is not None:
+            dirty_price = price.price_cents + (price.accint_cents or 0)
+            value_cents = int(round(dirty_price * units))
+        elif item.face_value_cents is not None and price.price_percent_bp is not None:
+            clean_price = item.face_value_cents * price.price_percent_bp / 10000
+            dirty_price = clean_price + (price.accint_cents or 0)
+            value_cents = int(round(dirty_price * units))
+        else:
+            return None
+    else:
+        if price.price_cents is None:
+            return None
+        value_cents = price.price_cents * units
+
+    currency_code = price.currency_code or item.currency_code
+    rate = _get_fx_rate_for_date(price.price_date, currency_code, db)
+    if rate is None:
+        return None
+    rub_value = int(round((value_cents / 100) * rate * 100))
+    return rub_value
 
 
 def _get_bank_industry_id(db: Session) -> int | None:
@@ -460,7 +536,15 @@ def list_items(
         stmt = stmt.where(Item.closed_at.is_(None))
 
     stmt = stmt.order_by(Item.created_at.desc())
-    return list(db.execute(stmt).scalars())
+    items = list(db.execute(stmt).scalars())
+    for item in items:
+        if not is_moex_item(item):
+            continue
+        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+        value = _compute_market_value_rub(item, price, db)
+        if value is not None:
+            item.current_value_rub = value
+    return items
 
 
 @app.get("/currencies", response_model=list[CurrencyOut])
@@ -536,6 +620,41 @@ def create_item(
     user: User = Depends(get_current_user),
 ):
     accounting_start_date = _ensure_accounting_start_date(user)
+    is_moex = is_moex_type(payload.type_code)
+    instrument_id = None
+    instrument_board_id = None
+    position_lots = None
+    lot_size = None
+    face_value_cents = None
+    currency_code = payload.currency_code
+
+    if is_moex:
+        if not payload.instrument_id:
+            raise HTTPException(status_code=400, detail="instrument_id is required for MOEX items")
+        if payload.position_lots is None:
+            raise HTTPException(status_code=400, detail="position_lots is required for MOEX items")
+        instrument, boards, details = resolve_market_instrument(db, payload.instrument_id)
+        instrument_id = instrument.secid
+        board_candidates = {board.board_id for board in boards if board.board_id}
+        selected_board = payload.instrument_board_id or instrument.default_board_id
+        if not selected_board:
+            raise HTTPException(status_code=400, detail="instrument_board_id is required for MOEX items")
+        if board_candidates and selected_board not in board_candidates:
+            raise HTTPException(status_code=400, detail="Invalid instrument_board_id")
+        instrument_board_id = selected_board
+        position_lots = payload.position_lots
+        lot_size = instrument.lot_size or details.get("lot_size") or 1
+        face_value_cents = instrument.face_value_cents
+        if instrument.currency_code and instrument.currency_code != payload.currency_code:
+            raise HTTPException(status_code=400, detail="instrument currency must match item currency")
+        currency_code = instrument.currency_code or payload.currency_code
+    else:
+        if payload.instrument_id is not None:
+            raise HTTPException(status_code=400, detail="instrument_id is only allowed for MOEX items")
+        if payload.instrument_board_id is not None:
+            raise HTTPException(status_code=400, detail="instrument_board_id is only allowed for MOEX items")
+        if payload.position_lots is not None:
+            raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
     bank_id = None
     if payload.bank_id is not None:
         if payload.type_code not in _BANK_TYPE_CODES:
@@ -570,12 +689,12 @@ def create_item(
 
     history_status = _resolve_history_status(payload.open_date, accounting_start_date)
     opening_counterparty = None
-    if history_status == "NEW" and payload.initial_value_rub > 0:
+    if not is_moex and history_status == "NEW" and payload.initial_value_rub > 0:
         opening_counterparty = _resolve_opening_counterparty(
             db,
             user,
             payload.opening_counterparty_item_id,
-            payload.currency_code,
+            currency_code,
         )
 
     min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
@@ -590,7 +709,7 @@ def create_item(
         kind=item_kind,
         type_code=payload.type_code,
         name=payload.name,
-        currency_code=payload.currency_code,
+        currency_code=currency_code,
         bank_id=bank_id,
         open_date=payload.open_date,
         account_last7=payload.account_last7,
@@ -605,6 +724,11 @@ def create_item(
         interest_payout_order=payload.interest_payout_order,
         interest_capitalization=payload.interest_capitalization,
         interest_payout_account_id=interest_payout_account_id,
+        instrument_id=instrument_id,
+        instrument_board_id=instrument_board_id,
+        position_lots=position_lots,
+        lot_size=lot_size,
+        face_value_cents=face_value_cents,
         initial_value_rub=payload.initial_value_rub,
         current_value_rub=0 if history_status == "NEW" else payload.initial_value_rub,
         start_date=accounting_start_date,
@@ -620,7 +744,7 @@ def create_item(
     if settings and settings.enabled:
         create_item_chains(db, user, item, settings)
 
-    if history_status == "NEW" and payload.initial_value_rub > 0:
+    if not is_moex and history_status == "NEW" and payload.initial_value_rub > 0:
         create_opening_transactions(
             db=db,
             user=user,
@@ -630,6 +754,12 @@ def create_item(
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
         )
+
+    if is_moex and item.instrument_id:
+        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+        value = _compute_market_value_rub(item, price, db)
+        if value is not None:
+            item.current_value_rub = value
 
     db.commit()
     db.refresh(item)
@@ -655,6 +785,41 @@ def update_item(
     existing_settings = item.plan_settings
     old_signature = plan_signature(item, existing_settings)
     was_plan_enabled = existing_settings.enabled if existing_settings else False
+    is_moex = is_moex_type(payload.type_code)
+    instrument_id = None
+    instrument_board_id = None
+    position_lots = None
+    lot_size = None
+    face_value_cents = None
+    currency_code = payload.currency_code
+
+    if is_moex:
+        if not payload.instrument_id:
+            raise HTTPException(status_code=400, detail="instrument_id is required for MOEX items")
+        if payload.position_lots is None:
+            raise HTTPException(status_code=400, detail="position_lots is required for MOEX items")
+        instrument, boards, details = resolve_market_instrument(db, payload.instrument_id)
+        instrument_id = instrument.secid
+        board_candidates = {board.board_id for board in boards if board.board_id}
+        selected_board = payload.instrument_board_id or instrument.default_board_id
+        if not selected_board:
+            raise HTTPException(status_code=400, detail="instrument_board_id is required for MOEX items")
+        if board_candidates and selected_board not in board_candidates:
+            raise HTTPException(status_code=400, detail="Invalid instrument_board_id")
+        instrument_board_id = selected_board
+        position_lots = payload.position_lots
+        lot_size = instrument.lot_size or details.get("lot_size") or 1
+        face_value_cents = instrument.face_value_cents
+        if instrument.currency_code and instrument.currency_code != payload.currency_code:
+            raise HTTPException(status_code=400, detail="instrument currency must match item currency")
+        currency_code = instrument.currency_code or payload.currency_code
+    else:
+        if payload.instrument_id is not None:
+            raise HTTPException(status_code=400, detail="instrument_id is only allowed for MOEX items")
+        if payload.instrument_board_id is not None:
+            raise HTTPException(status_code=400, detail="instrument_board_id is only allowed for MOEX items")
+        if payload.position_lots is not None:
+            raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
 
     bank_id = None
     if payload.bank_id is not None:
@@ -697,6 +862,29 @@ def update_item(
         if tx_exists:
             purge_card_transactions_fn(db, user, item.id)
 
+    changing_instrument = instrument_id != item.instrument_id
+    changing_position = position_lots is not None and position_lots != item.position_lots
+    if changing_instrument or changing_position:
+        tx_exists = (
+            db.query(Transaction.id)
+            .filter(
+                Transaction.user_id == user.id,
+                Transaction.deleted_at.is_(None),
+                or_(
+                    Transaction.primary_item_id == item.id,
+                    Transaction.counterparty_item_id == item.id,
+                    Transaction.primary_card_item_id == item.id,
+                    Transaction.counterparty_card_item_id == item.id,
+                ),
+            )
+            .first()
+        )
+        if tx_exists:
+            raise HTTPException(
+                status_code=409,
+                detail="MOEX instrument/position can only be changed via transactions.",
+            )
+
     card_kind, credit_limit, item_kind = _resolve_card_kind_and_limit(
         payload, existing_item=item
     )
@@ -719,12 +907,12 @@ def update_item(
 
     new_history_status = _resolve_history_status(payload.open_date, accounting_start_date)
     opening_counterparty = None
-    if new_history_status == "NEW" and payload.initial_value_rub > 0:
+    if not is_moex and new_history_status == "NEW" and payload.initial_value_rub > 0:
         opening_counterparty = _resolve_opening_counterparty(
             db,
             user,
             payload.opening_counterparty_item_id,
-            payload.currency_code,
+            currency_code,
         )
 
     open_date_changed = payload.open_date != item.open_date
@@ -737,6 +925,8 @@ def update_item(
         (item.history_status == "NEW" or new_history_status == "NEW")
         and (open_date_changed or amount_changed or opening_counterparty_changed or history_changed)
     )
+    if is_moex:
+        should_rebuild_opening = False
     if should_rebuild_opening:
         delete_opening_transactions(db, user, item.id)
 
@@ -744,8 +934,10 @@ def update_item(
     delta = item.current_value_rub - old_base
     new_base = 0 if new_history_status == "NEW" else payload.initial_value_rub
     next_current_value = new_base + delta
+    if is_moex:
+        next_current_value = item.current_value_rub
     min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
-    if next_current_value < min_balance:
+    if not is_moex and next_current_value < min_balance:
         detail = "New initial value would make current balance negative."
         if min_balance < 0:
             detail = "New initial value would exceed the credit limit."
@@ -754,7 +946,7 @@ def update_item(
     item.kind = item_kind
     item.type_code = payload.type_code
     item.name = payload.name
-    item.currency_code = payload.currency_code
+    item.currency_code = currency_code
     item.bank_id = bank_id
     item.open_date = payload.open_date
     item.account_last7 = payload.account_last7
@@ -769,6 +961,11 @@ def update_item(
     item.interest_payout_order = payload.interest_payout_order
     item.interest_capitalization = payload.interest_capitalization
     item.interest_payout_account_id = interest_payout_account_id
+    item.instrument_id = instrument_id
+    item.instrument_board_id = instrument_board_id
+    item.position_lots = position_lots
+    item.lot_size = lot_size
+    item.face_value_cents = face_value_cents
     item.initial_value_rub = payload.initial_value_rub
     item.current_value_rub = next_current_value
     item.start_date = accounting_start_date
@@ -797,6 +994,12 @@ def update_item(
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
         )
+
+    if is_moex and item.instrument_id:
+        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+        value = _compute_market_value_rub(item, price, db)
+        if value is not None:
+            item.current_value_rub = value
 
     db.commit()
     db.refresh(item)

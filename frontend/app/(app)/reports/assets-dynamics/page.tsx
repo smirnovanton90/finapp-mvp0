@@ -7,10 +7,12 @@ import {
   fetchBanks,
   fetchFxRates,
   fetchItems,
+  fetchMarketInstrumentPrices,
   fetchTransactions,
   BankOut,
   FxRateOut,
   ItemOut,
+  MarketPriceOut,
   TransactionOut,
 } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -245,6 +247,58 @@ function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number
   return isPrimary ? -amount : amount;
 }
 
+function isMoexItem(item: ItemOut) {
+  return Boolean(item.instrument_id);
+}
+
+function getMarketPriceKey(item: ItemOut) {
+  if (!item.instrument_id) return null;
+  const board = item.instrument_board_id ?? "";
+  return `${item.instrument_id}|${board}`;
+}
+
+function computeInstrumentUnitPriceCents(
+  item: ItemOut,
+  price: MarketPriceOut | null
+) {
+  if (!price) return null;
+  if (price.price_cents != null) {
+    if (item.type_code === "bonds") {
+      return price.price_cents + (price.accint_cents ?? 0);
+    }
+    return price.price_cents;
+  }
+  if (price.price_percent_bp != null && item.face_value_cents != null) {
+    const base = Math.round(
+      (item.face_value_cents * price.price_percent_bp) / 10000
+    );
+    return base + (price.accint_cents ?? 0);
+  }
+  return null;
+}
+
+function findPriceOnOrBefore(
+  priceByDate: Record<string, MarketPriceOut>,
+  dates: string[] | undefined,
+  dateKey: string
+) {
+  if (priceByDate[dateKey]) return priceByDate[dateKey];
+  if (!dates || dates.length === 0) return null;
+  let lo = 0;
+  let hi = dates.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (dates[mid] <= dateKey) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best >= 0 ? priceByDate[dates[best]] : null;
+}
+
 function getRateForDate(
   ratesByDate: Record<string, FxRateOut[]>,
   dateKey: string,
@@ -266,6 +320,7 @@ function buildDeltasByDate(
   txs: TransactionOut[],
   selectedIds: Set<number>,
   itemKindById: Map<number, ItemOut["kind"]>,
+  moexItemIds: Set<number>,
   todayKey: string
 ) {
   const map = new Map<string, Map<number, number>>();
@@ -298,6 +353,7 @@ function buildDeltasByDate(
     if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0) return;
 
     primarySelectedIds.forEach((itemId) => {
+      if (moexItemIds.has(itemId)) return;
       let delta = 0;
       if (tx.direction === "INCOME") delta = tx.amount_rub;
       if (tx.direction === "EXPENSE") delta = -tx.amount_rub;
@@ -311,8 +367,67 @@ function buildDeltasByDate(
     if (tx.direction === "TRANSFER") {
       const counterAmount = tx.amount_counterparty ?? tx.amount_rub;
       counterSelectedIds.forEach((itemId) => {
+        if (moexItemIds.has(itemId)) return;
         const kind = itemKindById.get(itemId) ?? "ASSET";
         const delta = transferDelta(kind, false, counterAmount);
+        addDelta(dateKey, itemId, delta);
+      });
+    }
+  });
+
+  return map;
+}
+
+function buildLotDeltasByDate(
+  txs: TransactionOut[],
+  selectedIds: Set<number>,
+  moexItemIds: Set<number>,
+  todayKey: string
+) {
+  const map = new Map<string, Map<number, number>>();
+  const addDelta = (dateKey: string, itemId: number, delta: number) => {
+    if (!map.has(dateKey)) map.set(dateKey, new Map());
+    const bucket = map.get(dateKey);
+    if (!bucket) return;
+    bucket.set(itemId, (bucket.get(itemId) ?? 0) + delta);
+  };
+
+  txs.forEach((tx) => {
+    const dateKey = toTxDateKey(tx.transaction_date);
+    if (!dateKey) return;
+    if (tx.source === "AUTO_ITEM_OPENING" || tx.source === "AUTO_ITEM_CLOSING") {
+      return;
+    }
+    const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
+    if (dateKey <= todayKey && !isRealized) return;
+
+    const primaryCandidates = [
+      tx.primary_item_id,
+      tx.primary_card_item_id ?? null,
+    ].filter(Boolean) as number[];
+    const counterCandidates = [
+      tx.counterparty_item_id,
+      tx.counterparty_card_item_id ?? null,
+    ].filter(Boolean) as number[];
+    const primarySelectedIds = primaryCandidates.filter(
+      (id) => selectedIds.has(id) && moexItemIds.has(id)
+    );
+    const counterSelectedIds = counterCandidates.filter(
+      (id) => selectedIds.has(id) && moexItemIds.has(id)
+    );
+    if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0) return;
+
+    primarySelectedIds.forEach((itemId) => {
+      let delta = 0;
+      if (tx.direction === "INCOME") delta = tx.primary_quantity_lots ?? 0;
+      if (tx.direction === "EXPENSE") delta = -(tx.primary_quantity_lots ?? 0);
+      if (tx.direction === "TRANSFER") delta = -(tx.primary_quantity_lots ?? 0);
+      addDelta(dateKey, itemId, delta);
+    });
+
+    if (tx.direction === "TRANSFER") {
+      counterSelectedIds.forEach((itemId) => {
+        const delta = tx.counterparty_quantity_lots ?? 0;
         addDelta(dateKey, itemId, delta);
       });
     }
@@ -330,6 +445,10 @@ export default function AssetsDynamicsPage() {
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
     {}
   );
+  const [marketPricesByKey, setMarketPricesByKey] = useState<
+    Record<string, Record<string, MarketPriceOut>>
+  >({});
+  const [marketPricesLoading, setMarketPricesLoading] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
@@ -460,6 +579,22 @@ export default function AssetsDynamicsPage() {
     const selected = new Set(selectedItemIds);
     return sortedItems.filter((item) => selected.has(item.id));
   }, [sortedItems, selectedItemIds]);
+  const moexItems = useMemo(
+    () => selectedItems.filter((item) => isMoexItem(item)),
+    [selectedItems]
+  );
+  const moexItemIds = useMemo(
+    () => new Set(moexItems.map((item) => item.id)),
+    [moexItems]
+  );
+  const moexPriceKeyByItemId = useMemo(() => {
+    const map = new Map<number, string>();
+    moexItems.forEach((item) => {
+      const key = getMarketPriceKey(item);
+      if (key) map.set(item.id, key);
+    });
+    return map;
+  }, [moexItems]);
 
   const selectedCurrencyCodes = useMemo(() => {
     const set = new Set<string>();
@@ -595,6 +730,79 @@ export default function AssetsDynamicsPage() {
     };
   }, [fxRatesByDate, needsRates, rateFetchKeys]);
 
+  useEffect(() => {
+    if (!moexItems.length || !rangeStartKey || !rangeEndKey) return;
+    const toKey = rangeEndKey < todayKey ? rangeEndKey : todayKey;
+    const historyFromKey = toDateKey(addDays(parseDateKey(rangeStartKey), -14));
+    if (!toKey || rangeStartKey > toKey) return;
+
+    let cancelled = false;
+    const loadPrices = async () => {
+      setMarketPricesLoading(true);
+      const next: Record<string, Record<string, MarketPriceOut>> = {};
+
+      for (const item of moexItems) {
+        if (!item.instrument_id) continue;
+        const key = getMarketPriceKey(item);
+        if (!key) continue;
+        try {
+          const prices = await fetchMarketInstrumentPrices(item.instrument_id, {
+            from: historyFromKey,
+            to: toKey,
+            boardId: item.instrument_board_id ?? undefined,
+          });
+          if (cancelled) return;
+          const byDate: Record<string, MarketPriceOut> = {};
+          prices.forEach((price) => {
+            byDate[price.price_date] = price;
+          });
+          next[key] = byDate;
+        } catch (e) {
+          if (cancelled) return;
+          next[key] = {};
+        }
+      }
+
+      if (!cancelled && Object.keys(next).length > 0) {
+        setMarketPricesByKey((prev) => ({ ...prev, ...next }));
+      }
+      if (!cancelled) setMarketPricesLoading(false);
+    };
+
+    loadPrices();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moexItems, rangeEndKey, rangeStartKey, todayKey]);
+
+  useEffect(() => {
+    if (moexItems.length === 0 && marketPricesLoading) {
+      setMarketPricesLoading(false);
+    }
+  }, [moexItems.length, marketPricesLoading]);
+
+  const latestMarketPriceByKey = useMemo(() => {
+    const latest = new Map<string, MarketPriceOut>();
+    Object.entries(marketPricesByKey).forEach(([key, byDate]) => {
+      let last: MarketPriceOut | null = null;
+      Object.entries(byDate).forEach(([dateKey, price]) => {
+        if (dateKey > todayKey) return;
+        if (!last || dateKey > last.price_date) last = price;
+      });
+      if (last) latest.set(key, last);
+    });
+    return latest;
+  }, [marketPricesByKey, todayKey]);
+
+  const marketPriceDatesByKey = useMemo(() => {
+    const map = new Map<string, string[]>();
+    Object.entries(marketPricesByKey).forEach(([key, byDate]) => {
+      map.set(key, Object.keys(byDate).sort());
+    });
+    return map;
+  }, [marketPricesByKey]);
+
   const dailyRows = useMemo<DailyRow[]>(() => {
     if (!selectedItems.length || !rangeStartKey || !rangeEndKey) return [];
 
@@ -615,14 +823,35 @@ export default function AssetsDynamicsPage() {
       transactions,
       selectedIds,
       itemKindById,
+      moexItemIds,
       todayKey
     );
+    const lotDeltasByDate = buildLotDeltasByDate(
+      transactions,
+      selectedIds,
+      moexItemIds,
+      todayKey
+    );
+    const initialLotsById = new Map<number, number>();
+    moexItems.forEach((item) => {
+      const currentLots = item.position_lots ?? 0;
+      const startKeyForItem = itemStartKeyById.get(item.id) ?? "";
+      let realizedDelta = 0;
+      lotDeltasByDate.forEach((deltaMap, dateKey) => {
+        if (dateKey > todayKey) return;
+        if (startKeyForItem && dateKey < startKeyForItem) return;
+        const delta = deltaMap.get(item.id);
+        if (delta) realizedDelta += delta;
+      });
+      initialLotsById.set(item.id, currentLots - realizedDelta);
+    });
     const startKey = earliestStartKey || rangeStartKey;
     let startDate = parseDateKey(startKey);
     const endDate = parseDateKey(rangeEndKey);
     if (startDate > endDate) startDate = endDate;
 
-    const balances = new Map<number, number>();
+    const amountBalances = new Map<number, number>();
+    const lotBalances = new Map<number, number>();
     const rows: DailyRow[] = [];
 
     for (
@@ -633,14 +862,30 @@ export default function AssetsDynamicsPage() {
       const dateKey = toDateKey(current);
       const newItems = itemsByStartDate.get(dateKey) ?? [];
       newItems.forEach((item) => {
-        balances.set(item.id, getItemDisplayInitialCents(item));
+        if (isMoexItem(item)) {
+          lotBalances.set(
+            item.id,
+            initialLotsById.get(item.id) ?? item.position_lots ?? 0
+          );
+          return;
+        }
+        amountBalances.set(item.id, getItemDisplayInitialCents(item));
       });
 
       const dayDeltas = deltasByDate.get(dateKey);
       if (dayDeltas) {
         dayDeltas.forEach((delta, itemId) => {
-          const currentBalance = balances.get(itemId) ?? 0;
-          balances.set(itemId, currentBalance + delta);
+          const currentBalance = amountBalances.get(itemId) ?? 0;
+          amountBalances.set(itemId, currentBalance + delta);
+        });
+      }
+
+      const dayLotDeltas = lotDeltasByDate.get(dateKey);
+      if (dayLotDeltas) {
+        dayLotDeltas.forEach((delta, itemId) => {
+          const currentLots =
+            lotBalances.get(itemId) ?? initialLotsById.get(itemId) ?? 0;
+          lotBalances.set(itemId, currentLots + delta);
         });
       }
 
@@ -667,7 +912,8 @@ export default function AssetsDynamicsPage() {
       const itemRubValues: Record<number, number | null> = {};
       let totalRubCents: number | null = 0;
       let totalCurrencyCents: number | null = showCurrencyColumns ? 0 : null;
-      let missingRate = false;
+      let missingRubValue = false;
+      let missingCurrencyValue = false;
 
       selectedItems.forEach((item) => {
         const startKeyForItem = itemStartKeyById.get(item.id) ?? "";
@@ -676,29 +922,69 @@ export default function AssetsDynamicsPage() {
           itemRubValues[item.id] = null;
           return;
         }
-        const valueCents = balances.get(item.id) ?? getItemDisplayInitialCents(item);
+
+        let valueCents: number | null = null;
+        let valueCurrency = item.currency_code;
+
+        if (isMoexItem(item)) {
+          const lots =
+            lotBalances.get(item.id) ?? initialLotsById.get(item.id) ?? 0;
+          const priceKey = moexPriceKeyByItemId.get(item.id);
+          const priceByDate = priceKey ? marketPricesByKey[priceKey] : null;
+          const priceDates = priceKey
+            ? marketPriceDatesByKey.get(priceKey)
+            : undefined;
+          const price =
+            dateKey > todayKey
+              ? priceKey
+                ? latestMarketPriceByKey.get(priceKey)
+                : null
+              : priceByDate
+                ? findPriceOnOrBefore(priceByDate, priceDates, dateKey)
+                : null;
+          const unitPriceCents = computeInstrumentUnitPriceCents(item, price);
+          if (unitPriceCents != null) {
+            const lotSize = item.lot_size ?? 1;
+            valueCents = unitPriceCents * lots * lotSize;
+            valueCurrency = price?.currency_code ?? item.currency_code;
+          }
+        } else {
+          valueCents =
+            amountBalances.get(item.id) ?? getItemDisplayInitialCents(item);
+        }
+
         itemValues[item.id] = valueCents;
 
-        const rate = getRate(item.currency_code);
+        if (valueCents == null) {
+          itemRubValues[item.id] = null;
+          missingRubValue = true;
+          if (showCurrencyColumns) missingCurrencyValue = true;
+          return;
+        }
+
+        const rate = getRate(valueCurrency);
         if (rate === null) {
           itemRubValues[item.id] = null;
-          if (item.currency_code !== "RUB") missingRate = true;
+          if (valueCurrency !== "RUB") missingRubValue = true;
         } else {
           const rubValueCents = Math.round((valueCents / 100) * rate * 100);
           itemRubValues[item.id] = rubValueCents;
           const effectiveKind = resolveItemEffectiveKind(item, valueCents);
-          const signedRub = effectiveKind === "LIABILITY" ? -rubValueCents : rubValueCents;
+          const signedRub =
+            effectiveKind === "LIABILITY" ? -rubValueCents : rubValueCents;
           if (totalRubCents !== null) totalRubCents += signedRub;
         }
 
         if (showCurrencyColumns && singleCurrencyCode) {
           const effectiveKind = resolveItemEffectiveKind(item, valueCents);
-          const signedValue = effectiveKind === "LIABILITY" ? -valueCents : valueCents;
+          const signedValue =
+            effectiveKind === "LIABILITY" ? -valueCents : valueCents;
           if (totalCurrencyCents !== null) totalCurrencyCents += signedValue;
         }
       });
 
-      if (missingRate) totalRubCents = null;
+      if (missingRubValue) totalRubCents = null;
+      if (showCurrencyColumns && missingCurrencyValue) totalCurrencyCents = null;
 
       const rate = showCurrencyColumns && singleCurrencyCode ? getRate(singleCurrencyCode) : null;
 
@@ -718,10 +1004,16 @@ export default function AssetsDynamicsPage() {
     getEffectiveStartKey,
     getItemDisplayInitialCents,
     latestRatesByCurrency,
+    latestMarketPriceByKey,
     earliestStartKey,
     rangeEndKey,
     rangeStartKey,
     resolveItemEffectiveKind,
+    marketPricesByKey,
+    marketPriceDatesByKey,
+    moexItemIds,
+    moexItems,
+    moexPriceKeyByItemId,
     selectedItems,
     showCurrencyColumns,
     singleCurrencyCode,
@@ -1152,6 +1444,11 @@ export default function AssetsDynamicsPage() {
             {ratesLoading && (
               <div className="px-8 text-sm text-muted-foreground">
                 Загружаем курсы валют...
+              </div>
+            )}
+            {marketPricesLoading && (
+              <div className="px-8 text-sm text-muted-foreground">
+                Загружаем котировки MOEX...
               </div>
             )}
 

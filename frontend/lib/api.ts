@@ -44,6 +44,11 @@ export type ItemOut = {
   interest_payout_order: "END_OF_TERM" | "MONTHLY" | null;
   interest_capitalization: boolean | null;
   interest_payout_account_id: number | null;
+  instrument_id: string | null;
+  instrument_board_id: string | null;
+  position_lots: number | null;
+  lot_size: number | null;
+  face_value_cents: number | null;
   initial_value_rub: number;
   current_value_rub: number;
   start_date: string;
@@ -73,6 +78,9 @@ export type ItemCreate = {
   interest_payout_order?: "END_OF_TERM" | "MONTHLY" | null;
   interest_capitalization?: boolean | null;
   interest_payout_account_id?: number | null;
+  instrument_id?: string | null;
+  instrument_board_id?: string | null;
+  position_lots?: number | null;
   initial_value_rub: number;
   plan_settings?: ItemPlanSettings | null;
 };
@@ -146,6 +154,48 @@ export type FxRateOut = {
   rate: number;
 };
 
+export type MarketInstrumentOut = {
+  secid: string;
+  provider: string;
+  isin: string | null;
+  short_name: string | null;
+  name: string | null;
+  type_code: string | null;
+  engine: string | null;
+  market: string | null;
+  default_board_id: string | null;
+  currency_code: string | null;
+  lot_size: number | null;
+  face_value_cents: number | null;
+  is_traded: boolean | null;
+};
+
+export type MarketBoardOut = {
+  board_id: string;
+  title: string | null;
+  engine: string | null;
+  market: string | null;
+  currency_code: string | null;
+  is_primary: boolean | null;
+};
+
+export type MarketInstrumentDetailsOut = {
+  instrument: MarketInstrumentOut;
+  boards: MarketBoardOut[];
+};
+
+export type MarketPriceOut = {
+  instrument_id: string;
+  board_id: string;
+  price_date: string;
+  price_time: string | null;
+  price_cents: number | null;
+  price_percent_bp: number | null;
+  accint_cents: number | null;
+  yield_bp: number | null;
+  currency_code: string | null;
+};
+
 export type CategoryScope = "INCOME" | "EXPENSE" | "BOTH";
 
 export type CategoryNode = {
@@ -191,6 +241,8 @@ export type TransactionOut = {
 
   amount_rub: number; // в копейках
   amount_counterparty: number | null;
+  primary_quantity_lots: number | null;
+  counterparty_quantity_lots: number | null;
   direction: TransactionDirection;
   transaction_type: TransactionType;
   status: TransactionStatus;
@@ -255,6 +307,8 @@ export type TransactionChainCreate = {
   counterparty_id?: number | null;
   amount_rub: number;
   amount_counterparty?: number | null;
+  primary_quantity_lots?: number | null;
+  counterparty_quantity_lots?: number | null;
   direction: TransactionDirection;
   category_id: number | null;
   description?: string | null;
@@ -323,6 +377,8 @@ export type TransactionCreate = {
 
   amount_rub: number; // в копейках
   amount_counterparty?: number | null;
+  primary_quantity_lots?: number | null;
+  counterparty_quantity_lots?: number | null;
   direction: TransactionDirection;
   transaction_type: TransactionType;
   status?: TransactionStatus;
@@ -481,6 +537,61 @@ export async function fetchFxRatesBatch(
     method: "POST",
     body: JSON.stringify({ dates }),
   });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchMarketInstruments(options?: {
+  q?: string;
+  type_code?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<MarketInstrumentOut[]> {
+  const params = new URLSearchParams();
+  if (options?.q) params.set("q", options.q);
+  if (options?.type_code) params.set("type_code", options.type_code);
+  if (options?.limit != null) params.set("limit", String(options.limit));
+  if (options?.offset != null) params.set("offset", String(options.offset));
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/market/instruments${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchMarketInstrumentDetails(
+  secid: string
+): Promise<MarketInstrumentDetailsOut> {
+  const res = await authFetch(`${API_BASE}/market/instruments/${secid}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchMarketInstrumentPrice(
+  secid: string,
+  boardId?: string
+): Promise<MarketPriceOut> {
+  const params = new URLSearchParams();
+  if (boardId) params.set("board_id", boardId);
+  const qs = params.toString();
+  const res = await authFetch(
+    `${API_BASE}/market/instruments/${secid}/price${qs ? `?${qs}` : ""}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchMarketInstrumentPrices(
+  secid: string,
+  options: { from: string; to: string; boardId?: string }
+): Promise<MarketPriceOut[]> {
+  const params = new URLSearchParams();
+  params.set("from", options.from);
+  params.set("to", options.to);
+  if (options.boardId) params.set("board_id", options.boardId);
+  const qs = params.toString();
+  const res = await authFetch(
+    `${API_BASE}/market/instruments/${secid}/prices${qs ? `?${qs}` : ""}`
+  );
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

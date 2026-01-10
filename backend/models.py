@@ -11,6 +11,8 @@ from sqlalchemy import (
     Float,
     Boolean,
     LargeBinary,
+    Numeric,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db import Base
@@ -78,6 +80,67 @@ class FxRate(Base):
     )
     updated_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class MarketInstrument(Base):
+    __tablename__ = "market_instruments"
+
+    secid: Mapped[str] = mapped_column(String(50), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(20), nullable=False, server_default="MOEX")
+    isin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    short_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    type_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    engine: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    market: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    default_board_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    currency_code: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    lot_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    face_value_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    is_traded: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    items: Mapped[list["Item"]] = relationship(back_populates="instrument")
+
+    __table_args__ = (
+        UniqueConstraint("provider", "secid", name="ux_market_instruments_provider_secid"),
+    )
+
+
+class MarketPrice(Base):
+    __tablename__ = "market_prices"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    instrument_id: Mapped[str] = mapped_column(
+        String(50), ForeignKey("market_instruments.secid"), nullable=False
+    )
+    board_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    price_date: Mapped[date] = mapped_column(Date, nullable=False)
+    price_time: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+    price_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    price_percent_bp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    accint_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    yield_bp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency_code: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    instrument: Mapped["MarketInstrument"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "instrument_id", "board_id", "price_date", name="ux_market_prices_instrument_board_date"
+        ),
     )
 
 
@@ -232,6 +295,14 @@ class Item(Base):
     interest_payout_account_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("items.id"), nullable=True
     )
+    instrument_id: Mapped[str | None] = mapped_column(
+        String(50), ForeignKey("market_instruments.secid"), nullable=True
+    )
+    instrument: Mapped[Optional["MarketInstrument"]] = relationship(back_populates="items")
+    instrument_board_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    position_lots: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    lot_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    face_value_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     initial_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -292,6 +363,10 @@ class Item(Base):
         CheckConstraint(
             "history_status in ('NEW','HISTORICAL')",
             name="ck_items_history_status",
+        ),
+        CheckConstraint(
+            "(position_lots is null) or (position_lots >= 0)",
+            name="ck_items_position_lots_non_negative",
         ),
     )
 
@@ -410,6 +485,8 @@ class Transaction(Base):
 
     amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)  # в копейках
     amount_counterparty: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    primary_quantity_lots: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    counterparty_quantity_lots: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     direction: Mapped[str] = mapped_column(String(20), nullable=False)  # INCOME/EXPENSE/TRANSFER
     transaction_type: Mapped[str] = mapped_column(String(20), nullable=False)  # ACTUAL/PLANNED

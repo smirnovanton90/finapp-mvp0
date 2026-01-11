@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/ui/sidebar";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
 import { AccountingStartGate } from "@/components/accounting-start-gate";
+import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -63,6 +64,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <AccountingStartGate>
+      <OnboardingWizard />
       <div className="min-h-screen bg-[#F7F8FA]" key={sessionKey}>
         <div className="flex">
           <Sidebar />

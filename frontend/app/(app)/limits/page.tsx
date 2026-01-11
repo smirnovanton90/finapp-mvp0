@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { Pencil, Plus, Trash2 } from "lucide-react";
@@ -47,6 +47,7 @@ import {
   TransactionOut,
   updateLimit,
 } from "@/lib/api";
+import { useOnboarding } from "@/components/onboarding-context";
 
 const CATEGORY_PLACEHOLDER = "-";
 const CATEGORY_PATH_SEPARATOR = " / ";
@@ -244,6 +245,7 @@ function getLimitRange(limit: LimitOut, today: Date) {
 export default function LimitsPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
+  const { activeStep, isWizardOpen } = useOnboarding();
 
   const [limits, setLimits] = useState<LimitOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
@@ -269,6 +271,13 @@ export default function LimitsPage() {
   const [cat3, setCat3] = useState("");
   const [categoryQuery, setCategoryQuery] = useState("");
   const [isCategorySearchOpen, setIsCategorySearchOpen] = useState(false);
+  const onboardingAppliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isWizardOpen) {
+      onboardingAppliedRef.current = null;
+    }
+  }, [isWizardOpen]);
 
   const categoryMaps = useMemo(
     () => buildCategoryMaps(categoryNodes, "EXPENSE"),
@@ -463,6 +472,25 @@ export default function LimitsPage() {
     applyCategorySelection(nextL1, nextL2, nextL3);
     setFormError(null);
   }, [categoryLookup.idToPath, editingLimit, isDialogOpen, categoryMaps.l1.length]);
+
+  useEffect(() => {
+    if (!isWizardOpen || activeStep?.key !== "limits") return;
+    if (onboardingAppliedRef.current === "limits") return;
+    if (categoryMaps.l1.length === 0) return;
+    onboardingAppliedRef.current = "limits";
+    setEditingLimit(null);
+    setIsDialogOpen(true);
+    setLimitName("Лимит на расходы");
+    setPeriod("MONTHLY");
+    setAmountStr("10 000");
+    const l1 = categoryMaps.l1[0];
+    const l2 = (categoryMaps.l2[l1] ?? [CATEGORY_PLACEHOLDER])[0];
+    const l3 =
+      l2 && l2 !== CATEGORY_PLACEHOLDER
+        ? (categoryMaps.l3[l2] ?? [CATEGORY_PLACEHOLDER])[0]
+        : CATEGORY_PLACEHOLDER;
+    applyCategorySelection(l1, l2 ?? CATEGORY_PLACEHOLDER, l3 ?? CATEGORY_PLACEHOLDER);
+  }, [activeStep?.key, categoryMaps, isWizardOpen]);
 
   const openCreateDialog = () => {
     setEditingLimit(null);

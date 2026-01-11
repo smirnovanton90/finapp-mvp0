@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ItemSelector } from "@/components/item-selector";
 import { useAccountingStart } from "@/components/accounting-start-context";
+import { useOnboarding } from "@/components/onboarding-context";
 
 import {
   Select,
@@ -545,6 +546,7 @@ function findPriceOnOrBefore(
 export default function Page() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
+  const { activeStep, isWizardOpen } = useOnboarding();
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
@@ -626,6 +628,13 @@ export default function Page() {
   const [logoOverlayHeight, setLogoOverlayHeight] = useState(0);
   const logoNaturalSizeRef = useRef<{ width: number; height: number } | null>(null);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
+  const onboardingAppliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isWizardOpen) {
+      onboardingAppliedRef.current = null;
+    }
+  }, [isWizardOpen]);
   const isEditing = Boolean(editingItem);
   const segmentedButtonBase =
     "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
@@ -2128,6 +2137,25 @@ export default function Page() {
     setFormError(null);
     setIsCreateOpen(true);
   };
+
+  useEffect(() => {
+    if (!isWizardOpen || activeStep?.key !== "assets") return;
+    if (!accountingStartDate) return;
+    if (onboardingAppliedRef.current === "assets") return;
+    onboardingAppliedRef.current = "assets";
+    openCreateModal("ASSET", CASH_TYPES);
+    setKind("ASSET");
+    setTypeCode("cash");
+    setCurrencyCode("RUB");
+    setName("Наличные");
+    setAmountStr("50 000");
+    setOpenDate(accountingStartDate);
+  }, [
+    accountingStartDate,
+    activeStep?.key,
+    isWizardOpen,
+    openCreateModal,
+  ]);
 
   const openEditModal = (item: ItemOut) => {
     setEditingItem(item);

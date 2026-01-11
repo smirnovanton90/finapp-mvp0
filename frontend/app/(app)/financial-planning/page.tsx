@@ -19,7 +19,14 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 
@@ -74,6 +81,7 @@ import {
   TransactionChainOut,
   TransactionOut,
 } from "@/lib/api";
+import { useOnboarding } from "@/components/onboarding-context";
 import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 
@@ -245,6 +253,7 @@ function getTodayKey() {
 export default function FinancialPlanningPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
+  const { activeStep, isWizardOpen } = useOnboarding();
 
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [items, setItems] = useState<ItemOut[]>([]);
@@ -292,6 +301,13 @@ export default function FinancialPlanningPage() {
   const [isCategorySearchOpen, setIsCategorySearchOpen] = useState(false);
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
+  const onboardingAppliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isWizardOpen) {
+      onboardingAppliedRef.current = null;
+    }
+  }, [isWizardOpen]);
 
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
 
@@ -563,6 +579,51 @@ export default function FinancialPlanningPage() {
       resetForm();
     }
   }, [isDialogOpen]);
+
+  useEffect(() => {
+    if (!isWizardOpen || activeStep?.key !== "planning") return;
+    if (onboardingAppliedRef.current === "planning") return;
+    if (items.length === 0 || categoryNodes.length === 0) return;
+    onboardingAppliedRef.current = "planning";
+    setIsDialogOpen(true);
+
+    const demoItem =
+      items.find(
+        (item) =>
+          !item.archived_at &&
+          !item.closed_at &&
+          getEffectiveItemKind(item, item.current_value_rub) === "ASSET"
+      ) ?? null;
+    const today = getTodayKey();
+    const endDateValue = (() => {
+      const date = new Date();
+      date.setDate(date.getDate() + 180);
+      return date.toISOString().slice(0, 10);
+    })();
+
+    setChainName("Зарплата");
+    setDirection("INCOME");
+    setStartDate(today);
+    setEndDate(endDateValue);
+    setFrequency("MONTHLY");
+    setMonthlyMode("DAY_OF_MONTH");
+    setMonthlyDay("1");
+    setAmountStr("120 000");
+    if (demoItem) {
+      setPrimaryItemId(demoItem.id);
+    }
+
+    const incomeMaps = buildCategoryMaps(categoryNodes, "INCOME");
+    if (incomeMaps.l1.length > 0) {
+      const l1 = incomeMaps.l1[0];
+      const l2 = (incomeMaps.l2[l1] ?? [CATEGORY_PLACEHOLDER])[0];
+      const l3 =
+        l2 && l2 !== CATEGORY_PLACEHOLDER
+          ? (incomeMaps.l3[l2] ?? [CATEGORY_PLACEHOLDER])[0]
+          : CATEGORY_PLACEHOLDER;
+      applyCategorySelection(l1, l2 ?? CATEGORY_PLACEHOLDER, l3 ?? CATEGORY_PLACEHOLDER);
+    }
+  }, [activeStep?.key, categoryNodes, isWizardOpen, items]);
 
   useEffect(() => {
     if (!isDialogOpen) return;

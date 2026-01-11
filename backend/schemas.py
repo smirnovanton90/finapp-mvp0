@@ -19,6 +19,8 @@ TransactionChainPurpose = Literal["INTEREST", "PRINCIPAL"]
 CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
 LimitPeriod = Literal["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"]
 CounterpartyType = Literal["LEGAL", "PERSON"]
+OnboardingDeviceType = Literal["WEB", "MOBILE"]
+OnboardingStatus = Literal["PENDING", "POSTPONED", "IN_PROGRESS", "COMPLETED", "SKIPPED"]
 
 
 class AuthRegister(BaseModel):
@@ -78,6 +80,19 @@ class UserMeOut(BaseModel):
 
 class AccountingStartDateUpdate(BaseModel):
     accounting_start_date: date
+
+
+class OnboardingStateOut(BaseModel):
+    device_type: OnboardingDeviceType
+    status: OnboardingStatus
+
+    class Config:
+        from_attributes = True
+
+
+class OnboardingStateUpdate(BaseModel):
+    device_type: OnboardingDeviceType
+    status: OnboardingStatus
 
 
 class ItemPlanSettingsBase(BaseModel):

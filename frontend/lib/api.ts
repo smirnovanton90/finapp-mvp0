@@ -98,6 +98,13 @@ export type BankOut = {
 };
 
 export type CounterpartyType = "LEGAL" | "PERSON";
+export type OnboardingDeviceType = "WEB" | "MOBILE";
+export type OnboardingStatus =
+  | "PENDING"
+  | "POSTPONED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "SKIPPED";
 
 export type CounterpartyOut = {
   id: number;
@@ -116,6 +123,16 @@ export type CounterpartyOut = {
   owner_user_id: number | null;
   created_at: string;
   deleted_at: string | null;
+};
+
+export type OnboardingStateOut = {
+  device_type: OnboardingDeviceType;
+  status: OnboardingStatus;
+};
+
+export type OnboardingStateUpdate = {
+  device_type: OnboardingDeviceType;
+  status: OnboardingStatus;
 };
 
 export type CounterpartyCreate = {
@@ -414,6 +431,26 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
 
 export async function fetchUserMe(): Promise<UserMeOut> {
   const res = await authFetch(`${API_BASE}/users/me`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchOnboardingStatus(
+  deviceType: OnboardingDeviceType = "WEB"
+): Promise<OnboardingStateOut> {
+  const qs = new URLSearchParams({ device_type: deviceType });
+  const res = await authFetch(`${API_BASE}/onboarding/status?${qs.toString()}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateOnboardingStatus(
+  payload: OnboardingStateUpdate
+): Promise<OnboardingStateOut> {
+  const res = await authFetch(`${API_BASE}/onboarding/status`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

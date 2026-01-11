@@ -108,6 +108,7 @@ import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
+import { useOnboarding } from "@/components/onboarding-context";
 
 type TransactionsViewMode = "actual" | "planning";
 
@@ -1597,6 +1598,7 @@ export function TransactionsView({
   const searchParams = useSearchParams();
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
+  const { activeStep, isWizardOpen } = useOnboarding();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
   const defaultShowPlannedRealized = isPlanningView;
@@ -1724,6 +1726,13 @@ export function TransactionsView({
   const [confirmingTxId, setConfirmingTxId] = useState<number | null>(null);
   const [isBulkConfirming, setIsBulkConfirming] = useState(false);
   const txRequestIdRef = useRef(0);
+  const onboardingAppliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isWizardOpen) {
+      onboardingAppliedRef.current = null;
+    }
+  }, [isWizardOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2264,6 +2273,64 @@ export function TransactionsView({
     resetForm();
     setDialogMode("create");
   };
+
+  useEffect(() => {
+    if (!isWizardOpen || activeStep?.key !== "transactions") return;
+    if (onboardingAppliedRef.current === "transactions") return;
+    if (scopedCategoryMaps.l1.length === 0) return;
+    onboardingAppliedRef.current = "transactions";
+    openCreateDialog();
+
+    const demoItem =
+      items.find(
+        (item) =>
+          !item.archived_at &&
+          !item.closed_at &&
+          getEffectiveItemKind(item, item.current_value_rub) === "ASSET" &&
+          !isMoexItem(item)
+      ) ?? null;
+    const todayKey = new Date().toISOString().slice(0, 10);
+    let targetDate = accountingStartDate ?? todayKey;
+    if (demoItem?.open_date && demoItem.open_date > targetDate) {
+      targetDate = demoItem.open_date;
+    }
+
+    setDate(targetDate);
+    setDirection("EXPENSE");
+    setFormTransactionType("ACTUAL");
+    if (demoItem) {
+      setPrimaryItemId(demoItem.id);
+    }
+    setAmountStr("450");
+    setDescription("Кофе");
+
+    if (scopedCategoryMaps.l1.length > 0) {
+      const l1 = scopedCategoryMaps.l1[0];
+      const l2 = (scopedCategoryMaps.l2[l1] ?? [CATEGORY_PLACEHOLDER])[0];
+      const l3 =
+        l2 && l2 !== CATEGORY_PLACEHOLDER
+          ? (scopedCategoryMaps.l3[l2] ?? [CATEGORY_PLACEHOLDER])[0]
+          : CATEGORY_PLACEHOLDER;
+      applyCategorySelection(l1, l2 ?? CATEGORY_PLACEHOLDER, l3 ?? CATEGORY_PLACEHOLDER);
+    }
+
+    if (counterparties.length > 0) {
+      const demoCounterparty =
+        counterparties.find((item) =>
+          (item.name ?? "").toLocaleLowerCase("ru").includes("магазин")
+        ) ?? counterparties[0];
+      setCounterpartyId(demoCounterparty.id);
+      setCounterpartySearch(buildCounterpartyName(demoCounterparty));
+    }
+  }, [
+    accountingStartDate,
+    activeStep?.key,
+    counterparties,
+    isWizardOpen,
+    items,
+    openCreateDialog,
+    scopedCategoryMaps,
+  ]);
 
   const openEditDialog = (tx: TransactionCard, trigger?: HTMLElement | null) => {
     lastActiveElementRef.current =

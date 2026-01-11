@@ -48,6 +48,44 @@ class User(Base):
         back_populates="user"
     )
     counterparties: Mapped[list["Counterparty"]] = relationship(back_populates="owner")
+    onboarding_states: Mapped[list["OnboardingState"]] = relationship(
+        back_populates="user"
+    )
+
+
+class OnboardingState(Base):
+    __tablename__ = "onboarding_states"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), primary_key=True
+    )
+    device_type: Mapped[str] = mapped_column(String(10), primary_key=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="PENDING"
+    )
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="onboarding_states")
+
+    __table_args__ = (
+        CheckConstraint(
+            "device_type in ('WEB','MOBILE')",
+            name="ck_onboarding_states_device_type",
+        ),
+        CheckConstraint(
+            "status in ('PENDING','POSTPONED','IN_PROGRESS','COMPLETED','SKIPPED')",
+            name="ck_onboarding_states_status",
+        ),
+    )
 
 
 class Currency(Base):

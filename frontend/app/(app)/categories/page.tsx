@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +37,7 @@ import {
   updateCategoryScope,
   updateCategoryVisibility,
 } from "@/lib/api";
+import { useOnboarding } from "@/components/onboarding-context";
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, User } from "lucide-react";
 
 type DeleteTarget = {
@@ -235,6 +236,7 @@ function CategoryTree({
 }
 
 export default function CategoriesPage() {
+  const { activeStep, isWizardOpen } = useOnboarding();
   const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -253,6 +255,13 @@ export default function CategoriesPage() {
   const [editIcon, setEditIcon] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
+  const onboardingAppliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isWizardOpen) {
+      onboardingAppliedRef.current = null;
+    }
+  }, [isWizardOpen]);
 
   const loadCategories = useCallback(
     async (silent?: boolean) => {
@@ -306,6 +315,15 @@ export default function CategoriesPage() {
     setEditIcon(node.icon_name ?? "");
     setEditError(null);
   };
+
+  useEffect(() => {
+    if (!isWizardOpen || activeStep?.key !== "categories") return;
+    if (onboardingAppliedRef.current === "categories") return;
+    onboardingAppliedRef.current = "categories";
+    openAddDialog(null, null, 0, "EXPENSE");
+    setNewName("Кофе");
+    setNewIcon("Coffee");
+  }, [activeStep?.key, isWizardOpen, openAddDialog]);
 
   const handleAddSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

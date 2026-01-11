@@ -12,6 +12,7 @@ from db import get_db
 from models import (
     Item,
     User,
+    OnboardingState,
     Currency,
     FxRate,
     Counterparty,
@@ -45,6 +46,7 @@ from categories import router as categories_router
 from limits import router as limits_router
 from counterparties import router as counterparties_router
 from market import router as market_router, resolve_market_instrument
+from onboarding import router as onboarding_router
 from market_utils import is_moex_item, is_moex_type
 from item_plan_service import (
     create_item_chains,
@@ -84,6 +86,7 @@ app.include_router(categories_router)
 app.include_router(limits_router)
 app.include_router(counterparties_router)
 app.include_router(market_router)
+app.include_router(onboarding_router)
 
 UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -481,6 +484,15 @@ def register(
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    db.add(
+        OnboardingState(
+            user_id=user.id,
+            device_type="WEB",
+            status="PENDING",
+        )
+    )
+    db.commit()
 
     token = create_access_token(user.id)
     return AuthResponse(

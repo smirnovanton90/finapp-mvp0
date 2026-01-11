@@ -21,6 +21,7 @@ import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "./sidebar-context";
+import { useOnboarding } from "@/components/onboarding-context";
 
 const nav = [
   { href: "/dashboard", label: "\u0414\u044d\u0448\u0431\u043e\u0440\u0434", icon: LayoutDashboard },
@@ -75,6 +76,7 @@ const nav = [
 export function Sidebar() {
   const pathname = usePathname();
   const { isCollapsed, toggleSidebar } = useSidebar();
+  const { status, startOnboarding } = useOnboarding();
   const [isReportsOpen, setIsReportsOpen] = useState(
     pathname === "/reports" || pathname.startsWith("/reports/")
   );
@@ -205,6 +207,20 @@ export function Sidebar() {
         })}
       </nav>
       <div className="px-4 pb-4">
+        {status === "POSTPONED" && (
+          <Button
+            variant="ghost"
+            className={cn(
+              "mb-2 w-full justify-center text-xs font-medium text-white/90 hover:bg-white/20 hover:text-white",
+              isCollapsed ? "px-0" : "px-3"
+            )}
+            onClick={() => startOnboarding()}
+            title={isCollapsed ? "Познакомиться с приложением" : undefined}
+          >
+            {!isCollapsed && <span>Познакомиться с приложением</span>}
+            {isCollapsed && <span>?</span>}
+          </Button>
+        )}
         <Button
           variant="ghost"
           className={cn(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
 import {
   Briefcase,
@@ -61,6 +61,7 @@ import {
   updateCounterparty,
   uploadCounterpartyLogo,
 } from "@/lib/api";
+import { useOnboarding } from "@/components/onboarding-context";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const MAX_LOGO_DIM = 1024;
@@ -116,6 +117,7 @@ function getCounterpartyFilterText(counterparty: CounterpartyOut) {
 
 export default function CounterpartiesPage() {
   const { data: session } = useSession();
+  const { activeStep, isWizardOpen } = useOnboarding();
 
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [industries, setIndustries] = useState<CounterpartyIndustryOut[]>([]);
@@ -154,6 +156,13 @@ export default function CounterpartiesPage() {
   const [showPersonEntities, setShowPersonEntities] = useState(true);
   const [showActiveStatus, setShowActiveStatus] = useState(true);
   const [showDeletedStatus, setShowDeletedStatus] = useState(false);
+  const onboardingAppliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isWizardOpen) {
+      onboardingAppliedRef.current = null;
+    }
+  }, [isWizardOpen]);
 
   const legalFormLabel = useMemo(() => {
     const map = new Map(legalForms.map((form) => [form.code, form.label]));
@@ -271,6 +280,18 @@ export default function CounterpartiesPage() {
     setLogoPreview(editing.logo_url ?? null);
     setFormError(null);
   }, [editing, isDialogOpen]);
+
+  useEffect(() => {
+    if (!isWizardOpen || activeStep?.key !== "counterparties") return;
+    if (onboardingAppliedRef.current === "counterparties") return;
+    if (industries.length === 0) return;
+    onboardingAppliedRef.current = "counterparties";
+    setEditing(null);
+    setIsDialogOpen(true);
+    setEntityType("LEGAL");
+    setIndustryId(String(industries[0].id));
+    setName("Магазин у дома");
+  }, [activeStep?.key, industries, isWizardOpen]);
 
   const handleLogoChange = async (file: File | null) => {
     setLogoError(null);

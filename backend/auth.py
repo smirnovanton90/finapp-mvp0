@@ -12,7 +12,7 @@ import time
 
 from config import settings
 from db import get_db
-from models import User
+from models import OnboardingState, User
 
 AUTH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
 GOOGLE_REQUEST = requests.Request()
@@ -131,5 +131,13 @@ def get_current_user(
         db.add(user)
         db.commit()
         db.refresh(user)
+        db.add(
+            OnboardingState(
+                user_id=user.id,
+                device_type="WEB",
+                status="PENDING",
+            )
+        )
+        db.commit()
 
     return user

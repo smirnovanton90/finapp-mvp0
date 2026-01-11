@@ -177,6 +177,7 @@ class ItemCreate(BaseModel):
     instrument_id: str | None = None
     instrument_board_id: str | None = None
     position_lots: int | None = Field(default=None, ge=0)
+    opening_price_cents: int | None = Field(default=None, ge=0)
     initial_value_rub: int
     plan_settings: ItemPlanSettingsBase | None = None
 

@@ -68,6 +68,7 @@ import {
   fetchMarketInstruments,
   fetchMarketInstrumentDetails,
   fetchMarketInstrumentPrice,
+  fetchMarketInstrumentPrices,
   fetchTransactions,
   fetchTransactionChains,
   createItem,
@@ -412,6 +413,13 @@ function formatAmount(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
+function formatMoney(valueInCents: number | null, currencyCode?: string | null) {
+  if (valueInCents == null) return "-";
+  const code = currencyCode ?? "";
+  const suffix = code ? ` ${code}` : "";
+  return `${formatAmount(valueInCents)}${suffix}`;
+}
+
 const CHAIN_FREQUENCY_LABELS: Record<TransactionChainFrequency, string> = {
   DAILY: "Ежедневно",
   WEEKLY: "Еженедельно",
@@ -495,6 +503,43 @@ function getTodayDateKey() {
   return `${year}-${month}-${day}`;
 }
 
+function parseDateKey(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function addDays(date: Date, days: number) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+function toDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function findPriceOnOrBefore(
+  pricesByDate: Record<string, MarketPriceOut>,
+  sortedDates: string[],
+  targetDate: string
+) {
+  if (pricesByDate[targetDate]) return pricesByDate[targetDate];
+  let lo = 0;
+  let hi = sortedDates.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (sortedDates[mid] <= targetDate) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best >= 0 ? pricesByDate[sortedDates[best]] : null;
+}
+
 /* ------------------ страница ------------------ */
 
 export default function Page() {
@@ -539,7 +584,12 @@ export default function Page() {
   const [instrumentBoards, setInstrumentBoards] = useState<MarketBoardOut[]>([]);
   const [instrumentBoardId, setInstrumentBoardId] = useState("");
   const [positionLots, setPositionLots] = useState("");
+  const [moexPurchasePrice, setMoexPurchasePrice] = useState("");
   const [marketPrice, setMarketPrice] = useState<MarketPriceOut | null>(null);
+  const [moexDatePrices, setMoexDatePrices] = useState<
+    Record<string, MarketPriceOut | null>
+  >({});
+  const [moexDatePricesLoading, setMoexDatePricesLoading] = useState(false);
   const [accountLast7, setAccountLast7] = useState("");
   const [contractNumber, setContractNumber] = useState("");
   const [openDate, setOpenDate] = useState(() => getTodayDateKey());
@@ -595,7 +645,10 @@ export default function Page() {
     setInstrumentBoards([]);
     setInstrumentBoardId("");
     setPositionLots("");
+    setMoexPurchasePrice("");
     setMarketPrice(null);
+    setMoexDatePrices({});
+    setMoexDatePricesLoading(false);
     setAccountLast7("");
     setContractNumber("");
     setOpenDate(getTodayDateKey());
@@ -719,7 +772,7 @@ export default function Page() {
   }  
 
   function buildPlanSignatureFromState(): string {
-    const amountCents = parseRubToCents(amountStr);
+    const amountCents = isMoexType ? moexInitialValueCents ?? NaN : parseRubToCents(amountStr);
     const paymentAmountCents = parseRubToCents(paymentAmountStr);
     const planStartDate =
       accountingStartDate ?? editingItem?.start_date ?? getTodayDateKey();
@@ -860,6 +913,33 @@ export default function Page() {
     [typeCode]
   );
   const isMoexType = useMemo(() => MOEX_TYPE_CODES.includes(typeCode), [typeCode]);
+  const moexLots = useMemo(() => {
+    if (!isMoexType) return null;
+    const rawLots = positionLots.replace(/\s/g, "");
+    if (!rawLots) return null;
+    const value = Number(rawLots);
+    if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) return null;
+    return value;
+  }, [isMoexType, positionLots]);
+  const moexPurchasePriceCents = useMemo(() => {
+    if (!isMoexType) return null;
+    const trimmed = moexPurchasePrice.trim();
+    if (!trimmed) return null;
+    const parsed = parseRubToCents(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return parsed;
+  }, [isMoexType, moexPurchasePrice]);
+
+  const moexInitialValueCents = useMemo(() => {
+    if (!isMoexType) return null;
+    if (!marketPrice) return null;
+    if (moexLots == null) return null;
+    const lotSize = selectedInstrument?.lot_size ?? 1;
+    const unitPrice = marketPrice.price_cents;
+    if (unitPrice == null) return null;
+    const accint = typeCode === "bonds" ? marketPrice.accint_cents ?? 0 : 0;
+    return Math.round((unitPrice + accint) * moexLots * lotSize);
+  }, [isMoexType, marketPrice, moexLots, selectedInstrument?.lot_size, typeCode]);
   const showBankAccountFields = useMemo(
     () => typeCode === "bank_account" || typeCode === "savings_account",
     [typeCode]
@@ -908,7 +988,8 @@ export default function Page() {
     () => showLoanPlanSettings && kind === "ASSET",
     [showLoanPlanSettings, kind]
   );
-  const hideInitialAmountField = showBankCardFields && Boolean(cardAccountId);
+  const hideInitialAmountField =
+    (showBankCardFields && Boolean(cardAccountId)) || isMoexType;
   const showContractNumberField = useMemo(
     () =>
       typeCode === "bank_account" ||
@@ -1002,12 +1083,49 @@ export default function Page() {
   const normalizedAmountValue = hideInitialAmountField
     ? amountStr.trim() || "0"
     : amountStr;
-  const amountCents = useMemo(
-    () => parseRubToCents(normalizedAmountValue),
-    [normalizedAmountValue]
-  );
+  const amountCents = useMemo(() => {
+    if (isMoexType) return moexInitialValueCents ?? NaN;
+    return parseRubToCents(normalizedAmountValue);
+  }, [isMoexType, moexInitialValueCents, normalizedAmountValue]);
   const hasNonZeroAmount = Number.isFinite(amountCents) && amountCents !== 0;
-  const showOpeningCounterparty = resolvedHistoryStatus === "NEW" && hasNonZeroAmount;
+  const hasNonZeroLots = moexLots != null && moexLots > 0;
+  const showOpeningCounterparty =
+    resolvedHistoryStatus === "NEW" &&
+    (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
+  const showMoexPricing = isMoexType && kind === "ASSET";
+  const showMoexStartDatePricing =
+    showMoexPricing &&
+    resolvedHistoryStatus === "HISTORICAL" &&
+    Boolean(accountingStartDate);
+  const moexCurrencyFallback = selectedInstrument?.currency_code ?? currencyCode;
+  const moexOpenDatePrice = openDate ? moexDatePrices[openDate] ?? null : null;
+  const moexStartDatePrice = accountingStartDate
+    ? moexDatePrices[accountingStartDate] ?? null
+    : null;
+  const computeMoexValueCents = useCallback(
+    (price: MarketPriceOut | null) => {
+      if (!price) return null;
+      if (moexLots == null) return null;
+      const lotSize = selectedInstrument?.lot_size ?? 1;
+      if (price.price_cents == null) return null;
+      const accint = typeCode === "bonds" ? price.accint_cents ?? 0 : 0;
+      return Math.round((price.price_cents + accint) * moexLots * lotSize);
+    },
+    [moexLots, selectedInstrument?.lot_size, typeCode]
+  );
+  const formatMoexPrice = useCallback(
+    (price: MarketPriceOut | null) =>
+      formatMoney(price?.price_cents ?? null, price?.currency_code ?? moexCurrencyFallback),
+    [moexCurrencyFallback]
+  );
+  const formatMoexValue = useCallback(
+    (price: MarketPriceOut | null) =>
+      formatMoney(
+        computeMoexValueCents(price),
+        price?.currency_code ?? moexCurrencyFallback
+      ),
+    [computeMoexValueCents, moexCurrencyFallback]
+  );
   const openingCounterpartyItems = useMemo(
     () =>
       activeItems.filter(
@@ -1723,6 +1841,7 @@ export default function Page() {
       setInstrumentBoards([]);
       setInstrumentBoardId("");
       setPositionLots("");
+      setMoexPurchasePrice("");
       setMarketPrice(null);
       return;
     }
@@ -1816,6 +1935,86 @@ export default function Page() {
     };
   }, [selectedInstrument, instrumentBoardId]);
 
+  useEffect(() => {
+    if (!isMoexType || kind !== "ASSET") {
+      setMoexDatePrices({});
+      setMoexDatePricesLoading(false);
+      return;
+    }
+    if (!selectedInstrument || !instrumentBoardId || !openDate) {
+      setMoexDatePrices({});
+      setMoexDatePricesLoading(false);
+      return;
+    }
+    const targetDates = new Set<string>();
+    targetDates.add(openDate);
+    if (accountingStartDate) targetDates.add(accountingStartDate);
+
+    const targetList = Array.from(targetDates).sort();
+    if (targetList.length === 0) {
+      setMoexDatePrices({});
+      setMoexDatePricesLoading(false);
+      return;
+    }
+
+    const minKey = targetList[0];
+    const maxKey = targetList[targetList.length - 1];
+    const todayKey = getTodayDateKey();
+    const toKey = maxKey > todayKey ? todayKey : maxKey;
+    if (!toKey || minKey > toKey) {
+      setMoexDatePrices({});
+      setMoexDatePricesLoading(false);
+      return;
+    }
+    const historyFromKey = toDateKey(addDays(parseDateKey(minKey), -14));
+
+    let cancelled = false;
+    setMoexDatePrices({});
+    setMoexDatePricesLoading(true);
+    fetchMarketInstrumentPrices(selectedInstrument.secid, {
+      from: historyFromKey,
+      to: toKey,
+      boardId: instrumentBoardId,
+    })
+      .then((prices) => {
+        if (cancelled) return;
+        const byDate: Record<string, MarketPriceOut> = {};
+        prices.forEach((price) => {
+          byDate[price.price_date] = price;
+        });
+        const sortedDates = Object.keys(byDate).sort();
+        const resolved: Record<string, MarketPriceOut | null> = {};
+        targetList.forEach((dateKey) => {
+          if (dateKey > todayKey) {
+            resolved[dateKey] = null;
+            return;
+          }
+          resolved[dateKey] = sortedDates.length
+            ? findPriceOnOrBefore(byDate, sortedDates, dateKey)
+            : null;
+        });
+        setMoexDatePrices(resolved);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMoexDatePrices({});
+      })
+      .finally(() => {
+        if (!cancelled) setMoexDatePricesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accountingStartDate,
+    instrumentBoardId,
+    isMoexType,
+    kind,
+    openDate,
+    selectedInstrument,
+  ]);
+
   const openCreateModal = (
     nextKind: ItemKind,
     nextTypeCodes: string[],
@@ -1843,7 +2042,10 @@ export default function Page() {
     setInstrumentBoards([]);
     setInstrumentBoardId("");
     setPositionLots("");
+    setMoexPurchasePrice("");
     setMarketPrice(null);
+    setMoexDatePrices({});
+    setMoexDatePricesLoading(false);
     setAccountLast7("");
     setContractNumber("");
     setOpenDate(getTodayDateKey());
@@ -1927,6 +2129,7 @@ export default function Page() {
     setCreditLimit(item.credit_limit != null ? formatAmount(item.credit_limit) : "");
     setDepositTermDays(item.deposit_term_days != null ? String(item.deposit_term_days) : "");
     setPositionLots(item.position_lots != null ? String(item.position_lots) : "");
+    setMoexPurchasePrice("");
     setInterestRate(
       item.interest_rate != null ? String(item.interest_rate).replace(".", ",") : ""
     );
@@ -2022,6 +2225,15 @@ export default function Page() {
         setFormError("Количество лотов должно быть целым неотрицательным числом.");
         return;
       }
+      if (resolvedHistoryStatus === "NEW" && moexPurchasePrice.trim()) {
+        const parsedPrice = parseRubToCents(moexPurchasePrice);
+        if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+          setFormError(
+            "\u0426\u0435\u043d\u0430 \u043f\u043e\u043a\u0443\u043f\u043a\u0438 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u0447\u0438\u0441\u043b\u043e\u043c (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440: 123,45)."
+          );
+          return;
+        }
+      }
     }
 
     const todayKey = getTodayDateKey();
@@ -2112,7 +2324,11 @@ export default function Page() {
     const amountValue = hideInitialAmountField
       ? amountStr.trim() || "0"
       : amountStr;
-    const cents = parseRubToCents(amountValue);
+    const cents = isMoexType ? moexInitialValueCents ?? NaN : parseRubToCents(amountValue);
+      if (isMoexType && moexInitialValueCents == null) {
+        setFormError("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u0442\u044c \u0441\u0443\u043c\u043c\u0443 \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0435\u0439 \u0446\u0435\u043d\u0435.");
+        return;
+      }
     if (
       !Number.isFinite(cents) ||
       (cents < 0 && !(showBankCardFields && cardKind === "CREDIT"))
@@ -2279,6 +2495,13 @@ export default function Page() {
         payload.instrument_id = selectedInstrument.secid;
         payload.instrument_board_id = instrumentBoardId || null;
         payload.position_lots = Number(positionLots.replace(/\s/g, ""));
+        if (
+          resolvedHistoryStatus === "NEW" &&
+          moexPurchasePrice.trim() &&
+          moexPurchasePriceCents != null
+        ) {
+          payload.opening_price_cents = moexPurchasePriceCents;
+        }
       }
 
       if (showBankAccountFields) {
@@ -3138,6 +3361,27 @@ export default function Page() {
                   />
                 </div>
 
+                {resolvedHistoryStatus === "NEW" && (
+                  <div className="grid gap-2">
+                    <Label>
+                      {"\u0426\u0435\u043d\u0430 \u043f\u043e\u043a\u0443\u043f\u043a\u0438 (\u0437\u0430 1 \u0448\u0442.)"}
+                    </Label>
+                    <Input
+                      value={moexPurchasePrice}
+                      onChange={(e) => {
+                        const formatted = formatRubInput(e.target.value);
+                        setMoexPurchasePrice(formatted);
+                      }}
+                      onBlur={() =>
+                        setMoexPurchasePrice((prev) => normalizeRubOnBlur(prev))
+                      }
+                      inputMode="decimal"
+                      placeholder={"\u041d\u0430\u043f\u0440\u0438\u043c\u0435\u0440: 123,45"}
+                      className="border-2 border-border/70 bg-white shadow-none"
+                    />
+                  </div>
+                )}
+
                 <div className="rounded-md border border-border/60 bg-white/80 p-2 text-xs text-muted-foreground">
                   {marketPrice ? (
                     <div className="flex flex-wrap gap-3">
@@ -3387,6 +3631,72 @@ export default function Page() {
 
             </div>
             <div className="grid gap-4">
+            {showMoexPricing && (
+              <div className="rounded-lg border border-violet-200/70 bg-violet-50/40 p-3 text-sm">
+                <div className="font-medium">
+                  {"MOEX: \u0446\u0435\u043d\u044b \u0438 \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c"}
+                </div>
+                {moexDatePricesLoading && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {"\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043a\u043e\u0442\u0438\u0440\u043e\u0432\u043e\u043a..."}
+                  </div>
+                )}
+                <table className="mt-2 w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground">
+                      <th className="py-1 font-medium">{"\u0414\u0430\u0442\u0430"}</th>
+                      <th className="py-1 text-right font-medium">{"\u0426\u0435\u043d\u0430"}</th>
+                      <th className="py-1 text-right font-medium">{"\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c"}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {showMoexStartDatePricing && accountingStartDate && (
+                      <tr>
+                        <td className="py-1 pr-2">
+                          {"\u041d\u0430\u0447\u0430\u043b\u043e \u0443\u0447\u0435\u0442\u0430 ("}
+                          {formatShortDate(accountingStartDate)}
+                          {")"}
+                        </td>
+                        <td className="py-1 text-right tabular-nums">
+                          {formatMoexPrice(moexStartDatePrice)}
+                        </td>
+                        <td className="py-1 text-right tabular-nums">
+                          {formatMoexValue(moexStartDatePrice)}
+                        </td>
+                      </tr>
+                    )}
+                    {openDate && (
+                      <tr>
+                        <td className="py-1 pr-2">
+                          {"\u0414\u0430\u0442\u0430 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f ("}
+                          {formatShortDate(openDate)}
+                          {")"}
+                        </td>
+                        <td className="py-1 text-right tabular-nums">
+                          {formatMoexPrice(moexOpenDatePrice)}
+                        </td>
+                        <td className="py-1 text-right tabular-nums">
+                          {formatMoexValue(moexOpenDatePrice)}
+                        </td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td className="py-1 pr-2">
+                        {"\u0422\u0435\u043a\u0443\u0449\u0430\u044f ("}
+                        {formatShortDate(getTodayDateKey())}
+                        {")"}
+                      </td>
+                      <td className="py-1 text-right tabular-nums">
+                        {formatMoexPrice(marketPrice)}
+                      </td>
+                      <td className="py-1 text-right tabular-nums">
+                        {formatMoexValue(marketPrice)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
             {showBankAccountFields && (
               <div className="grid gap-2">
                 <Label>Последние 7 цифр номера счета</Label>

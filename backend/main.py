@@ -655,6 +655,10 @@ def create_item(
             raise HTTPException(status_code=400, detail="instrument_board_id is only allowed for MOEX items")
         if payload.position_lots is not None:
             raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
+        if payload.opening_price_cents is not None:
+            raise HTTPException(status_code=400, detail="opening_price_cents is only allowed for MOEX items")
+        if payload.opening_price_cents is not None:
+            raise HTTPException(status_code=400, detail="opening_price_cents is only allowed for MOEX items")
     bank_id = None
     if payload.bank_id is not None:
         if payload.type_code not in _BANK_TYPE_CODES:
@@ -688,8 +692,18 @@ def create_item(
         deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
 
     history_status = _resolve_history_status(payload.open_date, accounting_start_date)
+    opening_quantity_lots = payload.position_lots if is_moex else None
+    has_opening_value = (
+        opening_quantity_lots is not None and opening_quantity_lots > 0
+        if is_moex
+        else payload.initial_value_rub > 0
+    )
+    opening_price_cents = payload.opening_price_cents if is_moex else None
+    opening_amount_rub = payload.initial_value_rub
+    if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
+        opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
     opening_counterparty = None
-    if not is_moex and history_status == "NEW" and payload.initial_value_rub > 0:
+    if history_status == "NEW" and has_opening_value:
         opening_counterparty = _resolve_opening_counterparty(
             db,
             user,
@@ -726,7 +740,9 @@ def create_item(
         interest_payout_account_id=interest_payout_account_id,
         instrument_id=instrument_id,
         instrument_board_id=instrument_board_id,
-        position_lots=position_lots,
+        position_lots=0
+        if is_moex and history_status == "NEW" and has_opening_value
+        else position_lots,
         lot_size=lot_size,
         face_value_cents=face_value_cents,
         initial_value_rub=payload.initial_value_rub,
@@ -744,13 +760,14 @@ def create_item(
     if settings and settings.enabled:
         create_item_chains(db, user, item, settings)
 
-    if not is_moex and history_status == "NEW" and payload.initial_value_rub > 0:
+    if history_status == "NEW" and has_opening_value:
         create_opening_transactions(
             db=db,
             user=user,
             item=item,
             counterparty=opening_counterparty,
-            amount_rub=payload.initial_value_rub,
+            amount_rub=opening_amount_rub,
+            quantity_lots=opening_quantity_lots,
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
         )
@@ -906,8 +923,18 @@ def update_item(
         deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
 
     new_history_status = _resolve_history_status(payload.open_date, accounting_start_date)
+    opening_quantity_lots = payload.position_lots if is_moex else None
+    has_opening_value = (
+        opening_quantity_lots is not None and opening_quantity_lots > 0
+        if is_moex
+        else payload.initial_value_rub > 0
+    )
+    opening_price_cents = payload.opening_price_cents if is_moex else None
+    opening_amount_rub = payload.initial_value_rub
+    if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
+        opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
     opening_counterparty = None
-    if not is_moex and new_history_status == "NEW" and payload.initial_value_rub > 0:
+    if new_history_status == "NEW" and has_opening_value:
         opening_counterparty = _resolve_opening_counterparty(
             db,
             user,
@@ -916,7 +943,11 @@ def update_item(
         )
 
     open_date_changed = payload.open_date != item.open_date
-    amount_changed = payload.initial_value_rub != item.initial_value_rub
+    amount_changed = (
+        opening_quantity_lots != item.position_lots
+        if is_moex
+        else payload.initial_value_rub != item.initial_value_rub
+    )
     opening_counterparty_changed = (
         payload.opening_counterparty_item_id != item.opening_counterparty_item_id
     )
@@ -925,8 +956,8 @@ def update_item(
         (item.history_status == "NEW" or new_history_status == "NEW")
         and (open_date_changed or amount_changed or opening_counterparty_changed or history_changed)
     )
-    if is_moex:
-        should_rebuild_opening = False
+    if is_moex and new_history_status == "NEW" and payload.opening_price_cents is not None:
+        should_rebuild_opening = True
     if should_rebuild_opening:
         delete_opening_transactions(db, user, item.id)
 
@@ -963,7 +994,13 @@ def update_item(
     item.interest_payout_account_id = interest_payout_account_id
     item.instrument_id = instrument_id
     item.instrument_board_id = instrument_board_id
-    item.position_lots = position_lots
+    if not (
+        is_moex
+        and new_history_status == "NEW"
+        and has_opening_value
+        and should_rebuild_opening
+    ):
+        item.position_lots = position_lots
     item.lot_size = lot_size
     item.face_value_cents = face_value_cents
     item.initial_value_rub = payload.initial_value_rub
@@ -984,13 +1021,14 @@ def update_item(
     elif was_plan_enabled:
         delete_auto_chains(db, user, item.id, keep_realized=True)
 
-    if should_rebuild_opening and new_history_status == "NEW" and payload.initial_value_rub > 0:
+    if should_rebuild_opening and new_history_status == "NEW" and has_opening_value:
         create_opening_transactions(
             db=db,
             user=user,
             item=item,
             counterparty=opening_counterparty,
-            amount_rub=payload.initial_value_rub,
+            amount_rub=opening_amount_rub,
+            quantity_lots=opening_quantity_lots,
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
         )

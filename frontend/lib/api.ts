@@ -81,6 +81,7 @@ export type ItemCreate = {
   instrument_id?: string | null;
   instrument_board_id?: string | null;
   position_lots?: number | null;
+  opening_price_cents?: number | null;
   initial_value_rub: number;
   plan_settings?: ItemPlanSettings | null;
 };

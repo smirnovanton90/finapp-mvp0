@@ -312,7 +312,14 @@ def _fetch_latest_price(
     else:
         price_date = datetime.utcnow().date()
 
-    price_value = row.get("MARKETPRICE") or row.get("LAST") or row.get("CLOSE")
+    price_value = (
+        row.get("LAST")
+        or row.get("LCURRENTPRICE")
+        or row.get("MARKETPRICE")
+        or row.get("CLOSE")
+        or row.get("CLOSEPRICE")
+        or row.get("WAPRICE")
+    )
     accint_value = row.get("ACCINT")
     yield_value = row.get("YIELD")
 

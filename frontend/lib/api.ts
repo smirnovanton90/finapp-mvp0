@@ -82,6 +82,9 @@ export type ItemCreate = {
   instrument_board_id?: string | null;
   position_lots?: number | null;
   opening_price_cents?: number | null;
+  commission_enabled?: boolean | null;
+  commission_amount_rub?: number | null;
+  commission_payment_item_id?: number | null;
   initial_value_rub: number;
   plan_settings?: ItemPlanSettings | null;
 };

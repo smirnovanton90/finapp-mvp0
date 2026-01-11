@@ -17,6 +17,9 @@ from transactions import (
 
 AUTO_OPENING_SOURCE = "AUTO_ITEM_OPENING"
 AUTO_CLOSING_SOURCE = "AUTO_ITEM_CLOSING"
+AUTO_COMMISSION_SOURCE = "AUTO_ITEM_COMMISSION"
+COMMISSION_CATEGORY_NAME = "Комиссии от торговли на финансовом рынке"
+COMMISSION_COMMENT_PREFIX = "Комиссия за приобретение ценных бумаг"
 
 ITEM_TYPE_LABELS = {
     "cash": "\u041d\u0430\u043b\u0438\u0447\u043d\u044b\u0435",
@@ -239,6 +242,7 @@ def _create_income_expense(
     linked_item_id: int,
     comment: str | None = None,
     primary_quantity_lots: int | None = None,
+    source: str = AUTO_OPENING_SOURCE,
 ) -> None:
     primary_side = _resolve_effective_side(db, user, item_id, True, "primary")
     _validate_tx_date(tx_date, primary_side, "Transaction")
@@ -285,7 +289,7 @@ def _create_income_expense(
         category_id=category.id,
         description=None,
         comment=comment,
-        source=AUTO_OPENING_SOURCE,
+        source=source,
     )
     db.add(tx)
 
@@ -390,12 +394,59 @@ def create_opening_transactions(
     )
 
 
+def _build_commission_comment(instrument_label: str | None) -> str:
+    if instrument_label:
+        return f"{COMMISSION_COMMENT_PREFIX} {instrument_label}"
+    return COMMISSION_COMMENT_PREFIX
+
+
+def create_commission_transaction(
+    db: Session,
+    user: User,
+    item: Item,
+    payment_item_id: int,
+    amount_rub: int,
+    tx_date: date,
+    instrument_label: str | None,
+) -> None:
+    if amount_rub <= 0:
+        return
+    comment = _build_commission_comment(instrument_label)
+    _create_income_expense(
+        db=db,
+        user=user,
+        item_id=payment_item_id,
+        amount_rub=amount_rub,
+        tx_date=tx_date,
+        direction="EXPENSE",
+        category_name=COMMISSION_CATEGORY_NAME,
+        comment=comment,
+        linked_item_id=item.id,
+        source=AUTO_COMMISSION_SOURCE,
+    )
+
+
 def delete_opening_transactions(db: Session, user: User, item_id: int) -> None:
     txs = (
         db.query(Transaction)
         .filter(Transaction.user_id == user.id)
         .filter(Transaction.linked_item_id == item_id)
         .filter(Transaction.source.in_([AUTO_OPENING_SOURCE, AUTO_CLOSING_SOURCE]))
+        .filter(Transaction.deleted_at.is_(None))
+        .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        .with_for_update()
+        .all()
+    )
+    for tx in txs:
+        _apply_transaction_soft_delete(db, user, tx)
+
+
+def delete_commission_transactions(db: Session, user: User, item_id: int) -> None:
+    txs = (
+        db.query(Transaction)
+        .filter(Transaction.user_id == user.id)
+        .filter(Transaction.linked_item_id == item_id)
+        .filter(Transaction.source == AUTO_COMMISSION_SOURCE)
         .filter(Transaction.deleted_at.is_(None))
         .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
         .with_for_update()

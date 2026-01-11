@@ -585,6 +585,9 @@ export default function Page() {
   const [instrumentBoardId, setInstrumentBoardId] = useState("");
   const [positionLots, setPositionLots] = useState("");
   const [moexPurchasePrice, setMoexPurchasePrice] = useState("");
+  const [commissionEnabled, setCommissionEnabled] = useState(false);
+  const [commissionAmount, setCommissionAmount] = useState("");
+  const [commissionPaymentItemId, setCommissionPaymentItemId] = useState("");
   const [marketPrice, setMarketPrice] = useState<MarketPriceOut | null>(null);
   const [moexDatePrices, setMoexDatePrices] = useState<
     Record<string, MarketPriceOut | null>
@@ -646,6 +649,12 @@ export default function Page() {
     setInstrumentBoardId("");
     setPositionLots("");
     setMoexPurchasePrice("");
+    setCommissionEnabled(false);
+    setCommissionAmount("");
+    setCommissionPaymentItemId("");
+    setCommissionEnabled(false);
+    setCommissionAmount("");
+    setCommissionPaymentItemId("");
     setMarketPrice(null);
     setMoexDatePrices({});
     setMoexDatePricesLoading(false);
@@ -929,6 +938,13 @@ export default function Page() {
     if (!Number.isFinite(parsed) || parsed < 0) return null;
     return parsed;
   }, [isMoexType, moexPurchasePrice]);
+  const commissionAmountCents = useMemo(() => {
+    const trimmed = commissionAmount.trim();
+    if (!trimmed) return null;
+    const parsed = parseRubToCents(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return parsed;
+  }, [commissionAmount]);
 
   const moexInitialValueCents = useMemo(() => {
     if (!isMoexType) return null;
@@ -1093,6 +1109,8 @@ export default function Page() {
     resolvedHistoryStatus === "NEW" &&
     (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
   const showMoexPricing = isMoexType && kind === "ASSET";
+  const showMoexCommission = isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW";
+  const commissionAllowed = showMoexCommission && hasNonZeroLots;
   const showMoexStartDatePricing =
     showMoexPricing &&
     resolvedHistoryStatus === "HISTORICAL" &&
@@ -1135,6 +1153,13 @@ export default function Page() {
           item.currency_code === currencyCode
       ),
     [activeItems, editingItem, currencyCode]
+  );
+  const commissionPaymentItems = useMemo(
+    () =>
+      activeItems.filter(
+        (item) => item.id !== editingItem?.id && !item.instrument_id
+      ),
+    [activeItems, editingItem]
   );
   const openingCounterpartyLabel =
     kind === "LIABILITY"
@@ -1728,6 +1753,34 @@ export default function Page() {
     }
   }, [showOpeningCounterparty, openingCounterpartyId, itemsById, currencyCode]);
   useEffect(() => {
+    if (!showMoexCommission) {
+      if (commissionEnabled) setCommissionEnabled(false);
+      if (commissionAmount) setCommissionAmount("");
+      if (commissionPaymentItemId) setCommissionPaymentItemId("");
+      return;
+    }
+    if (!commissionAllowed && commissionEnabled) {
+      setCommissionEnabled(false);
+    }
+  }, [
+    showMoexCommission,
+    commissionAllowed,
+    commissionEnabled,
+    commissionAmount,
+    commissionPaymentItemId,
+  ]);
+  useEffect(() => {
+    if (!commissionEnabled) {
+      if (commissionPaymentItemId) setCommissionPaymentItemId("");
+      return;
+    }
+    if (!commissionPaymentItemId) return;
+    const selected = itemsById.get(Number(commissionPaymentItemId));
+    if (!selected || selected.archived_at || selected.closed_at || selected.instrument_id) {
+      setCommissionPaymentItemId("");
+    }
+  }, [commissionEnabled, commissionPaymentItemId, itemsById]);
+  useEffect(() => {
     if (!showBankCardFields) return;
     if (cardKind !== "DEBIT") return;
     if (creditLimit) setCreditLimit("");
@@ -2130,6 +2183,24 @@ export default function Page() {
     setDepositTermDays(item.deposit_term_days != null ? String(item.deposit_term_days) : "");
     setPositionLots(item.position_lots != null ? String(item.position_lots) : "");
     setMoexPurchasePrice("");
+    if (item.instrument_id && item.history_status === "NEW") {
+      const commissionTx = txs.find(
+        (tx) => tx.linked_item_id === item.id && tx.source === "AUTO_ITEM_COMMISSION"
+      );
+      if (commissionTx) {
+        setCommissionEnabled(true);
+        setCommissionAmount(formatAmount(commissionTx.amount_rub));
+        setCommissionPaymentItemId(String(commissionTx.primary_item_id));
+      } else {
+        setCommissionEnabled(false);
+        setCommissionAmount("");
+        setCommissionPaymentItemId("");
+      }
+    } else {
+      setCommissionEnabled(false);
+      setCommissionAmount("");
+      setCommissionPaymentItemId("");
+    }
     setInterestRate(
       item.interest_rate != null ? String(item.interest_rate).replace(".", ",") : ""
     );
@@ -2230,6 +2301,39 @@ export default function Page() {
         if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
           setFormError(
             "\u0426\u0435\u043d\u0430 \u043f\u043e\u043a\u0443\u043f\u043a\u0438 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u0447\u0438\u0441\u043b\u043e\u043c (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440: 123,45)."
+          );
+          return;
+        }
+      }
+      if (commissionEnabled) {
+        if (!commissionAllowed) {
+          setFormError(
+            "\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044e \u043c\u043e\u0436\u043d\u043e \u0443\u043a\u0430\u0437\u0430\u0442\u044c \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u0440\u0438 \u043a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u0435 \u043b\u043e\u0442\u043e\u0432 \u0431\u043e\u043b\u044c\u0448\u0435 0."
+          );
+          return;
+        }
+        if (!commissionPaymentItemId) {
+          setFormError(
+            "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u0441\u0447\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438."
+          );
+          return;
+        }
+        if (!commissionAmountCents || commissionAmountCents <= 0) {
+          setFormError(
+            "\u0421\u0443\u043c\u043c\u0430 \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u0431\u043e\u043b\u044c\u0448\u0435 0."
+          );
+          return;
+        }
+        const paymentItem = itemsById.get(Number(commissionPaymentItemId));
+        if (!paymentItem || paymentItem.archived_at || paymentItem.closed_at) {
+          setFormError(
+            "\u0421\u0447\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d."
+          );
+          return;
+        }
+        if (paymentItem.instrument_id) {
+          setFormError(
+            "\u041e\u043f\u043b\u0430\u0442\u0430 \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438 \u0434\u043e\u043b\u0436\u043d\u0430 \u0431\u044b\u0442\u044c \u0441 \u043d\u0435-MOEX \u0441\u0447\u0435\u0442\u0430."
           );
           return;
         }
@@ -2502,6 +2606,13 @@ export default function Page() {
         ) {
           payload.opening_price_cents = moexPurchasePriceCents;
         }
+        payload.commission_enabled = commissionEnabled;
+        if (commissionEnabled) {
+          payload.commission_amount_rub = commissionAmountCents ?? null;
+          payload.commission_payment_item_id = commissionPaymentItemId
+            ? Number(commissionPaymentItemId)
+            : null;
+        }
       }
 
       if (showBankAccountFields) {
@@ -2669,6 +2780,7 @@ export default function Page() {
       setEditingItem(null);
   
       await loadItems();
+      await loadTransactions();
     } catch (e: any) {
       setFormError(e?.message ?? "Ошибка создания");
     } finally {
@@ -3695,6 +3807,79 @@ export default function Page() {
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            )}
+            {showMoexCommission && (
+              <div className="rounded-lg border border-border/70 bg-slate-50/60 p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium">
+                    {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u043f\u0440\u0438 \u043f\u043e\u043a\u0443\u043f\u043a\u0435"}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={commissionEnabled}
+                      onChange={(event) => setCommissionEnabled(event.target.checked)}
+                      disabled={!commissionAllowed}
+                    />
+                    {"\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c"}
+                  </label>
+                </div>
+                {!commissionAllowed && (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u043f\u0440\u0438 \u043a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u0435 \u043b\u043e\u0442\u043e\u0432 \u0431\u043e\u043b\u044c\u0448\u0435 0."}
+                  </div>
+                )}
+                {commissionEnabled && (
+                  <div className="mt-3 grid gap-2">
+                    <div className="grid gap-2">
+                      <Label>
+                        {"\u0421\u0443\u043c\u043c\u0430 \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"}
+                      </Label>
+                      <Input
+                        value={commissionAmount}
+                        onChange={(e) => {
+                          const formatted = formatRubInput(e.target.value);
+                          setCommissionAmount(formatted);
+                        }}
+                        onBlur={() =>
+                          setCommissionAmount((prev) => normalizeRubOnBlur(prev))
+                        }
+                        inputMode="decimal"
+                        placeholder={"\u041d\u0430\u043f\u0440\u0438\u043c\u0435\u0440: 1 234,56"}
+                        className="border-2 border-border/70 bg-white shadow-none"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>
+                        {"\u0421\u0447\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"}
+                      </Label>
+                      <ItemSelector
+                        items={commissionPaymentItems}
+                        selectedIds={
+                          commissionPaymentItemId
+                            ? [Number(commissionPaymentItemId)]
+                            : []
+                        }
+                        onChange={(ids) => {
+                          const nextId = ids[0] ?? null;
+                          setCommissionPaymentItemId(nextId ? String(nextId) : "");
+                        }}
+                        selectionMode="single"
+                        placeholder={"\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0430\u043a\u0442\u0438\u0432/\u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u043e"}
+                        clearLabel={"\u041d\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u043e"}
+                        getItemTypeLabel={getItemTypeLabel}
+                        getItemKind={resolveItemEffectiveKind}
+                        getItemBalance={getItemDisplayBalanceCents}
+                        getBankLogoUrl={itemBankLogoUrl}
+                        getBankName={itemBankName}
+                        itemCounts={itemTxCounts}
+                        ariaLabel={"\u0421\u0447\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {showBankAccountFields && (

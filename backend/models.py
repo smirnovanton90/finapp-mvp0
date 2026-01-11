@@ -518,7 +518,7 @@ class Transaction(Base):
         CheckConstraint("status in ('CONFIRMED','UNCONFIRMED','REALIZED')", name="ck_transactions_status"),
         CheckConstraint("amount_rub >= 0", name="ck_transactions_amount_non_negative"),
         CheckConstraint(
-            "(source is null) or (source in ('AUTO_ITEM_OPENING','AUTO_ITEM_CLOSING','MANUAL'))",
+            "(source is null) or (source in ('AUTO_ITEM_OPENING','AUTO_ITEM_CLOSING','AUTO_ITEM_COMMISSION','MANUAL'))",
             name="ck_transactions_source",
         ),
     )

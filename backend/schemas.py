@@ -178,6 +178,9 @@ class ItemCreate(BaseModel):
     instrument_board_id: str | None = None
     position_lots: int | None = Field(default=None, ge=0)
     opening_price_cents: int | None = Field(default=None, ge=0)
+    commission_enabled: bool | None = None
+    commission_amount_rub: int | None = Field(default=None, ge=0)
+    commission_payment_item_id: int | None = None
     initial_value_rub: int
     plan_settings: ItemPlanSettingsBase | None = None
 

@@ -53,7 +53,12 @@ from item_plan_service import (
     rebuild_item_chains,
     upsert_plan_settings,
 )
-from item_opening_service import create_opening_transactions, delete_opening_transactions
+from item_opening_service import (
+    create_commission_transaction,
+    create_opening_transactions,
+    delete_commission_transactions,
+    delete_opening_transactions,
+)
 
 app = FastAPI(title="FinApp API", version="0.1.0")
 
@@ -431,6 +436,29 @@ def _resolve_opening_counterparty(
         )
     return counterparty
 
+
+def _resolve_commission_payment_item(
+    db: Session,
+    user: User,
+    payment_item_id: int | None,
+) -> Item:
+    if payment_item_id is None:
+        raise HTTPException(status_code=400, detail="commission_payment_item_id is required")
+    payment_item = db.get(Item, payment_item_id)
+    if (
+        not payment_item
+        or payment_item.user_id != user.id
+        or payment_item.archived_at is not None
+        or payment_item.closed_at is not None
+    ):
+        raise HTTPException(status_code=400, detail="Invalid commission_payment_item_id")
+    if is_moex_item(payment_item):
+        raise HTTPException(
+            status_code=400,
+            detail="commission_payment_item_id must reference a non-MOEX item",
+        )
+    return payment_item
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -657,6 +685,15 @@ def create_item(
             raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
         if payload.opening_price_cents is not None:
             raise HTTPException(status_code=400, detail="opening_price_cents is only allowed for MOEX items")
+        if (
+            payload.commission_enabled is not None
+            or payload.commission_amount_rub is not None
+            or payload.commission_payment_item_id is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="commission fields are only allowed for MOEX items",
+            )
         if payload.opening_price_cents is not None:
             raise HTTPException(status_code=400, detail="opening_price_cents is only allowed for MOEX items")
     bank_id = None
@@ -702,6 +739,47 @@ def create_item(
     opening_amount_rub = payload.initial_value_rub
     if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
+    commission_requested = (
+        payload.commission_enabled is not None
+        or payload.commission_amount_rub is not None
+        or payload.commission_payment_item_id is not None
+    )
+    commission_enabled = bool(payload.commission_enabled)
+    commission_amount_rub = payload.commission_amount_rub
+    commission_payment_item = None
+    if commission_requested:
+        if not is_moex:
+            raise HTTPException(
+                status_code=400,
+                detail="commission fields are only allowed for MOEX items",
+            )
+        if commission_enabled:
+            if history_status != "NEW":
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission is only allowed for NEW MOEX items",
+                )
+            if opening_quantity_lots is None or opening_quantity_lots <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission requires position_lots > 0",
+                )
+            if commission_amount_rub is None or commission_amount_rub <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission_amount_rub is required",
+                )
+            commission_payment_item = _resolve_commission_payment_item(
+                db,
+                user,
+                payload.commission_payment_item_id,
+            )
+        else:
+            if commission_amount_rub is not None or payload.commission_payment_item_id is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission fields require commission_enabled",
+                )
     opening_counterparty = None
     if history_status == "NEW" and has_opening_value:
         opening_counterparty = _resolve_opening_counterparty(
@@ -770,6 +848,20 @@ def create_item(
             quantity_lots=opening_quantity_lots,
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
+        )
+
+    if commission_requested and commission_enabled and commission_payment_item:
+        instrument_label = item.instrument_id or item.name
+        if item.instrument_id and item.name and item.name != item.instrument_id:
+            instrument_label = f"{item.instrument_id} - {item.name}"
+        create_commission_transaction(
+            db=db,
+            user=user,
+            item=item,
+            payment_item_id=commission_payment_item.id,
+            amount_rub=commission_amount_rub or 0,
+            tx_date=item.open_date,
+            instrument_label=instrument_label,
         )
 
     if is_moex and item.instrument_id:
@@ -933,6 +1025,47 @@ def update_item(
     opening_amount_rub = payload.initial_value_rub
     if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
+    commission_requested = (
+        payload.commission_enabled is not None
+        or payload.commission_amount_rub is not None
+        or payload.commission_payment_item_id is not None
+    )
+    commission_enabled = bool(payload.commission_enabled)
+    commission_amount_rub = payload.commission_amount_rub
+    commission_payment_item = None
+    if commission_requested:
+        if not is_moex:
+            raise HTTPException(
+                status_code=400,
+                detail="commission fields are only allowed for MOEX items",
+            )
+        if commission_enabled:
+            if new_history_status != "NEW":
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission is only allowed for NEW MOEX items",
+                )
+            if opening_quantity_lots is None or opening_quantity_lots <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission requires position_lots > 0",
+                )
+            if commission_amount_rub is None or commission_amount_rub <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission_amount_rub is required",
+                )
+            commission_payment_item = _resolve_commission_payment_item(
+                db,
+                user,
+                payload.commission_payment_item_id,
+            )
+        else:
+            if commission_amount_rub is not None or payload.commission_payment_item_id is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission fields require commission_enabled",
+                )
     opening_counterparty = None
     if new_history_status == "NEW" and has_opening_value:
         opening_counterparty = _resolve_opening_counterparty(
@@ -960,6 +1093,8 @@ def update_item(
         should_rebuild_opening = True
     if should_rebuild_opening:
         delete_opening_transactions(db, user, item.id)
+    if commission_requested:
+        delete_commission_transactions(db, user, item.id)
 
     old_base = 0 if item.history_status == "NEW" else item.initial_value_rub
     delta = item.current_value_rub - old_base
@@ -1031,6 +1166,20 @@ def update_item(
             quantity_lots=opening_quantity_lots,
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
+        )
+
+    if commission_requested and commission_enabled and commission_payment_item:
+        instrument_label = item.instrument_id or item.name
+        if item.instrument_id and item.name and item.name != item.instrument_id:
+            instrument_label = f"{item.instrument_id} - {item.name}"
+        create_commission_transaction(
+            db=db,
+            user=user,
+            item=item,
+            payment_item_id=commission_payment_item.id,
+            amount_rub=commission_amount_rub or 0,
+            tx_date=item.open_date,
+            instrument_label=instrument_label,
         )
 
     if is_moex and item.instrument_id:

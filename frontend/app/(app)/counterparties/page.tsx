@@ -37,9 +37,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -151,7 +152,6 @@ export default function CounterpartiesPage() {
     () => new Set()
   );
   const [showUserCreated, setShowUserCreated] = useState(true);
-  const [showDefaultCreated, setShowDefaultCreated] = useState(false);
   const [showLegalEntities, setShowLegalEntities] = useState(true);
   const [showPersonEntities, setShowPersonEntities] = useState(true);
   const [showActiveStatus, setShowActiveStatus] = useState(true);
@@ -183,6 +183,7 @@ export default function CounterpartiesPage() {
       if (isDeleted && !showDeletedStatus) return false;
       if (!isDeleted && !showActiveStatus) return false;
       const isUser = item.owner_user_id != null;
+      const showDefaultCreated = !showUserCreated;
       if (isUser && !showUserCreated) return false;
       if (!isUser && !showDefaultCreated) return false;
       if (item.entity_type === "LEGAL" && !showLegalEntities) return false;
@@ -201,7 +202,7 @@ export default function CounterpartiesPage() {
     counterparties,
     normalizedNameFilter,
     selectedIndustryIds,
-    showDefaultCreated,
+    showUserCreated,
     showDeletedStatus,
     showLegalEntities,
     showPersonEntities,
@@ -467,17 +468,32 @@ export default function CounterpartiesPage() {
 
   return (
     <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
-      <Dialog
-        open={isDialogOpen}
-        onOpenChange={(open) => {
-          setIsDialogOpen(open);
-          if (!open) {
-            setEditing(null);
-            setFormError(null);
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-[560px]">
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <aside className="w-full max-w-[340px] shrink-0">
+          <div className="rounded-lg border-2 border-border/70 bg-white p-4">
+            <div className="space-y-6">
+              <Dialog
+                open={isDialogOpen}
+                onOpenChange={(open) => {
+                  setIsDialogOpen(open);
+                  if (!open) {
+                    setEditing(null);
+                    setFormError(null);
+                  }
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button
+                    className="w-full bg-violet-600 text-white hover:bg-violet-700"
+                    onClick={() => {
+                      setEditing(null);
+                    }}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Добавить
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>
               {editing ? "Изменить контрагента" : "Добавить контрагента"}
@@ -677,36 +693,8 @@ export default function CounterpartiesPage() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить контрагента?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Контрагент будет перемещен в раздел удаленных.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-rose-600 text-white hover:bg-rose-700"
-              onClick={handleDelete}
-              disabled={isDeleting}
-            >
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <div className="-mx-4 border-t-2 border-border/70" />
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <aside className="w-full max-w-[340px] shrink-0">
-          <div className="rounded-lg border-2 border-border/70 bg-white p-4">
-            <div className="space-y-6">
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="text-sm font-semibold text-foreground">Название</div>
@@ -733,43 +721,10 @@ export default function CounterpartiesPage() {
                   <div className="text-sm font-semibold text-foreground">
                     Созданные самостоятельно
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setShowUserCreated(true);
-                      setShowDefaultCreated(true);
-                    }}
-                    disabled={showUserCreated && showDefaultCreated}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={showUserCreated}
-                    onClick={() => setShowUserCreated((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showUserCreated
-                        ? "bg-violet-50 text-violet-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
-                    }`}
-                  >
-                    Да
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={showDefaultCreated}
-                    onClick={() => setShowDefaultCreated((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showDefaultCreated
-                        ? "bg-slate-100 text-slate-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
-                    }`}
-                  >
-                    Нет
-                  </button>
+                  <Switch
+                    checked={showUserCreated}
+                    onCheckedChange={setShowUserCreated}
+                  />
                 </div>
               </div>
 
@@ -904,27 +859,6 @@ export default function CounterpartiesPage() {
 
         <div className="flex-1">
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-900">
-              <Users className="h-6 w-6 text-violet-600" />
-              Контрагенты
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Управляйте списком контрагентов для операций и активов.
-            </p>
-          </div>
-          <Button
-            className="bg-violet-600 text-white hover:bg-violet-700"
-            onClick={() => {
-              setEditing(null);
-              setIsDialogOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            Добавить контрагента
-          </Button>
-        </div>
 
         {loading ? (
           <div className="text-sm text-muted-foreground">Загрузка контрагентов...</div>
@@ -1073,6 +1007,31 @@ export default function CounterpartiesPage() {
         </div>
       </div>
 
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить контрагента?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Контрагент будет перемещен в раздел удаленных.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-rose-600 text-white hover:bg-rose-700"
+              onClick={handleDelete}
+              disabled={isDeleting}
+            >
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

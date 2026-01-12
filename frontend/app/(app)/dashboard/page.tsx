@@ -1365,15 +1365,6 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Дэшборд</h1>
-          <p className="text-sm text-muted-foreground">Ключевые метрики за последние дни.</p>
-          {accountingStartDate && (
-            <p className="mt-1 text-sm text-muted-foreground">
-              Дата начала учета: {formatShortDate(accountingStartDate)}
-            </p>
-          )}
-        </div>
 
         <div
           className={

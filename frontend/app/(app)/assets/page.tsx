@@ -3685,9 +3685,6 @@ export default function Page() {
                   >
                     {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
                   </span>
-                  {resolvedHistoryStatus === "HISTORICAL" && accountingStartDate && (
-                    <span>Дата начала учета: {formatShortDate(accountingStartDate)}</span>
-                  )}
                 </div>
               )}
             </div>
@@ -4365,11 +4362,6 @@ export default function Page() {
       </Dialog>
 
       <div className="space-y-6">
-        {accountingStartDate && (
-          <div className="text-sm text-muted-foreground">
-            Дата начала учета: {formatShortDate(accountingStartDate)}
-          </div>
-        )}
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/70 bg-white px-4 py-3">
           <span className="text-sm font-medium text-muted-foreground">Показывать:</span>
           <div className="inline-flex items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">

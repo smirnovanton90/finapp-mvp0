@@ -22,6 +22,7 @@ import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "./sidebar-context";
 import { useOnboarding } from "@/components/onboarding-context";
+import { useAccountingStart } from "@/components/accounting-start-context";
 
 const nav = [
   { href: "/dashboard", label: "\u0414\u044d\u0448\u0431\u043e\u0440\u0434", icon: LayoutDashboard },
@@ -73,10 +74,19 @@ const nav = [
   },
 ];
 
+function formatShortDate(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (!year || !month || !day) return dateKey;
+  const paddedDay = String(day).padStart(2, "0");
+  const paddedMonth = String(month).padStart(2, "0");
+  return `${paddedDay}.${paddedMonth}.${year}`;
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const { isCollapsed, toggleSidebar } = useSidebar();
   const { status, startOnboarding } = useOnboarding();
+  const { accountingStartDate } = useAccountingStart();
   const [isReportsOpen, setIsReportsOpen] = useState(
     pathname === "/reports" || pathname.startsWith("/reports/")
   );
@@ -207,20 +217,26 @@ export function Sidebar() {
         })}
       </nav>
       <div className="px-4 pb-4">
-        {status === "POSTPONED" && (
-          <Button
-            variant="ghost"
-            className={cn(
-              "mb-2 w-full justify-center text-xs font-medium text-white/90 hover:bg-white/20 hover:text-white",
-              isCollapsed ? "px-0" : "px-3"
-            )}
-            onClick={() => startOnboarding()}
-            title={isCollapsed ? "Познакомиться с приложением" : undefined}
-          >
-            {!isCollapsed && <span>Познакомиться с приложением</span>}
-            {isCollapsed && <span>?</span>}
-          </Button>
+        {accountingStartDate && !isCollapsed && (
+          <div className="mb-3 text-right">
+            <div className="text-xs text-white/70 mb-1">Дата начала учета</div>
+            <div className="text-lg font-semibold text-white">
+              {formatShortDate(accountingStartDate)}
+            </div>
+          </div>
         )}
+        <Button
+          variant="ghost"
+          className={cn(
+            "mb-2 w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+            isCollapsed ? "px-0" : "px-4"
+          )}
+          onClick={() => startOnboarding()}
+          title={isCollapsed ? "Познакомиться с приложением" : undefined}
+        >
+          {!isCollapsed && <span>Познакомиться с приложением</span>}
+          {isCollapsed && <span>?</span>}
+        </Button>
         <Button
           variant="ghost"
           className={cn(

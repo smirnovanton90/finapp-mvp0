@@ -52,6 +52,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ItemSelector } from "@/components/item-selector";
+import { CounterpartySelector } from "@/components/counterparty-selector";
 import {
   Select,
   SelectContent,
@@ -70,11 +71,13 @@ import {
   deleteTransactionChain,
   fetchCategories,
   fetchCounterparties,
+  fetchCounterpartyIndustries,
   fetchItems,
   fetchTransactions,
   fetchDeletedTransactions,
   fetchTransactionChains,
   CounterpartyOut,
+  CounterpartyIndustryOut,
   ItemOut,
   TransactionChainFrequency,
   TransactionChainMonthlyRule,
@@ -83,6 +86,7 @@ import {
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
 import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
+import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 
 const CATEGORY_PLACEHOLDER = "-";
@@ -258,6 +262,7 @@ export default function FinancialPlanningPage() {
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [items, setItems] = useState<ItemOut[]>([]);
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
+  const [industries, setIndustries] = useState<CounterpartyIndustryOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
   const [loading, setLoading] = useState(false);
@@ -288,8 +293,6 @@ export default function FinancialPlanningPage() {
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
   const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
-  const [counterpartySearch, setCounterpartySearch] = useState("");
-  const [counterpartyDropdownOpen, setCounterpartyDropdownOpen] = useState(false);
   const [counterpartyLoading, setCounterpartyLoading] = useState(false);
   const [counterpartyError, setCounterpartyError] = useState<string | null>(null);
   const [amountStr, setAmountStr] = useState("");
@@ -417,25 +420,7 @@ export default function FinancialPlanningPage() {
     () => counterparties.filter((counterparty) => !counterparty.deleted_at),
     [counterparties]
   );
-  const sortedCounterparties = useMemo(() => {
-    return [...selectableCounterparties].sort((a, b) =>
-      buildCounterpartyName(a).localeCompare(buildCounterpartyName(b), "ru", {
-        sensitivity: "base",
-      })
-    );
-  }, [selectableCounterparties]);
-  const normalizedCounterpartySearch = useMemo(
-    () => normalizeCounterpartySearch(counterpartySearch),
-    [counterpartySearch]
-  );
-  const filteredCounterparties = useMemo(() => {
-    if (!normalizedCounterpartySearch) return sortedCounterparties;
-    return sortedCounterparties.filter((counterparty) =>
-      normalizeCounterpartySearch(getCounterpartyFilterText(counterparty)).includes(
-        normalizedCounterpartySearch
-      )
-    );
-  }, [normalizedCounterpartySearch, sortedCounterparties]);
+  const counterpartyTxCounts = useMemo(() => buildCounterpartyTransactionCounts(txs), [txs]);
 
   const primaryCurrency = primaryItemId
     ? itemsById.get(primaryItemId)?.currency_code ?? null
@@ -458,13 +443,6 @@ export default function FinancialPlanningPage() {
     }
   }, [isCrossCurrencyTransfer]);
 
-  useEffect(() => {
-    if (!counterpartyId || counterpartySearch.trim()) return;
-    const selected = counterpartiesById.get(counterpartyId);
-    if (selected) {
-      setCounterpartySearch(buildCounterpartyName(selected));
-    }
-  }, [counterpartyId, counterpartySearch, counterpartiesById]);
 
   const reloadPlanningData = async () => {
     const [chainsData, txData, deletedData] = await Promise.all([
@@ -500,6 +478,7 @@ export default function FinancialPlanningPage() {
             fetchDeletedTransactions(),
             fetchCategories(),
             fetchCounterparties({ include_deleted: true }),
+            fetchCounterpartyIndustries(),
           ]);
         setItems(itemsData);
         setChains(chainsData);
@@ -545,8 +524,6 @@ export default function FinancialPlanningPage() {
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
     setCounterpartyId(null);
-    setCounterpartySearch("");
-    setCounterpartyDropdownOpen(false);
     setAmountStr("");
     setAmountCounterpartyStr("");
     setCategoryQuery("");
@@ -1407,90 +1384,19 @@ export default function FinancialPlanningPage() {
 
             <div className="grid gap-2">
               <Label>Контрагент</Label>
-              <div className="relative">
-                <Input
-                  value={counterpartySearch}
-                  onChange={(e) => {
-                    setCounterpartySearch(e.target.value);
-                    setCounterpartyId(null);
-                    setCounterpartyDropdownOpen(true);
-                  }}
-                  onFocus={() => setCounterpartyDropdownOpen(true)}
-                  onBlur={() =>
-                    setTimeout(() => setCounterpartyDropdownOpen(false), 150)
-                  }
-                  placeholder="Начните вводить название"
-                  className="border-2 border-border/70 bg-white shadow-none"
-                />
-                {counterpartyDropdownOpen && (
-                  <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
-                    {counterpartyLoading && (
-                      <div className="px-3 py-2 text-sm text-muted-foreground">
-                        Загрузка...
-                      </div>
-                    )}
-                    {!counterpartyLoading && counterpartyError && (
-                      <div className="px-3 py-2 text-sm text-red-600">
-                        {counterpartyError}
-                      </div>
-                    )}
-                    {!counterpartyLoading &&
-                      !counterpartyError &&
-                      filteredCounterparties.length === 0 && (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">
-                          Ничего не найдено
-                        </div>
-                      )}
-                    {!counterpartyLoading &&
-                      !counterpartyError &&
-                      filteredCounterparties.map((counterparty) => {
-                        const name = buildCounterpartyName(counterparty);
-                        const DefaultIcon =
-                          counterparty.entity_type === "PERSON"
-                            ? User
-                            : getLegalDefaultIcon(counterparty.industry_id);
-                        return (
-                          <button
-                            key={counterparty.id}
-                            type="button"
-                            className={[
-                              "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50",
-                              counterpartyId === counterparty.id ? "bg-slate-50" : "",
-                            ].join(" ")}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              setCounterpartyId(counterparty.id);
-                              setCounterpartySearch(name);
-                              setCounterpartyDropdownOpen(false);
-                            }}
-                          >
-                            {counterparty.logo_url ? (
-                              <img
-                                src={counterparty.logo_url}
-                                alt=""
-                                className="h-8 w-8 rounded border border-border/60 bg-white object-contain"
-                                loading="lazy"
-                              />
-                            ) : (
-                              <div className="flex h-8 w-8 items-center justify-center rounded border border-border/60 bg-white text-slate-500">
-                                <DefaultIcon className="h-4 w-4" aria-hidden="true" />
-                              </div>
-                            )}
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium">{name}</span>
-                              {counterparty.entity_type === "LEGAL" &&
-                                counterparty.full_name && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {counterparty.full_name}
-                                  </span>
-                                )}
-                            </div>
-                          </button>
-                        );
-                      })}
-                  </div>
-                )}
-              </div>
+              <CounterpartySelector
+                counterparties={selectableCounterparties}
+                selectedIds={counterpartyId ? [counterpartyId] : []}
+                onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                selectionMode="single"
+                placeholder="Начните вводить название"
+                industries={industries}
+                disabled={counterpartyLoading}
+                counterpartyCounts={counterpartyTxCounts}
+              />
+              {counterpartyError && (
+                <p className="text-xs text-red-600">{counterpartyError}</p>
+              )}
             </div>
 
             {isTransfer && isCrossCurrencyTransfer ? (

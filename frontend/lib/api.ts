@@ -29,7 +29,7 @@ export type ItemOut = {
   type_code: string;
   name: string;
   currency_code: string;
-  bank_id: number | null;
+  counterparty_id: number | null;
   open_date: string;
   opening_counterparty_item_id: number | null;
   account_last7: string | null;
@@ -64,7 +64,7 @@ export type ItemCreate = {
   type_code: string;
   name: string;
   currency_code: string;
-  bank_id?: number | null;
+  counterparty_id?: number | null;
   open_date: string;
   opening_counterparty_item_id?: number | null;
   account_last7?: string | null;

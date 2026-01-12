@@ -218,8 +218,8 @@ def _resolve_item_for_plan(
         raise HTTPException(status_code=400, detail="Invalid card_account_id")
     if account.currency_code != item.currency_code:
         raise HTTPException(status_code=400, detail="Card and account currencies must match")
-    if account.bank_id != item.bank_id:
-        raise HTTPException(status_code=400, detail="Card and account banks must match")
+    if account.counterparty_id != item.counterparty_id:
+        raise HTTPException(status_code=400, detail="Card and account counterparties must match")
 
     start_date = _resolve_min_date(user, item, account)
     return ResolvedPlanSide(
@@ -446,7 +446,7 @@ def _create_interest_chain(
         primary_card_item=primary_side.card_item,
         counterparty_item=None,
         counterparty_card_item=None,
-        counterparty_id=item.bank_id,
+        counterparty_id=item.counterparty_id,
         category_id=category.id,
         purpose="INTEREST",
         frequency="MONTHLY",

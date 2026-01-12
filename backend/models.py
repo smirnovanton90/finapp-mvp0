@@ -223,7 +223,7 @@ class Counterparty(Base):
     deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     owner: Mapped[Optional["User"]] = relationship(back_populates="counterparties")
-    items: Mapped[list["Item"]] = relationship(back_populates="bank")
+    items: Mapped[list["Item"]] = relationship(back_populates="counterparty")
     industry: Mapped[Optional["CounterpartyIndustry"]] = relationship(
         back_populates="counterparties"
     )
@@ -312,10 +312,10 @@ class Item(Base):
     )
     currency: Mapped[Currency] = relationship(back_populates="items")
 
-    bank_id: Mapped[int | None] = mapped_column(
+    counterparty_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("counterparties.id"), nullable=True
     )
-    bank: Mapped[Optional["Counterparty"]] = relationship(back_populates="items")
+    counterparty: Mapped[Optional["Counterparty"]] = relationship(back_populates="items")
 
     account_last7: Mapped[str | None] = mapped_column(String(7), nullable=True)
     contract_number: Mapped[str | None] = mapped_column(String(100), nullable=True)

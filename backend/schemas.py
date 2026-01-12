@@ -175,7 +175,7 @@ class ItemCreate(BaseModel):
     type_code: str = Field(min_length=1, max_length=50)
     name: str = Field(min_length=1, max_length=200)
     currency_code: str = Field(default="RUB", min_length=3, max_length=3)
-    bank_id: int | None = None
+    counterparty_id: int | None = None
     open_date: date
     opening_counterparty_item_id: int | None = None
     account_last7: str | None = Field(default=None, min_length=7, max_length=7, pattern=r"^\d{7}$")
@@ -210,7 +210,7 @@ class ItemCreate(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_bank_account_fields(self) -> "ItemCreate":
+    def validate_counterparty_fields(self) -> "ItemCreate":
         bank_account_types = {"bank_account", "savings_account"}
         contract_number_types = {"bank_account", "bank_card", "deposit", "savings_account"}
         loan_types = {
@@ -308,7 +308,7 @@ class ItemOut(BaseModel):
     type_code: str
     name: str
     currency_code: str
-    bank_id: int | None
+    counterparty_id: int | None
     open_date: date
     opening_counterparty_item_id: int | None
     account_last7: str | None

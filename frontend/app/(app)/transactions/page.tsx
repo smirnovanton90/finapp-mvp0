@@ -47,6 +47,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ItemSelector } from "@/components/item-selector";
+import { CounterpartySelector } from "@/components/counterparty-selector";
 import {
   Dialog,
   DialogContent,
@@ -84,12 +85,14 @@ import {
   fetchBanks,
   fetchCategories,
   fetchCounterparties,
+  fetchCounterpartyIndustries,
   fetchItems,
   fetchFxRatesBatch,
   fetchTransactions,
   fetchTransactionsPage,
   BankOut,
   CounterpartyOut,
+  CounterpartyIndustryOut,
   FxRateOut,
   ItemOut,
   TransactionCreate,
@@ -98,6 +101,7 @@ import {
   updateTransactionStatus,
 } from "@/lib/api";
 import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
+import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import {
   buildCategoryLookup,
@@ -229,11 +233,6 @@ function normalizeCounterpartySearch(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
 }
 
-function getCounterpartyFilterText(counterparty: CounterpartyOut) {
-  const base = buildCounterpartyName(counterparty);
-  const extra = counterparty.entity_type === "LEGAL" ? counterparty.full_name : null;
-  return [base, extra].filter(Boolean).join(" ");
-}
 
 function formatAmount(valueInCents: number) {
   const hasCents = Math.abs(valueInCents) % 100 !== 0;
@@ -1622,9 +1621,11 @@ export function TransactionsView({
   const [itemTxCounts, setItemTxCounts] = useState<Map<number, number>>(new Map());
   const [banks, setBanks] = useState<BankOut[]>([]);
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
+  const [industries, setIndustries] = useState<CounterpartyIndustryOut[]>([]);
   const [counterpartyLoading, setCounterpartyLoading] = useState(false);
   const [counterpartyError, setCounterpartyError] = useState<string | null>(null);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
+  const counterpartyTxCounts = useMemo(() => buildCounterpartyTransactionCounts(txs), [txs]);
   const [txCursor, setTxCursor] = useState<string | null>(null);
   const [hasMoreTxs, setHasMoreTxs] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -1662,8 +1663,6 @@ export function TransactionsView({
   const [dateTo, setDateTo] = useState(initialDateTo);
   const [commentFilter, setCommentFilter] = useState("");
   const [itemFilterResetKey, setItemFilterResetKey] = useState(0);
-  const [counterpartyFilterQuery, setCounterpartyFilterQuery] = useState("");
-  const [isCounterpartyFilterOpen, setIsCounterpartyFilterOpen] = useState(false);
   const [selectedCounterpartyIds, setSelectedCounterpartyIds] = useState<Set<number>>(
     () => new Set()
   );
@@ -1693,8 +1692,6 @@ export function TransactionsView({
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
   const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
-  const [counterpartySearch, setCounterpartySearch] = useState("");
-  const [counterpartyDropdownOpen, setCounterpartyDropdownOpen] = useState(false);
   const [amountStr, setAmountStr] = useState("");
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
   const [primaryQuantityLots, setPrimaryQuantityLots] = useState("");
@@ -1953,54 +1950,11 @@ export function TransactionsView({
       })
     );
   }, [selectableCounterparties]);
-  const normalizedCounterpartySearch = useMemo(
-    () => normalizeCounterpartySearch(counterpartySearch),
-    [counterpartySearch]
-  );
-  const filteredCounterparties = useMemo(() => {
-    if (!normalizedCounterpartySearch) return sortedCounterparties;
-    return sortedCounterparties.filter((counterparty) =>
-      normalizeCounterpartySearch(getCounterpartyFilterText(counterparty)).includes(
-        normalizedCounterpartySearch
-      )
-    );
-  }, [normalizedCounterpartySearch, sortedCounterparties]);
-  const counterpartyFilterOptions = useMemo(() => {
-    return [...counterparties].sort((a, b) =>
-      buildCounterpartyName(a).localeCompare(buildCounterpartyName(b), "ru", {
-        sensitivity: "base",
-      })
-    );
-  }, [counterparties]);
-  const normalizedCounterpartyFilterQuery = useMemo(
-    () => normalizeCounterpartySearch(counterpartyFilterQuery),
-    [counterpartyFilterQuery]
-  );
-  const filteredCounterpartyFilterOptions = useMemo(() => {
-    if (!normalizedCounterpartyFilterQuery) return counterpartyFilterOptions;
-    return counterpartyFilterOptions.filter((counterparty) =>
-      normalizeCounterpartySearch(getCounterpartyFilterText(counterparty)).includes(
-        normalizedCounterpartyFilterQuery
-      )
-    );
-  }, [counterpartyFilterOptions, normalizedCounterpartyFilterQuery]);
-  const selectedCounterpartyFilterOptions = useMemo(() => {
-    return Array.from(selectedCounterpartyIds)
-      .map((id) => counterpartiesById.get(id))
-      .filter(Boolean) as CounterpartyOut[];
-  }, [counterpartiesById, selectedCounterpartyIds]);
   const importBankOptions = useMemo(
     () => banks.filter((bank) => IMPORT_BANK_OGRNS.has(bank.ogrn)),
     [banks]
   );
 
-  useEffect(() => {
-    if (!counterpartyId || counterpartySearch.trim()) return;
-    const selected = counterpartiesById.get(counterpartyId);
-    if (selected) {
-      setCounterpartySearch(buildCounterpartyName(selected));
-    }
-  }, [counterpartyId, counterpartySearch, counterpartiesById]);
   const filteredImportBanks = useMemo(() => {
     const query = importBankSearch.trim().toLowerCase();
     const list = query
@@ -2229,8 +2183,6 @@ export function TransactionsView({
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
     setCounterpartyId(null);
-    setCounterpartySearch("");
-    setCounterpartyDropdownOpen(false);
     setAmountStr("");
     setAmountCounterpartyStr("");
     setPrimaryQuantityLots("");
@@ -2320,7 +2272,6 @@ export function TransactionsView({
           (item.name ?? "").toLocaleLowerCase("ru").includes("магазин")
         ) ?? counterparties[0];
       setCounterpartyId(demoCounterparty.id);
-      setCounterpartySearch(buildCounterpartyName(demoCounterparty));
     }
   }, [
     accountingStartDate,
@@ -2350,7 +2301,6 @@ export function TransactionsView({
     setPrimaryItemId(getDisplayPrimaryItemId(tx));
     setCounterpartyItemId(getDisplayCounterpartyItemId(tx));
     setCounterpartyId(tx.counterparty_id);
-    setCounterpartySearch(counterpartyLabel(tx.counterparty_id));
     setAmountStr(formatCentsForInput(tx.amount_rub));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
@@ -2393,7 +2343,6 @@ export function TransactionsView({
       tx.direction === "TRANSFER" ? getDisplayCounterpartyItemId(tx) : null
     );
     setCounterpartyId(tx.counterparty_id);
-    setCounterpartySearch(counterpartyLabel(tx.counterparty_id));
     setAmountStr(formatCentsForInput(tx.amount_rub));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
@@ -2436,7 +2385,6 @@ export function TransactionsView({
       tx.direction === "TRANSFER" ? getDisplayCounterpartyItemId(tx) : null
     );
     setCounterpartyId(tx.counterparty_id);
-    setCounterpartySearch(counterpartyLabel(tx.counterparty_id));
     setAmountStr(formatCentsForInput(tx.amount_rub));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
@@ -3334,8 +3282,12 @@ export function TransactionsView({
     setCounterpartyLoading(true);
     setCounterpartyError(null);
     try {
-      const data = await fetchCounterparties({ include_deleted: true });
-      setCounterparties(data);
+      const [counterpartiesData, industriesData] = await Promise.all([
+        fetchCounterparties({ include_deleted: true }),
+        fetchCounterpartyIndustries(),
+      ]);
+      setCounterparties(counterpartiesData);
+      setIndustries(industriesData);
     } catch (e: any) {
       setCounterpartyError(
         e?.message ?? "Не удалось загрузить контрагентов."
@@ -3605,27 +3557,8 @@ export function TransactionsView({
     setSelectedCategoryFilterKeys(new Set());
     setCategoryFilterQuery("");
   };
-  const toggleCounterpartyFilterSelection = (counterparty: CounterpartyOut) => {
-    setSelectedCounterpartyIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(counterparty.id)) {
-        next.delete(counterparty.id);
-      } else {
-        next.add(counterparty.id);
-      }
-      return next;
-    });
-  };
-  const removeCounterpartyFilterSelection = (id: number) => {
-    setSelectedCounterpartyIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  };
   const resetCounterpartyFilters = () => {
     setSelectedCounterpartyIds(new Set());
-    setCounterpartyFilterQuery("");
   };
   const toggleCurrencySelection = (value: string) => {
     setSelectedCurrencyCodes((prev) => {
@@ -4181,93 +4114,19 @@ export function TransactionsView({
 
                     <div className="grid gap-2">
                       <Label>Контрагент</Label>
-                      <div className="relative">
-                        <Input
-                          value={counterpartySearch}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setCounterpartySearch(value);
-                            setCounterpartyId(null);
-                            setCounterpartyDropdownOpen(true);
-                          }}
-                          onFocus={() => setCounterpartyDropdownOpen(true)}
-                          onBlur={() =>
-                            setTimeout(() => setCounterpartyDropdownOpen(false), 150)
-                          }
-                          placeholder="Начните вводить название"
-                          className="border-2 border-border/70 bg-white shadow-none"
-                        />
-                        {counterpartyDropdownOpen && (
-                          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
-                            {counterpartyLoading && (
-                              <div className="px-3 py-2 text-sm text-muted-foreground">
-                                Загрузка...
-                              </div>
-                            )}
-                            {!counterpartyLoading && counterpartyError && (
-                              <div className="px-3 py-2 text-sm text-red-600">
-                                {counterpartyError}
-                              </div>
-                            )}
-                            {!counterpartyLoading &&
-                              !counterpartyError &&
-                              filteredCounterparties.length === 0 && (
-                                <div className="px-3 py-2 text-sm text-muted-foreground">
-                                  Ничего не найдено
-                                </div>
-                              )}
-                            {!counterpartyLoading &&
-                              !counterpartyError &&
-                              filteredCounterparties.map((counterparty) => {
-                                const name = buildCounterpartyName(counterparty);
-                                const DefaultIcon =
-                                  counterparty.entity_type === "PERSON"
-                                    ? User
-                                    : getLegalDefaultIcon(counterparty.industry_id);
-                                return (
-                                  <button
-                                    key={counterparty.id}
-                                    type="button"
-                                    className={[
-                                      "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50",
-                                      counterpartyId === counterparty.id
-                                        ? "bg-slate-50"
-                                        : "",
-                                    ].join(" ")}
-                                    onMouseDown={(event) => event.preventDefault()}
-                                    onClick={() => {
-                                      setCounterpartyId(counterparty.id);
-                                      setCounterpartySearch(name);
-                                      setCounterpartyDropdownOpen(false);
-                                    }}
-                                  >
-                                    {counterparty.logo_url ? (
-                                      <img
-                                        src={counterparty.logo_url}
-                                        alt=""
-                                        className="h-8 w-8 rounded border border-border/60 bg-white object-contain"
-                                        loading="lazy"
-                                      />
-                                    ) : (
-                                      <div className="flex h-8 w-8 items-center justify-center rounded border border-border/60 bg-white text-slate-500">
-                                        <DefaultIcon className="h-4 w-4" aria-hidden="true" />
-                                      </div>
-                                    )}
-                                    <div className="flex flex-col">
-                                      <span className="text-sm font-medium">{name}</span>
-                                      {counterparty.entity_type === "LEGAL" &&
-                                        counterparty.full_name && (
-                                          <span className="text-xs text-muted-foreground">
-                                            {counterparty.full_name}
-                                          </span>
-                                        )}
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                          </div>
-                        )}
-                      </div>
+                      <CounterpartySelector
+                        counterparties={selectableCounterparties}
+                        selectedIds={counterpartyId ? [counterpartyId] : []}
+                        onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                        selectionMode="single"
+                        placeholder="Начните вводить название"
+                        industries={industries}
+                        disabled={counterpartyLoading}
+                        counterpartyCounts={counterpartyTxCounts}
+                      />
+                      {counterpartyError && (
+                        <p className="text-xs text-red-600">{counterpartyError}</p>
+                      )}
                     </div>
 
                     {isLoanRepayment ? (
@@ -5097,112 +4956,16 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="relative">
-                  <Input
-                    type="text"
-                    className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
-                    placeholder="Начните вводить название"
-                    value={counterpartyFilterQuery}
-                    onChange={(e) => {
-                      setCounterpartyFilterQuery(e.target.value);
-                      setIsCounterpartyFilterOpen(true);
-                    }}
-                    onFocus={() => setIsCounterpartyFilterOpen(true)}
-                    onClick={() => setIsCounterpartyFilterOpen(true)}
-                    onBlur={() => setIsCounterpartyFilterOpen(false)}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        isCounterpartyFilterOpen &&
-                        counterpartyFilterQuery.trim()
-                      ) {
-                        const first = filteredCounterpartyFilterOptions[0];
-                        if (first) {
-                          event.preventDefault();
-                          toggleCounterpartyFilterSelection(first);
-                          setCounterpartyFilterQuery("");
-                          setIsCounterpartyFilterOpen(false);
-                        }
-                      }
-                    }}
-                  />
-                  {isCounterpartyFilterOpen ? (
-                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
-                      {filteredCounterpartyFilterOptions.length === 0 ? (
-                        <div className="px-2 py-1 text-sm text-muted-foreground">
-                          Ничего не найдено
-                        </div>
-                      ) : (
-                        filteredCounterpartyFilterOptions.map((counterparty) => {
-                          const isSelected = selectedCounterpartyIds.has(
-                            counterparty.id
-                          );
-                          const name = buildCounterpartyName(counterparty);
-                          const DefaultIcon =
-                            counterparty.entity_type === "PERSON"
-                              ? User
-                              : getLegalDefaultIcon(counterparty.industry_id);
-                          return (
-                            <button
-                              key={counterparty.id}
-                              type="button"
-                              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                                isSelected
-                                  ? "bg-violet-50 text-violet-700"
-                                  : "text-slate-700 hover:bg-slate-100"
-                              }`}
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                toggleCounterpartyFilterSelection(counterparty);
-                                setCounterpartyFilterQuery("");
-                                setIsCounterpartyFilterOpen(false);
-                              }}
-                            >
-                              {counterparty.logo_url ? (
-                                <img
-                                  src={counterparty.logo_url}
-                                  alt=""
-                                  className="h-5 w-5 rounded border border-border/60 bg-white object-contain"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-white text-slate-500">
-                                  <DefaultIcon className="h-3 w-3" aria-hidden="true" />
-                                </div>
-                              )}
-                              <span className="min-w-0 break-words">{name}</span>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-                {selectedCounterpartyFilterOptions.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {selectedCounterpartyFilterOptions.map((counterparty) => {
-                      const name = buildCounterpartyName(counterparty);
-                      return (
-                        <div
-                          key={counterparty.id}
-                          className="flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs text-violet-800"
-                        >
-                          <span>{name}</span>
-                          <button
-                            type="button"
-                            className="text-violet-700 hover:text-violet-900"
-                            onClick={() =>
-                              removeCounterpartyFilterSelection(counterparty.id)
-                            }
-                            aria-label={`Удалить фильтр ${name}`}
-                          >
-                            x
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                <CounterpartySelector
+                  counterparties={selectableCounterparties}
+                  selectedIds={Array.from(selectedCounterpartyIds)}
+                  onChange={(ids) => setSelectedCounterpartyIds(new Set(ids))}
+                  selectionMode="multi"
+                  placeholder="Начните вводить название"
+                  industries={industries}
+                  counterpartyCounts={counterpartyTxCounts}
+                  showChips={true}
+                />
               </div>
 <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">

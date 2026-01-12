@@ -63,8 +63,8 @@ def _resolve_effective_side(
         raise HTTPException(
             status_code=400, detail="Card and account currencies must match"
         )
-    if account.bank_id != item.bank_id:
-        raise HTTPException(status_code=400, detail="Card and account banks must match")
+    if account.counterparty_id != item.counterparty_id:
+        raise HTTPException(status_code=400, detail="Card and account counterparties must match")
 
     start_date = _resolve_min_date(user, item, account)
     return ResolvedSide(

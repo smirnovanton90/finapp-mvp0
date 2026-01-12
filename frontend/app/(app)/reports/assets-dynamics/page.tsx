@@ -5,11 +5,13 @@ import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import {
   fetchBanks,
+  fetchCounterparties,
   fetchFxRates,
   fetchItems,
   fetchMarketInstrumentPrices,
   fetchTransactions,
   BankOut,
+  CounterpartyOut,
   FxRateOut,
   ItemOut,
   MarketPriceOut,
@@ -440,7 +442,7 @@ export default function AssetsDynamicsPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const [items, setItems] = useState<ItemOut[]>([]);
-  const [banks, setBanks] = useState<BankOut[]>([]);
+  const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [transactions, setTransactions] = useState<TransactionOut[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
     {}
@@ -471,13 +473,13 @@ export default function AssetsDynamicsPage() {
     Promise.all([
       fetchItems({ includeClosed: true, includeArchived: true }),
       fetchTransactions(),
-      fetchBanks().catch(() => []),
+      fetchCounterparties().catch(() => []),
     ])
-      .then(([itemsData, txData, banksData]) => {
+      .then(([itemsData, txData, counterpartiesData]) => {
         if (!active) return;
         setItems(itemsData);
         setTransactions(txData);
-        setBanks(banksData);
+        setCounterparties(counterpartiesData);
       })
       .catch((e: any) => {
         if (!active) return;
@@ -507,9 +509,9 @@ export default function AssetsDynamicsPage() {
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
-  const banksById = useMemo(
-    () => new Map(banks.map((bank) => [bank.id, bank])),
-    [banks]
+  const counterpartiesById = useMemo(
+    () => new Map(counterparties.map((cp) => [cp.id, cp])),
+    [counterparties]
   );
   const getItemDisplayBalanceCents = useCallback(
     (item: ItemOut) => {
@@ -551,17 +553,23 @@ export default function AssetsDynamicsPage() {
     },
     [accountingStartDate, itemsById]
   );
-  const itemBankLogoUrl = (id: number | null | undefined) => {
+  const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
     if (!id) return null;
-    const bankId = itemsById.get(id)?.bank_id;
-    if (!bankId) return null;
-    return banksById.get(bankId)?.logo_url ?? null;
+    const cpId = itemsById.get(id)?.counterparty_id;
+    if (!cpId) return null;
+    return counterpartiesById.get(cpId)?.logo_url ?? null;
   };
-  const itemBankName = (id: number | null | undefined) => {
+  const itemCounterpartyName = (id: number | null | undefined) => {
     if (!id) return "";
-    const bankId = itemsById.get(id)?.bank_id;
-    if (!bankId) return "";
-    return banksById.get(bankId)?.name ?? "";
+    const cpId = itemsById.get(id)?.counterparty_id;
+    if (!cpId) return "";
+    const cp = counterpartiesById.get(cpId);
+    if (!cp) return "";
+    if (cp.entity_type === "PERSON") {
+      const parts = [cp.last_name, cp.first_name, cp.middle_name].filter(Boolean);
+      return parts.length > 0 ? parts.join(" ") : "";
+    }
+    return cp.name || cp.full_name || "";
   };
   useEffect(() => {
     const itemIds = new Set(sortedItems.map((item) => item.id));
@@ -1168,8 +1176,8 @@ export default function AssetsDynamicsPage() {
               noResultsMessage="Ничего не найдено"
               getItemTypeLabel={getItemTypeLabel}
               getItemKind={(item) => resolveItemEffectiveKind(item, item.current_value_rub)}
-              getBankLogoUrl={itemBankLogoUrl}
-              getBankName={itemBankName}
+              getBankLogoUrl={itemCounterpartyLogoUrl}
+              getBankName={itemCounterpartyName}
               getItemBalance={getItemDisplayBalanceCents}
               itemCounts={itemTxCounts}
               ariaLabel="Активы и обязательства"

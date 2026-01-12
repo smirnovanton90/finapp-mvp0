@@ -67,7 +67,7 @@ app = FastAPI(title="FinApp API", version="0.1.0")
 _FX_CACHE: dict[str, tuple[datetime, list[FxRateOut]]] = {}
 _FX_CACHE_TTL = timedelta(hours=1)
 _BANK_LICENSE_STATUSES = ("Действующая", "Отозванная")
-_BANK_TYPE_CODES = {
+_BANK_COUNTERPARTY_TYPE_CODES = {
     "bank_account",
     "bank_card",
     "deposit",
@@ -78,6 +78,44 @@ _BANK_TYPE_CODES = {
     "car_loan",
     "education_loan",
 }
+
+_MANDATORY_COUNTERPARTY_TYPE_CODES = {
+    "bank_account",
+    "bank_card",
+    "deposit",
+    "savings_account",
+    "consumer_loan",
+    "mortgage",
+    "car_loan",
+    "education_loan",
+    "loan_to_third_party",
+    "third_party_receivables",
+    "private_loan",
+    "third_party_payables",
+}
+
+_OPTIONAL_COUNTERPARTY_TYPE_CODES = {
+    "brokerage",
+    "installment",
+    "microloan",
+    "e_wallet",
+    "npf",
+    "investment_life_insurance",
+    "utilities_debt",
+    "telecom_debt",
+    "tax_debt",
+    "fns_debt",
+    "traffic_fines_debt",
+    "enforcement_debt",
+    "alimony_debt",
+    "court_debt",
+    "court_fine_debt",
+    "personal_income_tax_debt",
+    "property_tax_debt",
+    "land_tax_debt",
+    "transport_tax_debt",
+}
+
 _BANK_INDUSTRY_NAME = "Банки"
 
 app.include_router(transactions_router)
@@ -330,7 +368,7 @@ def _resolve_card_account_id(
     db: Session,
     user: User,
     payload: ItemCreate,
-    bank_id: int | None,
+    counterparty_id: int | None,
 ) -> int | None:
     if payload.card_account_id is None:
         return None
@@ -347,7 +385,7 @@ def _resolve_card_account_id(
         or linked.type_code != "bank_account"
     ):
         raise HTTPException(status_code=400, detail="Invalid card_account_id")
-    if bank_id is None or linked.bank_id != bank_id:
+    if counterparty_id is None or linked.counterparty_id != counterparty_id:
         raise HTTPException(
             status_code=400, detail="Card and account banks must match"
         )
@@ -708,20 +746,29 @@ def create_item(
             )
         if payload.opening_price_cents is not None:
             raise HTTPException(status_code=400, detail="opening_price_cents is only allowed for MOEX items")
-    bank_id = None
-    if payload.bank_id is not None:
-        if payload.type_code not in _BANK_TYPE_CODES:
-            raise HTTPException(
-                status_code=400,
-                detail="bank_id is only allowed for bank-related item types.",
-            )
-        bank = db.get(Counterparty, payload.bank_id)
-        bank_industry_id = _get_bank_industry_id(db)
-        if not bank or not bank_industry_id or bank.industry_id != bank_industry_id:
-            raise HTTPException(status_code=400, detail="Invalid bank_id")
-        bank_id = bank.id
+    counterparty_id = None
+    if payload.counterparty_id is not None:
+        counterparty = db.get(Counterparty, payload.counterparty_id)
+        if not counterparty:
+            raise HTTPException(status_code=400, detail="Invalid counterparty_id")
+        
+        # Для банковских типов проверяем, что контрагент из отрасли "Банки"
+        if payload.type_code in _BANK_COUNTERPARTY_TYPE_CODES:
+            bank_industry_id = _get_bank_industry_id(db)
+            if not bank_industry_id or counterparty.industry_id != bank_industry_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Counterparty must be a bank for bank-related item types.",
+                )
+        
+        counterparty_id = counterparty.id
+    elif payload.type_code in _MANDATORY_COUNTERPARTY_TYPE_CODES:
+        raise HTTPException(
+            status_code=400,
+            detail="counterparty_id is required for this item type.",
+        )
 
-    card_account_id = _resolve_card_account_id(db, user, payload, bank_id)
+    card_account_id = _resolve_card_account_id(db, user, payload, counterparty_id)
     card_kind, credit_limit, item_kind = _resolve_card_kind_and_limit(payload)
 
     interest_payout_account_id = None
@@ -814,7 +861,7 @@ def create_item(
         type_code=payload.type_code,
         name=payload.name,
         currency_code=currency_code,
-        bank_id=bank_id,
+        counterparty_id=counterparty_id,
         open_date=payload.open_date,
         account_last7=payload.account_last7,
         contract_number=payload.contract_number,
@@ -942,20 +989,29 @@ def update_item(
         if payload.position_lots is not None:
             raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
 
-    bank_id = None
-    if payload.bank_id is not None:
-        if payload.type_code not in _BANK_TYPE_CODES:
-            raise HTTPException(
-                status_code=400,
-                detail="bank_id is only allowed for bank-related item types.",
-            )
-        bank = db.get(Counterparty, payload.bank_id)
-        bank_industry_id = _get_bank_industry_id(db)
-        if not bank or not bank_industry_id or bank.industry_id != bank_industry_id:
-            raise HTTPException(status_code=400, detail="Invalid bank_id")
-        bank_id = bank.id
+    counterparty_id = None
+    if payload.counterparty_id is not None:
+        counterparty = db.get(Counterparty, payload.counterparty_id)
+        if not counterparty:
+            raise HTTPException(status_code=400, detail="Invalid counterparty_id")
+        
+        # Для банковских типов проверяем, что контрагент из отрасли "Банки"
+        if payload.type_code in _BANK_COUNTERPARTY_TYPE_CODES:
+            bank_industry_id = _get_bank_industry_id(db)
+            if not bank_industry_id or counterparty.industry_id != bank_industry_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Counterparty must be a bank for bank-related item types.",
+                )
+        
+        counterparty_id = counterparty.id
+    elif payload.type_code in _MANDATORY_COUNTERPARTY_TYPE_CODES:
+        raise HTTPException(
+            status_code=400,
+            detail="counterparty_id is required for this item type.",
+        )
 
-    card_account_id = _resolve_card_account_id(db, user, payload, bank_id)
+    card_account_id = _resolve_card_account_id(db, user, payload, counterparty_id)
     if (
         item.type_code == "bank_card"
         and payload.card_account_id is not None
@@ -1125,7 +1181,7 @@ def update_item(
     item.type_code = payload.type_code
     item.name = payload.name
     item.currency_code = currency_code
-    item.bank_id = bank_id
+    item.counterparty_id = counterparty_id
     item.open_date = payload.open_date
     item.account_last7 = payload.account_last7
     item.contract_number = payload.contract_number

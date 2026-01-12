@@ -29,6 +29,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ItemSelector } from "@/components/item-selector";
+import { CounterpartySelector } from "@/components/counterparty-selector";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
 
@@ -64,6 +65,8 @@ import {
 import {
   fetchItems,
   fetchBanks,
+  fetchCounterparties,
+  fetchCounterpartyIndustries,
   fetchCurrencies,
   fetchFxRates,
   fetchMarketInstruments,
@@ -81,6 +84,8 @@ import {
   ItemCreate,
   ItemOut,
   BankOut,
+  CounterpartyOut,
+  CounterpartyIndustryOut,
   CurrencyOut,
   FxRateOut,
   MarketBoardOut,
@@ -95,6 +100,7 @@ import {
   PaymentAmountKind,
 } from "@/lib/api";
 import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
+import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 
 
@@ -232,7 +238,44 @@ const LEGAL_LIABILITY_TYPES = [
   "court_fine_debt",
 ];
 const OTHER_LIABILITY_TYPES = ["business_liability", "other_liability"];
-const BANK_TYPE_CODES = [
+const MANDATORY_COUNTERPARTY_TYPE_CODES = [
+  "bank_account",
+  "bank_card",
+  "deposit",
+  "savings_account",
+  "consumer_loan",
+  "mortgage",
+  "car_loan",
+  "education_loan",
+  "loan_to_third_party",
+  "third_party_receivables",
+  "private_loan",
+  "third_party_payables",
+];
+
+const OPTIONAL_COUNTERPARTY_TYPE_CODES = [
+  "brokerage",
+  "installment",
+  "microloan",
+  "e_wallet",
+  "npf",
+  "investment_life_insurance",
+  "utilities_debt",
+  "telecom_debt",
+  "tax_debt",
+  "fns_debt",
+  "traffic_fines_debt",
+  "enforcement_debt",
+  "alimony_debt",
+  "court_debt",
+  "court_fine_debt",
+  "personal_income_tax_debt",
+  "property_tax_debt",
+  "land_tax_debt",
+  "transport_tax_debt",
+];
+
+const BANK_COUNTERPARTY_TYPE_CODES = [
   "bank_account",
   "bank_card",
   "deposit",
@@ -243,6 +286,14 @@ const BANK_TYPE_CODES = [
   "car_loan",
   "education_loan",
 ];
+
+// Все типы, где контрагент релевантен
+const COUNTERPARTY_TYPE_CODES = [
+  ...MANDATORY_COUNTERPARTY_TYPE_CODES,
+  ...OPTIONAL_COUNTERPARTY_TYPE_CODES,
+];
+
+const BANK_TYPE_CODES = BANK_COUNTERPARTY_TYPE_CODES;
 
 const AUTO_PLAN_INTEREST_TYPES = ["deposit", "savings_account"];
 const AUTO_PLAN_LOAN_TYPES = [
@@ -569,12 +620,11 @@ export default function Page() {
   const [currencyCode, setCurrencyCode] = useState("RUB");
   const [name, setName] = useState("");
   const [amountStr, setAmountStr] = useState(""); // строка: "1234.56" / "1 234,56"
-  const [banks, setBanks] = useState<BankOut[]>([]);
-  const [bankId, setBankId] = useState<number | null>(null);
-  const [bankSearch, setBankSearch] = useState("");
-  const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
-  const [bankLoading, setBankLoading] = useState(false);
-  const [bankError, setBankError] = useState<string | null>(null);
+  const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
+  const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
+  const [counterpartyLoading, setCounterpartyLoading] = useState(false);
+  const [counterpartyError, setCounterpartyError] = useState<string | null>(null);
+  const [industries, setIndustries] = useState<CounterpartyIndustryOut[]>([]);
   const [instrumentQuery, setInstrumentQuery] = useState("");
   const [instrumentOptions, setInstrumentOptions] = useState<MarketInstrumentOut[]>([]);
   const [instrumentLoading, setInstrumentLoading] = useState(false);
@@ -644,10 +694,7 @@ export default function Page() {
     setAmountStr("");
     setTypeCode("");
     setCurrencyCode("RUB");
-    setBankId(null);
-    setBankSearch("");
-    setBankDropdownOpen(false);
-    setBankError(null);
+    setCounterpartyId(null);
     setInstrumentQuery("");
     setInstrumentOptions([]);
     setInstrumentLoading(false);
@@ -926,8 +973,16 @@ export default function Page() {
     return base.filter((option) => allowed.has(option.code));
   }, [kind, effectiveAllowedTypeCodes, isGeneralCreate]);
 
-  const showBankField = useMemo(
-    () => BANK_TYPE_CODES.includes(typeCode),
+  const showCounterpartyField = useMemo(
+    () => COUNTERPARTY_TYPE_CODES.includes(typeCode),
+    [typeCode]
+  );
+  const isCounterpartyMandatory = useMemo(
+    () => MANDATORY_COUNTERPARTY_TYPE_CODES.includes(typeCode),
+    [typeCode]
+  );
+  const isBankCounterparty = useMemo(
+    () => BANK_COUNTERPARTY_TYPE_CODES.includes(typeCode),
     [typeCode]
   );
   const isMoexType = useMemo(() => MOEX_TYPE_CODES.includes(typeCode), [typeCode]);
@@ -1051,38 +1106,27 @@ export default function Page() {
     }
   }, [loanEndDate, planEndDate, showLoanPlanSettings]);
 
-  const filteredBanks = useMemo(() => {
-    const query = bankSearch.trim().toLowerCase();
-    const list = query
-      ? banks.filter((bank) => bank.name.toLowerCase().includes(query))
-      : banks.slice();
-    return list.sort((a, b) => {
-      const aHasLogo = Boolean(a.logo_url);
-      const bHasLogo = Boolean(b.logo_url);
-      if (aHasLogo !== bHasLogo) return aHasLogo ? -1 : 1;
-      return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
-    });
-  }, [banks, bankSearch]);
-
-  const selectedBank = useMemo(
-    () => banks.find((bank) => bank.id === bankId) ?? null,
-    [banks, bankId]
+  const counterpartiesById = useMemo(
+    () => new Map(counterparties.map((cp) => [cp.id, cp])),
+    [counterparties]
   );
-  const banksById = useMemo(
-    () => new Map(banks.map((bank) => [bank.id, bank])),
-    [banks]
-  );
-  const itemBankLogoUrl = (id: number | null | undefined) => {
+  const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
     if (!id) return null;
-    const bankId = itemsById.get(id)?.bank_id;
-    if (!bankId) return null;
-    return banksById.get(bankId)?.logo_url ?? null;
+    const cpId = itemsById.get(id)?.counterparty_id;
+    if (!cpId) return null;
+    return counterpartiesById.get(cpId)?.logo_url ?? null;
   };
-  const itemBankName = (id: number | null | undefined) => {
+  const itemCounterpartyName = (id: number | null | undefined) => {
     if (!id) return "";
-    const bankId = itemsById.get(id)?.bank_id;
-    if (!bankId) return "";
-    return banksById.get(bankId)?.name ?? "";
+    const cpId = itemsById.get(id)?.counterparty_id;
+    if (!cpId) return "";
+    const cp = counterpartiesById.get(cpId);
+    if (!cp) return "";
+    if (cp.entity_type === "PERSON") {
+      const parts = [cp.last_name, cp.first_name, cp.middle_name].filter(Boolean);
+      return parts.length > 0 ? parts.join(" ") : "";
+    }
+    return cp.name || cp.full_name || "";
   };
   const linkedCardsByAccountId = useMemo(() => {
     const map = new Map<number, ItemOut[]>();
@@ -1202,6 +1246,7 @@ export default function Page() {
     [activeItems]
   );
   const itemTxCounts = useMemo(() => buildItemTransactionCounts(txs), [txs]);
+  const counterpartyTxCounts = useMemo(() => buildCounterpartyTransactionCounts(txs), [txs]);
   const visibleItems = useMemo(
     () =>
       items.filter((item) => {
@@ -1264,7 +1309,7 @@ export default function Page() {
   const bankAccountItems = useMemo(() => {
     const filtered = activeAssetItems.filter((item) => {
       if (item.type_code !== "bank_account") return false;
-      if (bankId && item.bank_id !== bankId) return false;
+      if (counterpartyId && item.counterparty_id !== counterpartyId) return false;
       if (currencyCode && item.currency_code !== currencyCode) return false;
       return true;
     });
@@ -1276,7 +1321,7 @@ export default function Page() {
       }
     }
     return filtered;
-  }, [activeAssetItems, bankId, cardAccountId, currencyCode, itemsById]);
+  }, [activeAssetItems, counterpartyId, cardAccountId, currencyCode, itemsById]);
   const depositEndDateText = useMemo(() => {
     if (!openDate || !depositTermDays) return "";
     const days = Number(depositTermDays);
@@ -1287,11 +1332,15 @@ export default function Page() {
     return baseDate.toLocaleDateString("ru-RU");
   }, [openDate, depositTermDays]);
 
+  const selectedCounterparty = useMemo(
+    () => counterpartyId ? counterpartiesById.get(counterpartyId) : null,
+    [counterpartyId, counterpartiesById]
+  );
   const logoLayerStyle = useMemo(() => {
-    if (!showBankField || !selectedBank?.logo_url) return undefined;
+    if (!showCounterpartyField || !selectedCounterparty?.logo_url) return undefined;
     const mask = "linear-gradient(to bottom, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0) 100%)";
     return {
-      backgroundImage: `url("${selectedBank.logo_url}")`,
+      backgroundImage: `url("${selectedCounterparty.logo_url}")`,
       backgroundRepeat: "no-repeat",
       backgroundPosition: "top center",
       backgroundSize: "100% auto",
@@ -1302,7 +1351,7 @@ export default function Page() {
       WebkitMaskRepeat: "no-repeat",
       WebkitMaskSize: "100% 100%",
     } as React.CSSProperties;
-  }, [showBankField, selectedBank?.logo_url]);
+  }, [showCounterpartyField, selectedCounterparty?.logo_url]);
 
   const updateLogoOverlayHeight = useCallback(() => {
     const size = logoNaturalSizeRef.current;
@@ -1680,16 +1729,20 @@ export default function Page() {
     }
   }
 
-  async function loadBanks() {
-    setBankLoading(true);
-    setBankError(null);
+  async function loadCounterparties() {
+    setCounterpartyLoading(true);
+    setCounterpartyError(null);
     try {
-      const data = await fetchBanks();
-      setBanks(data);
+      const [counterpartiesData, industriesData] = await Promise.all([
+        fetchCounterparties(),
+        fetchCounterpartyIndustries(),
+      ]);
+      setCounterparties(counterpartiesData);
+      setIndustries(industriesData);
     } catch (e: any) {
-      setBankError(e?.message ?? "Не удалось загрузить список банков.");
+      setCounterpartyError(e?.message ?? "Не удалось загрузить список контрагентов.");
     } finally {
-      setBankLoading(false);
+      setCounterpartyLoading(false);
     }
   }
 
@@ -1708,23 +1761,21 @@ export default function Page() {
       loadTransactions();
       loadCurrencies();
       loadFxRates();
-      loadBanks();
+      loadCounterparties();
     }
   }, [session]);
 
   useEffect(() => {
-    if (!isCreateOpen || !showBankField || banks.length || bankLoading) return;
-    loadBanks();
-  }, [isCreateOpen, showBankField, banks.length, bankLoading]);
+    if (!isCreateOpen || !showCounterpartyField || counterparties.length || counterpartyLoading) return;
+    loadCounterparties();
+  }, [isCreateOpen, showCounterpartyField, counterparties.length, counterpartyLoading]);
 
   useEffect(() => {
-    if (showBankField) return;
-    if (bankId || bankSearch) {
-      setBankId(null);
-      setBankSearch("");
+    if (showCounterpartyField) return;
+    if (counterpartyId) {
+      setCounterpartyId(null);
     }
-    setBankDropdownOpen(false);
-  }, [showBankField]);
+  }, [showCounterpartyField]);
 
   useEffect(() => {
     if (showBankAccountFields) return;
@@ -1853,7 +1904,7 @@ export default function Page() {
   }, [repaymentAccountId, itemsById]);
 
   useEffect(() => {
-    if (!selectedBank?.logo_url || !isCreateOpen) {
+    if (!selectedCounterparty?.logo_url || !isCreateOpen) {
       logoNaturalSizeRef.current = null;
       setLogoOverlayHeight(0);
       return;
@@ -1872,19 +1923,19 @@ export default function Page() {
     image.onerror = () => {
       if (!cancelled) setLogoOverlayHeight(0);
     };
-    image.src = selectedBank.logo_url;
+    image.src = selectedCounterparty.logo_url;
 
     return () => {
       cancelled = true;
     };
-  }, [selectedBank?.logo_url, isCreateOpen, updateLogoOverlayHeight]);
+  }, [selectedCounterparty?.logo_url, isCreateOpen, updateLogoOverlayHeight]);
 
   useEffect(() => {
-    if (!selectedBank?.logo_url || !isCreateOpen) return;
+    if (!selectedCounterparty?.logo_url || !isCreateOpen) return;
     const handleResize = () => updateLogoOverlayHeight();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [selectedBank?.logo_url, isCreateOpen, updateLogoOverlayHeight]);
+  }, [selectedCounterparty?.logo_url, isCreateOpen, updateLogoOverlayHeight]);
 
   useEffect(() => {
     if (!currencies.length) return;
@@ -2091,10 +2142,7 @@ export default function Page() {
     setCurrencyCode("RUB");
     setName("");
     setAmountStr("");
-    setBankId(null);
-    setBankSearch("");
-    setBankDropdownOpen(false);
-    setBankError(null);
+    setCounterpartyId(null);
     setInstrumentQuery("");
     setInstrumentOptions([]);
     setInstrumentLoading(false);
@@ -2167,11 +2215,7 @@ export default function Page() {
     setCurrencyCode(item.currency_code);
     setName(item.name);
     setAmountStr(formatAmount(item.initial_value_rub));
-    setBankId(item.bank_id);
-    const bankName = item.bank_id ? banksById.get(item.bank_id)?.name ?? "" : "";
-    setBankSearch(bankName);
-    setBankDropdownOpen(false);
-    setBankError(null);
+    setCounterpartyId(item.counterparty_id);
     setInstrumentQuery(
       item.instrument_id ? `${item.instrument_id} - ${item.name ?? ""}`.trim() : ""
     );
@@ -2393,18 +2437,23 @@ export default function Page() {
       return;
     }
 
+    if (isCounterpartyMandatory && !counterpartyId) {
+      setFormError("Укажите контрагента.");
+      return;
+    }
+
     if (showBankCardFields && !isCreditCard && cardAccountId) {
       const linkedAccount = itemsById.get(Number(cardAccountId));
       if (!linkedAccount) {
         setFormError("Привязанный счет не найден.");
         return;
       }
-      if (!bankId) {
-        setFormError("Укажите банк карты.");
+      if (!counterpartyId) {
+        setFormError("Укажите контрагента карты.");
         return;
       }
-      if (linkedAccount.bank_id !== bankId) {
-        setFormError("Банк карты должен совпадать с банком счета.");
+      if (linkedAccount.counterparty_id !== counterpartyId) {
+        setFormError("Контрагент карты должен совпадать с контрагентом счета.");
         return;
       }
       if (linkedAccount.currency_code !== currencyCode) {
@@ -2617,7 +2666,7 @@ export default function Page() {
         type_code: typeCode,
         name: name.trim(),
         currency_code: currencyCode,
-        bank_id: showBankField ? bankId : null,
+        counterparty_id: showCounterpartyField ? counterpartyId : null,
         open_date: openDate,
         opening_counterparty_item_id: openingCounterpartyValue,
         initial_value_rub: cents,
@@ -2983,9 +3032,15 @@ export default function Page() {
                   const rubEquivalent = getRubEquivalentCents(it);
                   const displayBalanceCents = getItemDisplayBalanceCents(it);
                   const currencyCode = it.currency_code || "";
-                  const bank = it.bank_id ? banksById.get(it.bank_id) ?? null : null;
-                  const bankLogoUrl = bank?.logo_url ?? null;
-                  const bankName = bank?.name ?? "";
+                  const counterparty = it.counterparty_id ? counterpartiesById.get(it.counterparty_id) ?? null : null;
+                  const counterpartyLogoUrl = counterparty?.logo_url ?? null;
+                  const counterpartyName = counterparty
+                    ? counterparty.entity_type === "PERSON"
+                      ? [counterparty.last_name, counterparty.first_name, counterparty.middle_name]
+                          .filter(Boolean)
+                          .join(" ")
+                      : counterparty.name || counterparty.full_name || ""
+                    : "";
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
                   const isArchived = Boolean(it.archived_at);
                   const isClosed = Boolean(it.closed_at);
@@ -3074,10 +3129,10 @@ export default function Page() {
                           " "
                         )}
                       >
-                        {!isLinkedCard && bankLogoUrl ? (
+                        {!isLinkedCard && counterpartyLogoUrl ? (
                           <img
-                            src={bankLogoUrl}
-                            alt={bankName}
+                            src={counterpartyLogoUrl}
+                            alt={counterpartyName}
                             className={[
                               "mx-auto h-5 w-5 rounded object-contain bg-white",
                               isArchived || isClosed ? "opacity-40" : "",
@@ -3279,7 +3334,7 @@ export default function Page() {
           ref={dialogContentRef}
           className="max-h-[90vh] overflow-y-auto overflow-x-hidden sm:max-w-[1040px]"
         >
-          {selectedBank?.logo_url && logoOverlayHeight > 0 && (
+          {selectedCounterparty?.logo_url && logoOverlayHeight > 0 && (
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-0 top-0 z-0"
@@ -3542,75 +3597,27 @@ export default function Page() {
               />
             </div>
 
-            {showBankField && (
+            {showCounterpartyField && (
               <div className="grid gap-2">
-                <Label>Банк</Label>
-                <div className="relative">
-                  <Input
-                    value={bankSearch}
-                    onChange={(e) => {
-                      setBankSearch(e.target.value);
-                      setBankId(null);
-                      setBankDropdownOpen(true);
-                    }}
-                    onFocus={() => setBankDropdownOpen(true)}
-                    onBlur={() => setTimeout(() => setBankDropdownOpen(false), 150)}
-                    placeholder="Начните вводить название банка"
-                    className="border-2 border-border/70 bg-white shadow-none"
-                  />
-                  {bankDropdownOpen && (
-                    <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
-                      {bankLoading && (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">
-                          Загрузка...
-                        </div>
-                      )}
-                      {!bankLoading && bankError && (
-                        <div className="px-3 py-2 text-sm text-red-600">{bankError}</div>
-                      )}
-                      {!bankLoading && !bankError && filteredBanks.length === 0 && (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">
-                          Нет совпадений
-                        </div>
-                      )}
-                      {!bankLoading &&
-                        !bankError &&
-                        filteredBanks.map((bank) => (
-                          <button
-                            key={bank.id}
-                            type="button"
-                            className={[
-                              "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50",
-                              bankId === bank.id ? "bg-slate-50" : "",
-                            ].join(" ")}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              setBankId(bank.id);
-                              setBankSearch(bank.name);
-                              setBankDropdownOpen(false);
-                            }}
-                          >
-                            {bank.logo_url ? (
-                              <img
-                                src={bank.logo_url}
-                                alt=""
-                                className="h-8 w-8 rounded border border-border/60 object-contain bg-white"
-                                loading="lazy"
-                              />
-                            ) : (
-                              <div className="h-8 w-8 rounded border border-border/60 bg-slate-100" />
-                            )}
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium">{bank.name}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {bank.license_status}
-                              </span>
-                            </div>
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
+                <Label>{isBankCounterparty ? "Банк" : "Контрагент"}</Label>
+                <CounterpartySelector
+                  counterparties={counterparties}
+                  selectedIds={counterpartyId ? [counterpartyId] : []}
+                  onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                  selectionMode="single"
+                  placeholder="Начните вводить название"
+                  industries={industries}
+                  disabled={counterpartyLoading}
+                  counterpartyCounts={counterpartyTxCounts}
+                  filterByIndustryId={
+                    isBankCounterparty
+                      ? industries.find((ind) => ind.name === "Банки")?.id ?? null
+                      : null
+                  }
+                />
+                {counterpartyError && (
+                  <p className="text-xs text-red-600">{counterpartyError}</p>
+                )}
               </div>
             )}
 
@@ -3864,8 +3871,8 @@ export default function Page() {
                         getItemTypeLabel={getItemTypeLabel}
                         getItemKind={resolveItemEffectiveKind}
                         getItemBalance={getItemDisplayBalanceCents}
-                        getBankLogoUrl={itemBankLogoUrl}
-                        getBankName={itemBankName}
+                        getBankLogoUrl={itemCounterpartyLogoUrl}
+                        getBankName={itemCounterpartyName}
                         itemCounts={itemTxCounts}
                         ariaLabel={"\u0421\u0447\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"}
                       />
@@ -3924,13 +3931,7 @@ export default function Page() {
                         const account = itemsById.get(nextId);
                         if (account) {
                           setCurrencyCode(account.currency_code ?? "RUB");
-                          setBankId(account.bank_id ?? null);
-                          if (account.bank_id) {
-                            const name = banksById.get(account.bank_id)?.name ?? "";
-                            setBankSearch(name);
-                          } else {
-                            setBankSearch("");
-                          }
+                          setCounterpartyId(account.counterparty_id ?? null);
                         }
                       }}
                       selectionMode="single"
@@ -3939,8 +3940,8 @@ export default function Page() {
                       getItemTypeLabel={getItemTypeLabel}
                       getItemKind={resolveItemEffectiveKind}
                       getItemBalance={getItemDisplayBalanceCents}
-                      getBankLogoUrl={itemBankLogoUrl}
-                      getBankName={itemBankName}
+                      getBankLogoUrl={itemCounterpartyLogoUrl}
+                      getBankName={itemCounterpartyName}
                       itemCounts={itemTxCounts}
                       ariaLabel="Привязка карты к банковскому счету"
                     />
@@ -4050,8 +4051,8 @@ export default function Page() {
                       getItemTypeLabel={getItemTypeLabel}
                       getItemKind={resolveItemEffectiveKind}
                       getItemBalance={getItemDisplayBalanceCents}
-                      getBankLogoUrl={itemBankLogoUrl}
-                      getBankName={itemBankName}
+                      getBankLogoUrl={itemCounterpartyLogoUrl}
+                      getBankName={itemCounterpartyName}
                       itemCounts={itemTxCounts}
                       ariaLabel="Счет выплаты процентов"
                     />
@@ -4139,8 +4140,8 @@ export default function Page() {
                             getItemTypeLabel={getItemTypeLabel}
                             getItemKind={resolveItemEffectiveKind}
                             getItemBalance={getItemDisplayBalanceCents}
-                            getBankLogoUrl={itemBankLogoUrl}
-                            getBankName={itemBankName}
+                            getBankLogoUrl={itemCounterpartyLogoUrl}
+                            getBankName={itemCounterpartyName}
                             itemCounts={itemTxCounts}
                             ariaLabel="Счет погашения"
                           />
@@ -4323,8 +4324,8 @@ export default function Page() {
                   getItemTypeLabel={getItemTypeLabel}
                   getItemKind={resolveItemEffectiveKind}
                   getItemBalance={getItemDisplayBalanceCents}
-                  getBankLogoUrl={itemBankLogoUrl}
-                  getBankName={itemBankName}
+                  getBankLogoUrl={itemCounterpartyLogoUrl}
+                  getBankName={itemCounterpartyName}
                   itemCounts={itemTxCounts}
                   ariaLabel={openingCounterpartyLabel}
                 />

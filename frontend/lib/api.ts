@@ -120,6 +120,7 @@ export type CounterpartyOut = {
   middle_name: string | null;
   license_status: string | null;
   logo_url: string | null;
+  photo_url: string | null;
   owner_user_id: number | null;
   created_at: string;
   deleted_at: string | null;
@@ -550,6 +551,20 @@ export async function uploadCounterpartyLogo(
   const formData = new FormData();
   formData.append("file", file);
   const res = await authFetch(`${API_BASE}/counterparties/${id}/logo`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function uploadCounterpartyPhoto(
+  id: number,
+  file: File
+): Promise<CounterpartyOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await authFetch(`${API_BASE}/counterparties/${id}/photo`, {
     method: "POST",
     body: formData,
   });

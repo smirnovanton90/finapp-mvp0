@@ -304,6 +304,10 @@ export function CounterpartySelector({
 
                 const DefaultIcon =
                   counterparty.entity_type === "PERSON" ? User : Building2;
+                const imageUrl =
+                  counterparty.entity_type === "PERSON"
+                    ? counterparty.photo_url
+                    : counterparty.logo_url;
 
                 return (
                   <button
@@ -315,9 +319,9 @@ export function CounterpartySelector({
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => applySelection(counterparty.id)}
                   >
-                    {counterparty.logo_url ? (
+                    {imageUrl ? (
                       <img
-                        src={counterparty.logo_url}
+                        src={imageUrl}
                         alt={displayName}
                         className={`h-6 w-6 rounded border border-border/60 bg-white object-contain ${logoToneClass}`}
                         loading="lazy"

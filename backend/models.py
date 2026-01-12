@@ -210,6 +210,9 @@ class Counterparty(Base):
     logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     logo_mime: Mapped[str | None] = mapped_column(String(50), nullable=True)
     logo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_mime: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    photo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     owner_user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id"), nullable=True
     )

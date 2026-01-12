@@ -61,6 +61,7 @@ import {
   fetchLegalForms,
   updateCounterparty,
   uploadCounterpartyLogo,
+  uploadCounterpartyPhoto,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
 
@@ -147,6 +148,9 @@ export default function CounterpartiesPage() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [nameFilter, setNameFilter] = useState("");
   const [selectedIndustryIds, setSelectedIndustryIds] = useState<Set<number>>(
     () => new Set()
@@ -183,9 +187,9 @@ export default function CounterpartiesPage() {
       if (isDeleted && !showDeletedStatus) return false;
       if (!isDeleted && !showActiveStatus) return false;
       const isUser = item.owner_user_id != null;
-      const showDefaultCreated = !showUserCreated;
-      if (isUser && !showUserCreated) return false;
-      if (!isUser && !showDefaultCreated) return false;
+      // Если фильтр включен - показываем только созданные самостоятельно
+      // Если фильтр выключен - показываем все (и созданные самостоятельно, и по умолчанию)
+      if (showUserCreated && !isUser) return false;
       if (item.entity_type === "LEGAL" && !showLegalEntities) return false;
       if (item.entity_type === "PERSON" && !showPersonEntities) return false;
       if (selectedIndustryIds.size > 0) {
@@ -215,8 +219,11 @@ export default function CounterpartiesPage() {
       if (logoPreview?.startsWith("blob:")) {
         URL.revokeObjectURL(logoPreview);
       }
+      if (photoPreview?.startsWith("blob:")) {
+        URL.revokeObjectURL(photoPreview);
+      }
     };
-  }, [logoPreview]);
+  }, [logoPreview, photoPreview]);
 
   const loadAll = async () => {
     setLoading(true);
@@ -256,6 +263,9 @@ export default function CounterpartiesPage() {
     setLogoFile(null);
     setLogoError(null);
     setLogoPreview(null);
+    setPhotoFile(null);
+    setPhotoError(null);
+    setPhotoPreview(null);
     setFormError(null);
   };
 
@@ -279,6 +289,9 @@ export default function CounterpartiesPage() {
     setLogoFile(null);
     setLogoError(null);
     setLogoPreview(editing.logo_url ?? null);
+    setPhotoFile(null);
+    setPhotoError(null);
+    setPhotoPreview(editing.photo_url ?? null);
     setFormError(null);
   }, [editing, isDialogOpen]);
 
@@ -339,6 +352,55 @@ export default function CounterpartiesPage() {
       URL.revokeObjectURL(objectUrl);
       setLogoFile(null);
       setLogoPreview(editing?.logo_url ?? null);
+    };
+    image.src = objectUrl;
+  };
+
+  const handlePhotoChange = async (file: File | null) => {
+    setPhotoError(null);
+
+    if (photoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(photoPreview);
+    }
+
+    if (!file) {
+      setPhotoFile(null);
+      setPhotoPreview(editing?.photo_url ?? null);
+      return;
+    }
+
+    if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
+      setPhotoError("Разрешены PNG, JPG или WEBP.");
+      setPhotoFile(null);
+      setPhotoPreview(editing?.photo_url ?? null);
+      return;
+    }
+
+    if (file.size > MAX_LOGO_BYTES) {
+      setPhotoError(`Размер фотографии не больше ${formatSize(MAX_LOGO_BYTES)}.`);
+      setPhotoFile(null);
+      setPhotoPreview(editing?.photo_url ?? null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      if (image.width > MAX_LOGO_DIM || image.height > MAX_LOGO_DIM) {
+        setPhotoError(`Разрешение не больше ${MAX_LOGO_DIM}px.`);
+        URL.revokeObjectURL(objectUrl);
+        setPhotoFile(null);
+        setPhotoPreview(editing?.photo_url ?? null);
+        return;
+      }
+      setPhotoFile(file);
+      setPhotoPreview(objectUrl);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setPhotoError("Не удалось прочитать изображение.");
+      setPhotoFile(null);
+      setPhotoPreview(editing?.photo_url ?? null);
     };
     image.src = objectUrl;
   };
@@ -419,8 +481,21 @@ export default function CounterpartiesPage() {
         }
       }
 
+      let photoFailed = false;
+      if (entityType === "PERSON" && photoFile) {
+        try {
+          await uploadCounterpartyPhoto(saved.id, photoFile);
+        } catch (e: any) {
+          setFormError(
+            e?.message ??
+              "Контрагент сохранен, но фотографию загрузить не удалось."
+          );
+          photoFailed = true;
+        }
+      }
+
       await loadAll();
-      if (!logoFailed) {
+      if (!logoFailed && !photoFailed) {
         setIsDialogOpen(false);
         setEditing(null);
       }
@@ -668,6 +743,35 @@ export default function CounterpartiesPage() {
                     onChange={(e) => setMiddleName(e.target.value)}
                   />
                 </div>
+                <div className="grid gap-2">
+                  <Label>Фотография</Label>
+                  <Input
+                    type="file"
+                    accept={ALLOWED_LOGO_TYPES.join(",")}
+                    className="border-2 border-border/70 bg-white shadow-none"
+                    onChange={(event) =>
+                      handlePhotoChange(event.target.files?.[0] ?? null)
+                    }
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    До {formatSize(MAX_LOGO_BYTES)}, не больше {MAX_LOGO_DIM}px, PNG/JPG/WEBP.
+                  </div>
+                  {photoError && (
+                    <div className="text-xs text-red-600">{photoError}</div>
+                  )}
+                  {photoPreview && (
+                    <div className="flex items-center gap-3 rounded-md border border-border/70 bg-white p-2">
+                      <img
+                        src={photoPreview}
+                        alt=""
+                        className="h-12 w-12 rounded border border-border/60 object-contain bg-white"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        Предпросмотр фотографии
+                      </span>
+                    </div>
+                  )}
+                </div>
               </>
             )}
 
@@ -894,9 +998,9 @@ export default function CounterpartiesPage() {
                       <CardHeader className="space-y-2">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex min-w-0 items-start gap-3">
-                            {item.logo_url ? (
+                            {(item.entity_type === "PERSON" ? item.photo_url : item.logo_url) ? (
                               <img
-                                src={item.logo_url}
+                                src={item.entity_type === "PERSON" ? item.photo_url : item.logo_url}
                                 alt=""
                                 className={`rounded border border-border/60 object-contain bg-white ${
                                   isDeleted ? "h-10 w-10" : "h-12 w-12"

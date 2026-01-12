@@ -1245,7 +1245,10 @@ function TransactionCardRow({
   const chainLabel =
     isPlanned && tx.chain_name?.trim() ? tx.chain_name.trim() : null;
   const counterpartyName = counterparty ? buildCounterpartyName(counterparty) : null;
-  const counterpartyLogoUrl = counterparty?.logo_url ?? null;
+  const counterpartyLogoUrl =
+    counterparty?.entity_type === "PERSON"
+      ? counterparty?.photo_url ?? null
+      : counterparty?.logo_url ?? null;
   const CounterpartyFallbackIcon =
     counterparty?.entity_type === "PERSON"
       ? User

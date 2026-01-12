@@ -699,6 +699,7 @@ class CounterpartyOut(CounterpartyBase):
     id: int
     license_status: str | None
     logo_url: str | None
+    photo_url: str | None
     owner_user_id: int | None
     created_at: datetime
     deleted_at: datetime | None

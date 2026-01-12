@@ -153,6 +153,7 @@ def _create_transfer(
     transaction_type: str = "ACTUAL",
     primary_quantity_lots: int | None = None,
     counterparty_quantity_lots: int | None = None,
+    counterparty_id: int | None = None,
 ) -> None:
     primary_side = _resolve_effective_side(db, user, primary_item_id, True, "primary")
     counter_side = _resolve_effective_side(
@@ -215,7 +216,7 @@ def _create_transfer(
         counterparty_card_item_id=(
             counter_side.card_item.id if counter_side.card_item else None
         ),
-        counterparty_id=None,
+        counterparty_id=counterparty_id,
         amount_rub=amount,
         amount_counterparty=amount,
         primary_quantity_lots=primary_quantity_lots,
@@ -243,6 +244,7 @@ def _create_income_expense(
     comment: str | None = None,
     primary_quantity_lots: int | None = None,
     source: str = AUTO_OPENING_SOURCE,
+    counterparty_id: int | None = None,
 ) -> None:
     primary_side = _resolve_effective_side(db, user, item_id, True, "primary")
     _validate_tx_date(tx_date, primary_side, "Transaction")
@@ -278,7 +280,7 @@ def _create_income_expense(
         primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
         counterparty_item_id=None,
         counterparty_card_item_id=None,
-        counterparty_id=None,
+        counterparty_id=counterparty_id,
         amount_rub=amount_rub,
         amount_counterparty=None,
         primary_quantity_lots=primary_quantity_lots,
@@ -353,6 +355,7 @@ def create_opening_transactions(
             comment=opening_comment,
             primary_quantity_lots=primary_lots,
             counterparty_quantity_lots=counter_lots,
+            counterparty_id=item.counterparty_id,
         )
 
         closing_date = _resolve_closing_date(item, deposit_end_date, plan_settings)
@@ -370,6 +373,7 @@ def create_opening_transactions(
                 transaction_type="PLANNED",
                 primary_quantity_lots=counter_lots,
                 counterparty_quantity_lots=primary_lots,
+                counterparty_id=item.counterparty_id,
             )
         return
 
@@ -391,6 +395,7 @@ def create_opening_transactions(
         comment=opening_comment,
         linked_item_id=item.id,
         primary_quantity_lots=quantity_lots if is_moex else None,
+        counterparty_id=item.counterparty_id,
     )
 
 

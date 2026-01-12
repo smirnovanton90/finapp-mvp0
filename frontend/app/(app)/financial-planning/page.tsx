@@ -1004,9 +1004,15 @@ export default function FinancialPlanningPage() {
                     )}
                     {counterpartyName && (
                       <div className="flex items-center gap-2">
-                        {counterparty?.logo_url ? (
+                        {(counterparty?.entity_type === "PERSON"
+                          ? counterparty?.photo_url
+                          : counterparty?.logo_url) ? (
                           <img
-                            src={counterparty.logo_url}
+                            src={
+                              counterparty?.entity_type === "PERSON"
+                                ? counterparty?.photo_url
+                                : counterparty?.logo_url
+                            }
                             alt=""
                             className="h-5 w-5 rounded border border-border/60 bg-white object-contain"
                             loading="lazy"
@@ -1140,9 +1146,15 @@ export default function FinancialPlanningPage() {
                     )}
                     {counterpartyName && (
                       <div className="flex items-center gap-2">
-                        {counterparty?.logo_url ? (
+                        {(counterparty?.entity_type === "PERSON"
+                          ? counterparty?.photo_url
+                          : counterparty?.logo_url) ? (
                           <img
-                            src={counterparty.logo_url}
+                            src={
+                              counterparty?.entity_type === "PERSON"
+                                ? counterparty?.photo_url
+                                : counterparty?.logo_url
+                            }
                             alt=""
                             className="h-5 w-5 rounded border border-border/60 bg-white object-contain"
                             loading="lazy"

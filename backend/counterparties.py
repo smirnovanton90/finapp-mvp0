@@ -45,6 +45,16 @@ def apply_logo_url(counterparty: Counterparty) -> None:
     )
 
 
+def build_photo_url(counterparty_id: int) -> str:
+    return f"{settings.public_base_url}/counterparties/{counterparty_id}/photo"
+
+
+def apply_photo_url(counterparty: Counterparty) -> None:
+    counterparty.photo_url = (
+        build_photo_url(counterparty.id) if counterparty.photo_data else None
+    )
+
+
 def normalize_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -257,6 +267,7 @@ def list_counterparties(
     rows = list(db.execute(stmt).scalars())
     for row in rows:
         apply_logo_url(row)
+        apply_photo_url(row)
     return rows
 
 
@@ -303,12 +314,14 @@ def create_counterparty(
         owner_user_id=user.id,
         license_status=None,
         logo_url=None,
+        photo_url=None,
         **normalized,
     )
     db.add(counterparty)
     db.commit()
     db.refresh(counterparty)
     apply_logo_url(counterparty)
+    apply_photo_url(counterparty)
     return counterparty
 
 
@@ -359,6 +372,7 @@ def update_counterparty(
     db.commit()
     db.refresh(counterparty)
     apply_logo_url(counterparty)
+    apply_photo_url(counterparty)
     return counterparty
 
 
@@ -438,4 +452,66 @@ async def upload_counterparty_logo(
     db.commit()
     db.refresh(counterparty)
     apply_logo_url(counterparty)
+    return counterparty
+
+
+@router.get("/{counterparty_id}/photo")
+def get_counterparty_photo(
+    counterparty_id: int,
+    db: Session = Depends(get_db),
+):
+    counterparty = db.get(Counterparty, counterparty_id)
+    if not counterparty or not counterparty.photo_data:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    media_type = counterparty.photo_mime or "application/octet-stream"
+    return Response(content=counterparty.photo_data, media_type=media_type)
+
+
+@router.post("/{counterparty_id}/photo", response_model=CounterpartyOut)
+async def upload_counterparty_photo(
+    counterparty_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    counterparty = db.get(Counterparty, counterparty_id)
+    if not counterparty or counterparty.owner_user_id != user.id:
+        raise HTTPException(status_code=404, detail="Контрагент не найден.")
+    if counterparty.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="Нельзя редактировать удаленного контрагента.")
+    if counterparty.entity_type != "PERSON":
+        raise HTTPException(status_code=400, detail="Фотография доступна только для физических лиц.")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Файл не загружен.")
+    if len(data) > MAX_LOGO_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Размер фотографии не должен превышать {MAX_LOGO_BYTES // (1024 * 1024)} МБ.",
+        )
+
+    try:
+        image = Image.open(BytesIO(data))
+        image.verify()
+        image = Image.open(BytesIO(data))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Неверный формат изображения.") from exc
+
+    if image.format not in ALLOWED_LOGO_FORMATS:
+        raise HTTPException(status_code=400, detail="Недопустимый формат изображения.")
+
+    width, height = image.size
+    if width > MAX_LOGO_DIM or height > MAX_LOGO_DIM:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Разрешение фотографии не должно превышать {MAX_LOGO_DIM}px.",
+        )
+
+    counterparty.photo_mime = FORMAT_TO_MIME[image.format]
+    counterparty.photo_data = data
+    apply_photo_url(counterparty)
+    db.commit()
+    db.refresh(counterparty)
+    apply_photo_url(counterparty)
     return counterparty

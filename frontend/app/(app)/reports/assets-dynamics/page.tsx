@@ -557,7 +557,11 @@ export default function AssetsDynamicsPage() {
     if (!id) return null;
     const cpId = itemsById.get(id)?.counterparty_id;
     if (!cpId) return null;
-    return counterpartiesById.get(cpId)?.logo_url ?? null;
+    const counterparty = counterpartiesById.get(cpId);
+    if (!counterparty) return null;
+    return counterparty.entity_type === "PERSON"
+      ? counterparty.photo_url ?? null
+      : counterparty.logo_url ?? null;
   };
   const itemCounterpartyName = (id: number | null | undefined) => {
     if (!id) return "";

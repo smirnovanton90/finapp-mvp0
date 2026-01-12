@@ -1115,7 +1115,11 @@ export default function Page() {
     if (!id) return null;
     const cpId = itemsById.get(id)?.counterparty_id;
     if (!cpId) return null;
-    return counterpartiesById.get(cpId)?.logo_url ?? null;
+    const counterparty = counterpartiesById.get(cpId);
+    if (!counterparty) return null;
+    return counterparty.entity_type === "PERSON"
+      ? counterparty.photo_url ?? null
+      : counterparty.logo_url ?? null;
   };
   const itemCounterpartyName = (id: number | null | undefined) => {
     if (!id) return "";
@@ -1338,10 +1342,15 @@ export default function Page() {
     [counterpartyId, counterpartiesById]
   );
   const logoLayerStyle = useMemo(() => {
-    if (!showCounterpartyField || !selectedCounterparty?.logo_url) return undefined;
+    if (!showCounterpartyField || !selectedCounterparty) return undefined;
+    const imageUrl =
+      selectedCounterparty.entity_type === "PERSON"
+        ? selectedCounterparty.photo_url
+        : selectedCounterparty.logo_url;
+    if (!imageUrl) return undefined;
     const mask = "linear-gradient(to bottom, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0) 100%)";
     return {
-      backgroundImage: `url("${selectedCounterparty.logo_url}")`,
+      backgroundImage: `url("${imageUrl}")`,
       backgroundRepeat: "no-repeat",
       backgroundPosition: "top center",
       backgroundSize: "100% auto",
@@ -1352,7 +1361,7 @@ export default function Page() {
       WebkitMaskRepeat: "no-repeat",
       WebkitMaskSize: "100% 100%",
     } as React.CSSProperties;
-  }, [showCounterpartyField, selectedCounterparty?.logo_url]);
+  }, [showCounterpartyField, selectedCounterparty]);
 
   const updateLogoOverlayHeight = useCallback(() => {
     const size = logoNaturalSizeRef.current;
@@ -1905,7 +1914,16 @@ export default function Page() {
   }, [repaymentAccountId, itemsById]);
 
   useEffect(() => {
-    if (!selectedCounterparty?.logo_url || !isCreateOpen) {
+    if (!selectedCounterparty || !isCreateOpen) {
+      logoNaturalSizeRef.current = null;
+      setLogoOverlayHeight(0);
+      return;
+    }
+    const imageUrl =
+      selectedCounterparty.entity_type === "PERSON"
+        ? selectedCounterparty.photo_url
+        : selectedCounterparty.logo_url;
+    if (!imageUrl) {
       logoNaturalSizeRef.current = null;
       setLogoOverlayHeight(0);
       return;
@@ -1924,19 +1942,24 @@ export default function Page() {
     image.onerror = () => {
       if (!cancelled) setLogoOverlayHeight(0);
     };
-    image.src = selectedCounterparty.logo_url;
+    image.src = imageUrl;
 
     return () => {
       cancelled = true;
     };
-  }, [selectedCounterparty?.logo_url, isCreateOpen, updateLogoOverlayHeight]);
+  }, [selectedCounterparty, isCreateOpen, updateLogoOverlayHeight]);
 
   useEffect(() => {
-    if (!selectedCounterparty?.logo_url || !isCreateOpen) return;
+    if (!selectedCounterparty || !isCreateOpen) return;
+    const imageUrl =
+      selectedCounterparty.entity_type === "PERSON"
+        ? selectedCounterparty.photo_url
+        : selectedCounterparty.logo_url;
+    if (!imageUrl) return;
     const handleResize = () => updateLogoOverlayHeight();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [selectedCounterparty?.logo_url, isCreateOpen, updateLogoOverlayHeight]);
+  }, [selectedCounterparty, isCreateOpen, updateLogoOverlayHeight]);
 
   useEffect(() => {
     if (!currencies.length) return;
@@ -3034,7 +3057,10 @@ export default function Page() {
                   const displayBalanceCents = getItemDisplayBalanceCents(it);
                   const currencyCode = it.currency_code || "";
                   const counterparty = it.counterparty_id ? counterpartiesById.get(it.counterparty_id) ?? null : null;
-                  const counterpartyLogoUrl = counterparty?.logo_url ?? null;
+                  const counterpartyLogoUrl =
+                    counterparty?.entity_type === "PERSON"
+                      ? counterparty?.photo_url ?? null
+                      : counterparty?.logo_url ?? null;
                   const counterpartyName = counterparty
                     ? counterparty.entity_type === "PERSON"
                       ? [counterparty.last_name, counterparty.first_name, counterparty.middle_name]
@@ -3335,7 +3361,11 @@ export default function Page() {
           ref={dialogContentRef}
           className="max-h-[90vh] overflow-y-auto overflow-x-hidden sm:max-w-[1040px]"
         >
-          {selectedCounterparty?.logo_url && logoOverlayHeight > 0 && (
+          {selectedCounterparty &&
+            (selectedCounterparty.entity_type === "PERSON"
+              ? selectedCounterparty.photo_url
+              : selectedCounterparty.logo_url) &&
+            logoOverlayHeight > 0 && (
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-0 top-0 z-0"

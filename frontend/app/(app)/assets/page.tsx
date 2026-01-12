@@ -3400,9 +3400,17 @@ export default function Page() {
 
 
             {isMoexType && (
-              <div className="grid gap-3 rounded-lg border border-dashed border-violet-200 bg-violet-50/40 p-3">
+              <div className="grid gap-3 rounded-lg border border-dashed border-border/60 p-3">
                 <div className="grid gap-2">
-                  <Label>Инструмент MOEX</Label>
+                  <div className="flex items-center gap-2">
+                    <Label>Ценная бумага</Label>
+                    <div className="group relative">
+                      <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                      <div className="absolute left-0 top-6 z-50 hidden w-64 rounded-md border border-border/60 bg-white p-2 text-xs text-muted-foreground shadow-lg group-hover:block">
+                        Поиск возможен по ISIN-коду, коду ценной бумаги, названию
+                      </div>
+                    </div>
+                  </div>
                   <div className="relative">
                     <Input
                       value={instrumentQuery}
@@ -3521,47 +3529,6 @@ export default function Page() {
                     />
                   </div>
                 )}
-
-                <div className="rounded-md border border-border/60 bg-white/80 p-2 text-xs text-muted-foreground">
-                  {marketPrice ? (
-                    <div className="flex flex-wrap gap-3">
-                      <span>
-                        Цена:{" "}
-                        {marketPrice.price_percent_bp != null
-                          ? `${formatPercent(marketPrice.price_percent_bp / 100)}%`
-                          : marketPrice.price_cents != null
-                            ? `${formatAmount(marketPrice.price_cents)} ${
-                                marketPrice.currency_code ??
-                                selectedInstrument?.currency_code ??
-                                currencyCode
-                              }`
-                            : "-"}
-                      </span>
-                      {marketPrice.accint_cents != null && (
-                        <span>
-                          НКД: {formatAmount(marketPrice.accint_cents)}{" "}
-                          {marketPrice.currency_code ??
-                            selectedInstrument?.currency_code ??
-                            currencyCode}
-                        </span>
-                      )}
-                      {marketPrice.yield_bp != null && (
-                        <span>Доходность: {formatPercent(marketPrice.yield_bp / 100)}%</span>
-                      )}
-                      {selectedInstrument?.lot_size != null && (
-                        <span>Лот: {selectedInstrument.lot_size}</span>
-                      )}
-                      {selectedInstrument?.face_value_cents != null && (
-                        <span>
-                          Номинал: {formatAmount(selectedInstrument.face_value_cents)}{" "}
-                          {selectedInstrument.currency_code ?? currencyCode}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span>Цена не найдена для выбранного режима.</span>
-                  )}
-                </div>
               </div>
             )}
 
@@ -4405,24 +4372,47 @@ export default function Page() {
         )}
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/70 bg-white px-4 py-3">
           <span className="text-sm font-medium text-muted-foreground">Показывать:</span>
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
-              className="h-4 w-4"
-              checked={showClosed}
-              onChange={(event) => setShowClosed(event.target.checked)}
-            />
-            Закрытые
-          </label>
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
-              className="h-4 w-4"
-              checked={showArchived}
-              onChange={(event) => setShowArchived(event.target.checked)}
-            />
-            Удаленные
-          </label>
+          <div className="inline-flex items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+            <button
+              type="button"
+              aria-pressed={!showClosed && !showArchived}
+              onClick={() => {
+                setShowClosed(false);
+                setShowArchived(false);
+              }}
+              className={`${segmentedButtonBase} ${
+                !showClosed && !showArchived
+                  ? "bg-violet-50 text-violet-700"
+                  : "bg-white text-muted-foreground hover:bg-white"
+              }`}
+            >
+              Активные
+            </button>
+            <button
+              type="button"
+              aria-pressed={showClosed}
+              onClick={() => setShowClosed((prev) => !prev)}
+              className={`${segmentedButtonBase} ${
+                showClosed
+                  ? "bg-slate-100 text-slate-700"
+                  : "bg-white text-muted-foreground hover:bg-white"
+              }`}
+            >
+              Закрытые
+            </button>
+            <button
+              type="button"
+              aria-pressed={showArchived}
+              onClick={() => setShowArchived((prev) => !prev)}
+              className={`${segmentedButtonBase} ${
+                showArchived
+                  ? "bg-slate-100 text-slate-700"
+                  : "bg-white text-muted-foreground hover:bg-white"
+              }`}
+            >
+              Удаленные
+            </button>
+          </div>
           <Button
             type="button"
             size="sm"

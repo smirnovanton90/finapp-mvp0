@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { useAccountingStart } from "@/components/accounting-start-context";
@@ -3814,16 +3815,11 @@ export default function Page() {
                   <div className="font-medium">
                     {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u043f\u0440\u0438 \u043f\u043e\u043a\u0443\u043f\u043a\u0435"}
                   </div>
-                  <label className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={commissionEnabled}
-                      onChange={(event) => setCommissionEnabled(event.target.checked)}
-                      disabled={!commissionAllowed}
-                    />
-                    {"\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c"}
-                  </label>
+                  <Switch
+                    checked={commissionEnabled}
+                    onCheckedChange={setCommissionEnabled}
+                    disabled={!commissionAllowed}
+                  />
                 </div>
                 {!commissionAllowed && (
                   <div className="mt-2 text-xs text-muted-foreground">
@@ -4070,15 +4066,10 @@ export default function Page() {
                       Настройте автоматическое создание плановых транзакций.
                     </div>
                   </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      checked={planEnabled}
-                      onChange={(event) => setPlanEnabled(event.target.checked)}
-                    />
-                    Включить
-                  </label>
+                  <Switch
+                    checked={planEnabled}
+                    onCheckedChange={setPlanEnabled}
+                  />
                 </div>
                 {planEnabled && (
                   <>

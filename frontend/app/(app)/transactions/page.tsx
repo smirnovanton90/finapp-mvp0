@@ -1204,12 +1204,12 @@ function TransactionCardRow({
   const amountClass = tx.isDeleted
     ? "text-slate-500"
     : isIncome
-      ? "text-emerald-700"
+      ? "text-emerald-600"
       : isExpense
-        ? "text-rose-700"
+        ? "text-rose-600"
         : "text-slate-900";
-  const transferNegativeClass = tx.isDeleted ? "text-slate-500" : "text-rose-700";
-  const transferPositiveClass = tx.isDeleted ? "text-slate-500" : "text-emerald-700";
+  const transferNegativeClass = tx.isDeleted ? "text-slate-500" : "text-rose-600";
+  const transferPositiveClass = tx.isDeleted ? "text-slate-500" : "text-emerald-600";
 
   const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-700";
   const actionHoverClass = tx.isDeleted ? "" : "hover:text-slate-900";

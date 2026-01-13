@@ -8,6 +8,7 @@ import {
   fetchCounterparties,
   fetchFxRates,
   fetchItems,
+  fetchMarketInstrumentPrice,
   fetchMarketInstrumentPrices,
   fetchTransactions,
   BankOut,
@@ -284,8 +285,11 @@ function findPriceOnOrBefore(
   dates: string[] | undefined,
   dateKey: string
 ) {
+  // Сначала проверяем точное совпадение даты
   if (priceByDate[dateKey]) return priceByDate[dateKey];
   if (!dates || dates.length === 0) return null;
+  
+  // Ищем ближайшую предыдущую дату
   let lo = 0;
   let hi = dates.length - 1;
   let best = -1;
@@ -336,9 +340,6 @@ function buildDeltasByDate(
   txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
-    if (tx.source === "AUTO_ITEM_OPENING" || tx.source === "AUTO_ITEM_CLOSING") {
-      return;
-    }
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
     if (dateKey <= todayKey && !isRealized) return;
 
@@ -358,7 +359,14 @@ function buildDeltasByDate(
       if (moexItemIds.has(itemId)) return;
       let delta = 0;
       if (tx.direction === "INCOME") delta = tx.amount_rub;
-      if (tx.direction === "EXPENSE") delta = -tx.amount_rub;
+      if (tx.direction === "EXPENSE") {
+        // Opening-транзакции для обязательств создаются как EXPENSE,
+        // но в backend они УВЕЛИЧИВАЮТ долг (см. item_opening_service._create_income_expense).
+        // Поэтому для корректной истории учитываем этот частный случай.
+        const kind = itemKindById.get(itemId) ?? "ASSET";
+        const isOpening = tx.source === "AUTO_ITEM_OPENING";
+        delta = isOpening && kind === "LIABILITY" ? tx.amount_rub : -tx.amount_rub;
+      }
       if (tx.direction === "TRANSFER") {
         const kind = itemKindById.get(itemId) ?? "ASSET";
         delta = transferDelta(kind, true, tx.amount_rub);
@@ -397,9 +405,6 @@ function buildLotDeltasByDate(
   txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
-    if (tx.source === "AUTO_ITEM_OPENING" || tx.source === "AUTO_ITEM_CLOSING") {
-      return;
-    }
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
     if (dateKey <= todayKey && !isRealized) return;
 
@@ -450,6 +455,9 @@ export default function AssetsDynamicsPage() {
   const [marketPricesByKey, setMarketPricesByKey] = useState<
     Record<string, Record<string, MarketPriceOut>>
   >({});
+  const [latestPricesByKey, setLatestPricesByKey] = useState<
+    Map<string, MarketPriceOut>
+  >(new Map());
   const [marketPricesLoading, setMarketPricesLoading] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
   const [rangeStart, setRangeStart] = useState("");
@@ -531,9 +539,9 @@ export default function AssetsDynamicsPage() {
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
-        if (linked) return linked.initial_value_rub;
+        if (linked) return linked.history_status === "NEW" ? 0 : linked.initial_value_rub;
       }
-      return item.initial_value_rub;
+      return item.history_status === "NEW" ? 0 : item.initial_value_rub;
     },
     [itemsById]
   );
@@ -769,6 +777,21 @@ export default function AssetsDynamicsPage() {
             byDate[price.price_date] = price;
           });
           next[key] = byDate;
+          
+          // Добавляем текущую цену для сегодняшней даты, если её нет в исторических данных
+          if (!byDate[todayKey]) {
+            try {
+              const latestPrice = await fetchMarketInstrumentPrice(
+                item.instrument_id,
+                item.instrument_board_id ?? undefined
+              );
+              if (latestPrice.price_date >= todayKey) {
+                byDate[todayKey] = latestPrice;
+              }
+            } catch (e) {
+              // Игнорируем ошибки
+            }
+          }
         } catch (e) {
           if (cancelled) return;
           next[key] = {};
@@ -794,18 +817,83 @@ export default function AssetsDynamicsPage() {
     }
   }, [moexItems.length, marketPricesLoading]);
 
+  // Загружаем текущие цены для MOEX активов (для сегодняшней даты)
+  useEffect(() => {
+    if (moexItems.length === 0) return;
+
+    let cancelled = false;
+    const loadLatestPrices = async () => {
+      const latest = new Map<string, MarketPriceOut>();
+      
+      for (const item of moexItems) {
+        if (!item.instrument_id || !item.instrument_board_id) continue;
+        const key = getMarketPriceKey(item);
+        if (!key) continue;
+        
+        try {
+          const price = await fetchMarketInstrumentPrice(
+            item.instrument_id,
+            item.instrument_board_id
+          );
+          if (cancelled) return;
+          latest.set(key, price);
+          
+          // Также добавляем текущую цену в исторические данные для сегодняшней даты
+          setMarketPricesByKey((prev) => {
+            const current = prev[key] || {};
+            // Обновляем цену на сегодняшнюю дату, если текущая цена более свежая
+            if (!current[todayKey] || price.price_date >= (current[todayKey]?.price_date || "")) {
+              return {
+                ...prev,
+                [key]: {
+                  ...current,
+                  [todayKey]: price,
+                },
+              };
+            }
+            return prev;
+          });
+        } catch (e) {
+          // Игнорируем ошибки для отдельных активов
+        }
+      }
+      
+      if (!cancelled) {
+        setLatestPricesByKey(latest);
+      }
+    };
+
+    loadLatestPrices();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moexItems, todayKey]);
+
   const latestMarketPriceByKey = useMemo(() => {
     const latest = new Map<string, MarketPriceOut>();
+    
+    // Сначала используем загруженные текущие цены (самые свежие)
+    latestPricesByKey.forEach((price, key) => {
+      latest.set(key, price);
+    });
+    
+    // Затем дополняем из исторических данных, если текущей цены нет
     Object.entries(marketPricesByKey).forEach(([key, byDate]) => {
+      if (latest.has(key)) return; // Уже есть текущая цена
+      
       let last: MarketPriceOut | null = null;
       Object.entries(byDate).forEach(([dateKey, price]) => {
         if (dateKey > todayKey) return;
-        if (!last || dateKey > last.price_date) last = price;
+        // Используем price_date из объекта price, а не dateKey из ключа
+        const priceDate = price.price_date;
+        if (!last || priceDate > last.price_date) last = price;
       });
       if (last) latest.set(key, last);
     });
+    
     return latest;
-  }, [marketPricesByKey, todayKey]);
+  }, [marketPricesByKey, latestPricesByKey, todayKey]);
 
   const marketPriceDatesByKey = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -942,18 +1030,27 @@ export default function AssetsDynamicsPage() {
           const lots =
             lotBalances.get(item.id) ?? initialLotsById.get(item.id) ?? 0;
           const priceKey = moexPriceKeyByItemId.get(item.id);
-          const priceByDate = priceKey ? marketPricesByKey[priceKey] : null;
-          const priceDates = priceKey
-            ? marketPriceDatesByKey.get(priceKey)
-            : undefined;
-          const price =
-            dateKey > todayKey
-              ? priceKey
-                ? latestMarketPriceByKey.get(priceKey)
-                : null
-              : priceByDate
-                ? findPriceOnOrBefore(priceByDate, priceDates, dateKey)
-                : null;
+          let price: MarketPriceOut | null = null;
+          
+          if (priceKey) {
+            // Для сегодняшней даты и будущих дат используем самую свежую цену
+            if (dateKey >= todayKey) {
+              // Сначала проверяем загруженные текущие цены
+              price = latestPricesByKey.get(priceKey) ?? null;
+              // Если нет текущей цены, используем последнюю из исторических
+              if (!price) {
+                price = latestMarketPriceByKey.get(priceKey) ?? null;
+              }
+            } else {
+              // Для прошлых дат ищем цену на эту дату или ближайшую предыдущую
+              const priceByDate = marketPricesByKey[priceKey];
+              const priceDates = marketPriceDatesByKey.get(priceKey);
+              if (priceByDate) {
+                price = findPriceOnOrBefore(priceByDate, priceDates, dateKey);
+              }
+            }
+          }
+          
           const unitPriceCents = computeInstrumentUnitPriceCents(item, price);
           if (unitPriceCents != null) {
             const lotSize = item.lot_size ?? 1;
@@ -1017,6 +1114,7 @@ export default function AssetsDynamicsPage() {
     getItemDisplayInitialCents,
     latestRatesByCurrency,
     latestMarketPriceByKey,
+    latestPricesByKey,
     earliestStartKey,
     rangeEndKey,
     rangeStartKey,

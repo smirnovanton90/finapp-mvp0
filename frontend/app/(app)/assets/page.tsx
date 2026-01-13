@@ -646,6 +646,8 @@ export default function Page() {
     Record<string, MarketPriceOut | null>
   >({});
   const [moexDatePricesLoading, setMoexDatePricesLoading] = useState(false);
+  const [moexMarketPrices, setMoexMarketPrices] = useState<Map<number, MarketPriceOut>>(new Map());
+  const [moexMarketPricesLoading, setMoexMarketPricesLoading] = useState(false);
   const [accountLast7, setAccountLast7] = useState("");
   const [contractNumber, setContractNumber] = useState("");
   const [openDate, setOpenDate] = useState(() => getTodayDateKey());
@@ -947,7 +949,48 @@ export default function Page() {
     []
   );
 
+  function computeInstrumentUnitPriceCents(
+    item: ItemOut,
+    price: MarketPriceOut | null
+  ): number | null {
+    if (!price) return null;
+    if (price.price_cents != null) {
+      if (item.type_code === "bonds") {
+        return price.price_cents + (price.accint_cents ?? 0);
+      }
+      return price.price_cents;
+    }
+    if (price.price_percent_bp != null && item.face_value_cents != null) {
+      const base = Math.round(
+        (item.face_value_cents * price.price_percent_bp) / 10000
+      );
+      return base + (price.accint_cents ?? 0);
+    }
+    return null;
+  }
+
   function getRubEquivalentCents(item: ItemOut): number | null {
+    // Для MOEX активов используем текущие рыночные цены (как на вкладке "Динамика стоимости активов")
+    const isMoexItem = MOEX_TYPE_CODES.includes(item.type_code);
+    if (isMoexItem && item.instrument_id && item.instrument_board_id) {
+      const marketPrice = moexMarketPrices.get(item.id);
+      if (marketPrice) {
+        const unitPriceCents = computeInstrumentUnitPriceCents(item, marketPrice);
+        if (unitPriceCents != null) {
+          const positionLots = item.position_lots ?? 0;
+          const lotSize = item.lot_size ?? 1;
+          const valueCents = unitPriceCents * positionLots * lotSize;
+          const valueCurrency = marketPrice.currency_code ?? item.currency_code;
+          const rate = valueCurrency === "RUB" ? 1.0 : rateByCode[valueCurrency];
+          if (rate == null) return null;
+          return Math.round((valueCents / 100) * rate * 100);
+        }
+      }
+      // Если рыночная цена не загружена, возвращаем null
+      return null;
+    }
+    
+    // Для обычных активов/обязательств используем текущее значение из БД
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
     const amount = Math.abs(getItemDisplayBalanceCents(item)) / 100;
@@ -1292,7 +1335,7 @@ export default function Page() {
   const repaymentAccountItems = useMemo(() => {
     const filtered = activeAssetItems.filter((item) => {
       if (editingItem && item.id === editingItem.id) return false;
-      if (item.type_code !== "bank_account") return false;
+      if (!CASH_TYPES.includes(item.type_code)) return false;
       if (currencyCode && item.currency_code !== currencyCode) return false;
       return true;
     });
@@ -1765,6 +1808,44 @@ export default function Page() {
     }
   }
 
+  async function loadMoexMarketPrices() {
+    const moexItems = items.filter(
+      (item) =>
+        !item.closed_at &&
+        !item.archived_at &&
+        MOEX_TYPE_CODES.includes(item.type_code) &&
+        item.instrument_id &&
+        item.instrument_board_id
+    );
+    if (moexItems.length === 0) {
+      setMoexMarketPrices(new Map());
+      return;
+    }
+
+    setMoexMarketPricesLoading(true);
+    try {
+      const pricesMap = new Map<number, MarketPriceOut>();
+      await Promise.all(
+        moexItems.map(async (item) => {
+          try {
+            const price = await fetchMarketInstrumentPrice(
+              item.instrument_id!,
+              item.instrument_board_id || undefined
+            );
+            pricesMap.set(item.id, price);
+          } catch {
+            // Игнорируем ошибки для отдельных активов
+          }
+        })
+      );
+      setMoexMarketPrices(pricesMap);
+    } catch (e: any) {
+      // Игнорируем ошибки загрузки цен
+    } finally {
+      setMoexMarketPricesLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (session) {
       loadItems();
@@ -1774,6 +1855,12 @@ export default function Page() {
       loadCounterparties();
     }
   }, [session]);
+
+  useEffect(() => {
+    if (items.length > 0) {
+      loadMoexMarketPrices();
+    }
+  }, [items]);
 
   useEffect(() => {
     if (!isCreateOpen || !showCounterpartyField || counterparties.length || counterpartyLoading) return;
@@ -2669,8 +2756,8 @@ export default function Page() {
         setFormError("Счет погашения не найден.");
         return;
       }
-      if (repaymentAccount.type_code !== "bank_account") {
-        setFormError("Счет погашения должен быть банковским счетом.");
+      if (!CASH_TYPES.includes(repaymentAccount.type_code)) {
+        setFormError("Счет погашения должен быть денежным активом.");
         return;
       }
       if (repaymentAccount.currency_code !== currencyCode) {
@@ -2956,6 +3043,7 @@ export default function Page() {
     isLiability = false,
     icon: Icon,
     onAdd,
+    isInvestmentAssets = false,
   }: {
     title: string;
     items: ItemOut[];
@@ -2963,6 +3051,7 @@ export default function Page() {
     isLiability?: boolean;
     icon?: React.ComponentType<{ className?: string; strokeWidth?: number }>;
     onAdd?: () => void;
+    isInvestmentAssets?: boolean;
   }) {
     const accountIds = new Set<number>();
     categoryItems.forEach((item) => {
@@ -3017,34 +3106,35 @@ export default function Page() {
               Пока нет записей
             </div>
           ) : (
-            <Table className="w-full table-fixed">
+            <Table className="w-full">
               <TableHeader className="[&_tr]:border-b-2 [&_tr]:border-border/70">
                 <TableRow className="border-b-2 border-border/70">
-                  <TableHead className="w-40 min-w-40 pl-6 font-medium text-muted-foreground whitespace-normal">
+                  <TableHead className="pl-6 font-medium text-muted-foreground whitespace-normal">
                     Название
                   </TableHead>
-                  <TableHead className="w-10 min-w-10 font-medium text-muted-foreground text-center whitespace-normal">
+                  <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
                     
                   </TableHead>
-                  <TableHead className="w-16 min-w-16 font-medium text-muted-foreground text-center whitespace-normal">
+                  <TableHead className="font-medium text-muted-foreground whitespace-normal text-center">
+                    Дата появления / Статус
+                  </TableHead>
+                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
+                    {isInvestmentAssets
+                      ? "Текущая сумма в валюте/количество лотов"
+                      : "Текущая сумма в валюте"}
+                  </TableHead>
+                  <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
                     
                   </TableHead>
-                  <TableHead className="w-28 min-w-28 font-medium text-muted-foreground whitespace-normal text-center">
-                    Дата появления
+                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
+                    {isInvestmentAssets
+                      ? "Актуальный курс валюты/стоимость одного лота"
+                      : "Актуальный курс валюты"}
                   </TableHead>
-                  <TableHead className="w-24 min-w-24 font-medium text-muted-foreground whitespace-normal text-center">
-                    Статус
-                  </TableHead>
-                  <TableHead className="w-36 min-w-36 text-right font-medium text-muted-foreground whitespace-normal">
-                    Текущая сумма в валюте
-                  </TableHead>
-                  <TableHead className="w-24 min-w-24 text-right font-medium text-muted-foreground whitespace-normal">
-                    Актуальный курс валюты
-                  </TableHead>
-                  <TableHead className="w-36 min-w-36 text-right font-medium text-muted-foreground whitespace-normal">
+                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
                     Текущая сумма в руб. экв.
                   </TableHead>
-                  <TableHead className="w-12 min-w-12 pr-6" />
+                  <TableHead className="pr-6" />
                 </TableRow>
               </TableHeader>
 
@@ -3112,6 +3202,8 @@ export default function Page() {
                     : isClosed
                     ? "text-slate-400"
                     : "text-violet-600";
+                  const isMoexItem = MOEX_TYPE_CODES.includes(it.type_code);
+                  const moexMarketPrice = isMoexItem ? moexMarketPrices.get(it.id) : null;
 
                   return (
                     <TableRow
@@ -3120,7 +3212,7 @@ export default function Page() {
                     >
                       <TableCell
                         className={[
-                          "w-40 min-w-40 whitespace-normal break-words",
+                          "whitespace-normal break-words",
                           isLinkedCard ? "pl-12" : "pl-6",
                         ].join(" ")}
                       >
@@ -3152,9 +3244,7 @@ export default function Page() {
                       </TableCell>
 
                       <TableCell
-                        className={["w-10 min-w-10 text-center text-sm", mutedToneClass].join(
-                          " "
-                        )}
+                        className={["text-center text-sm", mutedToneClass].join(" ")}
                       >
                         {!isLinkedCard && counterpartyLogoUrl ? (
                           <img
@@ -3170,9 +3260,55 @@ export default function Page() {
                       </TableCell>
 
                       <TableCell
-                        className={["w-16 min-w-16 text-center text-sm", mutedToneClass].join(
-                          " "
-                        )}
+                        className={["text-center text-sm", mutedToneClass].join(" ")}
+                      >
+                        <div className="flex flex-col items-center gap-1">
+                          <span>{openDateLabel}</span>
+                          {historyStatus ? (
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                historyStatus === "NEW"
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-slate-100 text-slate-700"
+                              }`}
+                            >
+                              {historyStatus === "NEW" ? "Новый" : "Исторический"}
+                            </span>
+                          ) : (
+                            <span className={["text-sm", mutedToneClass].join(" ")}>-</span>
+                          )}
+                        </div>
+                      </TableCell>
+
+                      <TableCell
+                        className={[
+                          "text-right font-semibold tabular-nums",
+                          isArchived
+                            ? "text-slate-400"
+                            : isClosed
+                            ? "text-slate-400"
+                            : isLiability
+                            ? "text-red-600"
+                            : "",
+                        ].join(" ")}
+                      >
+                        {isLinkedCard
+                          ? "-"
+                          : isInvestmentAssets && isMoexItem
+                          ? it.position_lots != null
+                            ? `${new Intl.NumberFormat("ru-RU").format(it.position_lots)} шт.`
+                            : "-"
+                          : isInvestmentAssets && !isMoexItem
+                          ? isLiability
+                            ? `${formatAmount(Math.abs(displayBalanceCents))} ${currencyCode}`
+                            : `${formatAmount(displayBalanceCents)} ${currencyCode}`
+                          : isLiability
+                          ? `-${formatAmount(Math.abs(displayBalanceCents))}`
+                          : formatAmount(displayBalanceCents)}
+                      </TableCell>
+
+                      <TableCell
+                        className={["text-center text-sm", mutedToneClass].join(" ")}
                       >
                         {isLinkedCard ? (
                           "-"
@@ -3192,59 +3328,36 @@ export default function Page() {
                       </TableCell>
 
                       <TableCell
-                        className={["w-28 min-w-28 text-center text-sm", mutedToneClass].join(
-                          " "
-                        )}
-                      >
-                        {openDateLabel}
-                      </TableCell>
-
-                      <TableCell className="w-24 min-w-24 text-center text-sm">
-                        {historyStatus ? (
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                              historyStatus === "NEW"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-slate-100 text-slate-700"
-                            }`}
-                          >
-                            {historyStatus === "NEW" ? "Новый" : "Исторический"}
-                          </span>
-                        ) : (
-                          <span className={["text-sm", mutedToneClass].join(" ")}>-</span>
-                        )}
-                      </TableCell>
-
-                      <TableCell
-                        className={[
-                          "w-36 min-w-36 text-right font-semibold tabular-nums",
-                          isArchived
-                            ? "text-slate-400"
-                            : isClosed
-                            ? "text-slate-400"
-                            : isLiability
-                            ? "text-red-600"
-                            : "",
-                        ].join(" ")}
+                        className={["text-right text-sm", mutedToneClass].join(" ")}
                       >
                         {isLinkedCard
                           ? "-"
-                          : isLiability
-                          ? `-${formatAmount(Math.abs(displayBalanceCents))}`
-                          : formatAmount(displayBalanceCents)}
-                      </TableCell>
-
-                      <TableCell
-                        className={["w-24 min-w-24 text-right text-sm", mutedToneClass].join(
-                          " "
-                        )}
-                      >
-                        {isLinkedCard ? "-" : rate ? formatRate(rate) : "-"}
+                          : isInvestmentAssets && isMoexItem
+                          ? moexMarketPrice && moexMarketPrice.price_cents != null
+                            ? (() => {
+                                const lotSize = it.lot_size ?? 1;
+                                const unitPrice = moexMarketPrice.price_cents;
+                                const accint =
+                                  it.type_code === "bonds"
+                                    ? moexMarketPrice.accint_cents ?? 0
+                                    : 0;
+                                const lotPriceCents = Math.round((unitPrice + accint) * lotSize);
+                                return formatMoney(
+                                  lotPriceCents,
+                                  moexMarketPrice.currency_code ?? currencyCode
+                                );
+                              })()
+                            : moexMarketPricesLoading
+                            ? "..."
+                            : "-"
+                          : rate
+                          ? formatRate(rate)
+                          : "-"}
                       </TableCell>
 
                       <TableCell
                         className={[
-                          "w-36 min-w-36 text-right font-semibold tabular-nums",
+                          "text-right font-semibold tabular-nums",
                           isArchived
                             ? "text-slate-400"
                             : isClosed
@@ -3263,7 +3376,7 @@ export default function Page() {
                           : formatRub(rubEquivalent)}
                       </TableCell>
 
-                      <TableCell className="w-12 min-w-12 pr-6 text-right">
+                      <TableCell className="pr-6 text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -4455,6 +4568,7 @@ export default function Page() {
             total={investmentTotal}
             icon={TrendingUp}
             onAdd={() => openCreateModal("ASSET", INVESTMENT_TYPES)}
+            isInvestmentAssets={true}
           />
         )}
 

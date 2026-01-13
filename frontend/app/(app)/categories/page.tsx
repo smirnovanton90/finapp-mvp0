@@ -510,7 +510,7 @@ export default function CategoriesPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)}>
+              <Button type="button" variant="outline" className="border-2 border-border/70 bg-white shadow-none" onClick={() => setIsAddOpen(false)}>
                 Отмена
               </Button>
               <Button type="submit" className="bg-violet-600 text-white hover:bg-violet-700">
@@ -598,7 +598,7 @@ export default function CategoriesPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => setEditTarget(null)}>
+              <Button type="button" variant="outline" className="border-2 border-border/70 bg-white shadow-none" onClick={() => setEditTarget(null)}>
                 Отмена
               </Button>
               <Button

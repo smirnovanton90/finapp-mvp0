@@ -4201,7 +4201,7 @@ export default function Page() {
             )}
 
             {showPlanSection && (
-              <div className={`rounded-lg border border-border/70 bg-slate-50/60 ${planEnabled ? 'p-4 grid gap-4' : 'p-4'}`}>
+              <div className={`rounded-lg border border-border/70 bg-slate-50/60 ${planEnabled ? 'p-4 grid gap-4' : 'p-4 self-start'}`}>
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="text-sm font-medium">Плановые транзакции</div>

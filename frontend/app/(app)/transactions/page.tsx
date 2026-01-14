@@ -46,6 +46,7 @@ import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tooltip } from "@/components/ui/tooltip";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import {
@@ -1503,43 +1504,47 @@ function TransactionCardRow({
 
         <div className="flex items-center gap-2">
           {tx.isDeleted && (
-            <span className="inline-flex items-center text-slate-400" title="Удалена">
-              <Ban className="h-4 w-4" />
-            </span>
+            <Tooltip content="Удалена">
+              <span className="inline-flex items-center text-slate-400" aria-label="Удалена">
+                <Ban className="h-4 w-4" />
+              </span>
+            </Tooltip>
           )}
 
           <div className="flex flex-col items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className={`hover:bg-transparent ${statusBaseClass} ${statusHoverClass}`}
-              aria-label={statusHint}
-              title={statusHint}
-              onClick={() => onConfirm(tx)}
-              disabled={
-                tx.isDeleted ||
-                isDeleting ||
-                isConfirming ||
-                isConfirmed ||
-                isRealized
-              }
-            >
-              <StatusIcon className="h-4 w-4" />
-            </Button>
-            {canRealize && (
+            <Tooltip content={statusHint}>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
-                aria-label="Реализовать"
-                title="Реализовать"
-                onClick={(event) =>
-                  onRealize(tx, event.currentTarget as HTMLElement)
+                className={`hover:bg-transparent ${statusBaseClass} ${statusHoverClass}`}
+                aria-label={statusHint}
+                onClick={() => onConfirm(tx)}
+                disabled={
+                  tx.isDeleted ||
+                  isDeleting ||
+                  isConfirming ||
+                  isConfirmed ||
+                  isRealized
                 }
-                disabled={isRealizeDisabled}
               >
-                <Sparkles className="h-4 w-4" />
+                <StatusIcon className="h-4 w-4" />
               </Button>
+            </Tooltip>
+            {canRealize && (
+              <Tooltip content="Реализовать">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
+                  aria-label="Реализовать"
+                  onClick={(event) =>
+                    onRealize(tx, event.currentTarget as HTMLElement)
+                  }
+                  disabled={isRealizeDisabled}
+                >
+                  <Sparkles className="h-4 w-4" />
+                </Button>
+              </Tooltip>
             )}
           </div>
 

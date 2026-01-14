@@ -41,6 +41,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -1039,11 +1040,12 @@ export default function CounterpartiesPage() {
                                 {title}
                               </CardTitle>
                               {isUser && (
-                                <User
-                                  className="h-3.5 w-3.5 shrink-0 text-slate-400"
-                                  aria-label="Пользовательский контрагент"
-                                  title="Пользовательский контрагент"
-                                />
+                                <Tooltip content="Пользовательский контрагент">
+                                  <User
+                                    className="h-3.5 w-3.5 shrink-0 text-slate-400"
+                                    aria-label="Пользовательский контрагент"
+                                  />
+                                </Tooltip>
                               )}
                             </div>
                           </div>

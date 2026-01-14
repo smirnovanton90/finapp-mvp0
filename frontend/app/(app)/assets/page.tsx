@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1264,10 +1265,10 @@ export default function Page() {
   );
   const openingCounterpartyLabel =
     kind === "LIABILITY"
-      ? "\u0410\u043a\u0442\u0438\u0432 \u0434\u043b\u044f \u0437\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u0438\u044f (\u043e\u043f\u0446\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u043e)"
+      ? "\u0410\u043a\u0442\u0438\u0432 \u0434\u043b\u044f \u0437\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u0438\u044f"
       : "\u0410\u043a\u0442\u0438\u0432-\u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0441\u0440\u0435\u0434\u0441\u0442\u0432";
-  const openingWarning =
-    showOpeningCounterparty && !openingCounterpartyId
+  const openingHint =
+    showOpeningCounterparty
       ? kind === "LIABILITY"
         ? "Если не выбрать актив, будет создана фактическая транзакция с категорией «Прочие расходы»."
         : "Если не выбрать актив, будет создана фактическая транзакция с категорией «Прочие доходы»."
@@ -3510,7 +3511,7 @@ export default function Page() {
               <div className="grid gap-4">
             {isGeneralCreate && (
               <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
                   <button
                     type="button"
                     aria-pressed={kind === "ASSET"}
@@ -3603,7 +3604,7 @@ export default function Page() {
 
 
             {isMoexType && (
-              <div className="grid gap-3 rounded-lg border border-dashed border-border/60 p-3">
+              <div className="grid gap-3 rounded-lg border-2 border-border/70 bg-white p-3">
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
                     <Label>Ценная бумага</Label>
@@ -3814,13 +3815,17 @@ export default function Page() {
             <div className="grid gap-2">
               <div className="flex items-center gap-2">
                 <Label>{openDateLabel}</Label>
-                <span
-                  className="text-muted-foreground"
-                  title={openDateHelpText}
-                  aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u0434\u0430\u0442\u0435 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f"
+                <Tooltip
+                  content={openDateHelpText}
+                  contentClassName="w-80 max-w-[calc(100vw-2rem)]"
                 >
-                  <Info className="h-4 w-4" />
-                </span>
+                  <span
+                    className="text-muted-foreground"
+                    aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u0434\u0430\u0442\u0435 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f"
+                  >
+                    <Info className="h-4 w-4" />
+                  </span>
+                </Tooltip>
               </div>
               <Input
                 type="date"
@@ -3891,7 +3896,7 @@ export default function Page() {
             </div>
             <div className="grid content-start gap-4">
             {showMoexPricing && (
-              <div className="rounded-lg border border-violet-200/70 bg-violet-50/40 p-3 text-sm">
+              <div className="rounded-lg border-2 border-border/70 bg-white p-3 text-sm">
                 <div className="font-medium">
                   {"MOEX: \u0446\u0435\u043d\u044b \u0438 \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c"}
                 </div>
@@ -3957,7 +3962,7 @@ export default function Page() {
               </div>
             )}
             {showMoexCommission && (
-              <div className="rounded-lg border border-border/70 bg-slate-50/60 p-3 text-sm">
+              <div className="rounded-lg border-2 border-border/70 bg-white p-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div className="font-medium">
                     {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u043f\u0440\u0438 \u043f\u043e\u043a\u0443\u043f\u043a\u0435"}
@@ -4445,7 +4450,22 @@ export default function Page() {
             )}
             {showOpeningCounterparty && (
               <div className="grid gap-2">
-                <Label>{openingCounterpartyLabel}</Label>
+                <div className="flex items-center gap-2">
+                  <Label>{openingCounterpartyLabel}</Label>
+                  {openingHint && (
+                    <Tooltip
+                      content={openingHint}
+                      contentClassName="w-80 max-w-[calc(100vw-2rem)]"
+                    >
+                      <span
+                        className="text-muted-foreground"
+                        aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u043f\u043e\u043b\u044e \u0430\u043a\u0442\u0438\u0432\u0430"
+                      >
+                        <Info className="h-4 w-4" />
+                      </span>
+                    </Tooltip>
+                  )}
+                </div>
                 <ItemSelector
                   items={openingCounterpartyItems}
                   selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
@@ -4464,12 +4484,6 @@ export default function Page() {
                   itemCounts={itemTxCounts}
                   ariaLabel={openingCounterpartyLabel}
                 />
-                {openingWarning && (
-                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">
-                    <AlertCircle className="mt-0.5 h-4 w-4" />
-                    <span>{openingWarning}</span>
-                  </div>
-                )}
               </div>
             )}
 

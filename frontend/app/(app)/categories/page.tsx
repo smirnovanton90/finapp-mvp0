@@ -16,6 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -174,11 +175,12 @@ function CategoryTree({
                       {node.name}
                     </span>
                     {isUserCategory && (
-                      <User
-                        className="h-3.5 w-3.5 shrink-0 text-slate-400"
-                        aria-label="Пользовательская категория"
-                        title="Пользовательская категория"
-                      />
+                      <Tooltip content="Пользовательская категория">
+                        <User
+                          className="h-3.5 w-3.5 shrink-0 text-slate-400"
+                          aria-label="Пользовательская категория"
+                        />
+                      </Tooltip>
                     )}
                   </span>
                 </div>
@@ -708,4 +710,3 @@ export default function CategoriesPage() {
     </main>
   );
 }
-

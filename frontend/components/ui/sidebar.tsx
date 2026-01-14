@@ -20,6 +20,7 @@ import {
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useSidebar } from "./sidebar-context";
 import { useOnboarding } from "@/components/onboarding-context";
 import { useAccountingStart } from "@/components/accounting-start-context";
@@ -100,7 +101,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 flex h-screen flex-col overflow-hidden rounded-none rounded-r-3xl border border-white/10 bg-gradient-to-b from-[#8D63FF] via-[#7A58F3] to-[#5A5FF0] text-white shadow-xl transition-all duration-300",
+        "fixed left-0 top-0 flex h-screen flex-col overflow-visible rounded-none rounded-r-3xl border border-white/10 bg-gradient-to-b from-[#8D63FF] via-[#7A58F3] to-[#5A5FF0] text-white shadow-xl transition-all duration-300",
         isCollapsed ? "w-16" : "w-72"
       )}
     >
@@ -137,36 +138,45 @@ export function Sidebar() {
           if (item.children?.length) {
             const showChildren = isReportsOpen && !isCollapsed;
 
-            return (
-              <div key={item.href} className="flex flex-col">
-                <button
-                  type="button"
-                  onClick={() => setIsReportsOpen((prev) => !prev)}
+            const trigger = (
+              <button
+                type="button"
+                onClick={() => setIsReportsOpen((prev) => !prev)}
+                className={cn(
+                  "relative flex w-full items-center gap-3 py-2 text-base font-semibold transition-colors",
+                  isCollapsed ? "justify-center px-0" : "pl-7 pr-5",
+                  active
+                    ? "text-white before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-white before:content-['']"
+                    : "text-white/80 hover:text-white"
+                )}
+              >
+                <Icon
                   className={cn(
-                    "relative flex w-full items-center gap-3 py-2 text-base font-semibold transition-colors",
-                    isCollapsed ? "justify-center px-0" : "pl-7 pr-5",
-                    active
-                      ? "text-white before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-white before:content-['']"
-                      : "text-white/80 hover:text-white"
+                    "h-6 w-6 flex-shrink-0",
+                    active ? "text-white" : "text-white/90"
                   )}
-                  title={isCollapsed ? item.label : undefined}
-                >
-                  <Icon
+                />
+                {!isCollapsed && <span>{item.label}</span>}
+                {!isCollapsed && (
+                  <ChevronDown
                     className={cn(
-                      "h-6 w-6 flex-shrink-0",
-                      active ? "text-white" : "text-white/90"
+                      "ml-auto h-4 w-4 transition-transform",
+                      isReportsOpen ? "rotate-0" : "-rotate-90"
                     )}
                   />
-                  {!isCollapsed && <span>{item.label}</span>}
-                  {!isCollapsed && (
-                    <ChevronDown
-                      className={cn(
-                        "ml-auto h-4 w-4 transition-transform",
-                        isReportsOpen ? "rotate-0" : "-rotate-90"
-                      )}
-                    />
-                  )}
-                </button>
+                )}
+              </button>
+            );
+
+            return (
+              <div key={item.href} className="flex flex-col">
+                {isCollapsed ? (
+                  <Tooltip content={item.label} side="right" className="flex w-full">
+                    {trigger}
+                  </Tooltip>
+                ) : (
+                  trigger
+                )}
                 {showChildren && (
                   <div className="flex flex-col gap-1 pb-1 pl-12 pr-5">
                     {item.children.map((child) => {
@@ -195,9 +205,8 @@ export function Sidebar() {
             );
           }
 
-          return (
+          const link = (
             <Link
-              key={item.href}
               href={item.href}
               className={cn(
                 "relative flex w-full items-center gap-3 py-2 text-base font-semibold transition-colors",
@@ -206,12 +215,34 @@ export function Sidebar() {
                   ? "text-white before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-white before:content-['']"
                   : "text-white/80 hover:text-white"
               )}
-              title={isCollapsed ? item.label : undefined}
             >
               <Icon
                 className={cn("h-6 w-6 flex-shrink-0", active ? "text-white" : "text-white/90")}
               />
               {!isCollapsed && <span>{item.label}</span>}
+            </Link>
+          );
+
+          return isCollapsed ? (
+            <Tooltip key={item.href} content={item.label} side="right" className="flex w-full">
+              {link}
+            </Tooltip>
+          ) : (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "relative flex w-full items-center gap-3 py-2 text-base font-semibold transition-colors",
+                "pl-7 pr-5",
+                active
+                  ? "text-white before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-white before:content-['']"
+                  : "text-white/80 hover:text-white"
+              )}
+            >
+              <Icon
+                className={cn("h-6 w-6 flex-shrink-0", active ? "text-white" : "text-white/90")}
+              />
+              <span>{item.label}</span>
             </Link>
           );
         })}
@@ -225,30 +256,60 @@ export function Sidebar() {
             </div>
           </div>
         )}
-        <Button
-          variant="ghost"
-          className={cn(
-            "mb-2 w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
-            isCollapsed ? "px-0" : "px-4"
-          )}
-          onClick={() => startOnboarding()}
-          title={isCollapsed ? "Познакомиться с приложением" : undefined}
-        >
-          {!isCollapsed && <span>Познакомиться с приложением</span>}
-          {isCollapsed && <span>?</span>}
-        </Button>
-        <Button
-          variant="ghost"
-          className={cn(
-            "w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
-            isCollapsed ? "px-0" : "px-4"
-          )}
-          onClick={() => signOut()}
-          title={isCollapsed ? "\u0412\u044b\u0439\u0442\u0438" : undefined}
-        >
-          <LogOut className={cn("h-4 w-4 flex-shrink-0", isCollapsed ? "" : "hidden")} />
-          {!isCollapsed && <span>{"\u0412\u044b\u0439\u0442\u0438"}</span>}
-        </Button>
+        {isCollapsed ? (
+          <Tooltip
+            content="\u041f\u043e\u0437\u043d\u0430\u043a\u043e\u043c\u0438\u0442\u044c\u0441\u044f \u0441 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435\u043c"
+            side="right"
+            className="flex w-full"
+          >
+            <Button
+              variant="ghost"
+              className={cn(
+                "mb-2 w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+                "px-0"
+              )}
+              onClick={() => startOnboarding()}
+            >
+              <span>?</span>
+            </Button>
+          </Tooltip>
+        ) : (
+          <Button
+            variant="ghost"
+            className={cn(
+              "mb-2 w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+              "px-4"
+            )}
+            onClick={() => startOnboarding()}
+          >
+            <span>Познакомиться с приложением</span>
+          </Button>
+        )}
+        {isCollapsed ? (
+          <Tooltip content="\u0412\u044b\u0439\u0442\u0438" side="right" className="flex w-full">
+            <Button
+              variant="ghost"
+              className={cn(
+                "w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+                "px-0"
+              )}
+              onClick={() => signOut()}
+            >
+              <LogOut className="h-4 w-4 flex-shrink-0" />
+            </Button>
+          </Tooltip>
+        ) : (
+          <Button
+            variant="ghost"
+            className={cn(
+              "w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+              "px-4"
+            )}
+            onClick={() => signOut()}
+          >
+            <span>{"\u0412\u044b\u0439\u0442\u0438"}</span>
+          </Button>
+        )}
       </div>
     </aside>
   );

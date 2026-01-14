@@ -450,7 +450,7 @@ def _ensure_accounting_start_date(user: User) -> date_type:
 
 
 def _resolve_history_status(open_date: date_type, accounting_start_date: date_type) -> str:
-    return "NEW" if open_date > accounting_start_date else "HISTORICAL"
+    return "NEW" if open_date >= accounting_start_date else "HISTORICAL"
 
 
 def _resolve_opening_counterparty(
@@ -583,7 +583,7 @@ def set_accounting_start_date(
             update items
                set start_date = :start_date,
                    history_status = case
-                       when open_date > :start_date then 'NEW'
+                       when open_date >= :start_date then 'NEW'
                        else 'HISTORICAL'
                    end
              where user_id = :user_id

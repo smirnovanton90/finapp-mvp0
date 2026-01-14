@@ -1194,7 +1194,7 @@ export default function Page() {
   );
   const resolvedHistoryStatus = useMemo(() => {
     if (openDate && accountingStartDate) {
-      return openDate > accountingStartDate ? "NEW" : "HISTORICAL";
+      return openDate >= accountingStartDate ? "NEW" : "HISTORICAL";
     }
     return editingItem?.history_status ?? null;
   }, [openDate, accountingStartDate, editingItem]);
@@ -1211,8 +1211,9 @@ export default function Page() {
     resolvedHistoryStatus === "NEW" &&
     (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
   const showMoexPricing = isMoexType && kind === "ASSET";
-  const showMoexCommission = isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW";
-  const commissionAllowed = showMoexCommission && hasNonZeroLots;
+  const showMoexCommission =
+    isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW" && hasNonZeroLots;
+  const commissionAllowed = showMoexCommission;
   const showMoexStartDatePricing =
     showMoexPricing &&
     resolvedHistoryStatus === "HISTORICAL" &&
@@ -3964,20 +3965,22 @@ export default function Page() {
             {showMoexCommission && (
               <div className="rounded-lg border-2 border-border/70 bg-white p-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium">
+                  <div className="flex items-center gap-2 font-medium">
                     {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u043f\u0440\u0438 \u043f\u043e\u043a\u0443\u043f\u043a\u0435"}
+                    <Tooltip content="Создать фактическую транзакцию по оплате комиссии за покупку ценной бумаги">
+                      <span
+                        className="text-muted-foreground"
+                        aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"
+                      >
+                        <Info className="h-4 w-4" />
+                      </span>
+                    </Tooltip>
                   </div>
                   <Switch
                     checked={commissionEnabled}
                     onCheckedChange={setCommissionEnabled}
-                    disabled={!commissionAllowed}
                   />
                 </div>
-                {!commissionAllowed && (
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u043f\u0440\u0438 \u043a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u0435 \u043b\u043e\u0442\u043e\u0432 \u0431\u043e\u043b\u044c\u0448\u0435 0."}
-                  </div>
-                )}
                 {commissionEnabled && (
                   <div className="mt-3 grid gap-2">
                     <div className="grid gap-2">
@@ -4449,41 +4452,43 @@ export default function Page() {
               </div>
             )}
             {showOpeningCounterparty && (
-              <div className="grid gap-2">
-                <div className="flex items-center gap-2">
-                  <Label>{openingCounterpartyLabel}</Label>
-                  {openingHint && (
-                    <Tooltip
-                      content={openingHint}
-                      contentClassName="w-80 max-w-[calc(100vw-2rem)]"
-                    >
-                      <span
-                        className="text-muted-foreground"
-                        aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u043f\u043e\u043b\u044e \u0430\u043a\u0442\u0438\u0432\u0430"
+              <div className="rounded-lg border-2 border-border/70 bg-white p-3">
+                <div className="grid gap-2">
+                  <div className="flex items-center gap-2">
+                    <Label>{openingCounterpartyLabel}</Label>
+                    {openingHint && (
+                      <Tooltip
+                        content={openingHint}
+                        contentClassName="w-80 max-w-[calc(100vw-2rem)]"
                       >
-                        <Info className="h-4 w-4" />
-                      </span>
-                    </Tooltip>
-                  )}
+                        <span
+                          className="text-muted-foreground"
+                          aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u043f\u043e\u043b\u044e \u0430\u043a\u0442\u0438\u0432\u0430"
+                        >
+                          <Info className="h-4 w-4" />
+                        </span>
+                      </Tooltip>
+                    )}
+                  </div>
+                  <ItemSelector
+                    items={openingCounterpartyItems}
+                    selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
+                    onChange={(ids) => {
+                      const nextId = ids[0] ?? null;
+                      setOpeningCounterpartyId(nextId ? String(nextId) : "");
+                    }}
+                    selectionMode="single"
+                    placeholder="Выберите актив"
+                    clearLabel="Не выбрано"
+                    getItemTypeLabel={getItemTypeLabel}
+                    getItemKind={resolveItemEffectiveKind}
+                    getItemBalance={getItemDisplayBalanceCents}
+                    getBankLogoUrl={itemCounterpartyLogoUrl}
+                    getBankName={itemCounterpartyName}
+                    itemCounts={itemTxCounts}
+                    ariaLabel={openingCounterpartyLabel}
+                  />
                 </div>
-                <ItemSelector
-                  items={openingCounterpartyItems}
-                  selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
-                  onChange={(ids) => {
-                    const nextId = ids[0] ?? null;
-                    setOpeningCounterpartyId(nextId ? String(nextId) : "");
-                  }}
-                  selectionMode="single"
-                  placeholder="Выберите актив"
-                  clearLabel="Не выбрано"
-                  getItemTypeLabel={getItemTypeLabel}
-                  getItemKind={resolveItemEffectiveKind}
-                  getItemBalance={getItemDisplayBalanceCents}
-                  getBankLogoUrl={itemCounterpartyLogoUrl}
-                  getBankName={itemCounterpartyName}
-                  itemCounts={itemTxCounts}
-                  ariaLabel={openingCounterpartyLabel}
-                />
               </div>
             )}
 

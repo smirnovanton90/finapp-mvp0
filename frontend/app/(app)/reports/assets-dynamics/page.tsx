@@ -1173,8 +1173,8 @@ export default function AssetsDynamicsPage() {
   const innerHeight = height - padding.top - padding.bottom;
 
   const values = chartData.map((point) => point.value);
-  const minValue = values.length ? Math.min(...values, 0) : 0;
-  const maxValue = values.length ? Math.max(...values, 0) : 0;
+  const minValue = values.length ? Math.min(...values) : 0;
+  const maxValue = values.length ? Math.max(...values) : 0;
   const rangePadding = Math.max((maxValue - minValue) * 0.12, 1);
   const paddedMin = minValue - rangePadding;
   const paddedMax = maxValue + rangePadding;

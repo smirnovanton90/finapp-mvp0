@@ -1335,7 +1335,7 @@ export default function FinancialPlanningPage() {
             </div>
 
             <div className="grid gap-2" role="group" aria-label="Направление">
-              <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+              <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border border-input bg-muted/60 p-0.5">
                 <button
                   type="button"
                   aria-pressed={isIncome}

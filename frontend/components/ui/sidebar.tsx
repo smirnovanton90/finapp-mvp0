@@ -189,7 +189,7 @@ export function Sidebar() {
                           key={child.href}
                           href={child.href}
                           className={cn(
-                            "rounded-md py-1.5 text-sm font-medium transition-colors",
+                            "rounded-full py-1.5 text-sm font-medium transition-colors",
                             childActive
                               ? "text-white"
                               : "text-white/75 hover:text-white"
@@ -265,7 +265,7 @@ export function Sidebar() {
             <Button
               variant="ghost"
               className={cn(
-                "mb-2 w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+                "mb-2 w-full justify-center rounded-full border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
                 "px-0"
               )}
               onClick={() => startOnboarding()}
@@ -277,7 +277,7 @@ export function Sidebar() {
           <Button
             variant="ghost"
             className={cn(
-              "mb-2 w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+              "mb-2 w-full justify-center rounded-full border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
               "px-4"
             )}
             onClick={() => startOnboarding()}
@@ -290,7 +290,7 @@ export function Sidebar() {
             <Button
               variant="ghost"
               className={cn(
-                "w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+                "w-full justify-center rounded-full border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
                 "px-0"
               )}
               onClick={() => signOut()}
@@ -302,7 +302,7 @@ export function Sidebar() {
           <Button
             variant="ghost"
             className={cn(
-              "w-full justify-center rounded-md border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+              "w-full justify-center rounded-full border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
               "px-4"
             )}
             onClick={() => signOut()}

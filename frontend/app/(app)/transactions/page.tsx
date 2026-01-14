@@ -2212,7 +2212,7 @@ export function TransactionsView({
   }, [counterpartyIsMoex, counterpartyQuantityLots, isTransfer]);
 
   const segmentedButtonBase =
-    "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
+    "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
   const isDialogOpen = dialogMode !== null;
   const isEditMode = dialogMode === "edit";
   const isBulkEdit = dialogMode === "bulk-edit";
@@ -4077,7 +4077,7 @@ export function TransactionsView({
 
                     {!isBulkEdit && !isRealizeMode && (
                       <div className="grid gap-2" role="group" aria-label="Тип транзакции">
-                        <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+                        <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border border-input bg-muted/60 p-0.5">
                           <button
                             type="button"
                             aria-pressed={isActualTransaction}

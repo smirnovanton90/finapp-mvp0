@@ -19,10 +19,10 @@ export default function LoginPage() {
           >
             Войти через Google
           </Button>
-          <Button className="w-full" variant="outline" asChild>
+          <Button className="w-full border-2 border-border/70 bg-white shadow-none" variant="outline" asChild>
             <Link href="/login/password">Войти с логином и паролем</Link>
           </Button>
-          <Button className="w-full" variant="secondary" asChild>
+          <Button className="w-full border-2 border-border/70 bg-white shadow-none" variant="outline" asChild>
             <Link href="/register">Зарегистрироваться</Link>
           </Button>
         </CardContent>

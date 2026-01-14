@@ -48,6 +48,7 @@ export default function LoginWithPasswordPage() {
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Логин</label>
               <Input
+                className="border-2 border-border/70 bg-white shadow-none"
                 autoComplete="username"
                 value={login}
                 onChange={(event) => setLogin(event.target.value)}
@@ -57,6 +58,7 @@ export default function LoginWithPasswordPage() {
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Пароль</label>
               <Input
+                className="border-2 border-border/70 bg-white shadow-none"
                 autoComplete="current-password"
                 type="password"
                 value={password}

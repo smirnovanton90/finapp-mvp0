@@ -1003,13 +1003,13 @@ export default function CounterpartiesPage() {
                               <img
                                 src={item.entity_type === "PERSON" ? item.photo_url : item.logo_url}
                                 alt=""
-                                className={`rounded border border-border/60 object-contain bg-white ${
+                                className={`rounded object-contain bg-white ${
                                   isDeleted ? "h-10 w-10" : "h-12 w-12"
                                 }`}
                               />
                             ) : (
                               <div
-                                className={`flex items-center justify-center rounded border border-border/60 bg-slate-100 text-slate-400 ${
+                                className={`flex items-center justify-center rounded bg-slate-100 text-slate-400 ${
                                   isDeleted ? "h-10 w-10" : "h-12 w-12"
                                 }`}
                               >

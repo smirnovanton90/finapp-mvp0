@@ -29,6 +29,7 @@ import {
   MoreVertical,
   Pencil,
   Plus,
+  QrCode,
   Shield,
   ShoppingCart,
   Sparkles,
@@ -42,6 +43,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import jsQR from "jsqr";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1084,6 +1086,83 @@ function normalizeRubOnBlur(value: string): string {
   return `${intPart},${decPart.slice(0, 2)}`;
 }
 
+type ParsedReceiptData = {
+  date: string;
+  amount: number;
+  fn: string;
+  fp: string;
+  i: string;
+};
+
+async function decodeQRCode(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Не удалось создать контекст canvas"));
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        if (code) {
+          resolve(code.data);
+        } else {
+          reject(new Error("Не удалось декодировать QR-код. Убедитесь, что изображение содержит QR-код."));
+        }
+      } catch (error: any) {
+        reject(new Error(error?.message || "Не удалось декодировать QR-код. Убедитесь, что изображение содержит QR-код."));
+      }
+    };
+    img.onerror = () => {
+      reject(new Error("Ошибка при загрузке изображения"));
+    };
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => {
+      reject(new Error("Ошибка при чтении файла"));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function parseReceiptQR(qrData: string): ParsedReceiptData | null {
+  // Формат ФНС: t=YYYYMMDDTHHMM&s=SUM&fn=FN&i=INVOICE&fp=FP&n=N
+  const params = new URLSearchParams(qrData);
+  const t = params.get("t");
+  const s = params.get("s");
+  const fn = params.get("fn");
+  const fp = params.get("fp");
+  const i = params.get("i");
+
+  if (!t || !s) return null;
+
+  // Парсинг даты: YYYYMMDDTHHMM -> YYYY-MM-DD
+  const year = t.slice(0, 4);
+  const month = t.slice(4, 6);
+  const day = t.slice(6, 8);
+  const date = `${year}-${month}-${day}`;
+
+  // Парсинг суммы
+  const amount = parseFloat(s);
+  if (isNaN(amount) || amount <= 0) return null;
+
+  return {
+    date,
+    amount: Math.round(amount * 100), // конвертируем в копейки
+    fn: fn || "",
+    fp: fp || "",
+    i: i || "",
+  };
+}
+
 function TransactionCardRow({
   tx,
   counterparty,
@@ -1724,6 +1803,8 @@ export function TransactionsView({
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importConfirmed, setImportConfirmed] = useState(false);
+  const [isQrCodeLoading, setIsQrCodeLoading] = useState(false);
+  const qrCodeInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedTxIds, setSelectedTxIds] = useState<Set<number>>(() => new Set());
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
@@ -2219,7 +2300,6 @@ export function TransactionsView({
     setIsBulkEditConfirmOpen(false);
     setIsBulkEditing(false);
     setIsCategorySearchOpen(false);
-    setCounterpartyDropdownOpen(false);
   };
 
   const openCreateDialog = () => {
@@ -2232,6 +2312,72 @@ export function TransactionsView({
     setIsBulkEditConfirmOpen(false);
     resetForm();
     setDialogMode("create");
+  };
+
+  const handleQrCodeUpload = async (file: File) => {
+    setIsQrCodeLoading(true);
+    try {
+      const qrData = await decodeQRCode(file);
+      const receiptData = parseReceiptQR(qrData);
+      
+      if (!receiptData) {
+        alert("Не удалось распарсить данные из QR-кода. Убедитесь, что это QR-код чека ФНС.");
+        setIsQrCodeLoading(false);
+        if (qrCodeInputRef.current) {
+          qrCodeInputRef.current.value = "";
+        }
+        return;
+      }
+
+      // Предзаполняем форму данными из чека ПЕРЕД открытием диалога
+      lastActiveElementRef.current = null;
+      setEditingTx(null);
+      setRealizeSource(null);
+      setBulkEditIds(null);
+      setBulkEditBaseline(null);
+      setIsBulkEditConfirmOpen(false);
+      setFormError(null);
+      
+      // Устанавливаем данные формы
+      setDate(receiptData.date);
+      setDirection("EXPENSE");
+      setFormMode("STANDARD");
+      setFormTransactionType("ACTUAL");
+      setPrimaryItemId(null);
+      setCounterpartyItemId(null);
+      setCounterpartyId(null);
+      setAmountStr(formatCentsForInput(receiptData.amount));
+      setAmountCounterpartyStr("");
+      setPrimaryQuantityLots("");
+      setCounterpartyQuantityLots("");
+      setLoanTotalStr("");
+      setLoanInterestStr("");
+      setIsCategorySearchOpen(false);
+      applyCategorySelection("", "", "");
+      setDescription("");
+      
+      // Формируем комментарий с параметрами чека
+      const commentParts: string[] = [];
+      if (receiptData.fn) commentParts.push(`ФН: ${receiptData.fn}`);
+      if (receiptData.fp) commentParts.push(`ФП: ${receiptData.fp}`);
+      if (receiptData.i) commentParts.push(`ФД: ${receiptData.i}`);
+      setComment(commentParts.join(", "));
+      
+      // Открываем диалог
+      setDialogMode("create");
+      
+      // Очищаем input
+      if (qrCodeInputRef.current) {
+        qrCodeInputRef.current.value = "";
+      }
+    } catch (error: any) {
+      alert(error?.message ?? "Не удалось обработать QR-код.");
+      if (qrCodeInputRef.current) {
+        qrCodeInputRef.current.value = "";
+      }
+    } finally {
+      setIsQrCodeLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -4390,6 +4536,29 @@ export function TransactionsView({
                   </form>
                 </DialogContent>
               </Dialog>
+
+              <input
+                ref={qrCodeInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    handleQrCodeUpload(file);
+                  }
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-2 border-border/70 bg-white shadow-none"
+                onClick={() => qrCodeInputRef.current?.click()}
+                disabled={isQrCodeLoading}
+              >
+                <QrCode className="mr-2 h-4 w-4" />
+                {isQrCodeLoading ? "Обработка..." : "Загрузить QR-код чека"}
+              </Button>
 
               <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
                 <DialogTrigger asChild>

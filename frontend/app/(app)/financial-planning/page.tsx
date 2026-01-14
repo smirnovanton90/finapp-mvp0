@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CategorySelector } from "@/components/category-selector";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import {
@@ -67,8 +68,13 @@ import {
   makeCategoryPathKey,
 } from "@/lib/categories";
 import {
+  CATEGORY_ICON_BY_NAME,
+  CATEGORY_ICON_FALLBACK,
+} from "@/lib/category-icons";
+import {
   createTransactionChain,
   deleteTransactionChain,
+  fetchBanks,
   fetchCategories,
   fetchCounterparties,
   fetchCounterpartyIndustries,
@@ -76,6 +82,7 @@ import {
   fetchTransactions,
   fetchDeletedTransactions,
   fetchTransactionChains,
+  BankOut,
   CounterpartyOut,
   CounterpartyIndustryOut,
   ItemOut,
@@ -297,11 +304,11 @@ export default function FinancialPlanningPage() {
   const [counterpartyError, setCounterpartyError] = useState<string | null>(null);
   const [amountStr, setAmountStr] = useState("");
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
-  const [cat1, setCat1] = useState("");
-  const [cat2, setCat2] = useState("");
-  const [cat3, setCat3] = useState("");
-  const [categoryQuery, setCategoryQuery] = useState("");
-  const [isCategorySearchOpen, setIsCategorySearchOpen] = useState(false);
+  const [selectedCategoryPath, setSelectedCategoryPath] = useState<{
+    l1: string;
+    l2: string;
+    l3: string;
+  } | null>(null);
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
   const onboardingAppliedRef = useRef<string | null>(null);
@@ -338,6 +345,35 @@ export default function FinancialPlanningPage() {
     );
     return categoryLookup.pathToId.get(key) ?? null;
   };
+
+  const resolveCategoryIcon = useCallback(
+    (categoryId: number | null) => {
+      if (!categoryId) return CATEGORY_ICON_FALLBACK;
+      const path = categoryLookup.idToPath.get(categoryId);
+      if (!path || path.length === 0) return CATEGORY_ICON_FALLBACK;
+      for (let depth = path.length; depth >= 1; depth -= 1) {
+        const key = makeCategoryPathKey(...path.slice(0, depth));
+        const targetId = categoryLookup.pathToId.get(key);
+        if (!targetId) continue;
+        const iconName = categoryLookup.idToIcon.get(targetId);
+        if (!iconName) continue;
+        const normalizedIconName = iconName.trim();
+        if (!normalizedIconName) continue;
+        const Icon = CATEGORY_ICON_BY_NAME[normalizedIconName];
+        if (Icon) return Icon;
+      }
+      return CATEGORY_ICON_FALLBACK;
+    },
+    [categoryLookup.idToIcon, categoryLookup.idToPath, categoryLookup.pathToId]
+  );
+
+  const getCategoryIconByPath = useCallback(
+    (l1: string, l2: string, l3: string) => {
+      const categoryId = resolveCategoryId(l1, l2, l3);
+      return resolveCategoryIcon(categoryId);
+    },
+    [categoryLookup.pathToId, resolveCategoryIcon]
+  );
 
   const formatCategoryLabel = (categoryId: number | null, txDirection: string) => {
     if (txDirection === "TRANSFER") return "Перевод";
@@ -377,21 +413,45 @@ export default function FinancialPlanningPage() {
     return paths;
   }, [categoryMaps]);
 
-  const normalizedCategoryQuery = useMemo(
-    () => normalizeCategory(categoryQuery),
-    [categoryQuery]
-  );
-  const filteredCategoryPaths = useMemo(() => {
-    if (!normalizedCategoryQuery) return categoryPaths;
-    return categoryPaths.filter((path) =>
-      path.searchKey.includes(normalizedCategoryQuery)
-    );
-  }, [categoryPaths, normalizedCategoryQuery]);
 
   const itemTxCounts = useMemo(() => buildItemTransactionCounts(txs), [txs]);
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
     [items]
+  );
+  const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
+    if (!id) return null;
+    const cpId = itemsById.get(id)?.counterparty_id;
+    if (!cpId) return null;
+    const counterparty = counterpartiesById.get(cpId);
+    if (!counterparty) return null;
+    return counterparty.entity_type === "PERSON"
+      ? counterparty.photo_url ?? null
+      : counterparty.logo_url ?? null;
+  };
+  const itemCounterpartyName = (id: number | null | undefined) => {
+    if (!id) return "";
+    const cpId = itemsById.get(id)?.counterparty_id;
+    if (!cpId) return "";
+    const cp = counterpartiesById.get(cpId);
+    if (!cp) return "";
+    if (cp.entity_type === "PERSON") {
+      const parts = [cp.last_name, cp.first_name, cp.middle_name].filter(Boolean);
+      return parts.length > 0 ? parts.join(" ") : "";
+    }
+    return cp.name || cp.full_name || "";
+  };
+  const itemBankLogoUrl = itemCounterpartyLogoUrl;
+  const itemBankName = itemCounterpartyName;
+  const getItemDisplayBalanceCents = useCallback(
+    (item: ItemOut) => {
+      if (item.type_code === "bank_card" && item.card_account_id) {
+        const linked = itemsById.get(item.card_account_id);
+        if (linked) return linked.current_value_rub;
+      }
+      return item.current_value_rub;
+    },
+    [itemsById]
   );
   const resolveMinDate = useCallback(
     (item: ItemOut | null | undefined) => {
@@ -470,6 +530,7 @@ export default function FinancialPlanningPage() {
           deletedData,
           categoriesData,
           counterpartiesData,
+          industriesData,
         ] =
           await Promise.all([
             fetchItems(),
@@ -486,6 +547,7 @@ export default function FinancialPlanningPage() {
         setDeletedTxs(deletedData);
         setCategoryNodes(categoriesData);
         setCounterparties(counterpartiesData);
+        setIndustries(industriesData);
       } catch (e: any) {
         setCounterpartyError(
           e?.message ?? "Не удалось загрузить контрагентов."
@@ -503,11 +565,16 @@ export default function FinancialPlanningPage() {
     "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
 
   const applyCategorySelection = (l1: string, l2: string, l3: string) => {
-    setCat1(l1);
-    setCat2(l2);
-    setCat3(l3);
-    setCategoryQuery(formatCategoryPath(l1, l2, l3));
+    if (!l1 || (l1 === CATEGORY_PLACEHOLDER && !l2 && !l3)) {
+      setSelectedCategoryPath(null);
+    } else {
+      setSelectedCategoryPath({ l1, l2, l3 });
+    }
   };
+
+  const cat1 = selectedCategoryPath?.l1 || "";
+  const cat2 = selectedCategoryPath?.l2 || "";
+  const cat3 = selectedCategoryPath?.l3 || "";
 
   const resetForm = () => {
     const today = getTodayKey();
@@ -526,29 +593,10 @@ export default function FinancialPlanningPage() {
     setCounterpartyId(null);
     setAmountStr("");
     setAmountCounterpartyStr("");
-    setCategoryQuery("");
     setDescription("");
     setComment("");
     setFormError(null);
-    const expenseMaps = buildCategoryMaps(categoryNodes, "EXPENSE");
-    if (expenseMaps.l1.length > 0) {
-      const nextL1 = expenseMaps.l1[0];
-      const nextL2 = (expenseMaps.l2[nextL1] ?? [CATEGORY_PLACEHOLDER])[0];
-      const nextL3 =
-        nextL2 && nextL2 !== CATEGORY_PLACEHOLDER
-          ? (expenseMaps.l3[nextL2] ?? [CATEGORY_PLACEHOLDER])[0]
-          : CATEGORY_PLACEHOLDER;
-      applyCategorySelection(
-        nextL1,
-        nextL2 ?? CATEGORY_PLACEHOLDER,
-        nextL3 ?? CATEGORY_PLACEHOLDER
-      );
-    } else {
-      setCat1("");
-      setCat2("");
-      setCat3("");
-      setCategoryQuery("");
-    }
+    setSelectedCategoryPath(null);
   };
 
   useEffect(() => {
@@ -590,41 +638,14 @@ export default function FinancialPlanningPage() {
       setPrimaryItemId(demoItem.id);
     }
 
-    const incomeMaps = buildCategoryMaps(categoryNodes, "INCOME");
-    if (incomeMaps.l1.length > 0) {
-      const l1 = incomeMaps.l1[0];
-      const l2 = (incomeMaps.l2[l1] ?? [CATEGORY_PLACEHOLDER])[0];
-      const l3 =
-        l2 && l2 !== CATEGORY_PLACEHOLDER
-          ? (incomeMaps.l3[l2] ?? [CATEGORY_PLACEHOLDER])[0]
-          : CATEGORY_PLACEHOLDER;
-      applyCategorySelection(l1, l2 ?? CATEGORY_PLACEHOLDER, l3 ?? CATEGORY_PLACEHOLDER);
-    }
   }, [activeStep?.key, categoryNodes, isWizardOpen, items]);
 
   useEffect(() => {
     if (!isDialogOpen) return;
     if (direction === "TRANSFER") {
-      setCat1("");
-      setCat2("");
-      setCat3("");
-      setCategoryQuery("");
-      return;
+      setSelectedCategoryPath(null);
     }
-    if (categoryMaps.l1.length > 0) {
-      const nextL1 = categoryMaps.l1[0];
-      const nextL2 = (categoryMaps.l2[nextL1] ?? [CATEGORY_PLACEHOLDER])[0];
-      const nextL3 =
-        nextL2 && nextL2 !== CATEGORY_PLACEHOLDER
-          ? (categoryMaps.l3[nextL2] ?? [CATEGORY_PLACEHOLDER])[0]
-          : CATEGORY_PLACEHOLDER;
-      applyCategorySelection(
-        nextL1,
-        nextL2 ?? CATEGORY_PLACEHOLDER,
-        nextL3 ?? CATEGORY_PLACEHOLDER
-      );
-    }
-  }, [direction, categoryMaps, isDialogOpen]);
+  }, [direction, isDialogOpen]);
 
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
@@ -1363,36 +1384,40 @@ export default function FinancialPlanningPage() {
               </div>
             </div>
 
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Актив/обязательство</Label>
+              <ItemSelector
+                items={items}
+                selectedIds={primaryItemId ? [primaryItemId] : []}
+                onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                selectionMode="single"
+                placeholder="Выберите счет"
+                getItemTypeLabel={getItemTypeLabel}
+                getItemKind={resolveItemEffectiveKind}
+                getBankLogoUrl={itemBankLogoUrl}
+                getBankName={itemBankName}
+                getItemBalance={getItemDisplayBalanceCents}
+                itemCounts={itemTxCounts}
+              />
+            </div>
+            {isTransfer && (
               <div className="grid gap-2">
-                <Label>Актив/обязательство</Label>
+                <Label>Контрагент</Label>
                 <ItemSelector
-                  items={items}
-                  selectedIds={primaryItemId ? [primaryItemId] : []}
-                  onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                  items={items.filter((item) => item.id !== primaryItemId)}
+                  selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
+                  onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
                   selectionMode="single"
                   placeholder="Выберите счет"
                   getItemTypeLabel={getItemTypeLabel}
                   getItemKind={resolveItemEffectiveKind}
+                  getBankLogoUrl={itemBankLogoUrl}
+                  getBankName={itemBankName}
+                  getItemBalance={getItemDisplayBalanceCents}
                   itemCounts={itemTxCounts}
                 />
               </div>
-              {isTransfer && (
-                <div className="grid gap-2">
-                  <Label>Контрагент</Label>
-                  <ItemSelector
-                    items={items.filter((item) => item.id !== primaryItemId)}
-                    selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
-                    onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
-                    selectionMode="single"
-                    placeholder="Выберите счет"
-                    getItemTypeLabel={getItemTypeLabel}
-                    getItemKind={resolveItemEffectiveKind}
-                    itemCounts={itemTxCounts}
-                  />
-                </div>
-              )}
-            </div>
+            )}
 
             <div className="grid gap-2">
               <Label>Контрагент</Label>
@@ -1459,75 +1484,20 @@ export default function FinancialPlanningPage() {
             {!isTransfer && (
               <div className="grid gap-2">
                 <Label>Категория</Label>
-                <div className="relative">
-                  <Input
-                    className="border-2 border-border/70 bg-white shadow-none"
-                    value={categoryQuery}
-                    onChange={(e) => {
-                      setCategoryQuery(e.target.value);
-                      setIsCategorySearchOpen(true);
-                    }}
-                    onFocus={() => setIsCategorySearchOpen(true)}
-                    onBlur={() => {
-                      setIsCategorySearchOpen(false);
-                      setCategoryQuery(formatCategoryPath(cat1, cat2, cat3));
-                    }}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        isCategorySearchOpen &&
-                        categoryQuery.trim()
-                      ) {
-                        const first = filteredCategoryPaths[0];
-                        if (first) {
-                          event.preventDefault();
-                          applyCategorySelection(first.l1, first.l2, first.l3);
-                          setIsCategorySearchOpen(false);
-                        }
-                      }
-                    }}
-                    placeholder="Начните вводить категорию"
-                    type="text"
-                  />
-                  {isCategorySearchOpen && categoryQuery.trim() ? (
-                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
-                      {filteredCategoryPaths.length === 0 ? (
-                        <div className="px-2 py-1 text-sm text-muted-foreground">
-                          Ничего не найдено
-                        </div>
-                      ) : (
-                        filteredCategoryPaths.map((option) => {
-                          const isSelected =
-                            option.l1 === cat1 &&
-                            option.l2 === cat2 &&
-                            option.l3 === cat3;
-                          return (
-                            <button
-                              key={`${option.l1}||${option.l2}||${option.l3}`}
-                              type="button"
-                              className={`flex w-full items-start rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                                isSelected
-                                  ? "bg-violet-50 text-violet-700"
-                                  : "text-slate-700 hover:bg-slate-100"
-                              }`}
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                applyCategorySelection(
-                                  option.l1,
-                                  option.l2,
-                                  option.l3
-                                );
-                                setIsCategorySearchOpen(false);
-                              }}
-                            >
-                              {option.label}
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : null}
-                </div>
+                <CategorySelector
+                  categoryNodes={categoryNodes}
+                  selectedPath={selectedCategoryPath}
+                  onChange={(path) => {
+                    if (path) {
+                      applyCategorySelection(path.l1, path.l2, path.l3);
+                    } else {
+                      applyCategorySelection("", "", "");
+                    }
+                  }}
+                  placeholder="Начните вводить категорию"
+                  direction={direction}
+                  disabled={isSubmitting}
+                />
               </div>
             )}
 

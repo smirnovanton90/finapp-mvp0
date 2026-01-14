@@ -51,6 +51,7 @@ import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
+import { CategorySelector } from "@/components/category-selector";
 import {
   Dialog,
   DialogContent,
@@ -102,6 +103,7 @@ import {
   TransactionOut,
   updateTransaction,
   updateTransactionStatus,
+  API_BASE,
 } from "@/lib/api";
 import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
@@ -1325,10 +1327,18 @@ function TransactionCardRow({
   const chainLabel =
     isPlanned && tx.chain_name?.trim() ? tx.chain_name.trim() : null;
   const counterpartyName = counterparty ? buildCounterpartyName(counterparty) : null;
-  const counterpartyLogoUrl =
+  const rawCounterpartyLogoUrl =
     counterparty?.entity_type === "PERSON"
       ? counterparty?.photo_url ?? null
       : counterparty?.logo_url ?? null;
+  // Преобразуем относительные URL в абсолютные
+  const counterpartyLogoUrl = rawCounterpartyLogoUrl
+    ? rawCounterpartyLogoUrl.startsWith("http://") || rawCounterpartyLogoUrl.startsWith("https://")
+      ? rawCounterpartyLogoUrl
+      : rawCounterpartyLogoUrl.startsWith("/")
+        ? `${API_BASE}${rawCounterpartyLogoUrl}`
+        : `${API_BASE}/${rawCounterpartyLogoUrl}`
+    : null;
   const CounterpartyFallbackIcon =
     counterparty?.entity_type === "PERSON"
       ? User
@@ -1761,8 +1771,6 @@ export function TransactionsView({
   const [selectedCategoryFilterKeys, setSelectedCategoryFilterKeys] = useState<
     Set<string>
   >(() => new Set());
-  const [categoryFilterQuery, setCategoryFilterQuery] = useState("");
-  const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
   const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
   const [selectedCurrencyCodes, setSelectedCurrencyCodes] = useState<Set<string>>(
     () => new Set()
@@ -1785,11 +1793,11 @@ export function TransactionsView({
   const [counterpartyQuantityLots, setCounterpartyQuantityLots] = useState("");
   const [loanTotalStr, setLoanTotalStr] = useState("");
   const [loanInterestStr, setLoanInterestStr] = useState("");
-  const [cat1, setCat1] = useState("");
-  const [cat2, setCat2] = useState("");
-  const [cat3, setCat3] = useState("");
-  const [categoryQuery, setCategoryQuery] = useState("");
-  const [isCategorySearchOpen, setIsCategorySearchOpen] = useState(false);
+  const [selectedCategoryPath, setSelectedCategoryPath] = useState<{
+    l1: string;
+    l2: string;
+    l3: string;
+  } | null>(null);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
@@ -1837,6 +1845,12 @@ export function TransactionsView({
   }, [setError]);
 
 
+  const normalizeCategoryValue = useCallback((value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === CATEGORY_PLACEHOLDER) return "";
+    return trimmed;
+  }, []);
+
   const categoryMaps = useMemo(
     () => buildCategoryMaps(categoryNodes),
     [categoryNodes]
@@ -1846,33 +1860,6 @@ export function TransactionsView({
     return buildCategoryMaps(categoryNodes, scope);
   }, [categoryNodes, direction]);
 
-  const categoryPaths = useMemo(() => {
-    const paths: CategoryPathOption[] = [];
-    const addPath = (l1: string, l2: string, l3: string) => {
-      const label = formatCategoryPath(l1, l2, l3);
-      if (!label) return;
-      paths.push({
-        l1,
-        l2,
-        l3,
-        label,
-        searchKey: normalizeCategory(label),
-      });
-    };
-
-    scopedCategoryMaps.l1.forEach((l1) => {
-      addPath(l1, CATEGORY_PLACEHOLDER, CATEGORY_PLACEHOLDER);
-      const l2List = scopedCategoryMaps.l2[l1] ?? [];
-      l2List.forEach((l2) => {
-        addPath(l1, l2, CATEGORY_PLACEHOLDER);
-        const l3List = scopedCategoryMaps.l3[l2] ?? [];
-        l3List.forEach((l3) => {
-          addPath(l1, l2, l3);
-        });
-      });
-    });
-    return paths;
-  }, [scopedCategoryMaps]);
 
   const filterCategoryPaths = useMemo(() => {
     const paths: CategoryPathOption[] = [];
@@ -1902,36 +1889,19 @@ export function TransactionsView({
     return paths;
   }, [categoryMaps]);
 
-  const normalizedCategoryQuery = useMemo(
-    () => normalizeCategory(categoryQuery),
-    [categoryQuery]
-  );
-  const filteredCategoryPaths = useMemo(() => {
-    if (!normalizedCategoryQuery) return categoryPaths;
-    return categoryPaths.filter((path) =>
-      path.searchKey.includes(normalizedCategoryQuery)
-    );
-  }, [categoryPaths, normalizedCategoryQuery]);
-
-  const normalizedCategoryFilterQuery = useMemo(
-    () => normalizeCategory(categoryFilterQuery),
-    [categoryFilterQuery]
-  );
-  const filteredCategoryFilterPaths = useMemo(() => {
-    if (!normalizedCategoryFilterQuery) return filterCategoryPaths;
-    return filterCategoryPaths.filter((path) =>
-      path.searchKey.includes(normalizedCategoryFilterQuery)
-    );
-  }, [filterCategoryPaths, normalizedCategoryFilterQuery]);
 
   const categoryFilterPathByKey = useMemo(() => {
     return new Map(
       filterCategoryPaths.map((option) => [
-        makeCategoryPathKey(option.l1, option.l2, option.l3),
+        makeCategoryPathKey(
+          normalizeCategoryValue(option.l1),
+          normalizeCategoryValue(option.l2),
+          normalizeCategoryValue(option.l3)
+        ),
         option,
       ])
     );
-  }, [filterCategoryPaths]);
+  }, [filterCategoryPaths, normalizeCategoryValue]);
 
   const selectedCategoryFilterOptions = useMemo(() => {
     const options: CategoryPathOption[] = [];
@@ -2100,15 +2070,30 @@ export function TransactionsView({
     tx.primary_card_item_id ?? tx.primary_item_id;
   const getDisplayCounterpartyItemId = (tx: TransactionOut) =>
     tx.counterparty_card_item_id ?? tx.counterparty_item_id;
-  const itemBank = (id: number | null | undefined) => {
+  const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
     if (!id) return null;
-    const bankId = itemsById.get(id)?.bank_id;
-    if (!bankId) return null;
-    return banksById.get(bankId) ?? null;
+    const cpId = itemsById.get(id)?.counterparty_id;
+    if (!cpId) return null;
+    const counterparty = counterpartiesById.get(cpId);
+    if (!counterparty) return null;
+    return counterparty.entity_type === "PERSON"
+      ? counterparty.photo_url ?? null
+      : counterparty.logo_url ?? null;
   };
-  const itemBankLogoUrl = (id: number | null | undefined) =>
-    itemBank(id)?.logo_url ?? null;
-  const itemBankName = (id: number | null | undefined) => itemBank(id)?.name ?? "";
+  const itemCounterpartyName = (id: number | null | undefined) => {
+    if (!id) return "";
+    const cpId = itemsById.get(id)?.counterparty_id;
+    if (!cpId) return "";
+    const cp = counterpartiesById.get(cpId);
+    if (!cp) return "";
+    if (cp.entity_type === "PERSON") {
+      const parts = [cp.last_name, cp.first_name, cp.middle_name].filter(Boolean);
+      return parts.length > 0 ? parts.join(" ") : "";
+    }
+    return cp.name || cp.full_name || "";
+  };
+  const itemBankLogoUrl = itemCounterpartyLogoUrl;
+  const itemBankName = itemCounterpartyName;
   const getItemDisplayBalanceCents = useCallback(
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
@@ -2234,10 +2219,11 @@ export function TransactionsView({
   const isRealizeMode = realizeSource !== null;
 
   const applyCategorySelection = (l1: string, l2: string, l3: string) => {
-    setCat1(l1);
-    setCat2(l2);
-    setCat3(l3);
-    setCategoryQuery(formatCategoryPath(l1, l2, l3));
+    if (!l1 || (l1 === CATEGORY_PLACEHOLDER && !l2 && !l3)) {
+      setSelectedCategoryPath(null);
+    } else {
+      setSelectedCategoryPath({ l1, l2, l3 });
+    }
   };
 
   const applyCategorySelectionById = (categoryId: number | null) => {
@@ -2249,11 +2235,9 @@ export function TransactionsView({
     );
   };
 
-  const normalizeCategoryValue = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed || trimmed === CATEGORY_PLACEHOLDER) return "";
-    return trimmed;
-  };
+  const cat1 = selectedCategoryPath?.l1 || "";
+  const cat2 = selectedCategoryPath?.l2 || "";
+  const cat3 = selectedCategoryPath?.l3 || "";
 
   const resolveCategoryId = (l1: string, l2: string, l3: string) => {
     const key = makeCategoryPathKey(
@@ -2263,6 +2247,7 @@ export function TransactionsView({
     );
     return categoryLookup.pathToId.get(key) ?? null;
   };
+
 
   const resetForm = () => {
     setDate(new Date().toISOString().slice(0, 10));
@@ -2278,7 +2263,6 @@ export function TransactionsView({
     setCounterpartyQuantityLots("");
     setLoanTotalStr("");
     setLoanInterestStr("");
-    setIsCategorySearchOpen(false);
     applyCategorySelection("", "", "");
     setDescription("");
     setComment("");
@@ -2299,7 +2283,6 @@ export function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setIsBulkEditing(false);
-    setIsCategorySearchOpen(false);
   };
 
   const openCreateDialog = () => {
@@ -2352,7 +2335,6 @@ export function TransactionsView({
       setCounterpartyQuantityLots("");
       setLoanTotalStr("");
       setLoanInterestStr("");
-      setIsCategorySearchOpen(false);
       applyCategorySelection("", "", "");
       setDescription("");
       
@@ -2444,7 +2426,6 @@ export function TransactionsView({
     setEditingTx(tx);
     setRealizeSource(null);
     setFormMode("STANDARD");
-    setIsCategorySearchOpen(false);
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
@@ -2484,7 +2465,6 @@ export function TransactionsView({
     setEditingTx(null);
     setRealizeSource(null);
     setFormMode("STANDARD");
-    setIsCategorySearchOpen(false);
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
@@ -2526,7 +2506,6 @@ export function TransactionsView({
     setEditingTx(null);
     setRealizeSource(tx);
     setFormMode("STANDARD");
-    setIsCategorySearchOpen(false);
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
@@ -2601,7 +2580,6 @@ export function TransactionsView({
     setEditingTx(null);
     setRealizeSource(null);
     setFormMode("STANDARD");
-    setIsCategorySearchOpen(false);
     setDialogMode("bulk-edit");
     setBulkEditIds(selectedTxs.map((tx) => tx.id));
     setBulkEditBaseline(baseline);
@@ -3691,25 +3669,24 @@ export function TransactionsView({
       return next;
     });
   };
-  const toggleCategoryFilterSelection = (option: CategoryPathOption) => {
-    const key = makeCategoryPathKey(option.l1, option.l2, option.l3);
-    setSelectedCategoryFilterKeys((prev) => {
-      if (prev.has(key)) return prev;
-      const next = new Set(prev);
-      next.add(key);
-      return next;
-    });
-  };
-  const removeCategoryFilterSelection = (key: string) => {
+  const toggleCategoryFilterSelection = (path: { l1: string; l2: string; l3: string }) => {
+    const key = makeCategoryPathKey(
+      normalizeCategoryValue(path.l1),
+      normalizeCategoryValue(path.l2),
+      normalizeCategoryValue(path.l3)
+    );
     setSelectedCategoryFilterKeys((prev) => {
       const next = new Set(prev);
-      next.delete(key);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
       return next;
     });
   };
   const resetCategoryFilters = () => {
     setSelectedCategoryFilterKeys(new Set());
-    setCategoryFilterQuery("");
   };
   const resetCounterpartyFilters = () => {
     setSelectedCounterpartyIds(new Set());
@@ -4419,76 +4396,20 @@ export function TransactionsView({
                     {!isTransfer && (
                       <div className="grid gap-2">
                         <Label>Категория</Label>
-                        <div className="relative">
-                          <Input
-                            className="border-2 border-border/70 bg-white shadow-none"
-                            value={categoryQuery}
-                            onChange={(e) => {
-                              setCategoryQuery(e.target.value);
-                              setIsCategorySearchOpen(true);
-                            }}
-                            onFocus={() => setIsCategorySearchOpen(true)}
-                            onClick={() => setIsCategorySearchOpen(true)}
-                            onBlur={() => {
-                              setIsCategorySearchOpen(false);
-                              setCategoryQuery(formatCategoryPath(cat1, cat2, cat3));
-                            }}
-                            onKeyDown={(event) => {
-                              if (
-                                event.key === "Enter" &&
-                                isCategorySearchOpen &&
-                                categoryQuery.trim()
-                              ) {
-                                const first = filteredCategoryPaths[0];
-                                if (first) {
-                                  event.preventDefault();
-                                  applyCategorySelection(first.l1, first.l2, first.l3);
-                                  setIsCategorySearchOpen(false);
-                                }
-                              }
-                            }}
-                            placeholder="Поиск категории"
-                            type="text"
-                          />
-                          {isCategorySearchOpen ? (
-                            <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
-                              {filteredCategoryPaths.length === 0 ? (
-                                <div className="px-2 py-1 text-sm text-muted-foreground">
-                                  Нет совпадений
-                                </div>
-                              ) : (
-                                filteredCategoryPaths.map((option) => {
-                                  const isSelected =
-                                    option.l1 === cat1 &&
-                                    option.l2 === cat2 &&
-                                    option.l3 === cat3;
-                                  return (
-                                    <button
-                                      key={`${option.l1}||${option.l2}||${option.l3}`}
-                                      type="button"
-                                      className={`flex w-full items-start rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                                        isSelected
-                                          ? "bg-violet-50 text-violet-700"
-                                          : "text-slate-700 hover:bg-slate-100"
-                                      }`}
-                                      onMouseDown={(event) => {
-                                        event.preventDefault();
-                                        applyCategorySelection(
-                                          option.l1,
-                                          option.l2,
-                                          option.l3
-                                        );
-                                        setIsCategorySearchOpen(false);
-                                      }}
-                                    >
-                                      {option.label}
-                                    </button>
-                                  );
-                                })
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
+                        <CategorySelector
+                          categoryNodes={categoryNodes}
+                          selectedPath={selectedCategoryPath}
+                          onChange={(path) => {
+                            if (path) {
+                              applyCategorySelection(path.l1, path.l2, path.l3);
+                            } else {
+                              applyCategorySelection("", "", "");
+                            }
+                          }}
+                          placeholder="Поиск категории"
+                          direction={direction}
+                          disabled={false}
+                        />
                       </div>
                     )}
 
@@ -5010,7 +4931,7 @@ export function TransactionsView({
                   ariaLabel="Активы/обязательства"
                 />
               </div>
-<div className="space-y-3">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="text-sm font-semibold text-foreground">
                     Категории
@@ -5024,100 +4945,14 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="relative">
-                  <Input
-                    type="text"
-                    className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
-                    placeholder="Поиск категории"
-                    value={categoryFilterQuery}
-                    onChange={(e) => {
-                      setCategoryFilterQuery(e.target.value);
-                      setIsCategoryFilterOpen(true);
-                    }}
-                    onFocus={() => setIsCategoryFilterOpen(true)}
-                    onClick={() => setIsCategoryFilterOpen(true)}
-                    onBlur={() => setIsCategoryFilterOpen(false)}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        isCategoryFilterOpen &&
-                        categoryFilterQuery.trim()
-                      ) {
-                        const first = filteredCategoryFilterPaths[0];
-                        if (first) {
-                          event.preventDefault();
-                          toggleCategoryFilterSelection(first);
-                          setCategoryFilterQuery("");
-                          setIsCategoryFilterOpen(false);
-                        }
-                      }
-                    }}
-                  />
-                  {isCategoryFilterOpen ? (
-                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
-                      {filteredCategoryFilterPaths.length === 0 ? (
-                        <div className="px-2 py-1 text-sm text-muted-foreground">
-                          Нет совпадений
-                        </div>
-                      ) : (
-                        filteredCategoryFilterPaths.map((option) => {
-                          const key = makeCategoryPathKey(
-                            option.l1,
-                            option.l2,
-                            option.l3
-                          );
-                          const isSelected = selectedCategoryFilterKeys.has(key);
-                          return (
-                            <button
-                              key={key}
-                              type="button"
-                              className={`flex w-full items-start rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                                isSelected
-                                  ? "bg-violet-50 text-violet-700"
-                                  : "text-slate-700 hover:bg-slate-100"
-                              }`}
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                toggleCategoryFilterSelection(option);
-                                setCategoryFilterQuery("");
-                                setIsCategoryFilterOpen(false);
-                              }}
-                            >
-                              {option.label}
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-                {selectedCategoryFilterOptions.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {selectedCategoryFilterOptions.map((option) => {
-                      const key = makeCategoryPathKey(
-                        option.l1,
-                        option.l2,
-                        option.l3
-                      );
-                      return (
-                        <div
-                          key={key}
-                          className="flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs text-violet-800"
-                        >
-                          <span>{option.label}</span>
-                          <button
-                            type="button"
-                            className="text-violet-700 hover:text-violet-900"
-                            onClick={() => removeCategoryFilterSelection(key)}
-                            aria-label={`Удалить фильтр ${option.label}`}
-                          >
-                            x
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                <CategorySelector
+                  categoryNodes={categoryNodes}
+                  selectedPathKeys={selectedCategoryFilterKeys}
+                  onTogglePath={toggleCategoryFilterSelection}
+                  selectionMode="multi"
+                  placeholder="Поиск категории"
+                  showChips={true}
+                />
               </div>
 <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">

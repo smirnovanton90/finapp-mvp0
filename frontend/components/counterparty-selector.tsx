@@ -133,6 +133,12 @@ export function CounterpartySelector({
       ? buildCounterpartyDisplayName(selectedCounterparties[0])
       : "";
   const inputValue = query || selectedLabel;
+  const selectedCounterparty = selectionMode === "single" ? selectedCounterparties[0] : null;
+  const selectedImageUrl = selectedCounterparty
+    ? selectedCounterparty.entity_type === "PERSON"
+      ? selectedCounterparty.photo_url
+      : selectedCounterparty.logo_url
+    : null;
 
   const applySelection = (id: number) => {
     if (disabled) return;
@@ -212,52 +218,73 @@ export function CounterpartySelector({
     zIndex: 50,
   };
 
+  const DefaultIcon = selectedCounterparty
+    ? selectedCounterparty.entity_type === "PERSON" ? User : Building2
+    : null;
+
   return (
     <div className="space-y-3">
       <div className="relative" ref={anchorRef}>
-        <Input
-          type="text"
-          aria-label={ariaLabel}
-          className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
-          placeholder={placeholder}
-          value={inputValue}
-          disabled={disabled}
-          onChange={(event) => {
-            if (disabled) return;
-            const value = event.target.value;
-            setQuery(value);
-            if (selectionMode === "single" && value.trim() === "") {
-              onChange([]);
-            }
-            setOpen(true);
-          }}
-          onFocus={(event) => {
-            if (disabled) return;
-            if (selectionMode === "single" && selectedLabel && !query) {
-              event.currentTarget.select();
-            }
-            setOpen(true);
-          }}
-          onClick={(event) => {
-            if (disabled) return;
-            if (selectionMode === "single" && selectedLabel && !query) {
-              event.currentTarget.select();
-            }
-            setOpen(true);
-          }}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              open &&
-              query.trim() &&
-              filteredCounterparties.length > 0
-            ) {
-              event.preventDefault();
-              applySelection(filteredCounterparties[0].id);
-            }
-          }}
-        />
+        <div className="relative flex items-center">
+          {selectedImageUrl && !query && (
+            <img
+              src={selectedImageUrl}
+              alt={selectedLabel}
+              className="absolute left-2 h-6 w-6 rounded bg-white object-contain z-10 pointer-events-none"
+              loading="lazy"
+            />
+          )}
+          {!selectedImageUrl && selectedCounterparty && !query && DefaultIcon && (
+            <div className="absolute left-2 flex h-6 w-6 items-center justify-center rounded bg-white text-slate-500 z-10 pointer-events-none">
+              <DefaultIcon className="h-4 w-4" aria-hidden="true" />
+            </div>
+          )}
+          <Input
+            type="text"
+            aria-label={ariaLabel}
+            className={`h-10 w-full border-2 border-border/70 bg-white shadow-none ${
+              (selectedImageUrl || (selectedCounterparty && !query)) ? "pl-10" : ""
+            }`}
+            placeholder={placeholder}
+            value={inputValue}
+            disabled={disabled}
+            onChange={(event) => {
+              if (disabled) return;
+              const value = event.target.value;
+              setQuery(value);
+              if (selectionMode === "single" && value.trim() === "") {
+                onChange([]);
+              }
+              setOpen(true);
+            }}
+            onFocus={(event) => {
+              if (disabled) return;
+              if (selectionMode === "single" && selectedLabel && !query) {
+                event.currentTarget.select();
+              }
+              setOpen(true);
+            }}
+            onClick={(event) => {
+              if (disabled) return;
+              if (selectionMode === "single" && selectedLabel && !query) {
+                event.currentTarget.select();
+              }
+              setOpen(true);
+            }}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                open &&
+                query.trim() &&
+                filteredCounterparties.length > 0
+              ) {
+                event.preventDefault();
+                applySelection(filteredCounterparties[0].id);
+              }
+            }}
+          />
+        </div>
         {open && (
           <div
             className="absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-md border border-border/70 bg-white p-1 shadow-lg"
@@ -323,12 +350,12 @@ export function CounterpartySelector({
                       <img
                         src={imageUrl}
                         alt={displayName}
-                        className={`h-6 w-6 rounded border border-border/60 bg-white object-contain ${logoToneClass}`}
+                        className={`h-6 w-6 rounded bg-white object-contain ${logoToneClass}`}
                         loading="lazy"
                       />
                     ) : (
                       <div
-                        className={`flex h-6 w-6 items-center justify-center rounded border border-border/60 bg-white text-slate-500 ${logoToneClass}`}
+                        className={`flex h-6 w-6 items-center justify-center rounded bg-white text-slate-500 ${logoToneClass}`}
                       >
                         <DefaultIcon className="h-4 w-4" aria-hidden="true" />
                       </div>

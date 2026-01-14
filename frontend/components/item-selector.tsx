@@ -101,6 +101,10 @@ export function ItemSelector({
   );
   const selectedLabel =
     selectionMode === "single" && selectedItems[0] ? selectedItems[0].name : "";
+  const selectedItem = selectionMode === "single" ? selectedItems[0] : null;
+  const selectedBankLogoUrl = selectedItem && getBankLogoUrl
+    ? getBankLogoUrl(selectedItem.id)
+    : null;
   const inputValue = query || selectedLabel;
   const normalizedQuery = useMemo(() => normalizeItemSearch(query), [query]);
   const filteredItems = useMemo(() => {
@@ -201,12 +205,23 @@ export function ItemSelector({
   return (
     <div className="space-y-3">
       <div className="relative" ref={anchorRef}>
-        <Input
-          type="text"
-          aria-label={ariaLabel}
-          className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
-          placeholder={placeholder}
-          value={inputValue}
+        <div className="relative flex items-center">
+          {selectedBankLogoUrl && !query && (
+            <img
+              src={selectedBankLogoUrl}
+              alt={selectedLabel}
+              className="absolute left-2 h-6 w-6 rounded bg-white object-contain z-10 pointer-events-none"
+              loading="lazy"
+            />
+          )}
+          <Input
+            type="text"
+            aria-label={ariaLabel}
+            className={`h-10 w-full border-2 border-border/70 bg-white shadow-none ${
+              selectedBankLogoUrl && !query ? "pl-10" : ""
+            }`}
+            placeholder={placeholder}
+            value={inputValue}
           disabled={disabled}
           onChange={(event) => {
             if (disabled) return;
@@ -243,7 +258,8 @@ export function ItemSelector({
               applySelection(filteredItems[0].id);
             }
           }}
-        />
+          />
+        </div>
         {open && (
           <div
             className="absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-md border border-border/70 bg-white p-1 shadow-lg"
@@ -317,11 +333,11 @@ export function ItemSelector({
                       <img
                         src={bankLogo}
                         alt={bankName || ""}
-                        className={`h-6 w-6 rounded border border-border/60 bg-white object-contain ${logoToneClass}`}
+                        className={`h-6 w-6 rounded bg-white object-contain ${logoToneClass}`}
                         loading="lazy"
                       />
                     ) : (
-                      <div className="h-6 w-6 rounded border border-border/60 bg-slate-100" />
+                      <div className="h-6 w-6 rounded bg-slate-100" />
                     )}
                     <div className="min-w-0">
                       <div

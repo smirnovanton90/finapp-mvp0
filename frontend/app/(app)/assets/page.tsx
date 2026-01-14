@@ -1194,7 +1194,7 @@ export default function Page() {
   );
   const resolvedHistoryStatus = useMemo(() => {
     if (openDate && accountingStartDate) {
-      return openDate >= accountingStartDate ? "NEW" : "HISTORICAL";
+      return openDate > accountingStartDate ? "NEW" : "HISTORICAL";
     }
     return editingItem?.history_status ?? null;
   }, [openDate, accountingStartDate, editingItem]);
@@ -3480,19 +3480,7 @@ export default function Page() {
           ref={dialogContentRef}
           className="max-h-[90vh] overflow-y-auto overflow-x-hidden sm:max-w-[1040px]"
         >
-          {selectedCounterparty &&
-            (selectedCounterparty.entity_type === "PERSON"
-              ? selectedCounterparty.photo_url
-              : selectedCounterparty.logo_url) &&
-            logoOverlayHeight > 0 && (
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 top-0 z-0"
-              style={{ height: `${logoOverlayHeight}px`, ...logoLayerStyle }}
-            />
-          )}
-
-          <div className="relative z-10 grid gap-4">
+          <div className="grid gap-4">
             <DialogHeader>
               <DialogTitle>
                 {isEditing
@@ -3814,19 +3802,30 @@ export default function Page() {
             )}
 
             <div className="grid gap-2">
-              <div className="flex items-center gap-2">
-                <Label>{openDateLabel}</Label>
-                <Tooltip
-                  content={openDateHelpText}
-                  contentClassName="w-80 max-w-[calc(100vw-2rem)]"
-                >
-                  <span
-                    className="text-muted-foreground"
-                    aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u0434\u0430\u0442\u0435 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f"
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Label>{openDateLabel}</Label>
+                  <Tooltip
+                    content={openDateHelpText}
+                    contentClassName="w-80 max-w-[calc(100vw-2rem)]"
                   >
-                    <Info className="h-4 w-4" />
-                  </span>
-                </Tooltip>
+                    <span
+                      className="text-muted-foreground"
+                      aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u0434\u0430\u0442\u0435 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f"
+                    >
+                      <Info className="h-4 w-4" />
+                    </span>
+                  </Tooltip>
+                </div>
+                {accountingStartDate && (
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-violet-600 hover:underline"
+                    onClick={() => setOpenDate(accountingStartDate)}
+                  >
+                    В дату начала учета
+                  </button>
+                )}
               </div>
               <Input
                 type="date"
@@ -3865,7 +3864,17 @@ export default function Page() {
                 <SelectContent>
                   {currencies.map((c) => (
                     <SelectItem key={c.iso_char_code} value={c.iso_char_code}>
-                      {c.iso_char_code} — {c.name}
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={[
+                            "inline-flex min-w-10 items-center justify-center rounded-full px-1.5 py-[1px] text-[11px] font-semibold uppercase",
+                            getCurrencyBadgeClass(c.iso_char_code),
+                          ].join(" ")}
+                        >
+                          {c.iso_char_code}
+                        </span>
+                        <span>{c.name}</span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>

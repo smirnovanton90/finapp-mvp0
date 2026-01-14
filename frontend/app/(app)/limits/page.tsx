@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { Pencil, Plus, Trash2 } from "lucide-react";
@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CategorySelector } from "@/components/category-selector";
 import {
   Select,
   SelectContent,
@@ -35,6 +36,10 @@ import {
   CategoryNode,
   makeCategoryPathKey,
 } from "@/lib/categories";
+import {
+  CATEGORY_ICON_BY_NAME,
+  CATEGORY_ICON_FALLBACK,
+} from "@/lib/category-icons";
 import {
   createLimit,
   deleteLimit,
@@ -266,11 +271,11 @@ export default function LimitsPage() {
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
   const [amountStr, setAmountStr] = useState("");
-  const [cat1, setCat1] = useState("");
-  const [cat2, setCat2] = useState("");
-  const [cat3, setCat3] = useState("");
-  const [categoryQuery, setCategoryQuery] = useState("");
-  const [isCategorySearchOpen, setIsCategorySearchOpen] = useState(false);
+  const [selectedCategoryPath, setSelectedCategoryPath] = useState<{
+    l1: string;
+    l2: string;
+    l3: string;
+  } | null>(null);
   const onboardingAppliedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -320,16 +325,6 @@ export default function LimitsPage() {
     return paths;
   }, [categoryMaps]);
 
-  const normalizedCategoryQuery = useMemo(
-    () => normalizeCategory(categoryQuery),
-    [categoryQuery]
-  );
-  const filteredCategoryPaths = useMemo(() => {
-    if (!normalizedCategoryQuery) return categoryPaths;
-    return categoryPaths.filter((path) =>
-      path.searchKey.includes(normalizedCategoryQuery)
-    );
-  }, [categoryPaths, normalizedCategoryQuery]);
 
   const activeLimits = useMemo(
     () => limits.filter((limit) => !limit.deleted_at),
@@ -423,6 +418,35 @@ export default function LimitsPage() {
     return categoryLookup.pathToId.get(key) ?? null;
   };
 
+  const resolveCategoryIcon = useCallback(
+    (categoryId: number | null) => {
+      if (!categoryId) return CATEGORY_ICON_FALLBACK;
+      const path = categoryLookup.idToPath.get(categoryId);
+      if (!path || path.length === 0) return CATEGORY_ICON_FALLBACK;
+      for (let depth = path.length; depth >= 1; depth -= 1) {
+        const key = makeCategoryPathKey(...path.slice(0, depth));
+        const targetId = categoryLookup.pathToId.get(key);
+        if (!targetId) continue;
+        const iconName = categoryLookup.idToIcon.get(targetId);
+        if (!iconName) continue;
+        const normalizedIconName = iconName.trim();
+        if (!normalizedIconName) continue;
+        const Icon = CATEGORY_ICON_BY_NAME[normalizedIconName];
+        if (Icon) return Icon;
+      }
+      return CATEGORY_ICON_FALLBACK;
+    },
+    [categoryLookup.idToIcon, categoryLookup.idToPath, categoryLookup.pathToId]
+  );
+
+  const getCategoryIconByPath = useCallback(
+    (l1: string, l2: string, l3: string) => {
+      const categoryId = resolveCategoryId(l1, l2, l3);
+      return resolveCategoryIcon(categoryId);
+    },
+    [categoryLookup.pathToId, resolveCategoryIcon]
+  );
+
   const formatCategoryLabel = (categoryId: number | null) => {
     if (!categoryId) return "-";
     const parts = categoryLookup.idToPath.get(categoryId) ?? [];
@@ -434,11 +458,16 @@ export default function LimitsPage() {
   };
 
   const applyCategorySelection = (l1: string, l2: string, l3: string) => {
-    setCat1(l1);
-    setCat2(l2);
-    setCat3(l3);
-    setCategoryQuery(formatCategoryPath(l1, l2, l3));
+    if (!l1 || (l1 === CATEGORY_PLACEHOLDER && !l2 && !l3)) {
+      setSelectedCategoryPath(null);
+    } else {
+      setSelectedCategoryPath({ l1, l2, l3 });
+    }
   };
+
+  const cat1 = selectedCategoryPath?.l1 || "";
+  const cat2 = selectedCategoryPath?.l2 || "";
+  const cat3 = selectedCategoryPath?.l3 || "";
 
   const resetForm = () => {
     setLimitName("");
@@ -447,10 +476,7 @@ export default function LimitsPage() {
     setCustomEndDate("");
     setAmountStr("");
     setFormError(null);
-    setCat1("");
-    setCat2("");
-    setCat3("");
-    setCategoryQuery("");
+    setSelectedCategoryPath(null);
   };
 
   useEffect(() => {
@@ -663,72 +689,20 @@ export default function LimitsPage() {
 
             <div className="grid gap-2">
               <Label>Категория расхода</Label>
-              <div className="relative">
-                <Input
-                  className="border-2 border-border/70 bg-white shadow-none"
-                  value={categoryQuery}
-                  onChange={(e) => {
-                    setCategoryQuery(e.target.value);
-                    setIsCategorySearchOpen(true);
-                  }}
-                  onFocus={() => setIsCategorySearchOpen(true)}
-                  onClick={() => setIsCategorySearchOpen(true)}
-                  onBlur={() => {
-                    setIsCategorySearchOpen(false);
-                    setCategoryQuery(formatCategoryPath(cat1, cat2, cat3));
-                  }}
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      isCategorySearchOpen &&
-                      categoryQuery.trim()
-                    ) {
-                      const first = filteredCategoryPaths[0];
-                      if (first) {
-                        event.preventDefault();
-                        applyCategorySelection(first.l1, first.l2, first.l3);
-                        setIsCategorySearchOpen(false);
-                      }
-                    }
-                  }}
-                  placeholder="Выберите категорию"
-                  type="text"
-                />
-                {isCategorySearchOpen ? (
-                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border/70 bg-white p-1 shadow-lg">
-                    {filteredCategoryPaths.length === 0 ? (
-                      <div className="px-2 py-1 text-sm text-muted-foreground">
-                        Ничего не найдено
-                      </div>
-                    ) : (
-                      filteredCategoryPaths.map((option) => {
-                        const isSelected =
-                          option.l1 === cat1 &&
-                          option.l2 === cat2 &&
-                          option.l3 === cat3;
-                        return (
-                          <button
-                            key={`${option.l1}||${option.l2}||${option.l3}`}
-                            type="button"
-                            className={`flex w-full items-start rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                              isSelected
-                                ? "bg-violet-50 text-violet-700"
-                                : "text-slate-700 hover:bg-slate-100"
-                            }`}
-                            onMouseDown={(event) => {
-                              event.preventDefault();
-                              applyCategorySelection(option.l1, option.l2, option.l3);
-                              setIsCategorySearchOpen(false);
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                ) : null}
-              </div>
+              <CategorySelector
+                categoryNodes={categoryNodes}
+                selectedPath={selectedCategoryPath}
+                onChange={(path) => {
+                  if (path) {
+                    applyCategorySelection(path.l1, path.l2, path.l3);
+                  } else {
+                    applyCategorySelection("", "", "");
+                  }
+                }}
+                placeholder="Выберите категорию"
+                direction="EXPENSE"
+                disabled={isSubmitting}
+              />
             </div>
 
             <div className="grid gap-2">

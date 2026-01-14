@@ -76,8 +76,9 @@ class TransactionFormViewModel(
     
     fun submit(onSuccess: () -> Unit) {
         val state = _uiState.value
+        val primaryItemId = state.selectedPrimaryItemId
         
-        if (state.selectedPrimaryItemId == null) {
+        if (primaryItemId == null) {
             _uiState.value = state.copy(errorMessage = "Выберите счет")
             return
         }
@@ -95,7 +96,7 @@ class TransactionFormViewModel(
             
             val transactionCreate = TransactionCreate(
                 transactionDate = transactionDateString,
-                primaryItemId = state.selectedPrimaryItemId!!,
+                primaryItemId = primaryItemId,
                 direction = state.selectedDirection,
                 transactionType = state.selectedTransactionType,
                 amountRub = (state.amountRub * 100).toInt(),

@@ -34,6 +34,7 @@ from schemas import (
     AuthUserOut,
     UserMeOut,
     AccountingStartDateUpdate,
+    ItemCloseRequest,
 )
 from auth import get_current_user, create_access_token, hash_password, verify_password
 
@@ -60,6 +61,10 @@ from item_opening_service import (
     create_opening_transactions,
     delete_commission_transactions,
     delete_opening_transactions,
+    _create_transfer,
+    _create_income_expense,
+    AUTO_CLOSING_SOURCE,
+    _build_item_comment,
 )
 
 app = FastAPI(title="FinApp API", version="0.1.0")
@@ -1310,6 +1315,7 @@ def archive_item(
 def close_item(
     item_id: int,
     close_cards: bool = False,
+    payload: ItemCloseRequest | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -1318,8 +1324,133 @@ def close_item(
         raise HTTPException(status_code=404, detail="Item not found")
     if item.archived_at is not None:
         raise HTTPException(status_code=400, detail="Cannot close deleted item")
-    if item.type_code != "bank_card" and item.current_value_rub != 0:
-        raise HTTPException(status_code=400, detail="Item balance must be zero to close")
+    
+    # Merge close_cards from query param and body
+    if payload:
+        close_cards = payload.close_cards or close_cards
+    
+    # Check balance
+    is_moex = is_moex_item(item)
+    has_balance = False
+    balance_amount = 0
+    balance_lots = None
+    
+    if is_moex:
+        balance_lots = item.position_lots or 0
+        has_balance = balance_lots != 0
+        if has_balance and item.instrument_board_id:
+            price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+            if price:
+                value = _compute_market_value_rub(item, price, db)
+                if value is not None:
+                    balance_amount = value
+    else:
+        balance_amount = item.current_value_rub
+        has_balance = item.type_code != "bank_card" and balance_amount != 0
+    
+    # If balance is non-zero, require closing options
+    if has_balance and not payload:
+        raise HTTPException(
+            status_code=400,
+            detail="Item balance is non-zero. Closing options are required.",
+        )
+    
+    # Handle closing with non-zero balance
+    if has_balance and payload:
+        closing_date = payload.closing_date or date_type.today()
+        
+        if payload.transfer_to_item_id:
+            # Create transfer transaction
+            target_item = db.get(Item, payload.transfer_to_item_id)
+            if not target_item or target_item.user_id != user.id:
+                raise HTTPException(status_code=400, detail="Invalid transfer_to_item_id")
+            if target_item.id == item.id:
+                raise HTTPException(status_code=400, detail="Cannot transfer to the same item")
+            if target_item.archived_at is not None or target_item.closed_at is not None:
+                raise HTTPException(status_code=400, detail="Target item is archived or closed")
+            
+            comment = f"Перевод с {item.name} при закрытии"
+            
+            if is_moex:
+                # For MOEX items, transfer position_lots
+                if item.kind == "ASSET":
+                    primary_id = item.id
+                    counter_id = target_item.id
+                    primary_lots = balance_lots
+                    counter_lots = balance_lots
+                else:
+                    primary_id = target_item.id
+                    counter_id = item.id
+                    primary_lots = balance_lots
+                    counter_lots = balance_lots
+                
+                _create_transfer(
+                    db=db,
+                    user=user,
+                    primary_item_id=primary_id,
+                    counterparty_item_id=counter_id,
+                    amount_rub=balance_amount,
+                    tx_date=closing_date,
+                    linked_item_id=item.id,
+                    source=AUTO_CLOSING_SOURCE,
+                    comment=comment,
+                    transaction_type="ACTUAL",
+                    primary_quantity_lots=primary_lots,
+                    counterparty_quantity_lots=counter_lots,
+                    counterparty_id=item.counterparty_id,
+                )
+            else:
+                # For non-MOEX items, transfer balance_amount
+                if item.kind == "ASSET":
+                    primary_id = item.id
+                    counter_id = target_item.id
+                else:
+                    primary_id = target_item.id
+                    counter_id = item.id
+                
+                _create_transfer(
+                    db=db,
+                    user=user,
+                    primary_item_id=primary_id,
+                    counterparty_item_id=counter_id,
+                    amount_rub=balance_amount,
+                    tx_date=closing_date,
+                    linked_item_id=item.id,
+                    source=AUTO_CLOSING_SOURCE,
+                    comment=comment,
+                    transaction_type="ACTUAL",
+                    counterparty_id=item.counterparty_id,
+                )
+        elif payload.write_off:
+            # Create income/expense transaction
+            if item.kind == "ASSET":
+                direction = "EXPENSE"
+                category_name = "Прочие расходы"
+            else:
+                direction = "INCOME"
+                category_name = "Прочие доходы"
+            
+            comment = f"Списание остатка с {item.name} при закрытии"
+            
+            _create_income_expense(
+                db=db,
+                user=user,
+                item_id=item.id,
+                amount_rub=balance_amount,
+                tx_date=closing_date,
+                direction=direction,
+                category_name=category_name,
+                linked_item_id=item.id,
+                comment=comment,
+                primary_quantity_lots=balance_lots if is_moex else None,
+                source=AUTO_CLOSING_SOURCE,
+                counterparty_id=item.counterparty_id,
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Either transfer_to_item_id or write_off must be specified.",
+            )
 
     if item.type_code == "bank_account":
         linked_cards = (

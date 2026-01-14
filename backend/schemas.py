@@ -82,6 +82,19 @@ class AccountingStartDateUpdate(BaseModel):
     accounting_start_date: date
 
 
+class ItemCloseRequest(BaseModel):
+    close_cards: bool = False
+    closing_date: date | None = None
+    transfer_to_item_id: int | None = None
+    write_off: bool = False
+
+    @model_validator(mode="after")
+    def validate_closing_options(self) -> "ItemCloseRequest":
+        if self.write_off and self.transfer_to_item_id is not None:
+            raise ValueError("Cannot specify both write_off and transfer_to_item_id")
+        return self
+
+
 class OnboardingStateOut(BaseModel):
     device_type: OnboardingDeviceType
     status: OnboardingStatus

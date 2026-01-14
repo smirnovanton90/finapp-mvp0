@@ -46,7 +46,13 @@ fun TransactionsListScreen(
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
                     items(uiState.transactions) { transaction ->
-                        TransactionRow(transaction = transaction)
+                        TransactionRow(
+                            transaction = transaction,
+                            itemNames = uiState.items,
+                            categoryNames = uiState.categories,
+                            categoryIcons = uiState.categoryIcons,
+                            counterpartyNames = uiState.counterparties
+                        )
                     }
                 }
             }

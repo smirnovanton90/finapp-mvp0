@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.finapp.data.local.TokenManager
 import com.finapp.data.repository.AuthRepository
+import com.finapp.data.repository.CategoriesRepository
+import com.finapp.data.repository.CounterpartiesRepository
 import com.finapp.data.repository.ItemsRepository
 import com.finapp.data.repository.TransactionsRepository
 import com.finapp.ui.auth.LoginViewModel
@@ -18,6 +20,8 @@ class ViewModelFactory(private val context: Context) : ViewModelProvider.Factory
     private val authRepository by lazy { AuthRepository(tokenManager) }
     private val itemsRepository by lazy { ItemsRepository(tokenManager) }
     private val transactionsRepository by lazy { TransactionsRepository(tokenManager) }
+    private val categoriesRepository by lazy { CategoriesRepository(tokenManager) }
+    private val counterpartiesRepository by lazy { CounterpartiesRepository(tokenManager) }
     
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -32,7 +36,12 @@ class ViewModelFactory(private val context: Context) : ViewModelProvider.Factory
                 ItemFormViewModel(itemsRepository) as T
             }
             modelClass.isAssignableFrom(TransactionsListViewModel::class.java) -> {
-                TransactionsListViewModel(transactionsRepository) as T
+                TransactionsListViewModel(
+                    transactionsRepository,
+                    itemsRepository,
+                    categoriesRepository,
+                    counterpartiesRepository
+                ) as T
             }
             modelClass.isAssignableFrom(TransactionFormViewModel::class.java) -> {
                 TransactionFormViewModel(transactionsRepository, itemsRepository) as T

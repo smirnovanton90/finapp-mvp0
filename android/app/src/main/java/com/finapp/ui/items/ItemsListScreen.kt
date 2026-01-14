@@ -77,10 +77,5 @@ fun ItemsListScreen(
             }
         }
         
-        uiState.errorMessage?.let { error ->
-            LaunchedEffect(error) {
-                // Show error snackbar
-            }
-        }
     }
 }

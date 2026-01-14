@@ -616,6 +616,12 @@ export default function Page() {
   const [isGeneralCreate, setIsGeneralCreate] = useState(false);
   const [sectionId, setSectionId] = useState("");
 
+  const [closeItemDialogOpen, setCloseItemDialogOpen] = useState(false);
+  const [closingItem, setClosingItem] = useState<ItemOut | null>(null);
+  const [closingDate, setClosingDate] = useState(() => getTodayDateKey());
+  const [closeTransferItemId, setCloseTransferItemId] = useState<string>("");
+  const [closeWriteOff, setCloseWriteOff] = useState(false);
+
   const [kind, setKind] = useState<ItemKind>("ASSET");
   const [allowedTypeCodes, setAllowedTypeCodes] = useState<string[]>(CASH_TYPES);
   const [typeCode, setTypeCode] = useState("");
@@ -3000,19 +3006,33 @@ export default function Page() {
     }
   }
 
+  function hasNonZeroBalance(item: ItemOut): boolean {
+    const isMoexItem = MOEX_TYPE_CODES.includes(item.type_code);
+    if (isMoexItem) {
+      const positionLots = item.position_lots ?? 0;
+      return positionLots !== 0;
+    } else {
+      return item.type_code !== "bank_card" && item.current_value_rub !== 0;
+    }
+  }
+
   async function onClose(item: ItemOut) {
-    setLoading(true);
     setError(null);
+    
+    const hasBalance = hasNonZeroBalance(item);
+    
+    if (hasBalance) {
+      setClosingItem(item);
+      setClosingDate(getTodayDateKey());
+      setCloseTransferItemId("");
+      setCloseWriteOff(false);
+      setCloseItemDialogOpen(true);
+      return;
+    }
+    
+    // Если баланс нулевой, продолжаем как раньше
+    setLoading(true);
     try {
-      if (item.plan_settings?.enabled) {
-        const confirmed = window.confirm(
-          "Есть плановые транзакции. Нереализованные будут удалены. Продолжить?"
-        );
-        if (!confirmed) {
-          setLoading(false);
-          return;
-        }
-      }
       if (item.type_code === "bank_account") {
         const linkedCards = linkedCardsByAccountId.get(item.id) ?? [];
         if (linkedCards.length > 0) {
@@ -3031,6 +3051,44 @@ export default function Page() {
         await closeItem(item.id);
       }
       await loadItems();
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось закрыть счет");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onConfirmClose() {
+    if (!closingItem) return;
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const payload: any = {
+        closing_date: closingDate,
+      };
+      
+      if (closeWriteOff) {
+        payload.write_off = true;
+      } else if (closeTransferItemId) {
+        payload.transfer_to_item_id = Number(closeTransferItemId);
+      } else {
+        setError("Выберите способ обработки остатка: перевод или списание");
+        setLoading(false);
+        return;
+      }
+      
+      if (closingItem.type_code === "bank_account") {
+        const linkedCards = linkedCardsByAccountId.get(closingItem.id) ?? [];
+        if (linkedCards.length > 0) {
+          payload.closeCards = true;
+        }
+      }
+      
+      await closeItem(closingItem.id, payload);
+      await loadItems();
+      setCloseItemDialogOpen(false);
+      setClosingItem(null);
     } catch (e: any) {
       setError(e?.message ?? "Не удалось закрыть счет");
     } finally {
@@ -3166,10 +3224,7 @@ export default function Page() {
                   const isClosed = Boolean(it.closed_at);
                   const isLinkedCard = it.type_code === "bank_card" && Boolean(it.card_account_id);
                   const canEdit = !isArchived && !isClosed;
-                  const canClose =
-                    !isArchived &&
-                    !isClosed &&
-                    (it.type_code === "bank_card" || it.current_value_rub === 0);
+                  const canClose = !isArchived && !isClosed;
                   const canDelete = !isArchived;
                   const linkedAccount =
                     it.type_code === "bank_card" && it.card_account_id
@@ -4522,6 +4577,99 @@ export default function Page() {
               </Button>
             </div>
             </form>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={closeItemDialogOpen} onOpenChange={setCloseItemDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Закрытие актива/обязательства</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label>Дата закрытия</Label>
+              <Input
+                type="date"
+                value={closingDate}
+                onChange={(e) => setClosingDate(e.target.value)}
+                className="border-2 border-border/70 bg-white shadow-none"
+              />
+            </div>
+            
+            <div className="grid gap-2">
+              <Label>Обработка остатка</Label>
+              <div className="inline-flex items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCloseWriteOff(false);
+                    setCloseTransferItemId("");
+                  }}
+                  className={[
+                    segmentedButtonBase,
+                    !closeWriteOff ? "bg-violet-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
+                  ].join(" ")}
+                >
+                  Перевести на
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCloseWriteOff(true);
+                    setCloseTransferItemId("");
+                  }}
+                  className={[
+                    segmentedButtonBase,
+                    closeWriteOff ? "bg-violet-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
+                  ].join(" ")}
+                >
+                  Списать
+                </button>
+              </div>
+            </div>
+
+            {!closeWriteOff && (
+              <div className="grid gap-2">
+                <Label>Актив/обязательство для перевода</Label>
+                <ItemSelector
+                  items={activeItems.filter((item) => item.id !== closingItem?.id)}
+                  selectedIds={closeTransferItemId ? [Number(closeTransferItemId)] : []}
+                  onChange={(ids) => {
+                    const nextId = ids[0] ?? null;
+                    setCloseTransferItemId(nextId ? String(nextId) : "");
+                  }}
+                  selectionMode="single"
+                  placeholder="Выберите актив/обязательство"
+                  clearLabel="Не выбрано"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  getBankLogoUrl={itemCounterpartyLogoUrl}
+                  getBankName={itemCounterpartyName}
+                  itemCounts={itemTxCounts}
+                  ariaLabel="Актив/обязательство для перевода"
+                />
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-2 border-border/70 bg-white shadow-none"
+              onClick={() => setCloseItemDialogOpen(false)}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              disabled={loading || (!closeWriteOff && !closeTransferItemId)}
+              onClick={onConfirmClose}
+              className="bg-violet-600 hover:bg-violet-700 text-white"
+            >
+              {loading ? "Закрываем..." : "Закрыть"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

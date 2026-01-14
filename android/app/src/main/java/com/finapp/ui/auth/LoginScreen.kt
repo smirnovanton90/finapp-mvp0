@@ -1,10 +1,17 @@
 package com.finapp.ui.auth
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
@@ -16,6 +23,7 @@ fun LoginScreen(
 ) {
     var login by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsState()
     
     LaunchedEffect(uiState.isAuthenticated) {
@@ -48,8 +56,6 @@ fun LoginScreen(
                     .padding(bottom = 16.dp),
                 singleLine = true
             )
-            
-            var passwordVisible by remember { mutableStateOf(false) }
             
             OutlinedTextField(
                 value = password,

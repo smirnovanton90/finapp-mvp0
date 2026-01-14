@@ -758,13 +758,27 @@ export async function archiveItem(id: number): Promise<ItemOut> {
 
 export async function closeItem(
   id: number,
-  options?: { closeCards?: boolean }
+  payload?: {
+    closeCards?: boolean;
+    closing_date?: string;
+    transfer_to_item_id?: number;
+    write_off?: boolean;
+  }
 ): Promise<ItemOut> {
   const params = new URLSearchParams();
-  if (options?.closeCards) params.set("close_cards", "true");
+  if (payload?.closeCards) params.set("close_cards", "true");
   const qs = params.toString();
+  const bodyPayload: any = {};
+  if (payload) {
+    if (payload.closeCards !== undefined) bodyPayload.close_cards = payload.closeCards;
+    if (payload.closing_date !== undefined) bodyPayload.closing_date = payload.closing_date;
+    if (payload.transfer_to_item_id !== undefined) bodyPayload.transfer_to_item_id = payload.transfer_to_item_id;
+    if (payload.write_off !== undefined) bodyPayload.write_off = payload.write_off;
+  }
+  const body = Object.keys(bodyPayload).length > 0 ? JSON.stringify(bodyPayload) : undefined;
   const res = await authFetch(`${API_BASE}/items/${id}/close${qs ? `?${qs}` : ""}`, {
     method: "PATCH",
+    ...(body ? { body } : {}),
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

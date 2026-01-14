@@ -3508,8 +3508,8 @@ export default function Page() {
               </div>
             )}
 
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="grid gap-4">
+            <div className="grid items-start gap-6 md:grid-cols-2">
+              <div className="grid content-start gap-4">
             {isGeneralCreate && (
               <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
                 <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">

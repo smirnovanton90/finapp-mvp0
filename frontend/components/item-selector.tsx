@@ -210,7 +210,7 @@ export function ItemSelector({
             <img
               src={selectedBankLogoUrl}
               alt={selectedLabel}
-              className="absolute left-2 h-6 w-6 rounded bg-white object-contain z-10 pointer-events-none"
+              className="absolute left-4 h-6 w-6 rounded bg-white object-contain z-10 pointer-events-none"
               loading="lazy"
             />
           )}
@@ -218,7 +218,7 @@ export function ItemSelector({
             type="text"
             aria-label={ariaLabel}
             className={`h-10 w-full border-2 border-border/70 bg-white shadow-none ${
-              selectedBankLogoUrl && !query ? "pl-10" : ""
+              selectedBankLogoUrl && !query ? "pl-11" : ""
             }`}
             placeholder={placeholder}
             value={inputValue}

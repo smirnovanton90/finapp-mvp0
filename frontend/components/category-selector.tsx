@@ -325,7 +325,7 @@ export function CategorySelector({
           {selectionMode === "single" && selectedPath && !query && selectedCategoryIcon && (() => {
             const CategoryIcon = selectedCategoryIcon;
             return (
-              <div className="absolute left-2 flex h-6 w-6 items-center justify-center z-10 pointer-events-none">
+              <div className="absolute left-4 flex h-6 w-6 items-center justify-center z-10 pointer-events-none">
                 <CategoryIcon className="h-4 w-4 text-violet-600" aria-hidden="true" />
               </div>
             );
@@ -334,7 +334,7 @@ export function CategorySelector({
             type="text"
             aria-label={ariaLabel}
             className={`h-10 w-full border-2 border-border/70 bg-white shadow-none ${
-              selectionMode === "single" && selectedPath && !query && selectedCategoryIcon ? "pl-10" : ""
+              selectionMode === "single" && selectedPath && !query && selectedCategoryIcon ? "pl-11" : ""
             }`}
             placeholder={placeholder}
             value={inputValue}

@@ -230,12 +230,12 @@ export function CounterpartySelector({
             <img
               src={selectedImageUrl}
               alt={selectedLabel}
-              className="absolute left-2 h-6 w-6 rounded bg-white object-contain z-10 pointer-events-none"
+              className="absolute left-4 h-6 w-6 rounded bg-white object-contain z-10 pointer-events-none"
               loading="lazy"
             />
           )}
           {!selectedImageUrl && selectedCounterparty && !query && DefaultIcon && (
-            <div className="absolute left-2 flex h-6 w-6 items-center justify-center rounded bg-white text-slate-500 z-10 pointer-events-none">
+            <div className="absolute left-4 flex h-6 w-6 items-center justify-center rounded bg-white text-slate-500 z-10 pointer-events-none">
               <DefaultIcon className="h-4 w-4" aria-hidden="true" />
             </div>
           )}
@@ -243,7 +243,7 @@ export function CounterpartySelector({
             type="text"
             aria-label={ariaLabel}
             className={`h-10 w-full border-2 border-border/70 bg-white shadow-none ${
-              (selectedImageUrl || (selectedCounterparty && !query)) ? "pl-10" : ""
+              (selectedImageUrl || (selectedCounterparty && !query)) ? "pl-11" : ""
             }`}
             placeholder={placeholder}
             value={inputValue}

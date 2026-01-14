@@ -562,7 +562,7 @@ export default function FinancialPlanningPage() {
   }, [session]);
 
   const segmentedButtonBase =
-    "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+    "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
 
   const applyCategorySelection = (l1: string, l2: string, l3: string) => {
     if (!l1 || (l1 === CATEGORY_PLACEHOLDER && !l2 && !l3)) {

@@ -4077,7 +4077,7 @@ export function TransactionsView({
 
                     {!isBulkEdit && !isRealizeMode && (
                       <div className="grid gap-2" role="group" aria-label="Тип транзакции">
-                        <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border border-input bg-muted/60 p-0.5">
+                        <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                           <button
                             type="button"
                             aria-pressed={isActualTransaction}
@@ -4107,7 +4107,7 @@ export function TransactionsView({
                     )}
 
                     <div className="grid gap-2" role="group" aria-label="Характер транзакции">
-                      <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border border-input bg-muted/60 p-0.5">
+                      <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                         <button
                           type="button"
                           aria-pressed={!isLoanRepayment && direction === "INCOME"}
@@ -4132,7 +4132,7 @@ export function TransactionsView({
                             setFormMode("STANDARD");
                             setDirection("EXPENSE");
                             setCounterpartyItemId(null);
-                            applyCategorySelection("Питание", "Продукты питания", "-");
+                            applyCategorySelection("", "", "");
                           }}
                           className={`${segmentedButtonBase} ${
                             !isLoanRepayment && direction === "EXPENSE"
@@ -4723,7 +4723,7 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                   <button
                     type="button"
                     aria-pressed={isIncomeSelected}
@@ -5019,7 +5019,7 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                   <button
                     type="button"
                     aria-pressed={showConfirmed}
@@ -5069,7 +5069,7 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                   <button
                     type="button"
                     aria-pressed={showActual}
@@ -5140,7 +5140,7 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                   <button
                     type="button"
                     aria-pressed={showActive}

@@ -691,7 +691,7 @@ export default function Page() {
   }, [isWizardOpen]);
   const isEditing = Boolean(editingItem);
   const segmentedButtonBase =
-    "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
+    "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
 
   function resetCreateForm() {
     setName("");
@@ -3500,7 +3500,7 @@ export default function Page() {
               <div className="grid content-start gap-4">
             {isGeneralCreate && (
               <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                   <button
                     type="button"
                     aria-pressed={kind === "ASSET"}
@@ -4529,7 +4529,7 @@ export default function Page() {
       <div className="space-y-6">
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/70 bg-white px-4 py-3">
           <span className="text-sm font-medium text-muted-foreground">Показывать:</span>
-          <div className="inline-flex items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+          <div className="inline-flex items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
             <button
               type="button"
               aria-pressed={!showClosed && !showArchived}

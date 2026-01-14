@@ -540,7 +540,7 @@ export default function CounterpartiesPage() {
   };
 
   const segmentedButtonBase =
-    "flex-1 min-w-0 rounded-sm px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
+    "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
 
   return (
     <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
@@ -850,7 +850,7 @@ export default function CounterpartiesPage() {
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                   <button
                     type="button"
                     aria-pressed={showActiveStatus}
@@ -895,7 +895,7 @@ export default function CounterpartiesPage() {
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-md border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
                   <button
                     type="button"
                     aria-pressed={showLegalEntities}

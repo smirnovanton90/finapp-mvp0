@@ -320,6 +320,13 @@ def create_opening_transactions(
     deposit_end_date: date | None,
     plan_settings,
 ) -> None:
+    # Не создаем транзакции открытия, если дата открытия равна дате начала учета
+    # Транзакции открытия создаются только для активов/обязательств с типом "Новый" (позже даты начала учета)
+    if not user.accounting_start_date:
+        return
+    if item.open_date and item.open_date <= user.accounting_start_date:
+        return
+    
     is_moex = is_moex_item(item)
     if is_moex:
         if quantity_lots is None or quantity_lots <= 0:

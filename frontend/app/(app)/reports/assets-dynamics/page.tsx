@@ -327,7 +327,8 @@ function buildDeltasByDate(
   selectedIds: Set<number>,
   itemKindById: Map<number, ItemOut["kind"]>,
   moexItemIds: Set<number>,
-  todayKey: string
+  todayKey: string,
+  itemsById: Map<number, ItemOut>
 ) {
   const map = new Map<string, Map<number, number>>();
   const addDelta = (dateKey: string, itemId: number, delta: number) => {
@@ -335,6 +336,28 @@ function buildDeltasByDate(
     const bucket = map.get(dateKey);
     if (!bucket) return;
     bucket.set(itemId, (bucket.get(itemId) ?? 0) + delta);
+  };
+
+  // Функция для получения effective_item_id (для карт это card_account_id, иначе сам item_id)
+  const getEffectiveItemId = (itemId: number): number => {
+    const item = itemsById.get(itemId);
+    if (!item) return itemId;
+    if (item.type_code === "bank_card" && item.card_account_id) {
+      return item.card_account_id;
+    }
+    return itemId;
+  };
+
+  // Функция для нормализации выбранных ID - заменяем карты на их счета
+  const normalizeSelectedIds = (candidates: number[]): number[] => {
+    const effectiveIds = new Set<number>();
+    candidates.forEach((id) => {
+      if (selectedIds.has(id)) {
+        const effectiveId = getEffectiveItemId(id);
+        effectiveIds.add(effectiveId);
+      }
+    });
+    return Array.from(effectiveIds);
   };
 
   txs.forEach((tx) => {
@@ -351,11 +374,15 @@ function buildDeltasByDate(
       tx.counterparty_item_id,
       tx.counterparty_card_item_id ?? null,
     ].filter(Boolean) as number[];
-    const primarySelectedIds = primaryCandidates.filter((id) => selectedIds.has(id));
-    const counterSelectedIds = counterCandidates.filter((id) => selectedIds.has(id));
-    if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0) return;
+    
+    // Нормализуем ID - заменяем карты на их счета
+    const primaryEffectiveIds = normalizeSelectedIds(primaryCandidates);
+    const counterEffectiveIds = normalizeSelectedIds(counterCandidates);
+    
+    if (primaryEffectiveIds.length === 0 && counterEffectiveIds.length === 0) return;
 
-    primarySelectedIds.forEach((itemId) => {
+    // Обрабатываем primary items
+    primaryEffectiveIds.forEach((itemId) => {
       if (moexItemIds.has(itemId)) return;
       let delta = 0;
       if (tx.direction === "INCOME") delta = tx.amount_rub;
@@ -374,9 +401,11 @@ function buildDeltasByDate(
       addDelta(dateKey, itemId, delta);
     });
 
+    // Обрабатываем counterparty items только для переводов
+    // Для INCOME/EXPENSE counterparty_item_id обычно указывает на контрагента, а не на актив
     if (tx.direction === "TRANSFER") {
       const counterAmount = tx.amount_counterparty ?? tx.amount_rub;
-      counterSelectedIds.forEach((itemId) => {
+      counterEffectiveIds.forEach((itemId) => {
         if (moexItemIds.has(itemId)) return;
         const kind = itemKindById.get(itemId) ?? "ASSET";
         const delta = transferDelta(kind, false, counterAmount);
@@ -917,7 +946,8 @@ export default function AssetsDynamicsPage() {
       selectedIds,
       itemKindById,
       moexItemIds,
-      todayKey
+      todayKey,
+      itemsById
     );
     const lotDeltasByDate = buildLotDeltasByDate(
       transactions,

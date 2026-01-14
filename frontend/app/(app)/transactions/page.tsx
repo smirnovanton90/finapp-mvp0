@@ -4243,22 +4243,24 @@ export function TransactionsView({
                       </div>
                     )}
 
-                    <div className="grid gap-2">
-                      <Label>Контрагент</Label>
-                      <CounterpartySelector
-                        counterparties={selectableCounterparties}
-                        selectedIds={counterpartyId ? [counterpartyId] : []}
-                        onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
-                        selectionMode="single"
-                        placeholder="Начните вводить название"
-                        industries={industries}
-                        disabled={counterpartyLoading}
-                        counterpartyCounts={counterpartyTxCounts}
-                      />
-                      {counterpartyError && (
-                        <p className="text-xs text-red-600">{counterpartyError}</p>
-                      )}
-                    </div>
+                    {!isTransfer && (
+                      <div className="grid gap-2">
+                        <Label>Контрагент</Label>
+                        <CounterpartySelector
+                          counterparties={selectableCounterparties}
+                          selectedIds={counterpartyId ? [counterpartyId] : []}
+                          onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                          selectionMode="single"
+                          placeholder="Начните вводить название"
+                          industries={industries}
+                          disabled={counterpartyLoading}
+                          counterpartyCounts={counterpartyTxCounts}
+                        />
+                        {counterpartyError && (
+                          <p className="text-xs text-red-600">{counterpartyError}</p>
+                        )}
+                      </div>
+                    )}
 
                     {isLoanRepayment ? (
                       <>

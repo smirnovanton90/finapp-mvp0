@@ -3115,7 +3115,7 @@ export default function Page() {
                     <TableHead className="pl-[2.5rem] sm:pl-[3rem] font-medium text-muted-foreground whitespace-normal">
                       Название
                     </TableHead>
-                    <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
+                    <TableHead className="w-16 min-w-16 max-w-16 font-medium text-muted-foreground text-center whitespace-normal">
                       
                     </TableHead>
                     <TableHead className="font-medium text-muted-foreground whitespace-normal text-center">
@@ -3249,7 +3249,7 @@ export default function Page() {
                       </TableCell>
 
                       <TableCell
-                        className={["text-center text-sm", mutedToneClass].join(" ")}
+                        className={["w-16 min-w-16 max-w-16 text-center text-sm", mutedToneClass].join(" ")}
                       >
                         {!isLinkedCard && counterpartyLogoUrl ? (
                           <img

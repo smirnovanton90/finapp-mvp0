@@ -3080,7 +3080,7 @@ export default function Page() {
     });
 
     return (
-      <Card className="pb-0">
+      <Card className="pb-0 overflow-hidden">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-base flex items-center gap-2">
             {Icon && (
@@ -3106,37 +3106,38 @@ export default function Page() {
               Пока нет записей
             </div>
           ) : (
-            <Table className="w-full">
-              <TableHeader className="[&_tr]:border-b-2 [&_tr]:border-border/70">
-                <TableRow className="border-b-2 border-border/70">
-                  <TableHead className="pl-6 font-medium text-muted-foreground whitespace-normal">
-                    Название
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
-                    
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground whitespace-normal text-center">
-                    Дата появления / Статус
-                  </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
-                    {isInvestmentAssets
-                      ? "Текущая сумма в валюте/количество лотов"
-                      : "Текущая сумма в валюте"}
-                  </TableHead>
-                  <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
-                    
-                  </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
-                    {isInvestmentAssets
-                      ? "Актуальный курс валюты/стоимость одного лота"
-                      : "Актуальный курс валюты"}
-                  </TableHead>
-                  <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
-                    Текущая сумма в руб. экв.
-                  </TableHead>
-                  <TableHead className="pr-6" />
-                </TableRow>
-              </TableHeader>
+            <div className="-mx-6">
+              <Table className="w-full">
+                <TableHeader className="[&_tr]:border-b-2 [&_tr]:border-border/70">
+                  <TableRow className="border-b-2 border-border/70">
+                    <TableHead className="pl-[2.5rem] sm:pl-[3rem] font-medium text-muted-foreground whitespace-normal">
+                      Название
+                    </TableHead>
+                    <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
+                      
+                    </TableHead>
+                    <TableHead className="font-medium text-muted-foreground whitespace-normal text-center">
+                      Дата появления / Статус
+                    </TableHead>
+                    <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
+                      {isInvestmentAssets
+                        ? "Текущая сумма в валюте/количество лотов"
+                        : "Текущая сумма в валюте"}
+                    </TableHead>
+                    <TableHead className="font-medium text-muted-foreground text-center whitespace-normal">
+                      
+                    </TableHead>
+                    <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
+                      {isInvestmentAssets
+                        ? "Актуальный курс валюты/стоимость одного лота"
+                        : "Актуальный курс валюты"}
+                    </TableHead>
+                    <TableHead className="text-right font-medium text-muted-foreground whitespace-normal">
+                      Текущая сумма в руб. экв.
+                    </TableHead>
+                    <TableHead className="pr-[2.5rem] sm:pr-[3rem]" />
+                  </TableRow>
+                </TableHeader>
 
               <TableBody>
                 {orderedItems.map((it) => {
@@ -3213,7 +3214,9 @@ export default function Page() {
                       <TableCell
                         className={[
                           "whitespace-normal break-words",
-                          isLinkedCard ? "pl-12" : "pl-6",
+                          isLinkedCard
+                            ? "pl-[4rem] sm:pl-[4.5rem]"
+                            : "pl-[2.5rem] sm:pl-[3rem]",
                         ].join(" ")}
                       >
                         <div className="flex items-center gap-2">
@@ -3376,7 +3379,7 @@ export default function Page() {
                           : formatRub(rubEquivalent)}
                       </TableCell>
 
-                      <TableCell className="pr-6 text-right">
+                      <TableCell className="pr-[2.5rem] sm:pr-[3rem] text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -3430,7 +3433,7 @@ export default function Page() {
 
               <TableFooter className="border-t-2 border-border/70">
                 <TableRow className="bg-violet-50/70 border-b-0">
-                  <TableCell className="pl-6 font-medium">Итого</TableCell>
+                  <TableCell className="pl-[2.5rem] sm:pl-[3rem] font-medium">Итого</TableCell>
                   <TableCell />
                   <TableCell />
                   <TableCell />
@@ -3445,10 +3448,11 @@ export default function Page() {
                   >
                     {isLiability ? `-${formatRub(total)}` : formatRub(total)}
                   </TableCell>
-                  <TableCell className="pr-6" />
+                  <TableCell className="pr-[2.5rem] sm:pr-[3rem]" />
                 </TableRow>
-              </TableFooter>
-            </Table>
+                </TableFooter>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -3885,7 +3889,7 @@ export default function Page() {
             )}
 
             </div>
-            <div className="grid gap-4">
+            <div className="grid content-start gap-4">
             {showMoexPricing && (
               <div className="rounded-lg border border-violet-200/70 bg-violet-50/40 p-3 text-sm">
                 <div className="font-medium">

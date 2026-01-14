@@ -450,7 +450,10 @@ def _ensure_accounting_start_date(user: User) -> date_type:
 
 
 def _resolve_history_status(open_date: date_type, accounting_start_date: date_type) -> str:
-    return "NEW" if open_date >= accounting_start_date else "HISTORICAL"
+    # Элементы, созданные в день начала учета или раньше, считаются историческими,
+    # так как они уже существовали на момент начала учета.
+    # Только элементы, созданные после дня начала учета, считаются новыми.
+    return "NEW" if open_date > accounting_start_date else "HISTORICAL"
 
 
 def _resolve_opening_counterparty(
@@ -855,6 +858,19 @@ def create_item(
             detail = "Initial balance cannot be below credit limit."
         raise HTTPException(status_code=400, detail=detail)
 
+    # Для элементов, созданных в день начала учета, current_value_rub должен быть равен initial_value_rub,
+    # так как транзакции открытия не создаются (create_opening_transactions возвращается раньше).
+    # Для элементов, созданных после дня начала учета, current_value_rub устанавливается в 0,
+    # и транзакция открытия обновит его.
+    will_create_opening_tx = (
+        history_status == "NEW"
+        and has_opening_value
+        and payload.open_date > accounting_start_date
+    )
+    initial_current_value_rub = (
+        0 if will_create_opening_tx else payload.initial_value_rub
+    )
+
     item = Item(
         user_id=user.id,
         kind=item_kind,
@@ -883,7 +899,7 @@ def create_item(
         lot_size=lot_size,
         face_value_cents=face_value_cents,
         initial_value_rub=payload.initial_value_rub,
-        current_value_rub=0 if history_status == "NEW" else payload.initial_value_rub,
+        current_value_rub=initial_current_value_rub,
         start_date=accounting_start_date,
         history_status=history_status,
         opening_counterparty_item_id=opening_counterparty.id
@@ -1164,9 +1180,20 @@ def update_item(
     if commission_requested:
         delete_commission_transactions(db, user, item.id)
 
-    old_base = 0 if item.history_status == "NEW" else item.initial_value_rub
+    # Для элементов, созданных в день начала учета, базовое значение - это initial_value_rub,
+    # так как транзакции открытия не создаются. Для элементов, созданных после дня начала учета,
+    # базовое значение - это 0, так как транзакция открытия обновит current_value_rub.
+    old_will_have_opening_tx = (
+        item.history_status == "NEW"
+        and item.open_date > accounting_start_date
+    )
+    old_base = 0 if old_will_have_opening_tx else item.initial_value_rub
     delta = item.current_value_rub - old_base
-    new_base = 0 if new_history_status == "NEW" else payload.initial_value_rub
+    new_will_have_opening_tx = (
+        new_history_status == "NEW"
+        and payload.open_date > accounting_start_date
+    )
+    new_base = 0 if new_will_have_opening_tx else payload.initial_value_rub
     next_current_value = new_base + delta
     if is_moex:
         next_current_value = item.current_value_rub

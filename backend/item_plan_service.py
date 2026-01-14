@@ -279,6 +279,18 @@ def _sum_interest_cents(
     return total
 
 
+def _sum_interest_cents_by_days(
+    principal_cents: int | Decimal, rate: float, days: int, base_date: date
+) -> Decimal:
+    """Рассчитывает проценты по указанному количеству дней, используя базовую дату для определения високосного года."""
+    principal = Decimal(principal_cents)
+    if principal <= 0 or rate <= 0 or days <= 0:
+        return Decimal(0)
+    annual_rate = Decimal(str(rate)) / Decimal(100)
+    days_in_year = Decimal(_days_in_year(base_date))
+    return principal * Decimal(days) * annual_rate / days_in_year
+
+
 def _apply_tail_adjustment(precise: list[Decimal], rounded: list[int]) -> None:
     if not precise:
         return
@@ -408,19 +420,55 @@ def _create_interest_chain(
     amounts_precise: list[Decimal] = []
     amounts_rounded: list[int] = []
     principal_cents = item.initial_value_rub
-    period_start = min_date
-    for payout_date in schedule_dates:
-        if period_start > payout_date:
-            continue
-        interest_precise = _sum_interest_cents(
-            principal_cents, item.interest_rate, period_start, payout_date
-        )
-        amounts_precise.append(interest_precise)
-        rounded = _round_cents(interest_precise)
-        amounts_rounded.append(rounded)
-        if item.interest_capitalization:
-            principal_cents += rounded
-        period_start = payout_date + timedelta(days=1)
+    
+    # Для вкладов используем deposit_term_days вместо фактического количества дней между датами
+    if item.type_code == "deposit" and item.deposit_term_days is not None:
+        # Для вклада с выплатой в конце срока - используем весь срок вклада
+        if item.interest_payout_order != "MONTHLY":
+            # Рассчитываем проценты за весь срок вклада
+            interest_precise = _sum_interest_cents_by_days(
+                principal_cents, item.interest_rate, item.deposit_term_days, item.open_date
+            )
+            amounts_precise.append(interest_precise)
+            rounded = _round_cents(interest_precise)
+            amounts_rounded.append(rounded)
+        else:
+            # Для месячных выплат распределяем дни между выплатами пропорционально
+            total_days = item.deposit_term_days
+            num_payouts = len(schedule_dates)
+            if num_payouts == 0:
+                raise HTTPException(status_code=400, detail="No payout dates for deposit")
+            
+            days_per_payout = total_days // num_payouts
+            remaining_days = total_days % num_payouts
+            
+            for idx, payout_date in enumerate(schedule_dates):
+                # Для последней выплаты добавляем остаток дней
+                days_for_period = days_per_payout + (remaining_days if idx == num_payouts - 1 else 0)
+                
+                interest_precise = _sum_interest_cents_by_days(
+                    principal_cents, item.interest_rate, days_for_period, item.open_date
+                )
+                amounts_precise.append(interest_precise)
+                rounded = _round_cents(interest_precise)
+                amounts_rounded.append(rounded)
+                if item.interest_capitalization:
+                    principal_cents += rounded
+    else:
+        # Для накопительных счетов и других типов используем фактическое количество дней
+        period_start = item.open_date
+        for payout_date in schedule_dates:
+            if period_start > payout_date:
+                continue
+            interest_precise = _sum_interest_cents(
+                principal_cents, item.interest_rate, period_start, payout_date
+            )
+            amounts_precise.append(interest_precise)
+            rounded = _round_cents(interest_precise)
+            amounts_rounded.append(rounded)
+            if item.interest_capitalization:
+                principal_cents += rounded
+            period_start = payout_date + timedelta(days=1)
 
     _apply_tail_adjustment(amounts_precise, amounts_rounded)
     if not amounts_rounded:

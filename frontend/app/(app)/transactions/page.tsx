@@ -1072,6 +1072,19 @@ function formatRubInput(raw: string): string {
   return formattedDec.length > 0 ? `${formattedInt},${formattedDec}` : formattedInt;
 }
 
+function formatAmountForInput(valueInCents: number): string {
+  const value = valueInCents / 100;
+  const valueStr = value.toFixed(2);
+  const parts = valueStr.split(".");
+  const intPart = parts[0] || "0";
+  const decPart = parts[1] || "00";
+  
+  // Форматируем целую часть с разделителями тысяч
+  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  
+  return `${formattedInt},${decPart}`;
+}
+
 function normalizeRubOnBlur(value: string): string {
   const v = value.trim();
   if (!v) return "";
@@ -2194,6 +2207,49 @@ export function TransactionsView({
       : `${formatAmount(loanTotals.principal)}${
           primaryCurrencyCode ? ` ${primaryCurrencyCode}` : ""
         }`;
+
+  const getFullAmountForTransfer = useCallback(() => {
+    if (!primaryItemId || !isTransfer) return null;
+    const item = itemsById.get(primaryItemId);
+    if (!item) return null;
+
+    // Для обычных активов получаем текущую сумму
+    let balanceCents = getItemDisplayBalanceCents(item);
+    
+    // Если валюта не RUB, конвертируем в валюту актива
+    const currencyCode = primaryCurrencyCode;
+    if (currencyCode && currencyCode !== "RUB") {
+      const rate = getFxRateForDate(date, currencyCode);
+      if (!rate) return null;
+      // Конвертируем из рублей в валюту: рубли / курс
+      const amountInCurrency = balanceCents / 100 / rate;
+      return formatAmountForInput(Math.round(amountInCurrency * 100));
+    }
+
+    // Для RUB просто форматируем
+    return formatAmountForInput(balanceCents);
+  }, [primaryItemId, isTransfer, itemsById, primaryCurrencyCode, date, getItemDisplayBalanceCents, getFxRateForDate]);
+
+  const handleFullAmountClick = useCallback(() => {
+    if (!primaryItemId || !isTransfer) return;
+    const item = itemsById.get(primaryItemId);
+    if (!item) return;
+
+    // Для MOEX активов заполняем поле "Количество лотов"
+    if (isMoexItem(item)) {
+      const lots = item.position_lots ?? 0;
+      if (lots > 0) {
+        setPrimaryQuantityLots(String(lots));
+      }
+      return;
+    }
+
+    // Для обычных активов заполняем поле "Сумма"
+    const fullAmount = getFullAmountForTransfer();
+    if (fullAmount !== null) {
+      setAmountStr(fullAmount);
+    }
+  }, [primaryItemId, isTransfer, itemsById, getFullAmountForTransfer]);
 
   useEffect(() => {
     if (!isCrossCurrencyTransfer) {
@@ -4347,11 +4403,22 @@ export function TransactionsView({
                       </>
                     ) : (
                       <div className="grid gap-2">
-                        <Label>
-                          {primaryCurrencyCode
-                            ? `Сумма (${primaryCurrencyCode})`
-                            : "Сумма"}
-                        </Label>
+                        <div className="flex items-center justify-between">
+                          <Label>
+                            {primaryCurrencyCode
+                              ? `Сумма (${primaryCurrencyCode})`
+                              : "Сумма"}
+                          </Label>
+                          {isTransfer && primaryItemId && (
+                            <button
+                              type="button"
+                              onClick={handleFullAmountClick}
+                              className="text-sm font-medium text-violet-600 hover:underline"
+                            >
+                              Вся сумма
+                            </button>
+                          )}
+                        </div>
                         <Input
                           className="border-2 border-border/70 bg-white shadow-none"
                           value={amountStr}

@@ -568,11 +568,23 @@ export default function AssetsDynamicsPage() {
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
-        if (linked) return linked.history_status === "NEW" ? 0 : linked.initial_value_rub;
+        if (linked) {
+          // Для элементов, созданных в день начала учета, начальное значение - это initial_value_rub
+          const linkedStartKey = getItemStartKey(linked, accountingStartDate);
+          const isCreatedOnStartDate = linkedStartKey === accountingStartDate;
+          return linked.history_status === "NEW" && !isCreatedOnStartDate
+            ? 0
+            : linked.initial_value_rub;
+        }
       }
-      return item.history_status === "NEW" ? 0 : item.initial_value_rub;
+      // Для элементов, созданных в день начала учета, начальное значение - это initial_value_rub
+      const itemStartKey = getItemStartKey(item, accountingStartDate);
+      const isCreatedOnStartDate = itemStartKey === accountingStartDate;
+      return item.history_status === "NEW" && !isCreatedOnStartDate
+        ? 0
+        : item.initial_value_rub;
     },
-    [itemsById]
+    [itemsById, accountingStartDate]
   );
   const getEffectiveStartKey = useCallback(
     (item: ItemOut) => {

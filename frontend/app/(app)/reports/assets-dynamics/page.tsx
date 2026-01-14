@@ -1255,16 +1255,6 @@ export default function AssetsDynamicsPage() {
   return (
     <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Динамика стоимости активов
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Выберите активы и обязательства, чтобы построить динамику
-            эквивалента в рублях по дням.
-          </p>
-        </div>
-
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-1.5">
             <Label>Активы и обязательства</Label>
@@ -1305,7 +1295,7 @@ export default function AssetsDynamicsPage() {
                   return fallback < normalized ? normalized : fallback;
                 });
               }}
-              className="bg-white"
+              className="h-10 border-2 border-border/70 bg-white shadow-none"
               disabled={selectedItems.length === 0}
             />
           </div>
@@ -1321,7 +1311,7 @@ export default function AssetsDynamicsPage() {
                 const next = event.target.value || defaultEndKey;
                 setRangeEnd(next < rangeStartKey ? rangeStartKey : next);
               }}
-              className="bg-white"
+              className="h-10 border-2 border-border/70 bg-white shadow-none"
               disabled={selectedItems.length === 0}
             />
           </div>

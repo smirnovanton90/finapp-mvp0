@@ -588,13 +588,6 @@ export default function AssetsDynamicsPage() {
     setSelectedItemIds((prev) => prev.filter((id) => itemIds.has(id)));
   }, [sortedItems]);
 
-  useEffect(() => {
-    if (selectedItemIds.length) return;
-    if (sortedItems.length > 0) {
-      setSelectedItemIds([sortedItems[0].id]);
-    }
-  }, [sortedItems, selectedItemIds.length]);
-
   const selectedItems = useMemo(() => {
     const selected = new Set(selectedItemIds);
     return sortedItems.filter((item) => selected.has(item.id));

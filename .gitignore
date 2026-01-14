@@ -1,7 +1,11 @@
 # python
 .venv/
 __pycache__/
+**/__pycache__/
 *.py[cod]
+*.pyc
+*.pyo
+*.pyd
 *$py.class
 .Python
 build/
@@ -63,6 +67,11 @@ cover/
 # misc
 .DS_Store
 *.pem
+
+# IDE
+.idea/
+**/.idea/
+*.iml
 
 # debug
 npm-debug.log*

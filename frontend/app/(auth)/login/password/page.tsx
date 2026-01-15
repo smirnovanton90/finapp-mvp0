@@ -38,7 +38,7 @@ export default function LoginWithPasswordPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#F7F8FA] px-6">
+    <main className="flex min-h-screen items-center justify-center bg-background px-6">
       <Card className="w-[360px]">
         <CardHeader>
           <CardTitle>Вход</CardTitle>
@@ -48,7 +48,7 @@ export default function LoginWithPasswordPage() {
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Логин</label>
               <Input
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 autoComplete="username"
                 value={login}
                 onChange={(event) => setLogin(event.target.value)}
@@ -58,7 +58,7 @@ export default function LoginWithPasswordPage() {
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Пароль</label>
               <Input
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 autoComplete="current-password"
                 type="password"
                 value={password}

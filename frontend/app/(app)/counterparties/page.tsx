@@ -543,10 +543,10 @@ export default function CounterpartiesPage() {
     "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+    <main className="min-h-screen bg-background px-8 py-8">
       <div className="flex flex-col gap-6 lg:flex-row">
         <aside className="w-full max-w-[340px] shrink-0">
-          <div className="rounded-lg border-2 border-border/70 bg-white p-4">
+          <div className="rounded-lg border-2 border-border/70 bg-card p-4">
             <div className="space-y-6">
               <Dialog
                 open={isDialogOpen}
@@ -588,7 +588,7 @@ export default function CounterpartiesPage() {
                 value={entityType}
                 onValueChange={(value) => setEntityType(value as CounterpartyType)}
               >
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                   <SelectValue placeholder="Выберите тип" />
                 </SelectTrigger>
                 <SelectContent>
@@ -603,7 +603,7 @@ export default function CounterpartiesPage() {
                 <div className="grid gap-2">
                   <Label>Отрасль</Label>
                   <Select value={industryId} onValueChange={setIndustryId}>
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                    <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                       <SelectValue placeholder="Выберите отрасль" />
                     </SelectTrigger>
                     <SelectContent>
@@ -624,7 +624,7 @@ export default function CounterpartiesPage() {
                 <div className="grid gap-2">
                   <Label>Название</Label>
                   <Input
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Например, Пятерочка"
@@ -633,7 +633,7 @@ export default function CounterpartiesPage() {
                 <div className="grid gap-2">
                   <Label>Полное юридическое наименование</Label>
                   <Input
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="Например, АГРОТОРГ"
@@ -647,7 +647,7 @@ export default function CounterpartiesPage() {
                       setLegalForm(value === "__none" ? "" : value)
                     }
                   >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                    <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                       <SelectValue placeholder="Выберите ОПФ" />
                     </SelectTrigger>
                     <SelectContent>
@@ -664,7 +664,7 @@ export default function CounterpartiesPage() {
                   <div className="grid gap-2">
                     <Label>ИНН</Label>
                     <Input
-                      className="border-2 border-border/70 bg-white shadow-none"
+                      className="border-2 border-border/70 bg-card shadow-none"
                       value={inn}
                       onChange={(e) =>
                         setInn(e.target.value.replace(/\D/g, "").slice(0, 12))
@@ -676,7 +676,7 @@ export default function CounterpartiesPage() {
                   <div className="grid gap-2">
                     <Label>ОГРН</Label>
                     <Input
-                      className="border-2 border-border/70 bg-white shadow-none"
+                      className="border-2 border-border/70 bg-card shadow-none"
                       value={ogrn}
                       onChange={(e) =>
                         setOgrn(e.target.value.replace(/\D/g, "").slice(0, 15))
@@ -691,7 +691,7 @@ export default function CounterpartiesPage() {
                   <Input
                     type="file"
                     accept={ALLOWED_LOGO_TYPES.join(",")}
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     onChange={(event) =>
                       handleLogoChange(event.target.files?.[0] ?? null)
                     }
@@ -722,7 +722,7 @@ export default function CounterpartiesPage() {
                   <div className="grid gap-2">
                     <Label>Фамилия</Label>
                     <Input
-                      className="border-2 border-border/70 bg-white shadow-none"
+                      className="border-2 border-border/70 bg-card shadow-none"
                       value={lastName}
                       onChange={(e) => setLastName(e.target.value)}
                     />
@@ -730,7 +730,7 @@ export default function CounterpartiesPage() {
                   <div className="grid gap-2">
                     <Label>Имя</Label>
                     <Input
-                      className="border-2 border-border/70 bg-white shadow-none"
+                      className="border-2 border-border/70 bg-card shadow-none"
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
                     />
@@ -739,7 +739,7 @@ export default function CounterpartiesPage() {
                 <div className="grid gap-2">
                   <Label>Отчество</Label>
                   <Input
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={middleName}
                     onChange={(e) => setMiddleName(e.target.value)}
                   />
@@ -749,7 +749,7 @@ export default function CounterpartiesPage() {
                   <Input
                     type="file"
                     accept={ALLOWED_LOGO_TYPES.join(",")}
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     onChange={(event) =>
                       handlePhotoChange(event.target.files?.[0] ?? null)
                     }
@@ -780,7 +780,7 @@ export default function CounterpartiesPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 onClick={() => setIsDialogOpen(false)}
                 disabled={isSubmitting}
               >
@@ -814,7 +814,7 @@ export default function CounterpartiesPage() {
                 </div>
                 <Input
                   type="text"
-                  className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
+                  className="h-10 w-full border-2 border-border/70 bg-card shadow-none"
                   placeholder="Поиск по названию"
                   value={nameFilter}
                   onChange={(e) => setNameFilter(e.target.value)}
@@ -858,7 +858,7 @@ export default function CounterpartiesPage() {
                     className={`${segmentedButtonBase} ${
                       showActiveStatus
                         ? "bg-violet-50 text-violet-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Активные
@@ -870,7 +870,7 @@ export default function CounterpartiesPage() {
                     className={`${segmentedButtonBase} ${
                       showDeletedStatus
                         ? "bg-slate-100 text-slate-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Удаленные
@@ -903,7 +903,7 @@ export default function CounterpartiesPage() {
                     className={`${segmentedButtonBase} ${
                       showLegalEntities
                         ? "bg-violet-50 text-violet-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     ЮЛ/ИП
@@ -915,7 +915,7 @@ export default function CounterpartiesPage() {
                     className={`${segmentedButtonBase} ${
                       showPersonEntities
                         ? "bg-slate-100 text-slate-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     ФЛ

@@ -16,7 +16,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-[#F7F8FA] flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-muted-foreground">Загрузка…</div>
       </div>
     );

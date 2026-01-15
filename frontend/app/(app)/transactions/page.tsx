@@ -1291,23 +1291,23 @@ function TransactionCardRow({
           : "border-2 border-dashed border-violet-300"
       : "";
 
-  const textClass = tx.isDeleted ? "text-slate-500" : "text-slate-900";
+  const textClass = tx.isDeleted ? "text-muted-foreground" : "text-foreground";
 
-  const mutedTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-600/80";
-  const chainTextClass = tx.isDeleted ? "text-slate-400" : "text-violet-700";
+  const mutedTextClass = tx.isDeleted ? "text-muted-foreground" : "text-muted-foreground";
+  const chainTextClass = tx.isDeleted ? "text-muted-foreground" : "text-violet-700";
 
   const amountClass = tx.isDeleted
-    ? "text-slate-500"
+    ? "text-muted-foreground"
     : isIncome
       ? "text-emerald-600"
       : isExpense
         ? "text-rose-600"
-        : "text-slate-900";
-  const transferNegativeClass = tx.isDeleted ? "text-slate-500" : "text-rose-600";
-  const transferPositiveClass = tx.isDeleted ? "text-slate-500" : "text-emerald-600";
+        : "text-foreground";
+  const transferNegativeClass = tx.isDeleted ? "text-muted-foreground" : "text-rose-600";
+  const transferPositiveClass = tx.isDeleted ? "text-muted-foreground" : "text-emerald-600";
 
-  const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-700";
-  const actionHoverClass = tx.isDeleted ? "" : "hover:text-slate-900";
+  const actionTextClass = tx.isDeleted ? "text-muted-foreground" : "text-foreground";
+  const actionHoverClass = tx.isDeleted ? "" : "hover:text-foreground";
   const isEditDisabled = tx.isDeleted || isDeleting;
   const isDeleteDisabled = tx.isDeleted || isDeleting;
   const isCreateDisabled = isDeleting;
@@ -1356,7 +1356,7 @@ function TransactionCardRow({
     counterparty?.entity_type === "PERSON"
       ? User
       : getLegalDefaultIcon(counterparty?.industry_id ?? null);
-  const counterpartyIconTone = tx.isDeleted ? "text-slate-400" : "text-slate-500";
+  const counterpartyIconTone = tx.isDeleted ? "text-slate-400" : "text-muted-foreground";
 
   const categoryLines = categoryLinesForId(tx.category_id);
   const CategoryIcon = categoryIconForId(tx.category_id);
@@ -3777,12 +3777,12 @@ export function TransactionsView({
   const isTransferSelected = selectedDirections.has("TRANSFER");
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+    <main className="min-h-screen bg-background px-8 py-8">
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <aside className="w-full max-w-[340px] shrink-0">
-          <div className="rounded-lg border-2 border-border/70 bg-white p-4">
+          <div className="rounded-lg border-2 border-border/70 bg-card p-4">
             <div className="space-y-6">
               <Dialog
                 open={isDialogOpen}
@@ -4133,7 +4133,7 @@ export function TransactionsView({
 
                     {!isBulkEdit && !isRealizeMode && (
                       <div className="grid gap-2" role="group" aria-label="Тип транзакции">
-                        <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+                        <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
                           <button
                             type="button"
                             aria-pressed={isActualTransaction}
@@ -4141,7 +4141,7 @@ export function TransactionsView({
                             className={`${segmentedButtonBase} ${
                               isActualTransaction
                                 ? "bg-violet-50 text-violet-700"
-                                : "bg-white text-muted-foreground hover:bg-white"
+                                : "bg-card text-muted-foreground hover:bg-accent"
                             }`}
                           >
                             Фактическая
@@ -4153,7 +4153,7 @@ export function TransactionsView({
                             className={`${segmentedButtonBase} ${
                               isPlannedTransaction
                                 ? "bg-amber-50 text-amber-700"
-                                : "bg-white text-muted-foreground hover:bg-white"
+                                : "bg-card text-muted-foreground hover:bg-accent"
                             }`}
                           >
                             Плановая
@@ -4163,7 +4163,7 @@ export function TransactionsView({
                     )}
 
                     <div className="grid gap-2" role="group" aria-label="Характер транзакции">
-                      <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+                      <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
                         <button
                           type="button"
                           aria-pressed={!isLoanRepayment && direction === "INCOME"}
@@ -4176,7 +4176,7 @@ export function TransactionsView({
                           className={`${segmentedButtonBase} ${
                             !isLoanRepayment && direction === "INCOME"
                               ? "bg-green-50 text-green-700"
-                              : "bg-white text-muted-foreground hover:bg-white"
+                              : "bg-card text-muted-foreground hover:bg-accent"
                           }`}
                         >
                           Доход
@@ -4193,7 +4193,7 @@ export function TransactionsView({
                           className={`${segmentedButtonBase} ${
                             !isLoanRepayment && direction === "EXPENSE"
                               ? "bg-red-50 text-red-700"
-                              : "bg-white text-muted-foreground hover:bg-white"
+                              : "bg-card text-muted-foreground hover:bg-accent"
                           }`}
                         >
                           Расход
@@ -4210,7 +4210,7 @@ export function TransactionsView({
                           className={`${segmentedButtonBase} ${
                             !isLoanRepayment && direction === "TRANSFER"
                               ? "bg-violet-50 text-violet-700"
-                              : "bg-white text-muted-foreground hover:bg-white"
+                              : "bg-card text-muted-foreground hover:bg-accent"
                           }`}
                         >
                           Перевод
@@ -4227,7 +4227,7 @@ export function TransactionsView({
                             className={`${segmentedButtonBase} whitespace-normal leading-tight ${
                               isLoanRepayment
                                 ? "bg-amber-50 text-amber-700"
-                                : "bg-white text-muted-foreground hover:bg-white"
+                                : "bg-card text-muted-foreground hover:bg-accent"
                             }`}
                           >
                             <span>
@@ -4244,7 +4244,7 @@ export function TransactionsView({
                       <Label>Дата транзакции</Label>
                       <Input
                         type="date"
-                        className="border-2 border-border/70 bg-white shadow-none"
+                        className="border-2 border-border/70 bg-card shadow-none"
                         value={date}
                         onChange={(e) => setDate(e.target.value)}
                       />
@@ -4327,7 +4327,7 @@ export function TransactionsView({
                               : "Общая сумма платежа"}
                           </Label>
                           <Input
-                            className="border-2 border-border/70 bg-white shadow-none"
+                            className="border-2 border-border/70 bg-card shadow-none"
                             value={loanTotalStr}
                             onChange={(e) =>
                               setLoanTotalStr(formatRubInput(e.target.value))
@@ -4346,7 +4346,7 @@ export function TransactionsView({
                               : "Сумма в погашение процентов"}
                           </Label>
                           <Input
-                            className="border-2 border-border/70 bg-white shadow-none"
+                            className="border-2 border-border/70 bg-card shadow-none"
                             value={loanInterestStr}
                             onChange={(e) =>
                               setLoanInterestStr(formatRubInput(e.target.value))
@@ -4369,7 +4369,7 @@ export function TransactionsView({
                             {`Сумма списания (${primaryCurrencyCode ?? "-"})`}
                           </Label>
                           <Input
-                            className="border-2 border-border/70 bg-white shadow-none"
+                            className="border-2 border-border/70 bg-card shadow-none"
                             value={amountStr}
                             onChange={(e) =>
                               setAmountStr(formatRubInput(e.target.value))
@@ -4386,7 +4386,7 @@ export function TransactionsView({
                             {`Сумма поступления (${counterpartyCurrencyCode ?? "-"})`}
                           </Label>
                           <Input
-                            className="border-2 border-border/70 bg-white shadow-none"
+                            className="border-2 border-border/70 bg-card shadow-none"
                             value={amountCounterpartyStr}
                             onChange={(e) =>
                               setAmountCounterpartyStr(formatRubInput(e.target.value))
@@ -4420,7 +4420,7 @@ export function TransactionsView({
                           )}
                         </div>
                         <Input
-                          className="border-2 border-border/70 bg-white shadow-none"
+                          className="border-2 border-border/70 bg-card shadow-none"
                           value={amountStr}
                           onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                           onBlur={() =>
@@ -4439,7 +4439,7 @@ export function TransactionsView({
                             <div className="grid gap-2">
                               <Label>Количество лотов (основной актив)</Label>
                               <Input
-                                className="border-2 border-border/70 bg-white shadow-none"
+                                className="border-2 border-border/70 bg-card shadow-none"
                                 value={primaryQuantityLots}
                                 onChange={(e) => setPrimaryQuantityLots(e.target.value)}
                                 inputMode="numeric"
@@ -4451,7 +4451,7 @@ export function TransactionsView({
                             <div className="grid gap-2">
                               <Label>Количество лотов (контрагент)</Label>
                               <Input
-                                className="border-2 border-border/70 bg-white shadow-none"
+                                className="border-2 border-border/70 bg-card shadow-none"
                                 value={counterpartyQuantityLots}
                                 onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
                                 inputMode="numeric"
@@ -4485,7 +4485,7 @@ export function TransactionsView({
                     <div className="grid gap-2">
                       <Label>Описание</Label>
                       <Input
-                        className="border-2 border-border/70 bg-white shadow-none"
+                        className="border-2 border-border/70 bg-card shadow-none"
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         placeholder="Например: обед в кафе"
@@ -4495,7 +4495,7 @@ export function TransactionsView({
                     <div className="grid gap-2">
                       <Label>Комментарий</Label>
                       <Input
-                        className="border-2 border-border/70 bg-white shadow-none"
+                        className="border-2 border-border/70 bg-card shadow-none"
                         value={comment}
                         onChange={(e) => setComment(e.target.value)}
                         placeholder="Например: с коллегами"
@@ -4506,7 +4506,7 @@ export function TransactionsView({
                       <Button
                         type="button"
                         variant="outline"
-                        className="border-2 border-border/70 bg-white shadow-none"
+                        className="border-2 border-border/70 bg-card shadow-none"
                         onClick={closeDialog}
                       >
                         Отмена
@@ -4542,7 +4542,7 @@ export function TransactionsView({
               <Button
                 type="button"
                 variant="outline"
-                className="w-full border-2 border-border/70 bg-white shadow-none"
+                className="w-full border-2 border-border/70 bg-card shadow-none"
                 onClick={() => qrCodeInputRef.current?.click()}
                 disabled={isQrCodeLoading}
               >
@@ -4554,7 +4554,7 @@ export function TransactionsView({
                 <DialogTrigger asChild>
                   <Button
                     variant="outline"
-                    className="w-full border-2 border-border/70 bg-white shadow-none"
+                    className="w-full border-2 border-border/70 bg-card shadow-none"
                   >
                     Импорт
                   </Button>
@@ -4583,10 +4583,10 @@ export function TransactionsView({
                             setTimeout(() => setImportBankDropdownOpen(false), 150)
                           }
                           placeholder="Начните вводить название банка"
-                          className="border-2 border-border/70 bg-white shadow-none"
+                          className="border-2 border-border/70 bg-card shadow-none"
                         />
                         {importBankDropdownOpen && (
-                          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
+                          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-card shadow-lg">
                             {filteredImportBanks.length === 0 ? (
                               <div className="px-3 py-2 text-sm text-muted-foreground">
                                 Банк не найден
@@ -4644,7 +4644,7 @@ export function TransactionsView({
                             ref={importPdfInputRef}
                             type="file"
                             accept=".pdf"
-                            className="border-2 border-border/70 bg-white shadow-none"
+                            className="border-2 border-border/70 bg-card shadow-none"
                             disabled={isImportFormDisabled}
                             onChange={(e) => {
                               const file = e.target.files?.[0] ?? null;
@@ -4701,7 +4701,7 @@ export function TransactionsView({
                         ref={importInputRef}
                         type="file"
                         accept=".xlsx"
-                        className="border-2 border-border/70 bg-white shadow-none"
+                        className="border-2 border-border/70 bg-card shadow-none"
                         disabled={isImportFormDisabled}
                         onChange={(e) => {
                           const file = e.target.files?.[0] ?? null;
@@ -4754,7 +4754,7 @@ export function TransactionsView({
                       <Button
                         type="button"
                         variant="outline"
-                        className="border-2 border-border/70 bg-white shadow-none"
+                        className="border-2 border-border/70 bg-card shadow-none"
                         onClick={() => handleImportOpenChange(false)}
                         disabled={isImporting}
                       >
@@ -4792,7 +4792,7 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
                   <button
                     type="button"
                     aria-pressed={isIncomeSelected}
@@ -4800,7 +4800,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       isIncomeSelected
                         ? "bg-green-50 text-green-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Доход
@@ -4812,7 +4812,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       isExpenseSelected
                         ? "bg-red-50 text-red-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Расход
@@ -4824,7 +4824,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       isTransferSelected
                         ? "bg-violet-50 text-violet-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Перевод
@@ -4851,7 +4851,7 @@ export function TransactionsView({
                   <Input
                     type="text"
                     inputMode="decimal"
-                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
+                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-card shadow-none"
                     placeholder="От"
                     value={amountFrom}
                     onChange={(e) =>
@@ -4865,7 +4865,7 @@ export function TransactionsView({
                   <Input
                     type="text"
                     inputMode="decimal"
-                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none"
+                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-card shadow-none"
                     placeholder="До"
                     value={amountTo}
                     onChange={(e) => setAmountTo(formatRubInput(e.target.value))}
@@ -4892,7 +4892,7 @@ export function TransactionsView({
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     type="date"
-                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none ${
+                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-card shadow-none ${
                       dateFrom ? "text-foreground" : "text-muted-foreground"
                     }`}
                     value={dateFrom}
@@ -4901,7 +4901,7 @@ export function TransactionsView({
                   <span className="text-sm text-muted-foreground">—</span>
                   <Input
                     type="date"
-                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-white shadow-none ${
+                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-card shadow-none ${
                       dateTo ? "text-foreground" : "text-muted-foreground"
                     }`}
                     value={dateTo}
@@ -5064,7 +5064,7 @@ export function TransactionsView({
                 </div>
                 <Input
                   type="text"
-                  className="h-10 w-full border-2 border-border/70 bg-white shadow-none"
+                  className="h-10 w-full border-2 border-border/70 bg-card shadow-none"
                   placeholder="Введите текст"
                   value={commentFilter}
                   onChange={(e) => setCommentFilter(e.target.value)}
@@ -5088,7 +5088,7 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
                   <button
                     type="button"
                     aria-pressed={showConfirmed}
@@ -5096,7 +5096,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       showConfirmed
                         ? "bg-violet-50 text-violet-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Подтвержденные
@@ -5108,7 +5108,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       showUnconfirmed
                         ? "bg-red-50 text-red-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Неподтвержденные
@@ -5138,7 +5138,7 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
                   <button
                     type="button"
                     aria-pressed={showActual}
@@ -5146,7 +5146,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       showActual
                         ? "bg-violet-50 text-violet-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Фактическая
@@ -5158,7 +5158,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       showPlannedRealized
                         ? "bg-sky-50 text-sky-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     } text-xs leading-tight whitespace-normal`}
                   >
                     <span className="text-center leading-tight">
@@ -5177,7 +5177,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       showPlannedUnrealized
                         ? "bg-amber-50 text-amber-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     } text-xs leading-tight whitespace-normal`}
                   >
                     <span className="text-center leading-tight">
@@ -5209,7 +5209,7 @@ export function TransactionsView({
                     Сбросить
                   </button>
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
                   <button
                     type="button"
                     aria-pressed={showActive}
@@ -5217,7 +5217,7 @@ export function TransactionsView({
                     className={`${segmentedButtonBase} ${
                       showActive
                         ? "bg-violet-50 text-violet-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Активные
@@ -5228,8 +5228,8 @@ export function TransactionsView({
                     onClick={() => setShowDeleted((prev) => !prev)}
                     className={`${segmentedButtonBase} ${
                       showDeleted
-                        ? "bg-slate-100 text-slate-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        ? "bg-muted text-foreground"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Удаленные
@@ -5312,7 +5312,7 @@ export function TransactionsView({
                 {Array.from({ length: 6 }).map((_, index) => (
                   <div
                     key={`tx-skeleton-${index}`}
-                    className="rounded-lg border-2 border-border/70 bg-white p-4"
+                    className="rounded-lg border-2 border-border/70 bg-card p-4"
                   >
                     <div className="flex items-start gap-4">
                       <div className="h-12 w-12 shrink-0 rounded-full bg-slate-100 animate-pulse" />
@@ -5366,7 +5366,7 @@ export function TransactionsView({
                 <Button
                   type="button"
                   variant="outline"
-                  className="border-2 border-slate-200 bg-white shadow-none"
+                  className="border-2 border-slate-200 bg-card shadow-none"
                   onClick={handleLoadMore}
                   disabled={isLoadingMore || loading}
                 >

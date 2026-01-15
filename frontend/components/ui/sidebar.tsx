@@ -24,6 +24,9 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useSidebar } from "./sidebar-context";
 import { useOnboarding } from "@/components/onboarding-context";
 import { useAccountingStart } from "@/components/accounting-start-context";
+import { useTheme } from "@/components/theme-provider";
+import { Moon, Sun } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 const nav = [
   { href: "/dashboard", label: "\u0414\u044d\u0448\u0431\u043e\u0440\u0434", icon: LayoutDashboard },
@@ -88,6 +91,7 @@ export function Sidebar() {
   const { isCollapsed, toggleSidebar } = useSidebar();
   const { status, startOnboarding } = useOnboarding();
   const { accountingStartDate } = useAccountingStart();
+  const { theme, toggleTheme } = useTheme();
   const [isReportsOpen, setIsReportsOpen] = useState(
     pathname === "/reports" || pathname.startsWith("/reports/")
   );
@@ -256,6 +260,46 @@ export function Sidebar() {
             </div>
           </div>
         )}
+        <div className={cn("mb-2 flex items-center gap-3", isCollapsed ? "justify-center" : "justify-between")}>
+          {isCollapsed ? (
+            <Tooltip content={theme === "dark" ? "Светлая тема" : "Темная тема"} side="right">
+              <button
+                onClick={toggleTheme}
+                className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white/90 bg-transparent text-white shadow-sm transition-colors hover:bg-white hover:text-violet-700"
+                aria-label={theme === "dark" ? "Переключить на светлую тему" : "Переключить на темную тему"}
+              >
+                {theme === "dark" ? (
+                  <Sun className="h-5 w-5" />
+                ) : (
+                  <Moon className="h-5 w-5" />
+                )}
+              </button>
+            </Tooltip>
+          ) : (
+            <>
+              <span className="text-sm font-medium text-white/90">
+                {theme === "dark" ? "Темная тема" : "Светлая тема"}
+              </span>
+              <button
+                onClick={toggleTheme}
+                className="flex items-center gap-2 rounded-full border-2 border-white/90 bg-transparent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-white hover:text-violet-700"
+                aria-label={theme === "dark" ? "Переключить на светлую тему" : "Переключить на темную тему"}
+              >
+                {theme === "dark" ? (
+                  <>
+                    <Sun className="h-4 w-4" />
+                    <span>Светлая</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="h-4 w-4" />
+                    <span>Темная</span>
+                  </>
+                )}
+              </button>
+            </>
+          )}
+        </div>
         {isCollapsed ? (
           <Tooltip
             content="\u041f\u043e\u0437\u043d\u0430\u043a\u043e\u043c\u0438\u0442\u044c\u0441\u044f \u0441 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435\u043c"

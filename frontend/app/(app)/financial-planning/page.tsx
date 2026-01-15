@@ -898,7 +898,7 @@ export default function FinancialPlanningPage() {
     <main className="flex min-h-screen flex-col gap-6 bg-slate-50 px-4 py-6 lg:px-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Планирование</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Планирование</h1>
           <p className="text-sm text-muted-foreground">
             Цепочки плановых транзакций и расписание будущих операций.
           </p>
@@ -922,7 +922,7 @@ export default function FinancialPlanningPage() {
       {loading ? (
         <div className="text-sm text-muted-foreground">Загрузка...</div>
       ) : activeChains.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
           Пока нет цепочек плановых транзакций.
         </div>
       ) : (
@@ -965,7 +965,7 @@ export default function FinancialPlanningPage() {
                 : getLegalDefaultIcon(counterparty?.industry_id ?? null);
 
             return (
-              <Card key={chain.id} className="bg-white">
+              <Card key={chain.id} className="bg-card">
                 <CardHeader className="space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -987,14 +987,14 @@ export default function FinancialPlanningPage() {
                     {getFrequencyLabel(chain)}
                   </div>
                 </CardHeader>
-                <CardContent className="text-sm text-slate-700">
+                <CardContent className="text-sm text-foreground">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6 sm:flex-nowrap">
                     <div className="min-w-0 space-y-2">
                       <div>
                         С {formatDate(chain.start_date)} по{" "}
                         {formatDate(chain.end_date)}
                       </div>
-                      <div className="font-semibold text-slate-900">
+                      <div className="font-semibold text-foreground">
                         {chain.direction === "EXPENSE" ? "-" : "+"}
                         {amountLabel} {currency}
                       </div>
@@ -1011,14 +1011,14 @@ export default function FinancialPlanningPage() {
                   <div className="mt-2 space-y-2">
                     <div>
                       Основной счет:{" "}
-                      <span className="font-medium text-slate-900">
+                      <span className="font-medium text-foreground">
                         {getItemName(chain.primary_item_id)}
                       </span>
                     </div>
                     {chain.direction === "TRANSFER" && (
                       <div>
                         Контрагент:{" "}
-                        <span className="font-medium text-slate-900">
+                        <span className="font-medium text-foreground">
                           {getItemName(chain.counterparty_item_id)}
                         </span>
                       </div>
@@ -1035,17 +1035,17 @@ export default function FinancialPlanningPage() {
                                 : counterparty?.logo_url
                             }
                             alt=""
-                            className="h-5 w-5 rounded border border-border/60 bg-white object-contain"
+                            className="h-5 w-5 rounded border border-border/60 bg-card object-contain"
                             loading="lazy"
                           />
                         ) : (
-                          <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-white text-slate-500">
+                          <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-card text-muted-foreground">
                             <CounterpartyIcon className="h-3.5 w-3.5" aria-hidden="true" />
                           </div>
                         )}
                         <span>
                           Контрагент:{" "}
-                          <span className="font-medium text-slate-900">
+                          <span className="font-medium text-foreground">
                             {counterpartyName}
                           </span>
                         </span>
@@ -1072,8 +1072,8 @@ export default function FinancialPlanningPage() {
       {deletedChains.length > 0 && (
         <section className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">Удаленные</h2>
-            <Badge className="bg-slate-100 text-slate-500">Удаленные</Badge>
+            <h2 className="text-lg font-semibold text-foreground">Удаленные</h2>
+            <Badge className="bg-muted text-muted-foreground">Удаленные</Badge>
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {deletedChains.map((chain) => {
@@ -1114,14 +1114,14 @@ export default function FinancialPlanningPage() {
                     ? "Расход"
                     : "Перевод";
               return (
-                <Card key={chain.id} className="bg-white/70">
+                <Card key={chain.id} className="bg-card/70">
                   <CardHeader className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <CardTitle className="text-lg text-slate-600">
                         {chain.name}
                       </CardTitle>
                       <Badge className={directionBadge}>{chainDirectionLabel}</Badge>
-                      <Badge className="bg-slate-100 text-slate-500">
+                      <Badge className="bg-muted text-muted-foreground">
                         Удаленная
                       </Badge>
                     </div>
@@ -1136,7 +1136,7 @@ export default function FinancialPlanningPage() {
                           С {formatDate(chain.start_date)} по{" "}
                           {formatDate(chain.end_date)}
                         </div>
-                        <div className="font-semibold text-slate-700">
+                        <div className="font-semibold text-foreground">
                           {chain.direction === "EXPENSE" ? "-" : "+"}
                           {amountLabel} {currency}
                         </div>
@@ -1153,14 +1153,14 @@ export default function FinancialPlanningPage() {
                     <div className="mt-2 space-y-2">
                       <div>
                         Основной счет:{" "}
-                        <span className="font-medium text-slate-700">
+                        <span className="font-medium text-foreground">
                           {getItemName(chain.primary_item_id)}
                         </span>
                       </div>
                       {chain.direction === "TRANSFER" && (
                         <div>
                           Контрагент:{" "}
-                        <span className="font-medium text-slate-700">
+                        <span className="font-medium text-foreground">
                           {getItemName(chain.counterparty_item_id)}
                         </span>
                       </div>
@@ -1177,17 +1177,17 @@ export default function FinancialPlanningPage() {
                                 : counterparty?.logo_url
                             }
                             alt=""
-                            className="h-5 w-5 rounded border border-border/60 bg-white object-contain"
+                            className="h-5 w-5 rounded border border-border/60 bg-card object-contain"
                             loading="lazy"
                           />
                         ) : (
-                          <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-white text-slate-500">
+                          <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-card text-muted-foreground">
                             <CounterpartyIcon className="h-3.5 w-3.5" aria-hidden="true" />
                           </div>
                         )}
                         <span>
                           Контрагент:{" "}
-                          <span className="font-medium text-slate-700">
+                          <span className="font-medium text-foreground">
                             {counterpartyName}
                           </span>
                         </span>
@@ -1217,7 +1217,7 @@ export default function FinancialPlanningPage() {
             <div className="grid gap-2">
               <Label>Название цепочки</Label>
               <Input
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 value={chainName}
                 onChange={(e) => setChainName(e.target.value)}
                 placeholder="Например, аренда офиса"
@@ -1229,7 +1229,7 @@ export default function FinancialPlanningPage() {
                 <Label>Дата начала</Label>
                 <Input
                   type="date"
-                  className="border-2 border-border/70 bg-white shadow-none"
+                  className="border-2 border-border/70 bg-card shadow-none"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                 />
@@ -1238,7 +1238,7 @@ export default function FinancialPlanningPage() {
                 <Label>Дата окончания</Label>
                 <Input
                   type="date"
-                  className="border-2 border-border/70 bg-white shadow-none"
+                  className="border-2 border-border/70 bg-card shadow-none"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
                 />
@@ -1254,7 +1254,7 @@ export default function FinancialPlanningPage() {
                     setFrequency(value as TransactionChainFrequency)
                   }
                 >
-                  <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                  <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                     <SelectValue placeholder="Выберите частоту" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1272,7 +1272,7 @@ export default function FinancialPlanningPage() {
                     value={String(weeklyDay)}
                     onValueChange={(value) => setWeeklyDay(Number(value))}
                   >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                    <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                       <SelectValue placeholder="Выберите день недели" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1296,7 +1296,7 @@ export default function FinancialPlanningPage() {
                       )
                     }
                   >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                    <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                       <SelectValue placeholder="Выберите правило" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1314,7 +1314,7 @@ export default function FinancialPlanningPage() {
                     type="number"
                     min={1}
                     max={31}
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={monthlyDay}
                     onChange={(e) => setMonthlyDay(e.target.value)}
                   />
@@ -1326,7 +1326,7 @@ export default function FinancialPlanningPage() {
                   <Input
                     type="number"
                     min={1}
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={intervalDays}
                     onChange={(e) => setIntervalDays(e.target.value)}
                   />
@@ -1346,7 +1346,7 @@ export default function FinancialPlanningPage() {
                   className={`${segmentedButtonBase} ${
                     isIncome
                       ? "bg-green-50 text-green-700"
-                      : "bg-white text-muted-foreground hover:bg-white"
+                      : "bg-card text-muted-foreground hover:bg-accent"
                   }`}
                 >
                   Доход
@@ -1361,7 +1361,7 @@ export default function FinancialPlanningPage() {
                   className={`${segmentedButtonBase} ${
                     isExpense
                       ? "bg-red-50 text-red-700"
-                      : "bg-white text-muted-foreground hover:bg-white"
+                      : "bg-card text-muted-foreground hover:bg-accent"
                   }`}
                 >
                   Расход
@@ -1376,7 +1376,7 @@ export default function FinancialPlanningPage() {
                   className={`${segmentedButtonBase} ${
                     isTransfer
                       ? "bg-violet-50 text-violet-700"
-                      : "bg-white text-muted-foreground hover:bg-white"
+                      : "bg-card text-muted-foreground hover:bg-accent"
                   }`}
                 >
                   Перевод
@@ -1441,7 +1441,7 @@ export default function FinancialPlanningPage() {
                 <div className="grid gap-2">
                   <Label>{`Сумма списания (${primaryCurrency ?? "-"})`}</Label>
                   <Input
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={amountStr}
                     onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                     onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
@@ -1452,7 +1452,7 @@ export default function FinancialPlanningPage() {
                 <div className="grid gap-2">
                   <Label>{`Сумма поступления (${counterpartyCurrency ?? "-"})`}</Label>
                   <Input
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={amountCounterpartyStr}
                     onChange={(e) =>
                       setAmountCounterpartyStr(formatRubInput(e.target.value))
@@ -1471,7 +1471,7 @@ export default function FinancialPlanningPage() {
                   {primaryCurrency ? `Сумма (${primaryCurrency})` : "Сумма"}
                 </Label>
                 <Input
-                  className="border-2 border-border/70 bg-white shadow-none"
+                  className="border-2 border-border/70 bg-card shadow-none"
                   value={amountStr}
                   onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                   onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
@@ -1504,7 +1504,7 @@ export default function FinancialPlanningPage() {
             <div className="grid gap-2">
               <Label>Описание</Label>
               <Input
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Назначение транзакции"
@@ -1514,7 +1514,7 @@ export default function FinancialPlanningPage() {
             <div className="grid gap-2">
               <Label>Комментарий</Label>
               <Input
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder="Комментарий"
@@ -1525,7 +1525,7 @@ export default function FinancialPlanningPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 onClick={() => setIsDialogOpen(false)}
                 disabled={isSubmitting}
               >

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
@@ -1288,7 +1288,7 @@ export default function AssetsDynamicsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+    <main className="min-h-screen bg-background px-8 py-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-1.5">
@@ -1330,7 +1330,7 @@ export default function AssetsDynamicsPage() {
                   return fallback < normalized ? normalized : fallback;
                 });
               }}
-              className="h-10 border-2 border-border/70 bg-white shadow-none"
+              className="h-10 border-2 border-border/70 bg-card shadow-none"
               disabled={selectedItems.length === 0}
             />
           </div>
@@ -1346,7 +1346,7 @@ export default function AssetsDynamicsPage() {
                 const next = event.target.value || defaultEndKey;
                 setRangeEnd(next < rangeStartKey ? rangeStartKey : next);
               }}
-              className="h-10 border-2 border-border/70 bg-white shadow-none"
+              className="h-10 border-2 border-border/70 bg-card shadow-none"
               disabled={selectedItems.length === 0}
             />
           </div>

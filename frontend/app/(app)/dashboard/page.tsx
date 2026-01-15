@@ -1363,7 +1363,7 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+    <main className="min-h-screen bg-background px-8 py-8">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
 
         <div
@@ -1544,11 +1544,11 @@ export default function DashboardPage() {
                             style={{ backgroundColor: row.color }}
                           />
                           <CategoryIcon className="h-3.5 w-3.5 text-slate-500" />
-                          <span className="truncate font-medium text-slate-900">
+                          <span className="truncate font-medium text-foreground">
                             {row.label}
                           </span>
                         </div>
-                        <span className="tabular-nums text-right text-slate-900 whitespace-nowrap">
+                        <span className="tabular-nums text-right text-foreground whitespace-nowrap">
                           {formatRub(row.value)}
                         </span>
                         <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
@@ -1636,11 +1636,11 @@ export default function DashboardPage() {
                             style={{ backgroundColor: row.color }}
                           />
                           <CategoryIcon className="h-3.5 w-3.5 text-slate-500" />
-                          <span className="truncate font-medium text-slate-900">
+                          <span className="truncate font-medium text-foreground">
                             {row.label}
                           </span>
                         </div>
-                        <span className="tabular-nums text-right text-slate-900 whitespace-nowrap">
+                        <span className="tabular-nums text-right text-foreground whitespace-nowrap">
                           {formatRub(row.value)}
                         </span>
                         <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">

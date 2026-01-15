@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
@@ -613,7 +613,7 @@ export default function LimitsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+    <main className="min-h-screen bg-background px-8 py-8">
       <Dialog
         open={isDialogOpen}
         onOpenChange={(open) => {
@@ -640,7 +640,7 @@ export default function LimitsPage() {
             <div className="grid gap-2">
               <Label>Название лимита</Label>
               <Input
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 value={limitName}
                 onChange={(e) => setLimitName(e.target.value)}
                 placeholder="Например, Рестораны"
@@ -650,7 +650,7 @@ export default function LimitsPage() {
             <div className="grid gap-2">
               <Label>Период лимита</Label>
               <Select value={period} onValueChange={(value) => setPeriod(value as LimitPeriod)}>
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                   <SelectValue placeholder="Выберите период" />
                 </SelectTrigger>
                 <SelectContent>
@@ -668,7 +668,7 @@ export default function LimitsPage() {
                   <Label>Дата начала</Label>
                   <Input
                     type="date"
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={customStartDate}
                     onChange={(e) => setCustomStartDate(e.target.value)}
                     min={accountingStartDate ?? undefined}
@@ -678,7 +678,7 @@ export default function LimitsPage() {
                   <Label>Дата окончания</Label>
                   <Input
                     type="date"
-                    className="border-2 border-border/70 bg-white shadow-none"
+                    className="border-2 border-border/70 bg-card shadow-none"
                     value={customEndDate}
                     onChange={(e) => setCustomEndDate(e.target.value)}
                     min={accountingStartDate ?? undefined}
@@ -708,7 +708,7 @@ export default function LimitsPage() {
             <div className="grid gap-2">
               <Label>Сумма лимита</Label>
               <Input
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 value={amountStr}
                 onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                 onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
@@ -721,7 +721,7 @@ export default function LimitsPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
                 onClick={() => setIsDialogOpen(false)}
                 disabled={isSubmitting}
               >
@@ -768,7 +768,7 @@ export default function LimitsPage() {
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Лимиты</h1>
+            <h1 className="text-2xl font-semibold text-foreground">Лимиты</h1>
             <p className="text-sm text-muted-foreground">
               Настраивайте лимиты расходов и контролируйте траты по категориям.
             </p>
@@ -794,7 +794,7 @@ export default function LimitsPage() {
               </div>
             )}
             {activeLimits.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-muted-foreground">
+              <div className="rounded-lg border border-dashed border-slate-300 bg-card p-6 text-center text-sm text-muted-foreground">
                 Пока нет активных лимитов.
               </div>
             ) : (
@@ -812,7 +812,7 @@ export default function LimitsPage() {
                   const periodLabel = PERIOD_LABELS[limit.period];
                   const rangeLabel = summary.rangeLabel;
                   return (
-                    <Card key={limit.id} className="bg-white">
+                    <Card key={limit.id} className="bg-card">
                       <CardHeader className="space-y-2">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0 space-y-1">
@@ -826,7 +826,7 @@ export default function LimitsPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <div className="text-sm font-semibold text-slate-900">
+                            <div className="text-sm font-semibold text-foreground">
                               {formatRub(limit.amount_rub)}
                             </div>
                             <Button
@@ -882,7 +882,7 @@ export default function LimitsPage() {
         {deletedLimits.length > 0 && (
           <section className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-900">Удаленные</h2>
+              <h2 className="text-lg font-semibold text-foreground">Удаленные</h2>
               <Badge className="bg-slate-100 text-slate-500">Удаленные</Badge>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
@@ -895,7 +895,7 @@ export default function LimitsPage() {
                 const periodLabel = PERIOD_LABELS[limit.period];
                 const rangeLabel = summary.rangeLabel;
                 return (
-                  <Card key={limit.id} className="bg-white/70">
+                  <Card key={limit.id} className="bg-card/70">
                     <CardHeader className="space-y-2">
                       <div className="flex flex-wrap items-start gap-2">
                         <CardTitle className="text-lg text-slate-600">

@@ -454,7 +454,7 @@ function CategorySectionBody({
               <TableCell
                 className={cn(
                   "whitespace-nowrap",
-                  row.level === 1 && "font-semibold text-slate-900",
+                  row.level === 1 && "font-semibold text-foreground",
                   row.level === 2 && "text-slate-800",
                   row.level === 3 && "text-sm text-slate-600"
                 )}
@@ -466,7 +466,7 @@ function CategorySectionBody({
                       onClick={() =>
                         row.level === 1 ? toggleL1(row.l1Id) : toggleL2(l2Key)
                       }
-                      className="inline-flex h-5 w-5 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                       aria-label={
                         isExpanded ? "Свернуть подкатегории" : "Развернуть подкатегории"
                       }
@@ -481,7 +481,7 @@ function CategorySectionBody({
                     <span className="inline-flex h-5 w-5" aria-hidden="true" />
                   )}
                   {CategoryIcon ? (
-                    <CategoryIcon className="h-4 w-4 text-slate-500" />
+                    <CategoryIcon className="h-4 w-4 text-muted-foreground" />
                   ) : null}
                   <span>{row.label}</span>
                 </div>
@@ -491,7 +491,7 @@ function CategorySectionBody({
                 return (
                   <TableCell
                     key={`${sectionId}:${row.id}-${monthKey}`}
-                    className="text-right tabular-nums text-slate-700"
+                    className="text-right tabular-nums text-foreground"
                   >
                     {formatRub(value)}
                   </TableCell>
@@ -570,13 +570,13 @@ function CategoryTable({
               {summaryLabel && summaryTotals && (
                 <TableFooter>
                   <TableRow>
-                    <TableCell className="font-semibold text-slate-900">
+                    <TableCell className="font-semibold text-foreground">
                       {summaryLabel}
                     </TableCell>
                     {monthKeys.map((monthKey) => (
                       <TableCell
                         key={`summary-${monthKey}`}
-                        className="text-right tabular-nums font-semibold text-slate-900"
+                        className="text-right tabular-nums font-semibold text-foreground"
                       >
                         {formatRub(summaryTotals[monthKey] ?? 0)}
                       </TableCell>
@@ -774,10 +774,10 @@ const expenseMatrix = useMemo(
     incomeMatrix.hasMissingRates || expenseMatrix.hasMissingRates;
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+    <main className="min-h-screen bg-background px-8 py-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
+          <h1 className="text-2xl font-semibold text-foreground">
             Динамика доходов и расходов по категориям
           </h1>
           <p className="text-sm text-muted-foreground">

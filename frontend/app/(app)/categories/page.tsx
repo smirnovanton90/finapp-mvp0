@@ -171,7 +171,7 @@ function CategoryTree({
                     <span className="inline-flex h-4 w-4" aria-hidden="true" />
                   )}
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-medium text-slate-900">
+                    <span className="truncate font-medium text-foreground">
                       {node.name}
                     </span>
                     {isUserCategory && (
@@ -429,7 +429,7 @@ export default function CategoriesPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+    <main className="min-h-screen bg-background px-8 py-8">
       <Dialog
         open={isAddOpen}
         onOpenChange={(open) => {
@@ -455,7 +455,7 @@ export default function CategoriesPage() {
 
             {addParentName && (
               <div className="text-sm text-muted-foreground">
-                Родитель: <span className="font-medium text-slate-900">{addParentName}</span>
+                Родитель: <span className="font-medium text-foreground">{addParentName}</span>
               </div>
             )}
 
@@ -465,7 +465,7 @@ export default function CategoriesPage() {
                 value={newName}
                 onChange={(event) => setNewName(event.target.value)}
                 placeholder="Например, Продукты"
-                className="border-2 border-border/70 bg-white shadow-none"
+                className="border-2 border-border/70 bg-card shadow-none"
               />
             </div>
 
@@ -475,7 +475,7 @@ export default function CategoriesPage() {
                 value={newScope}
                 onValueChange={(value) => setNewScope(value as CategoryScope)}
               >
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -494,7 +494,7 @@ export default function CategoriesPage() {
                 value={newIcon || "none"}
                 onValueChange={(value) => setNewIcon(value === "none" ? "" : value)}
               >
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                   <SelectValue placeholder="Без иконки" />
                 </SelectTrigger>
                 <SelectContent>
@@ -512,7 +512,7 @@ export default function CategoriesPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" className="border-2 border-border/70 bg-white shadow-none" onClick={() => setIsAddOpen(false)}>
+              <Button type="button" variant="outline" className="border-2 border-border/70 bg-card shadow-none" onClick={() => setIsAddOpen(false)}>
                 Отмена
               </Button>
               <Button type="submit" className="bg-violet-600 text-white hover:bg-violet-700">
@@ -547,7 +547,7 @@ export default function CategoriesPage() {
 
             {editTarget && (
               <div className="text-sm text-muted-foreground">
-                Категория: <span className="font-medium text-slate-900">{editTarget.name}</span>
+                Категория: <span className="font-medium text-foreground">{editTarget.name}</span>
               </div>
             )}
 
@@ -558,7 +558,7 @@ export default function CategoriesPage() {
                 onValueChange={(value) => setEditScope(value as CategoryScope)}
                 disabled={editTarget?.ownerUserId == null}
               >
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -582,7 +582,7 @@ export default function CategoriesPage() {
                 value={editIcon || "none"}
                 onValueChange={(value) => setEditIcon(value === "none" ? "" : value)}
               >
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
+                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
                   <SelectValue placeholder="Без иконки" />
                 </SelectTrigger>
                 <SelectContent>
@@ -600,7 +600,7 @@ export default function CategoriesPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" className="border-2 border-border/70 bg-white shadow-none" onClick={() => setEditTarget(null)}>
+              <Button type="button" variant="outline" className="border-2 border-border/70 bg-card shadow-none" onClick={() => setEditTarget(null)}>
                 Отмена
               </Button>
               <Button
@@ -649,7 +649,7 @@ export default function CategoriesPage() {
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Категории</h1>
+            <h1 className="text-2xl font-semibold text-foreground">Категории</h1>
             <p className="text-sm text-muted-foreground">
               Управляйте деревом категорий и задавайте, к каким операциям они относятся.
             </p>

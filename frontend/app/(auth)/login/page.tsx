@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 
 export default function LoginPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#F7F8FA] px-6">
+    <main className="flex min-h-screen items-center justify-center bg-background px-6">
       <Card className="w-[360px]">
         <CardHeader>
           <CardTitle>FinApp</CardTitle>
@@ -19,10 +19,10 @@ export default function LoginPage() {
           >
             Войти через Google
           </Button>
-          <Button className="w-full border-2 border-border/70 bg-white shadow-none" variant="outline" asChild>
+          <Button className="w-full border-2 border-border/70 bg-card shadow-none" variant="outline" asChild>
             <Link href="/login/password">Войти с логином и паролем</Link>
           </Button>
-          <Button className="w-full border-2 border-border/70 bg-white shadow-none" variant="outline" asChild>
+          <Button className="w-full border-2 border-border/70 bg-card shadow-none" variant="outline" asChild>
             <Link href="/register">Зарегистрироваться</Link>
           </Button>
         </CardContent>

@@ -448,7 +448,7 @@ const CURRENCY_BADGE_CLASSES: Record<string, string> = {
 };
 
 function getCurrencyBadgeClass(code: string) {
-  return CURRENCY_BADGE_CLASSES[code] ?? "bg-slate-100/20 text-slate-600";
+  return CURRENCY_BADGE_CLASSES[code] ?? "bg-muted/20 text-slate-600";
 }
 
 function formatRub(valueInCents: number) {
@@ -3243,7 +3243,7 @@ export default function Page() {
                   const rowToneClass = isArchived
                     ? "bg-rose-50/80"
                     : isClosed
-                    ? "bg-slate-100/80"
+                    ? "bg-muted/80"
                     : "";
                   const textToneClass = isArchived
                     ? "text-slate-400"
@@ -3329,7 +3329,7 @@ export default function Page() {
                               className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
                                 historyStatus === "NEW"
                                   ? "bg-emerald-50 text-emerald-700"
-                                  : "bg-slate-100 text-slate-700"
+                                  : "bg-muted text-foreground"
                               }`}
                             >
                               {historyStatus === "NEW" ? "Новый" : "Исторический"}
@@ -3519,7 +3519,7 @@ export default function Page() {
   /* ------------------ основной UI ------------------ */
 
   return (
-    <main className="min-h-screen bg-[#F7F8FA] px-8 py-8">
+    <main className="min-h-screen bg-background px-8 py-8">
       <Dialog
         open={isCreateOpen}
         onOpenChange={(open) => {
@@ -3555,7 +3555,7 @@ export default function Page() {
               <div className="grid content-start gap-4">
             {isGeneralCreate && (
               <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
                   <button
                     type="button"
                     aria-pressed={kind === "ASSET"}
@@ -3567,7 +3567,7 @@ export default function Page() {
                     className={`${segmentedButtonBase} ${
                       kind === "ASSET"
                         ? "bg-violet-50 text-violet-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Актив
@@ -3583,7 +3583,7 @@ export default function Page() {
                     className={`${segmentedButtonBase} ${
                       kind === "LIABILITY"
                         ? "bg-rose-50 text-rose-700"
-                        : "bg-white text-muted-foreground hover:bg-white"
+                        : "bg-card text-muted-foreground hover:bg-accent"
                     }`}
                   >
                     Обязательство
@@ -3648,7 +3648,7 @@ export default function Page() {
 
 
             {isMoexType && (
-              <div className="grid gap-3 rounded-lg border-2 border-border/70 bg-white p-3">
+              <div className="grid gap-3 rounded-lg border-2 border-border/70 bg-card p-3">
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
                     <Label>Ценная бумага</Label>
@@ -3701,7 +3701,7 @@ export default function Page() {
                               <button
                                 key={option.secid}
                                 type="button"
-                                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-slate-50"
+                                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent"
                                 onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => {
                                   setSelectedInstrument(option);
@@ -3895,7 +3895,7 @@ export default function Page() {
                     className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
                       resolvedHistoryStatus === "NEW"
                         ? "bg-emerald-50 text-emerald-700"
-                        : "bg-slate-100 text-slate-700"
+                        : "bg-muted text-foreground"
                     }`}
                   >
                     {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
@@ -3961,7 +3961,7 @@ export default function Page() {
             </div>
             <div className="grid content-start gap-4">
             {showMoexPricing && (
-              <div className="rounded-lg border-2 border-border/70 bg-white p-3 text-sm">
+              <div className="rounded-lg border-2 border-border/70 bg-card p-3 text-sm">
                 <div className="font-medium">
                   {"MOEX: \u0446\u0435\u043d\u044b \u0438 \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c"}
                 </div>
@@ -4027,7 +4027,7 @@ export default function Page() {
               </div>
             )}
             {showMoexCommission && (
-              <div className="rounded-lg border-2 border-border/70 bg-white p-3 text-sm">
+              <div className="rounded-lg border-2 border-border/70 bg-card p-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 font-medium">
                     {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u043f\u0440\u0438 \u043f\u043e\u043a\u0443\u043f\u043a\u0435"}
@@ -4516,7 +4516,7 @@ export default function Page() {
               </div>
             )}
             {showOpeningCounterparty && (
-              <div className="rounded-lg border-2 border-border/70 bg-white p-3">
+              <div className="rounded-lg border-2 border-border/70 bg-card p-3">
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
                     <Label>{openingCounterpartyLabel}</Label>
@@ -4599,7 +4599,7 @@ export default function Page() {
             
             <div className="grid gap-2">
               <Label>Обработка остатка</Label>
-              <div className="inline-flex items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+              <div className="inline-flex items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
                 <button
                   type="button"
                   onClick={() => {
@@ -4608,7 +4608,7 @@ export default function Page() {
                   }}
                   className={[
                     segmentedButtonBase,
-                    !closeWriteOff ? "bg-violet-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
+                    !closeWriteOff ? "bg-violet-600 text-white" : "bg-card text-foreground hover:bg-accent",
                   ].join(" ")}
                 >
                   Перевести на
@@ -4621,7 +4621,7 @@ export default function Page() {
                   }}
                   className={[
                     segmentedButtonBase,
-                    closeWriteOff ? "bg-violet-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
+                    closeWriteOff ? "bg-violet-600 text-white" : "bg-card text-foreground hover:bg-accent",
                   ].join(" ")}
                 >
                   Списать
@@ -4677,7 +4677,7 @@ export default function Page() {
       <div className="space-y-6">
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/70 bg-white px-4 py-3">
           <span className="text-sm font-medium text-muted-foreground">Показывать:</span>
-          <div className="inline-flex items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
+          <div className="inline-flex items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
             <button
               type="button"
               aria-pressed={!showClosed && !showArchived}
@@ -4688,7 +4688,7 @@ export default function Page() {
               className={`${segmentedButtonBase} ${
                 !showClosed && !showArchived
                   ? "bg-violet-50 text-violet-700"
-                  : "bg-white text-muted-foreground hover:bg-white"
+                  : "bg-card text-muted-foreground hover:bg-accent"
               }`}
             >
               Активные
@@ -4699,8 +4699,8 @@ export default function Page() {
               onClick={() => setShowClosed((prev) => !prev)}
               className={`${segmentedButtonBase} ${
                 showClosed
-                  ? "bg-slate-100 text-slate-700"
-                  : "bg-white text-muted-foreground hover:bg-white"
+                  ? "bg-muted text-foreground"
+                  : "bg-card text-muted-foreground hover:bg-accent"
               }`}
             >
               Закрытые
@@ -4711,8 +4711,8 @@ export default function Page() {
               onClick={() => setShowArchived((prev) => !prev)}
               className={`${segmentedButtonBase} ${
                 showArchived
-                  ? "bg-slate-100 text-slate-700"
-                  : "bg-white text-muted-foreground hover:bg-white"
+                  ? "bg-muted text-foreground"
+                  : "bg-card text-muted-foreground hover:bg-accent"
               }`}
             >
               Удаленные

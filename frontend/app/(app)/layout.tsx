@@ -52,7 +52,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-[#F7F8FA] flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-muted-foreground">Загрузка…</div>
       </div>
     );
@@ -65,7 +65,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AccountingStartGate>
       <OnboardingWizard />
-      <div className="min-h-screen bg-[#F7F8FA]" key={sessionKey}>
+      <div className="min-h-screen bg-background" key={sessionKey}>
         <div className="flex">
           <Sidebar />
           <div

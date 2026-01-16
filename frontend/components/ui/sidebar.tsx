@@ -27,6 +27,7 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { useTheme } from "@/components/theme-provider";
 import { Moon, Sun } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { PremiumModal } from "@/components/premium-modal";
 
 const nav = [
   { href: "/dashboard", label: "\u0414\u044d\u0448\u0431\u043e\u0440\u0434", icon: LayoutDashboard },
@@ -95,6 +96,7 @@ export function Sidebar() {
   const [isReportsOpen, setIsReportsOpen] = useState(
     pathname === "/reports" || pathname.startsWith("/reports/")
   );
+  const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
 
   useEffect(() => {
     if (pathname === "/reports" || pathname.startsWith("/reports/")) {
@@ -330,6 +332,35 @@ export function Sidebar() {
           </Button>
         )}
         {isCollapsed ? (
+          <Tooltip content="Premium" side="right" className="flex w-full">
+            <Button
+              variant="ghost"
+              className={cn(
+                "mb-2 w-full justify-center rounded-full h-[50px] text-[#DCDCDC]",
+                "px-0 bg-gradient-to-r from-[#7C6CF1] via-[#6C5DD7] to-[#5544D1] hover:opacity-90"
+              )}
+              onClick={() => setIsPremiumModalOpen(true)}
+            >
+              <span className="text-[20px] leading-[22px] font-medium font-['CodecProVariable',sans-serif]">
+                Premium
+              </span>
+            </Button>
+          </Tooltip>
+        ) : (
+          <Button
+            variant="ghost"
+            className={cn(
+              "mb-2 w-full justify-center rounded-full h-[50px] text-[#DCDCDC]",
+              "px-[22px] bg-gradient-to-r from-[#7C6CF1] via-[#6C5DD7] to-[#5544D1] hover:opacity-90"
+            )}
+            onClick={() => setIsPremiumModalOpen(true)}
+          >
+            <span className="text-[20px] leading-[22px] font-medium font-['CodecProVariable',sans-serif]">
+              Premium
+            </span>
+          </Button>
+        )}
+        {isCollapsed ? (
           <Tooltip content="\u0412\u044b\u0439\u0442\u0438" side="right" className="flex w-full">
             <Button
               variant="ghost"
@@ -355,6 +386,7 @@ export function Sidebar() {
           </Button>
         )}
       </div>
+      <PremiumModal open={isPremiumModalOpen} onOpenChange={setIsPremiumModalOpen} />
     </aside>
   );
 }

@@ -1001,7 +1001,7 @@ export default function CounterpartiesPage() {
                           <div className="flex min-w-0 items-start gap-3">
                             {(item.entity_type === "PERSON" ? item.photo_url : item.logo_url) ? (
                               <img
-                                src={item.entity_type === "PERSON" ? item.photo_url : item.logo_url}
+                                src={(item.entity_type === "PERSON" ? item.photo_url : item.logo_url) ?? ""}
                                 alt=""
                                 className={`rounded object-contain bg-white ${
                                   isDeleted ? "h-10 w-10" : "h-12 w-12"

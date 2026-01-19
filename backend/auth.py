@@ -119,6 +119,9 @@ def get_current_user(
     sub = payload.get("sub")
     email = payload.get("email")
     name = payload.get("name")
+    given_name = payload.get("given_name")
+    family_name = payload.get("family_name")
+    picture = payload.get("picture")
 
     if not sub:
         raise HTTPException(status_code=401, detail="Token has no sub")
@@ -127,7 +130,15 @@ def get_current_user(
     user = db.execute(stmt).scalar_one_or_none()
 
     if not user:
-        user = User(google_sub=sub, email=email, name=name)
+        # При первом входе заполняем все данные из Google
+        user = User(
+            google_sub=sub,
+            email=email,
+            name=name,
+            first_name=given_name,
+            last_name=family_name,
+            photo_url=picture,
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -139,5 +150,22 @@ def get_current_user(
             )
         )
         db.commit()
+    else:
+        # При последующих входах обновляем только пустые поля
+        if not user.first_name and given_name:
+            user.first_name = given_name
+        if not user.last_name and family_name:
+            user.last_name = family_name
+        if not user.photo_url and picture:
+            user.photo_url = picture
+        if not user.email and email:
+            user.email = email
+        if not user.name and name:
+            user.name = name
+        if any([user.first_name != given_name and given_name,
+                user.last_name != family_name and family_name,
+                user.email != email and email,
+                user.name != name and name]):
+            db.commit()
 
     return user

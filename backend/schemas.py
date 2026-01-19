@@ -73,10 +73,23 @@ class AuthResponse(BaseModel):
 
 class UserMeOut(BaseModel):
     id: int
+    login: str | None
+    email: str | None
+    name: str | None
+    first_name: str | None
+    last_name: str | None
+    birth_date: date | None
+    photo_url: str | None
     accounting_start_date: date | None
+    google_sub: str | None
 
     class Config:
         from_attributes = True
+
+class UserProfileUpdate(BaseModel):
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    birth_date: date | None = None
 
 class AccountingStartDateUpdate(BaseModel):
     accounting_start_date: date

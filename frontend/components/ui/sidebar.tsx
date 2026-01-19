@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -16,6 +16,7 @@ import {
   Folder,
   Gauge,
   Users,
+  User,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
@@ -23,11 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useSidebar } from "./sidebar-context";
 import { useOnboarding } from "@/components/onboarding-context";
-import { useAccountingStart } from "@/components/accounting-start-context";
-import { useTheme } from "@/components/theme-provider";
-import { Moon, Sun } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
-import { PremiumModal } from "@/components/premium-modal";
+import { fetchUserMe, fetchUserPhotoAsBlob } from "@/lib/api";
 
 const nav = [
   { href: "/dashboard", label: "\u0414\u044d\u0448\u0431\u043e\u0440\u0434", icon: LayoutDashboard },
@@ -79,30 +76,59 @@ const nav = [
   },
 ];
 
-function formatShortDate(dateKey: string) {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  if (!year || !month || !day) return dateKey;
-  const paddedDay = String(day).padStart(2, "0");
-  const paddedMonth = String(month).padStart(2, "0");
-  return `${paddedDay}.${paddedMonth}.${year}`;
-}
-
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { isCollapsed, toggleSidebar } = useSidebar();
   const { status, startOnboarding } = useOnboarding();
-  const { accountingStartDate } = useAccountingStart();
-  const { theme, toggleTheme } = useTheme();
   const [isReportsOpen, setIsReportsOpen] = useState(
     pathname === "/reports" || pathname.startsWith("/reports/")
   );
-  const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
+  const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (pathname === "/reports" || pathname.startsWith("/reports/")) {
       setIsReportsOpen(true);
     }
   }, [pathname]);
+
+  // Загрузка фото пользователя
+  useEffect(() => {
+    let blobUrl: string | null = null;
+    const loadUserPhoto = async () => {
+      try {
+        const me = await fetchUserMe();
+        if (me.photo_url) {
+          // Если это URL из Google, используем напрямую
+          if (me.photo_url.includes("googleusercontent.com")) {
+            setUserPhotoUrl(me.photo_url);
+          } else {
+            // Иначе загружаем через API с авторизацией
+            const blob = await fetchUserPhotoAsBlob();
+            if (blob) {
+              blobUrl = blob;
+              setUserPhotoUrl(blob);
+            } else {
+              setUserPhotoUrl(null);
+            }
+          }
+        } else {
+          setUserPhotoUrl(null);
+        }
+      } catch {
+        setUserPhotoUrl(null);
+      }
+    };
+
+    loadUserPhoto();
+
+    // Очистка blob URL при размонтировании
+    return () => {
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    };
+  }, []);
 
   return (
     <aside
@@ -254,54 +280,51 @@ export function Sidebar() {
         })}
       </nav>
       <div className="px-4 pb-4">
-        {accountingStartDate && !isCollapsed && (
-          <div className="mb-3 text-right">
-            <div className="text-xs text-white/70 mb-1">Дата начала учета</div>
-            <div className="text-lg font-semibold text-white">
-              {formatShortDate(accountingStartDate)}
+        {/* Личный кабинет */}
+        {isCollapsed ? (
+          <Tooltip content="Личный кабинет" side="right" className="flex w-full mb-2">
+            <Button
+              variant="ghost"
+              className={cn(
+                "w-full justify-center rounded-full border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+                "px-0"
+              )}
+              onClick={() => router.push("/cabinet")}
+            >
+              {userPhotoUrl ? (
+                <img
+                  src={userPhotoUrl}
+                  alt="Фото профиля"
+                  className="h-6 w-6 rounded-full object-cover"
+                />
+              ) : (
+                <User className="h-4 w-4 flex-shrink-0" />
+              )}
+            </Button>
+          </Tooltip>
+        ) : (
+          <Button
+            variant="ghost"
+            className={cn(
+              "mb-2 w-full justify-start rounded-full border-2 border-white/90 bg-transparent py-2 text-sm font-semibold text-white shadow-sm hover:bg-white hover:text-violet-700",
+              "px-4"
+            )}
+            onClick={() => router.push("/cabinet")}
+          >
+            <div className="flex items-center gap-3 w-full">
+              {userPhotoUrl ? (
+                <img
+                  src={userPhotoUrl}
+                  alt="Фото профиля"
+                  className="h-6 w-6 rounded-full object-cover flex-shrink-0"
+                />
+              ) : (
+                <User className="h-4 w-4 flex-shrink-0" />
+              )}
+              <span>Личный кабинет</span>
             </div>
-          </div>
+          </Button>
         )}
-        <div className={cn("mb-2 flex items-center gap-3", isCollapsed ? "justify-center" : "justify-between")}>
-          {isCollapsed ? (
-            <Tooltip content={theme === "dark" ? "Светлая тема" : "Темная тема"} side="right">
-              <button
-                onClick={toggleTheme}
-                className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white/90 bg-transparent text-white shadow-sm transition-colors hover:bg-white hover:text-violet-700"
-                aria-label={theme === "dark" ? "Переключить на светлую тему" : "Переключить на темную тему"}
-              >
-                {theme === "dark" ? (
-                  <Sun className="h-5 w-5" />
-                ) : (
-                  <Moon className="h-5 w-5" />
-                )}
-              </button>
-            </Tooltip>
-          ) : (
-            <>
-              <span className="text-sm font-medium text-white/90">
-                {theme === "dark" ? "Темная тема" : "Светлая тема"}
-              </span>
-              <button
-                onClick={toggleTheme}
-                className="flex items-center gap-2 rounded-full border-2 border-white/90 bg-transparent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-white hover:text-violet-700"
-                aria-label={theme === "dark" ? "Переключить на светлую тему" : "Переключить на темную тему"}
-              >
-                {theme === "dark" ? (
-                  <>
-                    <Sun className="h-4 w-4" />
-                    <span>Светлая</span>
-                  </>
-                ) : (
-                  <>
-                    <Moon className="h-4 w-4" />
-                    <span>Темная</span>
-                  </>
-                )}
-              </button>
-            </>
-          )}
-        </div>
         {isCollapsed ? (
           <Tooltip
             content="\u041f\u043e\u0437\u043d\u0430\u043a\u043e\u043c\u0438\u0442\u044c\u0441\u044f \u0441 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435\u043c"
@@ -332,35 +355,6 @@ export function Sidebar() {
           </Button>
         )}
         {isCollapsed ? (
-          <Tooltip content="Premium" side="right" className="flex w-full">
-            <Button
-              variant="ghost"
-              className={cn(
-                "mb-2 w-full justify-center rounded-full h-[50px] text-[#DCDCDC]",
-                "px-0 bg-gradient-to-r from-[#7C6CF1] via-[#6C5DD7] to-[#5544D1] hover:opacity-90"
-              )}
-              onClick={() => setIsPremiumModalOpen(true)}
-            >
-              <span className="text-[20px] leading-[22px] font-medium font-['CodecProVariable',sans-serif]">
-                Premium
-              </span>
-            </Button>
-          </Tooltip>
-        ) : (
-          <Button
-            variant="ghost"
-            className={cn(
-              "mb-2 w-full justify-center rounded-full h-[50px] text-[#DCDCDC]",
-              "px-[22px] bg-gradient-to-r from-[#7C6CF1] via-[#6C5DD7] to-[#5544D1] hover:opacity-90"
-            )}
-            onClick={() => setIsPremiumModalOpen(true)}
-          >
-            <span className="text-[20px] leading-[22px] font-medium font-['CodecProVariable',sans-serif]">
-              Premium
-            </span>
-          </Button>
-        )}
-        {isCollapsed ? (
           <Tooltip content="\u0412\u044b\u0439\u0442\u0438" side="right" className="flex w-full">
             <Button
               variant="ghost"
@@ -386,7 +380,6 @@ export function Sidebar() {
           </Button>
         )}
       </div>
-      <PremiumModal open={isPremiumModalOpen} onOpenChange={setIsPremiumModalOpen} />
     </aside>
   );
 }

@@ -1,9 +1,12 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date as date_type
 import requests
 from pathlib import Path
+from io import BytesIO
+from PIL import Image
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, delete, func, or_, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -33,6 +36,7 @@ from schemas import (
     AuthResponse,
     AuthUserOut,
     UserMeOut,
+    UserProfileUpdate,
     AccountingStartDateUpdate,
     ItemCloseRequest,
 )
@@ -562,10 +566,31 @@ def login(
         user=AuthUserOut(id=user.id, login=user.login, name=user.name),
     )
 
+MAX_PHOTO_BYTES = 2 * 1024 * 1024
+MAX_PHOTO_DIM = 1024
+ALLOWED_PHOTO_FORMATS = {"PNG", "JPEG", "WEBP"}
+FORMAT_TO_MIME = {
+    "PNG": "image/png",
+    "JPEG": "image/jpeg",
+    "WEBP": "image/webp",
+}
+
+
+def build_user_photo_url(user_id: int) -> str:
+    return f"{settings.public_base_url}/users/me/photo"
+
+
+def apply_user_photo_url(user: User) -> None:
+    if user.photo_data:
+        user.photo_url = build_user_photo_url(user.id)
+
+
 @app.get("/users/me", response_model=UserMeOut)
 def get_me(
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
+    apply_user_photo_url(user)
     return user
 
 
@@ -603,6 +628,89 @@ def set_accounting_start_date(
     db.commit()
     db.refresh(user)
     return user
+
+
+@app.patch("/users/me", response_model=UserMeOut)
+def update_user_profile(
+    payload: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # Валидация: first_name обязателен, если пользователь не из Google или если google_sub есть, но first_name пустое
+    if payload.first_name is not None:
+        user.first_name = payload.first_name.strip() if payload.first_name else None
+    if payload.last_name is not None:
+        user.last_name = payload.last_name.strip() if payload.last_name else None
+    if payload.birth_date is not None:
+        if payload.birth_date > date_type.today():
+            raise HTTPException(
+                status_code=400,
+                detail="Дата рождения не может быть в будущем.",
+            )
+        user.birth_date = payload.birth_date
+
+    # Проверка обязательности first_name (если не из Google или если из Google, но first_name пустое)
+    if not user.first_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Имя является обязательным полем.",
+        )
+
+    db.commit()
+    db.refresh(user)
+    apply_user_photo_url(user)
+    return user
+
+
+@app.post("/users/me/photo", response_model=UserMeOut)
+async def upload_user_photo(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Файл не загружен.")
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Размер фотографии не должен превышать {MAX_PHOTO_BYTES // (1024 * 1024)} МБ.",
+        )
+
+    try:
+        image = Image.open(BytesIO(data))
+        image.verify()
+        image = Image.open(BytesIO(data))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Неверный формат изображения.") from exc
+
+    if image.format not in ALLOWED_PHOTO_FORMATS:
+        raise HTTPException(status_code=400, detail="Недопустимый формат изображения.")
+
+    width, height = image.size
+    if width > MAX_PHOTO_DIM or height > MAX_PHOTO_DIM:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Разрешение фотографии не должно превышать {MAX_PHOTO_DIM}px.",
+        )
+
+    user.photo_mime = FORMAT_TO_MIME[image.format]
+    user.photo_data = data
+    apply_user_photo_url(user)
+    db.commit()
+    db.refresh(user)
+    apply_user_photo_url(user)
+    return user
+
+
+@app.get("/users/me/photo")
+def get_user_photo(
+    user: User = Depends(get_current_user),
+):
+    if not user.photo_data:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    media_type = user.photo_mime or "application/octet-stream"
+    return Response(content=user.photo_data, media_type=media_type)
 
 
 @app.get("/items", response_model=list[ItemOut])

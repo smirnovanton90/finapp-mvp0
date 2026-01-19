@@ -282,7 +282,21 @@ export type TransactionOut = {
 
 export type UserMeOut = {
   id: number;
+  login: string | null;
+  email: string | null;
+  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  birth_date: string | null;
+  photo_url: string | null;
   accounting_start_date: string | null;
+  google_sub: string | null;
+};
+
+export type UserProfileUpdate = {
+  first_name?: string | null;
+  last_name?: string | null;
+  birth_date?: string | null;
 };
 
 export type AccountingStartDateUpdate = {
@@ -454,6 +468,39 @@ export async function updateOnboardingStatus(
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
+}
+
+export async function updateUserProfile(
+  payload: UserProfileUpdate
+): Promise<UserMeOut> {
+  const res = await authFetch(`${API_BASE}/users/me`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function uploadUserPhoto(file: File): Promise<UserMeOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await authFetch(`${API_BASE}/users/me/photo`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchUserPhotoAsBlob(): Promise<string | null> {
+  try {
+    const res = await authFetch(`${API_BASE}/users/me/photo`);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  } catch {
+    return null;
+  }
 }
 
 export async function setAccountingStartDate(

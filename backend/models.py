@@ -30,6 +30,12 @@ class User(Base):
     google_sub: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_mime: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    photo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     accounting_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     created_at: Mapped[DateTime] = mapped_column(

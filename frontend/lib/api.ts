@@ -245,6 +245,7 @@ export type TransactionStatus = "CONFIRMED" | "UNCONFIRMED" | "REALIZED";
 export type TransactionSource =
   | "AUTO_ITEM_OPENING"
   | "AUTO_ITEM_CLOSING"
+  | "AUTO_ITEM_COMMISSION"
   | "MANUAL";
 export type TransactionChainFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "REGULAR";
 export type TransactionChainMonthlyRule = "FIRST_DAY" | "LAST_DAY";

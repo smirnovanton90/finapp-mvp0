@@ -377,6 +377,7 @@ export default function FinancialPlanningPage() {
 
   const formatCategoryLabel = (categoryId: number | null, txDirection: string) => {
     if (txDirection === "TRANSFER") return "Перевод";
+    if (categoryId === null) return "-";
     const parts = categoryLookup.idToPath.get(categoryId) ?? [];
     const label = parts
       .map((part) => part?.trim())
@@ -1030,9 +1031,9 @@ export default function FinancialPlanningPage() {
                           : counterparty?.logo_url) ? (
                           <img
                             src={
-                              counterparty?.entity_type === "PERSON"
+                              (counterparty?.entity_type === "PERSON"
                                 ? counterparty?.photo_url
-                                : counterparty?.logo_url
+                                : counterparty?.logo_url) ?? ""
                             }
                             alt=""
                             className="h-5 w-5 rounded border border-border/60 bg-card object-contain"
@@ -1172,9 +1173,9 @@ export default function FinancialPlanningPage() {
                           : counterparty?.logo_url) ? (
                           <img
                             src={
-                              counterparty?.entity_type === "PERSON"
+                              (counterparty?.entity_type === "PERSON"
                                 ? counterparty?.photo_url
-                                : counterparty?.logo_url
+                                : counterparty?.logo_url) ?? ""
                             }
                             alt=""
                             className="h-5 w-5 rounded border border-border/60 bg-card object-contain"

@@ -620,7 +620,7 @@ async function parsePdfStatementRows(file: File): Promise<ParsedPdfRow[]> {
   for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
     const page = await pdf.getPage(pageIndex);
     const viewport = page.getViewport({ scale: 1 });
-    const textContent = await page.getTextContent({ normalizeWhitespace: true });
+    const textContent = await page.getTextContent();
     const rawItems = textContent.items as unknown[];
     const items = rawItems.filter((item): item is PdfTextItem => {
       if (!item || typeof item !== "object") return false;
@@ -736,7 +736,7 @@ async function parseAlfaStatementRows(file: File): Promise<ParsedPdfRow[]> {
   for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
     const page = await pdf.getPage(pageIndex);
     const viewport = page.getViewport({ scale: 1 });
-    const textContent = await page.getTextContent({ normalizeWhitespace: true });
+    const textContent = await page.getTextContent();
     const rawItems = textContent.items as unknown[];
     const items = rawItems.filter((item): item is PdfTextItem => {
       if (!item || typeof item !== "object") return false;
@@ -1699,7 +1699,7 @@ function TransactionCardRow({
   );
 }
 
-export function TransactionsView({
+function TransactionsView({
   view = "actual",
 }: {
   view?: TransactionsViewMode;
@@ -2645,7 +2645,6 @@ export function TransactionsView({
     setPrimaryItemId(baseline.primaryItemId);
     setCounterpartyItemId(baseline.counterpartyItemId);
     setCounterpartyId(baseline.counterpartyId);
-    setCounterpartySearch(counterpartyLabel(baseline.counterpartyId));
     setAmountStr(baseline.amountStr);
     setAmountCounterpartyStr(baseline.amountCounterpartyStr);
     setPrimaryQuantityLots(baseline.primaryQuantityLots);
@@ -5338,7 +5337,7 @@ export function TransactionsView({
                   <TransactionCardRow
                     key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
                     tx={tx}
-                    counterparty={counterpartiesById.get(tx.counterparty_id) ?? null}
+                    counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
                     itemName={itemName}
                     itemCurrencyCode={itemCurrencyCode}
                     itemBankLogoUrl={itemBankLogoUrl}

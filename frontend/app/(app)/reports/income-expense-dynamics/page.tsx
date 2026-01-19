@@ -230,7 +230,7 @@ function buildCategoryMatrix(
   let hasMissingRates = false;
   const resolveTrail = buildCategoryTrailResolver(categoryById);
 
-  const addValue = (rowId: string, monthKey: string, value: number) => {
+  const addValue = (rowId: number, monthKey: string, value: number) => {
     const rowTotals = totals.get(rowId);
     if (!rowTotals) return;
     rowTotals[monthKey] = (rowTotals[monthKey] ?? 0) + value;

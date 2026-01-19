@@ -16,6 +16,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# Исключаем frontend/lib из игнорирования (нужны для сборки)
+!/frontend/lib/
 parts/
 sdist/
 var/

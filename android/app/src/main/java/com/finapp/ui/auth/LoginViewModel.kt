@@ -41,4 +41,43 @@ class LoginViewModel(private val authRepository: AuthRepository) : ViewModel() {
                 }
         }
     }
+    
+    fun googleLogin(idToken: String) {
+        viewModelScope.launch {
+            android.util.Log.d("LoginViewModel", "googleLogin called with idToken: ${idToken.take(20)}...")
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+            
+            try {
+                // Сохраняем токен
+                authRepository.saveGoogleToken(idToken)
+                android.util.Log.d("LoginViewModel", "Token saved, updating state to authenticated")
+                
+                // Небольшая задержка для гарантии сохранения
+                kotlinx.coroutines.delay(100)
+                
+                // Проверяем, что токен действительно сохранен
+                val isAuth = authRepository.isAuthenticated()
+                android.util.Log.d("LoginViewModel", "Token verification: $isAuth")
+                
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    isAuthenticated = isAuth
+                )
+                android.util.Log.d("LoginViewModel", "State updated, isAuthenticated: ${_uiState.value.isAuthenticated}")
+            } catch (e: Exception) {
+                android.util.Log.e("LoginViewModel", "Error in googleLogin", e)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = e.message ?: "Ошибка авторизации через Google"
+                )
+            }
+        }
+    }
+    
+    fun setError(message: String) {
+        _uiState.value = _uiState.value.copy(
+            isLoading = false,
+            errorMessage = message
+        )
+    }
 }

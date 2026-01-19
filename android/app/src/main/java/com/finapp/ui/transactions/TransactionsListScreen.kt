@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -18,6 +19,7 @@ import com.finapp.ui.components.LoadingIndicator
 @Composable
 fun TransactionsListScreen(
     onAddTransactionClick: () -> Unit,
+    onLogout: () -> Unit = {},
     viewModel: TransactionsListViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -25,7 +27,15 @@ fun TransactionsListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Транзакции") }
+                title = { Text("Транзакции") },
+                actions = {
+                    IconButton(onClick = onLogout) {
+                        Icon(
+                            imageVector = Icons.Default.ExitToApp,
+                            contentDescription = "Выйти"
+                        )
+                    }
+                }
             )
         },
         floatingActionButton = {

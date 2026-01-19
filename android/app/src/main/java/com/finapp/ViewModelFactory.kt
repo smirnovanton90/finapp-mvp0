@@ -8,8 +8,12 @@ import com.finapp.data.repository.AuthRepository
 import com.finapp.data.repository.CategoriesRepository
 import com.finapp.data.repository.CounterpartiesRepository
 import com.finapp.data.repository.ItemsRepository
+import com.finapp.data.repository.LimitsRepository
 import com.finapp.data.repository.TransactionsRepository
+import com.finapp.data.repository.UsersRepository
 import com.finapp.ui.auth.LoginViewModel
+import com.finapp.ui.counterparties.CounterpartiesListViewModel
+import com.finapp.ui.dashboard.DashboardViewModel
 import com.finapp.ui.items.ItemFormViewModel
 import com.finapp.ui.items.ItemsListViewModel
 import com.finapp.ui.transactions.TransactionFormViewModel
@@ -22,6 +26,8 @@ class ViewModelFactory(private val context: Context) : ViewModelProvider.Factory
     private val transactionsRepository by lazy { TransactionsRepository(tokenManager) }
     private val categoriesRepository by lazy { CategoriesRepository(tokenManager) }
     private val counterpartiesRepository by lazy { CounterpartiesRepository(tokenManager) }
+    private val limitsRepository by lazy { LimitsRepository(tokenManager) }
+    private val usersRepository by lazy { UsersRepository(tokenManager) }
     
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -45,6 +51,18 @@ class ViewModelFactory(private val context: Context) : ViewModelProvider.Factory
             }
             modelClass.isAssignableFrom(TransactionFormViewModel::class.java) -> {
                 TransactionFormViewModel(transactionsRepository, itemsRepository) as T
+            }
+            modelClass.isAssignableFrom(CounterpartiesListViewModel::class.java) -> {
+                CounterpartiesListViewModel(counterpartiesRepository) as T
+            }
+            modelClass.isAssignableFrom(DashboardViewModel::class.java) -> {
+                DashboardViewModel(
+                    usersRepository,
+                    itemsRepository,
+                    transactionsRepository,
+                    limitsRepository,
+                    categoriesRepository
+                ) as T
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
         }

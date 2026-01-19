@@ -20,9 +20,14 @@ class TokenManager(context: Context) {
     )
     
     fun saveToken(token: String) {
-        sharedPreferences.edit()
+        android.util.Log.d("TokenManager", "Saving token: ${token.take(20)}...")
+        val result = sharedPreferences.edit()
             .putString(Constants.KEY_ACCESS_TOKEN, token)
-            .apply()
+            .commit() // Используем commit() для синхронного сохранения
+        android.util.Log.d("TokenManager", "Token saved: $result")
+        // Проверяем, что токен действительно сохранен
+        val savedToken = getToken()
+        android.util.Log.d("TokenManager", "Token verification: ${savedToken != null}")
     }
     
     fun getToken(): String? {

@@ -12,8 +12,11 @@ object Constants {
     
     // Navigation routes
     const val ROUTE_LOGIN = "login"
+    const val ROUTE_DASHBOARD = "dashboard"
     const val ROUTE_ITEMS_LIST = "items_list"
     const val ROUTE_ITEM_FORM = "item_form"
     const val ROUTE_TRANSACTIONS_LIST = "transactions_list"
     const val ROUTE_TRANSACTION_FORM = "transaction_form"
+    const val ROUTE_CATEGORIES = "categories"
+    const val ROUTE_COUNTERPARTIES = "counterparties"
 }

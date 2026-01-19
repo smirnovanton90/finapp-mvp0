@@ -44,4 +44,10 @@ class AuthRepository(private val tokenManager: TokenManager) {
     fun isAuthenticated(): Boolean {
         return tokenManager.hasToken()
     }
+    
+    fun saveGoogleToken(idToken: String) {
+        // Сохраняем Google id_token как access_token
+        // Backend принимает его напрямую в заголовке Authorization
+        tokenManager.saveToken(idToken)
+    }
 }

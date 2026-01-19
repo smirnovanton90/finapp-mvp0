@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FinApp</string>
+    <!-- TODO: Замените YOUR_WEB_CLIENT_ID на реальный Web Client ID из Google Cloud Console -->
+    <!-- Получите его в Google Cloud Console: APIs & Services > Credentials > OAuth 2.0 Client IDs > Web client -->
+    <string name="default_web_client_id">188505140372-vv7tgfr9kh2e0vschlp44qt2ungdj94i.apps.googleusercontent.com</string>
 </resources>

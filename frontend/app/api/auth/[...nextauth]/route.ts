@@ -9,6 +9,24 @@ const BACKEND_BASE =
   process.env.NEXT_PUBLIC_BACKEND_URL ??
   "http://localhost:8000";
 
+const NEXTAUTH_URL = process.env.NEXTAUTH_URL ?? "";
+// When deploying by IP over plain HTTP, secure cookies break the session (browser won't send them).
+// We tie this to NEXTAUTH_URL so deployments can control it explicitly.
+const USE_SECURE_COOKIES = NEXTAUTH_URL.startsWith("https://");
+
+if (process.env.NODE_ENV === "production") {
+  if (!process.env.NEXTAUTH_SECRET) {
+    console.warn(
+      "[auth] NEXTAUTH_SECRET is not set. Sessions may break between restarts / instances."
+    );
+  }
+  if (!process.env.NEXTAUTH_URL) {
+    console.warn(
+      "[auth] NEXTAUTH_URL is not set. Set it to your site origin (e.g. http://<IP> or https://<DOMAIN>) to avoid login loops."
+    );
+  }
+}
+
 async function refreshGoogleToken(token: any) {
   try {
     const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
@@ -43,6 +61,8 @@ async function refreshGoogleToken(token: any) {
 }
 
 const handler = NextAuth({
+  secret: process.env.NEXTAUTH_SECRET,
+  useSecureCookies: USE_SECURE_COOKIES,
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,

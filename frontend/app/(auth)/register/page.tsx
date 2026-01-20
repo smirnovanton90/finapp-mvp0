@@ -38,11 +38,17 @@ async function readError(res: Response) {
       });
       return errors.join(". ");
     }
-    if (typeof data?.detail === "string") return data.detail;
+    if (typeof data?.detail === "string") {
+      // Translate specific error messages
+      if (data.detail === "Login already exists") {
+        return "Пользователь уже зарегистрирован";
+      }
+      return data.detail;
+    }
   } catch {
     // ignore parse errors
   }
-  return res.statusText || "Request failed";
+  return "Что-то пошло не так...";
 }
 
 export default function RegisterPage() {

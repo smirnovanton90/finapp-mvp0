@@ -3,6 +3,7 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { ThemeToggleFab } from "@/components/theme-toggle-fab";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
@@ -10,7 +11,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     if (status !== "loading" && session) {
-      router.replace("/assets");
+      router.replace("/dashboard");
     }
   }, [session, status, router]);
 
@@ -26,5 +27,10 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <ThemeToggleFab />
+    </>
+  );
 }  

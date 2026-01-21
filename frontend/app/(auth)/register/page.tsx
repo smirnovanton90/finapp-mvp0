@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { AuthInput } from "@/components/ui/auth-input";
+import { useTheme } from "@/components/theme-provider";
+import { AUTH_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
+import { ACCENT } from "@/lib/colors";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
@@ -52,6 +55,8 @@ async function readError(res: Response) {
 }
 
 export default function RegisterPage() {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const router = useRouter();
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -124,17 +129,25 @@ export default function RegisterPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center px-6 relative overflow-hidden">
-      {/* Linear gradient background from top-left to bottom-right */}
-      <div 
-        className="absolute inset-0"
+      {/* Background crossfade between dark/light */}
+      <div
+        className="absolute inset-0 pointer-events-none transition-opacity duration-700 ease-in-out"
         style={{
-          background: "linear-gradient(135deg, #4A3E9C 0%, #000000 100%)",
+          background: AUTH_BG_GRADIENT,
+          opacity: isDark ? 1 : 0,
+        }}
+      />
+      <div
+        className="absolute inset-0 pointer-events-none transition-opacity duration-700 ease-in-out"
+        style={{
+          background: AUTH_BG_GRADIENT_LIGHT,
+          opacity: isDark ? 0 : 1,
         }}
       />
       
       <div className="relative z-10 w-full max-w-[400px] flex flex-col items-center space-y-6">
         {/* Header Text */}
-        <h2 className="text-white text-center">Введите логин и пароль</h2>
+        <h2 className="text-foreground text-center">Введите логин и пароль</h2>
 
         {/* Registration Form */}
         <form className="w-full space-y-4" onSubmit={handleSubmit}>
@@ -143,7 +156,7 @@ export default function RegisterPage() {
             <div 
               className="w-full rounded-lg px-4 py-3 text-center"
               style={{
-                backgroundColor: "rgba(108, 93, 215, 0.22)",
+                backgroundColor: isDark ? "rgba(108, 93, 215, 0.22)" : "rgba(108, 93, 215, 0.12)",
               }}
             >
               <p className="text-sm" style={{ color: "#FB4C4F" }}>
@@ -203,8 +216,8 @@ export default function RegisterPage() {
 
         {/* Login Link */}
         <div className="text-center text-sm">
-          <span className="text-white/70">Есть аккаунт? </span>
-          <Link href="/login" className="text-[#997AF8] hover:text-[#A081FF] font-medium">
+          <span className="text-muted-foreground">Есть аккаунт? </span>
+          <Link href="/login" className="font-medium" style={{ color: ACCENT }}>
             Войти
           </Link>
         </div>

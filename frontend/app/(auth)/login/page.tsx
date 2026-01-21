@@ -6,8 +6,13 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { AuthInput } from "@/components/ui/auth-input";
+import { useTheme } from "@/components/theme-provider";
+import { AUTH_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT, PINK_GRADIENT } from "@/lib/gradients";
+import { ACCENT } from "@/lib/colors";
 
 export default function LoginPage() {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const router = useRouter();
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -39,29 +44,50 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center px-6 relative overflow-hidden">
-      {/* Linear gradient background from top-left to bottom-right */}
-      <div 
-        className="absolute inset-0"
+      {/* Background crossfade between dark/light */}
+      <div
+        className="absolute inset-0 pointer-events-none transition-opacity duration-700 ease-in-out"
         style={{
-          background: "linear-gradient(135deg, #4A3E9C 0%, #000000 100%)",
+          background: AUTH_BG_GRADIENT,
+          opacity: isDark ? 1 : 0,
+        }}
+      />
+      <div
+        className="absolute inset-0 pointer-events-none transition-opacity duration-700 ease-in-out"
+        style={{
+          background: AUTH_BG_GRADIENT_LIGHT,
+          opacity: isDark ? 0 : 1,
         }}
       />
       
       <div className="relative z-10 w-full max-w-[400px] flex flex-col items-center space-y-6">
         {/* Header */}
-        <h1 className="text-4xl font-bold text-white">Привет!</h1>
+        <h1 className="text-4xl font-bold text-foreground">
+          <span
+            style={{
+              backgroundImage: PINK_GRADIENT,
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              color: "transparent",
+            }}
+          >
+            Привет!
+          </span>{" "}
+          <span aria-hidden>👋</span>
+        </h1>
 
         {/* Google Login Button */}
         <Button
-          className="w-full text-white h-12 text-base font-medium border-0 rounded-lg relative flex items-center justify-center"
+          className="w-full text-foreground h-12 text-base font-medium border-0 rounded-lg relative flex items-center justify-center"
           style={{
-            backgroundColor: "rgba(108, 93, 215, 0.22)",
+            backgroundColor: isDark ? "rgba(108, 93, 215, 0.22)" : "rgba(108, 93, 215, 0.12)",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.4)";
+            e.currentTarget.style.backgroundColor = isDark ? "rgba(108, 93, 215, 0.4)" : "rgba(108, 93, 215, 0.18)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+            e.currentTarget.style.backgroundColor = isDark ? "rgba(108, 93, 215, 0.22)" : "rgba(108, 93, 215, 0.12)";
           }}
           onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
         >
@@ -79,7 +105,7 @@ export default function LoginPage() {
         </Button>
 
         {/* Separator */}
-        <div className="text-white/70 text-sm">или</div>
+        <div className="text-muted-foreground text-sm">или</div>
 
         {/* Login Form */}
         <form className="w-full space-y-4" onSubmit={handleSubmit}>
@@ -88,7 +114,7 @@ export default function LoginPage() {
             <div 
               className="w-full rounded-lg px-4 py-3 text-center"
               style={{
-                backgroundColor: "rgba(108, 93, 215, 0.22)",
+                backgroundColor: isDark ? "rgba(108, 93, 215, 0.22)" : "rgba(108, 93, 215, 0.12)",
               }}
             >
               <p className="text-sm" style={{ color: "#FB4C4F" }}>
@@ -124,7 +150,8 @@ export default function LoginPage() {
                   e.preventDefault();
                   setError("Грустно, конечно, но пока эта кнопка не работает 😉");
                 }}
-                className="text-sm text-[#997AF8] hover:text-[#A081FF] cursor-pointer"
+                className="text-sm font-medium cursor-pointer"
+                style={{ color: ACCENT }}
               >
                 Забыли пароль?
               </button>
@@ -149,8 +176,8 @@ export default function LoginPage() {
 
         {/* Registration Link */}
         <div className="text-center text-sm">
-          <span className="text-white/70">Нет аккаунта? </span>
-          <Link href="/register" className="text-[#997AF8] hover:text-[#A081FF] font-medium">
+          <span className="text-muted-foreground">Нет аккаунта? </span>
+          <Link href="/register" className="font-medium" style={{ color: ACCENT }}>
             Зарегистрируйтесь
           </Link>
         </div>

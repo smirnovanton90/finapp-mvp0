@@ -49,7 +49,7 @@
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: #1E2128;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
@@ -82,7 +82,7 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: #1E2128;
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -127,6 +127,17 @@
     font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition: background-color 700ms ease, color 700ms ease;
+  }
+
+  .auth-input::placeholder {
+    color: var(--auth-placeholder-color);
+    opacity: var(--auth-placeholder-opacity, 0.7);
+  }
+
+  .auth-input::-ms-input-placeholder {
+    color: var(--auth-placeholder-color);
+    opacity: var(--auth-placeholder-opacity, 0.7);
   }
   input[type="checkbox"] {
     appearance: none;

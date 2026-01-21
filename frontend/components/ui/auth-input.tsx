@@ -3,6 +3,8 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
+import { useTheme } from "@/components/theme-provider";
+import { ACCENT } from "@/lib/colors";
 
 interface AuthInputProps extends React.ComponentProps<"input"> {
   icon?: "user" | "lock";
@@ -15,6 +17,8 @@ function AuthInput({
   gradientDirection = "left-to-right",
   ...props 
 }: AuthInputProps) {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const [isFocused, setIsFocused] = React.useState(false);
   const [hasValue, setHasValue] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
@@ -122,20 +126,33 @@ function AuthInput({
           }}
         />
         
-        {/* Inner container - transparent by default */}
+        {/* Inner container - transparent (как было) */}
         <div className="relative flex items-center rounded-lg bg-transparent px-4 h-12 z-10">
           {/* Input */}
           <input
             {...props}
             ref={inputRef}
             type={isPasswordField && showPassword ? "text" : props.type}
+            style={
+              isDark
+                ? undefined
+                : ({
+                    ["--auth-placeholder-color" as any]: ACCENT,
+                    ["--auth-placeholder-opacity" as any]: isFocused ? "0.75" : "0.45",
+                  } as React.CSSProperties)
+            }
             className={cn(
-              "flex-1 bg-transparent border-0 p-0 h-auto text-white text-base",
-              "placeholder:text-[#8E81E6] placeholder:opacity-30",
+              "auth-input flex-1 bg-transparent border-0 p-0 h-auto text-base",
+              isDark
+                ? "text-white placeholder:text-[#8E81E6] placeholder:opacity-30"
+                : "text-foreground",
               "focus-visible:ring-0 focus-visible:outline-none focus-visible:border-0",
               "transition-all duration-200",
               "selection:bg-primary selection:text-primary-foreground",
-              isFocused && "placeholder:text-[#CFCFD6] placeholder:opacity-100",
+              isFocused &&
+                (isDark
+                  ? "placeholder:text-[#CFCFD6] placeholder:opacity-100"
+                  : ""),
               isPasswordField && "pr-8",
               className
             )}

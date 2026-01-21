@@ -3,7 +3,7 @@
 import { signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState, type CSSProperties, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { AuthInput } from "@/components/ui/auth-input";
 import { useTheme } from "@/components/theme-provider";
@@ -79,16 +79,17 @@ export default function LoginPage() {
 
         {/* Google Login Button */}
         <Button
-          className="w-full text-foreground h-12 text-base font-medium border-0 rounded-lg relative flex items-center justify-center"
-          style={{
-            backgroundColor: isDark ? "rgba(108, 93, 215, 0.22)" : "rgba(108, 93, 215, 0.12)",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = isDark ? "rgba(108, 93, 215, 0.4)" : "rgba(108, 93, 215, 0.18)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = isDark ? "rgba(108, 93, 215, 0.22)" : "rgba(108, 93, 215, 0.12)";
-          }}
+          variant="glass"
+          className="w-full h-12 text-base font-medium relative flex items-center justify-center"
+          style={
+            {
+              // keep exact design values from the original implementation
+              "--glass-bg": isDark ? "rgba(108, 93, 215, 0.22)" : "rgba(108, 93, 215, 0.12)",
+              "--glass-bg-hover": isDark
+                ? "rgba(108, 93, 215, 0.4)"
+                : "rgba(108, 93, 215, 0.18)",
+            } as CSSProperties
+          }
           onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
         >
           {/* Google G Logo - positioned left */}

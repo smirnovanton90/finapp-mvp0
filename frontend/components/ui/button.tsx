@@ -19,6 +19,11 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
+        // “Glass” button used on auth Google sign-in + sidebar controls
+        // Colors are driven by CSS vars to allow per-usage tuning:
+        // --glass-bg, --glass-bg-hover
+        glass:
+          "rounded-lg border-0 bg-[var(--glass-bg)] text-foreground transition-colors duration-200 hover:bg-[var(--glass-bg-hover)]",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",

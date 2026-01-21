@@ -3776,7 +3776,7 @@ function TransactionsView({
   const isTransferSelected = selectedDirections.has("TRANSFER");
 
   return (
-    <main className="min-h-screen bg-background px-8 py-8">
+    <main className="min-h-screen px-8 py-8">
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
       <div className="flex flex-col gap-6 lg:flex-row">

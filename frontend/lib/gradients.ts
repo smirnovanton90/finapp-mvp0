@@ -1,5 +1,6 @@
 export const PINK_GRADIENT = "linear-gradient(90deg, #2491FF 0%, #6C5DD7 45%, #B33F77 100%)";
 
+// Dark theme gradient for auth screens (login / register) — original complex radial
 export const AUTH_BG_GRADIENT =
   "radial-gradient(1800px 1200px at 0% 0%, rgba(127, 58, 161, 0.95) 0%, rgba(127, 58, 161, 0) 78%)," +
   "radial-gradient(1800px 1200px at 100% 0%, rgba(15, 8, 59, 0.95) 0%, rgba(15, 8, 59, 0) 78%)," +
@@ -14,3 +15,5 @@ export const AUTH_BG_GRADIENT_LIGHT =
   "radial-gradient(1600px 1200px at 100% 100%, rgba(179, 63, 119, 0.18) 0%, rgba(179, 63, 119, 0) 82%)," +
   "linear-gradient(135deg, #FFFFFF 0%, #F3F0FF 45%, #EEE9FF 100%)";
 
+// Dark theme gradient for основное приложение (кабинет, дашборд и т.п.)
+export const APP_BG_GRADIENT = "linear-gradient(135deg, #191727 0%, #4E3B8E 100%)";

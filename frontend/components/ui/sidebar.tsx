@@ -133,7 +133,7 @@ export function Sidebar() {
         isCollapsed ? "w-[100px]" : "w-[300px]"
       )}
     >
-      <div className="flex h-full w-full flex-col rounded-[9px] bg-[rgba(108,93,215,0.25)]">
+      <div className="flex h-full w-full flex-col rounded-[9px] bg-sidebar">
         {/* Collapse toggle */}
         <div className="relative h-[55px]">
           <Button

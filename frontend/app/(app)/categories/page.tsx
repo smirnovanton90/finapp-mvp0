@@ -429,7 +429,7 @@ export default function CategoriesPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background px-8 py-8">
+    <main className="min-h-screen px-8 py-8">
       <Dialog
         open={isAddOpen}
         onOpenChange={(open) => {

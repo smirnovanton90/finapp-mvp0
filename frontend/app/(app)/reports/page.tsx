@@ -6,7 +6,7 @@ import type { CSSProperties } from "react";
 
 export default function ReportsPage() {
   return (
-    <main className="min-h-screen bg-background px-8 py-8 flex flex-col items-center">
+    <main className="min-h-screen px-8 py-8 flex flex-col items-center">
       <div className="w-full max-w-[720px] space-y-6">
         <header className="flex items-center gap-3">
           <BarChart3

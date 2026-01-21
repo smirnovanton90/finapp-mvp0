@@ -543,7 +543,7 @@ export default function CounterpartiesPage() {
     "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
 
   return (
-    <main className="min-h-screen bg-background px-8 py-8">
+    <main className="min-h-screen px-8 py-8">
       <div className="flex flex-col gap-6 lg:flex-row">
         <aside className="w-full max-w-[340px] shrink-0">
           <div className="rounded-lg border-2 border-border/70 bg-card p-4">

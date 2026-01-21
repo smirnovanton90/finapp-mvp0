@@ -1288,7 +1288,7 @@ export default function AssetsDynamicsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background px-8 py-8">
+    <main className="min-h-screen px-8 py-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-1.5">

@@ -613,7 +613,7 @@ export default function LimitsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background px-8 py-8">
+    <main className="min-h-screen px-8 py-8">
       <Dialog
         open={isDialogOpen}
         onOpenChange={(open) => {

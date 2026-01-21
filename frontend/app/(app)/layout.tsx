@@ -8,6 +8,8 @@ import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { useTheme } from "@/components/theme-provider";
+import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -16,6 +18,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { isCollapsed } = useSidebar();
   const sessionKey = (session?.user as { id?: string })?.id ?? "anon";
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
 
   useEffect(() => {
     if (status !== "loading" && !session) {
@@ -52,8 +56,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-muted-foreground">Загрузка…</div>
+      <div className="relative min-h-screen overflow-hidden flex items-center justify-center">
+        {/* Dark gradient */}
+        <div
+          className="pointer-events-none absolute inset-0 transition-opacity duration-700 ease-in-out"
+          style={{
+            background: APP_BG_GRADIENT,
+            opacity: isDark ? 1 : 0,
+          }}
+        />
+        {/* Light gradient */}
+        <div
+          className="pointer-events-none absolute inset-0 transition-opacity duration-700 ease-in-out"
+          style={{
+            background: AUTH_BG_GRADIENT_LIGHT,
+            opacity: isDark ? 0 : 1,
+          }}
+        />
+        <div className="relative text-muted-foreground">Загрузка…</div>
       </div>
     );
   }
@@ -65,8 +85,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AccountingStartGate>
       <OnboardingWizard />
-      <div className="min-h-screen bg-background" key={sessionKey}>
-        <div className="flex">
+      <div
+        className="relative min-h-screen overflow-hidden"
+        key={sessionKey}
+      >
+        {/* Dark gradient */}
+        <div
+          className="pointer-events-none absolute inset-0 transition-opacity duration-700 ease-in-out"
+          style={{
+            background: APP_BG_GRADIENT,
+            opacity: isDark ? 1 : 0,
+          }}
+        />
+        {/* Light gradient */}
+        <div
+          className="pointer-events-none absolute inset-0 transition-opacity duration-700 ease-in-out"
+          style={{
+            background: AUTH_BG_GRADIENT_LIGHT,
+            opacity: isDark ? 0 : 1,
+          }}
+        />
+
+        <div className="relative flex">
           <Sidebar />
           <div
             className={cn(

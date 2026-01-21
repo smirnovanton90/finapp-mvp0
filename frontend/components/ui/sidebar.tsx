@@ -87,6 +87,7 @@ export function Sidebar() {
   const router = useRouter();
   const { isCollapsed, toggleSidebar } = useSidebar();
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
+  const isCabinetActive = pathname === "/cabinet" || pathname.startsWith("/cabinet/");
 
   // Загрузка фото пользователя
   useEffect(() => {
@@ -177,11 +178,18 @@ export function Sidebar() {
             const active = pathname === item.href || pathname.startsWith(item.href + "/");
             const Icon = item.icon;
 
-            const buttonBaseStyle =
-              ({
-                "--glass-bg": active ? "rgba(108, 93, 215, 0.22)" : "rgba(108, 93, 215, 0)",
-                "--glass-bg-hover": active ? "rgba(108, 93, 215, 0.32)" : "rgba(108, 93, 215, 0.22)",
-              } as CSSProperties);
+            const variant = active ? "authPrimary" : "glass";
+            const buttonStyle = (active
+              ? ({
+                  "--auth-primary-bg":
+                    "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                  "--auth-primary-bg-hover":
+                    "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                } as CSSProperties)
+              : ({
+                  "--glass-bg": "rgba(108, 93, 215, 0)",
+                  "--glass-bg-hover": "rgba(108, 93, 215, 0.22)",
+                } as CSSProperties));
 
             const itemColor = active ? SIDEBAR_TEXT_ACTIVE : SIDEBAR_TEXT_INACTIVE;
 
@@ -195,9 +203,9 @@ export function Sidebar() {
             const content = (
               <Button
                 asChild
-                variant="glass"
+                variant={variant as "glass" | "authPrimary"}
                 className={commonClass}
-                style={buttonBaseStyle}
+                style={buttonStyle}
               >
                 <Link href={item.href}>
                   <IconFrame>
@@ -236,13 +244,20 @@ export function Sidebar() {
             {isCollapsed ? (
               <Tooltip content="Личный кабинет" side="right" className="flex w-full">
                 <Button
-                  variant="glass"
+                  variant={isCabinetActive ? "authPrimary" : "glass"}
                   className="mx-auto h-[50px] w-[60px] rounded-[9px] p-0"
                   style={
-                    {
-                      "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                      "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
-                    } as CSSProperties
+                    (isCabinetActive
+                      ? ({
+                          "--auth-primary-bg":
+                            "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                          "--auth-primary-bg-hover":
+                            "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                        } as CSSProperties)
+                      : ({
+                          "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                          "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
+                        } as CSSProperties))
                   }
                   onClick={() => router.push("/cabinet")}
                 >
@@ -267,13 +282,20 @@ export function Sidebar() {
               </Tooltip>
             ) : (
               <Button
-                variant="glass"
+                variant={isCabinetActive ? "authPrimary" : "glass"}
                 className="mx-[10px] h-[50px] w-[calc(100%-20px)] justify-start rounded-[9px] pl-[15px] pr-[15px]"
                 style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
-                  } as CSSProperties
+                  (isCabinetActive
+                    ? ({
+                        "--auth-primary-bg":
+                          "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                        "--auth-primary-bg-hover":
+                          "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                      } as CSSProperties)
+                    : ({
+                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                        "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
+                      } as CSSProperties))
                 }
                 onClick={() => router.push("/cabinet")}
               >

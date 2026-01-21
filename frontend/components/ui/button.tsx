@@ -24,6 +24,10 @@ const buttonVariants = cva(
         // --glass-bg, --glass-bg-hover
         glass:
           "rounded-lg border-0 bg-[var(--glass-bg)] text-foreground transition-colors duration-200 hover:bg-[var(--glass-bg-hover)]",
+        // Primary gradient button used for "Войти" on login (and active sidebar item)
+        // --auth-primary-bg, --auth-primary-bg-hover
+        authPrimary:
+          "rounded-lg border-0 text-white transition-[background] duration-1000 ease-[ease] [background:var(--auth-primary-bg)] hover:[background:var(--auth-primary-bg-hover)]",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",

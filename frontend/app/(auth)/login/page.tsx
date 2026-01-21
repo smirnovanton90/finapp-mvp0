@@ -18,7 +18,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoginButtonHovered, setIsLoginButtonHovered] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -159,15 +158,16 @@ export default function LoginPage() {
             </div>
           </div>
           <Button 
-            className="w-full h-12 text-base font-bold text-white rounded-lg border-0"
-            style={{
-              background: isLoginButtonHovered
-                ? "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)"
-                : "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-              transition: "background 1000ms ease",
-            }}
-            onMouseEnter={() => setIsLoginButtonHovered(true)}
-            onMouseLeave={() => setIsLoginButtonHovered(false)}
+            variant="authPrimary"
+            className="w-full h-12 text-base font-bold rounded-lg border-0"
+            style={
+              {
+                "--auth-primary-bg":
+                  "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                "--auth-primary-bg-hover":
+                  "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+              } as CSSProperties
+            }
             type="submit" 
             disabled={isSubmitting}
           >

@@ -3,7 +3,7 @@
 import { signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState, type CSSProperties, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { AuthInput } from "@/components/ui/auth-input";
 import { useTheme } from "@/components/theme-provider";
@@ -63,7 +63,6 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRegisterButtonHovered, setIsRegisterButtonHovered] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -198,15 +197,16 @@ export default function RegisterPage() {
             />
           </div>
           <Button 
-            className="w-full h-12 text-base font-bold text-white rounded-lg border-0"
-            style={{
-              background: isRegisterButtonHovered
-                ? "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)"
-                : "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-              transition: "background 1000ms ease",
-            }}
-            onMouseEnter={() => setIsRegisterButtonHovered(true)}
-            onMouseLeave={() => setIsRegisterButtonHovered(false)}
+            variant="authPrimary"
+            className="w-full h-12 text-base font-bold rounded-lg border-0"
+            style={
+              {
+                "--auth-primary-bg":
+                  "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                "--auth-primary-bg-hover":
+                  "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+              } as CSSProperties
+            }
             type="submit" 
             disabled={isSubmitting}
           >

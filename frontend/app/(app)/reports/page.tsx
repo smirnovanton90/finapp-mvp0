@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACTIVE_TEXT, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { BarChart3 } from "lucide-react";
 import type { CSSProperties } from "react";
 
@@ -14,7 +14,7 @@ export default function ReportsPage() {
             strokeWidth={1.5}
             style={{ color: SIDEBAR_TEXT_INACTIVE }}
           />
-          <h1 className="text-2xl font-semibold" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+          <h1 className="text-2xl font-semibold" style={{ color: ACTIVE_TEXT }}>
             Отчёты
           </h1>
         </header>

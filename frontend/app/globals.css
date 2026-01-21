@@ -3,10 +3,83 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 100;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "CodecProVariable";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("/fonts/3_CodecProVariable-Regular.ttf") format("truetype");
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-sans: "CodecProVariable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -121,14 +194,27 @@
     @apply border-border outline-ring/50;
   }
   html {
-    font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    font-family: var(--font-sans);
   }
   body {
     @apply bg-background text-foreground;
-    font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     transition: background-color 700ms ease, color 700ms ease;
+  }
+
+  /* Принудительно используем CodecProVariable для всех элементов с tabular-nums */
+  /* Убираем font-variant-numeric, чтобы не заставлять браузер использовать другой шрифт для цифр */
+  .tabular-nums {
+    font-family: var(--font-sans) !important;
+    font-variant-numeric: normal !important;
+    /* Tabular spacing достигается через letter-spacing для цифр, если нужно */
+  }
+
+  /* Убеждаемся, что все числовые символы и символ рубля используют правильный шрифт */
+  * {
+    font-feature-settings: normal;
   }
 
   .auth-input::placeholder {

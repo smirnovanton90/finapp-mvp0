@@ -11,12 +11,14 @@ import {
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import Link from "next/link";
-import { AlertCircle, Target, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowRight, Target, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Tag } from "@/components/ui/tag";
 import {
   buildCategoryDescendants,
   buildCategoryLookup,
+  makeCategoryPathKey,
   type CategoryNode,
 } from "@/lib/categories";
 import {
@@ -36,6 +38,11 @@ import {
   TransactionOut,
 } from "@/lib/api";
 import { getEffectiveItemKind } from "@/lib/item-utils";
+import {
+  OVERDUE_TRANSACTIONS_GRADIENT,
+  NO_OVERDUE_TRANSACTIONS_GRADIENT,
+} from "@/lib/gradients";
+import { ACCENT, GREEN, RED } from "@/lib/colors";
 
 type ChartPoint = {
   x: number;
@@ -103,12 +110,6 @@ const CATEGORY_BREAKDOWN_LIMIT = 6;
 const UNCATEGORIZED_LABEL = "Без категории";
 const OTHER_LABEL = "Другое";
 const OTHER_SHARE_MAX = 0.1;
-const LIMIT_PERIOD_LABELS: Record<LimitOut["period"], string> = {
-  MONTHLY: "Ежемесячный",
-  WEEKLY: "Еженедельный",
-  YEARLY: "Ежегодный",
-  CUSTOM: "Произвольный период",
-};
 
 const LIABILITY_TYPES = [
   { code: "credit_card_debt", label: "Задолженность по кредитной карте" },
@@ -255,22 +256,36 @@ function formatChangePercent(percent: number | null) {
   return `${sign}${formatPercent(Math.abs(percent))}%`;
 }
 
+function getChangeVariant(
+  percent: number | null,
+  type: "income" | "expense"
+): "good" | "bad" {
+  if (percent === null) return "bad";
+  if (type === "income") {
+    // Для доходов: положительный = хорошо, отрицательный = плохо
+    return percent >= 0 ? "good" : "bad";
+  } else {
+    // Для расходов: отрицательный = хорошо (расходы снизились), положительный = плохо
+    return percent <= 0 ? "good" : "bad";
+  }
+}
+
 function getLimitProgressTone(ratio: number) {
   if (ratio >= 1) return "over";
   if (ratio >= 0.75) return "warn";
   return "ok";
 }
 
-function getLimitProgressColorClass(tone: "over" | "warn" | "ok") {
-  if (tone === "over") return "bg-rose-500";
-  if (tone === "warn") return "bg-orange-500";
-  return "bg-emerald-500";
+function getLimitProgressColor(tone: "over" | "warn" | "ok") {
+  if (tone === "over") return RED;
+  if (tone === "warn") return RED;
+  return GREEN;
 }
 
-function getLimitProgressTextClass(tone: "over" | "warn" | "ok") {
-  if (tone === "over") return "text-rose-500";
-  if (tone === "warn") return "text-orange-500";
-  return "text-emerald-500";
+function getLimitProgressTextColor(tone: "over" | "warn" | "ok") {
+  if (tone === "over") return RED;
+  if (tone === "warn") return RED;
+  return GREEN;
 }
 
 function changeBadgeClass(percent: number | null) {
@@ -1099,7 +1114,30 @@ export default function DashboardPage() {
     });
     return count;
   }, [todayKey, txs]);
-  const showOverdueWidget = overduePlannedCount > 0;
+  const hasOverduePlanned = overduePlannedCount > 0;
+
+  const resolveCategoryIcon = useCallback(
+    (categoryId: number | null): CategoryIcon => {
+      if (!categoryId) return CATEGORY_ICON_FALLBACK;
+      const path = categoryLookup.idToPath.get(categoryId);
+      if (!path || path.length === 0) return CATEGORY_ICON_FALLBACK;
+
+      for (let depth = path.length; depth >= 1; depth -= 1) {
+        const key = makeCategoryPathKey(...path.slice(0, depth));
+        const targetId = categoryLookup.pathToId.get(key);
+        if (!targetId) continue;
+        const iconName = categoryLookup.idToIcon.get(targetId);
+        if (!iconName) continue;
+        const normalized = iconName.trim();
+        if (!normalized) continue;
+        const Icon = CATEGORY_ICON_BY_NAME[normalized];
+        if (Icon) return Icon;
+      }
+
+      return CATEGORY_ICON_FALLBACK;
+    },
+    [categoryLookup.idToIcon, categoryLookup.idToPath, categoryLookup.pathToId]
+  );
 
 
   const chartItems = useMemo(() => activeItems, [activeItems]);
@@ -1364,15 +1402,9 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen px-8 py-8">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-[900px] flex-col gap-6">
 
-        <div
-          className={
-            showOverdueWidget
-              ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)]"
-              : "grid gap-4"
-          }
-        >
+        <div className="grid gap-4 items-stretch md:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)]">
           <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500 text-white shadow-[0_20px_50px_-28px_rgba(76,29,149,0.8)]">
             <div className="pointer-events-none absolute right-4 top-3 h-32 w-60 opacity-90">
               <div ref={chartRef} className="h-full w-full">
@@ -1416,13 +1448,13 @@ export default function DashboardPage() {
               </div>
             </div>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2 text-white/90">
+              <CardTitle className="flex items-center gap-2 text-2xl font-normal text-white/90">
                 <Wallet className="h-5 w-5 text-white/90" />
-                Текущий чистый капитал
+                Чистые активы
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="break-words text-4xl font-semibold leading-tight text-white tabular-nums">
+              <div className="break-words text-[48px] font-semibold leading-tight text-white tabular-nums">
                 {loading
                   ? "..."
                   : netTotal < 0
@@ -1431,11 +1463,9 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center gap-2 text-xs text-white/80">
                 <span>С 1 числа месяца</span>
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${netWorthBadgeClass(netTotalChangePercent)}`}
-                >
+                <Tag variant={getChangeVariant(netTotalChangePercent, "income")}>
                   {loading ? "..." : formatChangePercent(netTotalChangePercent)}
-                </span>
+                </Tag>
               </div>
               <div className="space-y-1 text-xs text-white/80">
                 <div className="flex items-center justify-between">
@@ -1454,42 +1484,75 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {showOverdueWidget && (
-            <Card className="overflow-hidden border-0 bg-gradient-to-br from-rose-700 via-red-600 to-orange-600 text-white shadow-[0_20px_50px_-28px_rgba(136,19,55,0.85)]">
+          <Card
+            className={`h-full ${
+              hasOverduePlanned
+                ? "relative overflow-hidden border-0 text-white shadow-[0_20px_50px_-28px_rgba(136,19,55,0.85)]"
+                : "relative overflow-hidden border-0 text-white shadow-[0_20px_50px_-28px_rgba(16,121,74,0.75)]"
+            }`}
+            style={{
+              background: hasOverduePlanned
+                ? OVERDUE_TRANSACTIONS_GRADIENT
+                : NO_OVERDUE_TRANSACTIONS_GRADIENT,
+            }}
+          >
+            <div className="flex h-full flex-col">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2 text-white/90">
-                  <AlertCircle className="h-5 w-5 text-white/90" />
-                  Просроченные плановые транзакции
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-4xl font-semibold text-white tabular-nums">
-                    {loading ? "..." : overduePlannedCount}
-                  </div>
-                  <Button
-                    asChild
-                    size="sm"
-                    variant="outline"
-                    className="w-fit border-white/30 bg-white/10 text-white shadow-none hover:bg-white/20"
-                  >
-                    <Link href="/transactions?preset=overdue-planned">
-                      Просмотреть
-                    </Link>
-                  </Button>
+                <div className="flex items-start justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2 text-2xl font-normal leading-tight text-white/85">
+                    {hasOverduePlanned && (
+                      <AlertTriangle className="h-5 w-5 shrink-0 text-white/85" />
+                    )}
+                    <span className="whitespace-normal break-words">
+                      {hasOverduePlanned
+                        ? "Просрочено"
+                        : "Нет просроченных транзакций"}
+                    </span>
+                  </CardTitle>
+                  {hasOverduePlanned && (
+                    <Button
+                      asChild
+                      size="icon"
+                      variant="ghost"
+                      className="h-12 w-12 shrink-0 self-start rounded-xl bg-white/10 text-white/85 shadow-none hover:bg-white/20 hover:text-white"
+                    >
+                      <Link
+                        href="/transactions?preset=overdue-planned"
+                        aria-label="Открыть просроченные транзакции"
+                      >
+                        <ArrowRight className="h-5 w-5" />
+                      </Link>
+                    </Button>
+                  )}
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              </CardHeader>
+              <div className="flex flex-1 items-end px-6 -mt-6 pb-0">
+                <div
+                  className="pointer-events-none select-none w-full text-right text-[180px] font-semibold leading-none tabular-nums"
+                  style={{
+                    color: hasOverduePlanned
+                      ? "rgba(174, 43, 91, 0.75)"
+                      : "rgba(255, 255, 255, 0.15)",
+                  }}
+                >
+                  {loading ? "..." : overduePlannedCount}
+                </div>
+              </div>
+            </div>
+          </Card>
         </div>
 
         <div className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium text-slate-800">
-                Доходы за <span className="text-violet-600">{previousMonthLabel}</span>
+              <div className="text-sm font-medium text-foreground">
+                Доходы за{" "}
+                <span style={{ color: ACCENT }}>{previousMonthLabel}</span>
               </div>
-              <div className="text-lg font-semibold text-emerald-600 tabular-nums whitespace-nowrap">
+              <div
+                className="text-lg font-semibold tabular-nums whitespace-nowrap"
+                style={{ color: GREEN }}
+              >
                 {loading ? "..." : formatRub(incomeBreakdown.total)}
               </div>
             </div>
@@ -1543,7 +1606,9 @@ export default function DashboardPage() {
                             className="h-2.5 w-2.5 shrink-0 rounded-full"
                             style={{ backgroundColor: row.color }}
                           />
-                          <CategoryIcon className="h-3.5 w-3.5 text-slate-500" />
+                          <span style={{ color: ACCENT }}>
+                            <CategoryIcon className="h-3.5 w-3.5" />
+                          </span>
                           <span className="truncate font-medium text-foreground">
                             {row.label}
                           </span>
@@ -1551,22 +1616,18 @@ export default function DashboardPage() {
                         <span className="tabular-nums text-right text-foreground whitespace-nowrap">
                           {formatRub(row.value)}
                         </span>
-                        <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
+                        <span className="tabular-nums text-right text-white/80 whitespace-nowrap">
                           {formatPercent(row.percent * 100)}%
                         </span>
                         <div className="flex justify-end">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.prevDelta)}`}
-                          >
+                          <Tag variant={getChangeVariant(row.prevDelta, "income")}>
                             {formatChangePercent(row.prevDelta)}
-                          </span>
+                          </Tag>
                         </div>
                         <div className="flex justify-end">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.avgDelta)}`}
-                          >
+                          <Tag variant={getChangeVariant(row.avgDelta, "income")}>
                             {formatChangePercent(row.avgDelta)}
-                          </span>
+                          </Tag>
                         </div>
                       </div>
                     );
@@ -1578,10 +1639,14 @@ export default function DashboardPage() {
 
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium text-slate-800">
-                Расходы за <span className="text-violet-600">{previousMonthLabel}</span>
+              <div className="text-sm font-medium text-foreground">
+                Расходы за{" "}
+                <span style={{ color: ACCENT }}>{previousMonthLabel}</span>
               </div>
-              <div className="text-lg font-semibold text-rose-600 tabular-nums whitespace-nowrap">
+              <div
+                className="text-lg font-semibold tabular-nums whitespace-nowrap"
+                style={{ color: RED }}
+              >
                 {loading ? "..." : formatRub(expenseBreakdown.total)}
               </div>
             </div>
@@ -1635,7 +1700,9 @@ export default function DashboardPage() {
                             className="h-2.5 w-2.5 shrink-0 rounded-full"
                             style={{ backgroundColor: row.color }}
                           />
-                          <CategoryIcon className="h-3.5 w-3.5 text-slate-500" />
+                          <span style={{ color: ACCENT }}>
+                            <CategoryIcon className="h-3.5 w-3.5" />
+                          </span>
                           <span className="truncate font-medium text-foreground">
                             {row.label}
                           </span>
@@ -1643,22 +1710,18 @@ export default function DashboardPage() {
                         <span className="tabular-nums text-right text-foreground whitespace-nowrap">
                           {formatRub(row.value)}
                         </span>
-                        <span className="tabular-nums text-right text-slate-500 whitespace-nowrap">
+                        <span className="tabular-nums text-right text-white/80 whitespace-nowrap">
                           {formatPercent(row.percent * 100)}%
                         </span>
                         <div className="flex justify-end">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.prevDelta)}`}
-                          >
+                          <Tag variant={getChangeVariant(row.prevDelta, "expense")}>
                             {formatChangePercent(row.prevDelta)}
-                          </span>
+                          </Tag>
                         </div>
                         <div className="flex justify-end">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${changeBadgeClass(row.avgDelta)}`}
-                          >
+                          <Tag variant={getChangeVariant(row.avgDelta, "expense")}>
                             {formatChangePercent(row.avgDelta)}
-                          </span>
+                          </Tag>
                         </div>
                       </div>
                     );
@@ -1672,7 +1735,7 @@ export default function DashboardPage() {
 
         <Card className="overflow-hidden border-0 bg-gradient-to-br from-sky-600 via-blue-600 to-indigo-600 text-white shadow-[0_20px_50px_-28px_rgba(30,64,175,0.7)]">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2 text-white/90">
+            <CardTitle className="flex items-center gap-2 text-2xl font-normal text-white/90">
               <Target className="h-5 w-5 text-white/90" />
               Контроль лимитов
             </CardTitle>
@@ -1695,9 +1758,9 @@ export default function DashboardPage() {
                   const ratio =
                     limit.amount_rub > 0 ? summary.spent / limit.amount_rub : 0;
                   const tone = getLimitProgressTone(ratio);
-                  const progressColorClass = getLimitProgressColorClass(tone);
-                  const periodLabel = LIMIT_PERIOD_LABELS[limit.period];
-                  const rangeLabel = summary.rangeLabel;
+                  const progressColor = getLimitProgressColor(tone);
+                  const textColor = getLimitProgressTextColor(tone);
+                  const LimitCategoryIcon = resolveCategoryIcon(limit.category_id);
                   return (
                     <div
                       key={limit.id}
@@ -1708,17 +1771,17 @@ export default function DashboardPage() {
                           <div className="truncate text-sm font-medium text-white/90">
                             {limit.name}
                           </div>
-                          <div className="truncate text-xs text-white/70">
-                            {periodLabel}
-                            {rangeLabel ? ` | ${rangeLabel}` : ""}
-                            {" | "}
-                            {formatLimitCategoryLabel(limit.category_id)}
+                          <div className="flex min-w-0 items-center gap-2 truncate text-xs text-white/70">
+                            <LimitCategoryIcon className="h-4 w-4 shrink-0 text-white/70" />
+                            <span className="truncate">
+                              {formatLimitCategoryLabel(limit.category_id)}
+                            </span>
                           </div>
                         </div>
                         <div
                           className="shrink-0 text-sm font-semibold tabular-nums whitespace-nowrap"
                         >
-                          <span className={getLimitProgressTextClass(tone)}>
+                          <span style={{ color: textColor }}>
                             {formatRub(summary.spent)}
                           </span>{" "}
                           <span className="text-white/90">/ {formatRub(limit.amount_rub)}</span>
@@ -1726,9 +1789,10 @@ export default function DashboardPage() {
                       </div>
                       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/20">
                         <div
-                          className={`h-full ${progressColorClass}`}
+                          className="h-full"
                           style={{
                             width: `${summary.progress * 100}%`,
+                            backgroundColor: progressColor,
                           }}
                         />
                       </div>

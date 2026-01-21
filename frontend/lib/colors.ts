@@ -12,3 +12,11 @@ export const SIDEBAR_TEXT_ACTIVE = "rgba(207, 207, 214, 1)";
 // Global active text color (white 85%)
 export const ACTIVE_TEXT = "rgba(255, 255, 255, 0.85)";
 
+// Red color
+export const RED = "#FB4C4F";
+export const RED_FILL = "rgba(251, 76, 79, 0.14)";
+
+// Green color
+export const GREEN = "#34D399";
+export const GREEN_FILL = "rgba(52, 211, 153, 0.14)";
+

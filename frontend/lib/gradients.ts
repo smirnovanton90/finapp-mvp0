@@ -17,3 +17,11 @@ export const AUTH_BG_GRADIENT_LIGHT =
 
 // Dark theme gradient for основное приложение (кабинет, дашборд и т.п.)
 export const APP_BG_GRADIENT = "linear-gradient(135deg, #191727 0%, #4E3B8E 100%)";
+
+// Градиент для виджета просроченных транзакций (когда есть просроченные, opacity 40%)
+export const OVERDUE_TRANSACTIONS_GRADIENT =
+  "linear-gradient(to right, rgba(223, 30, 104, 0.4), rgba(121, 16, 56, 0.4))";
+
+// Градиент для виджета просроченных транзакций (когда нет просроченных, opacity 40%)
+export const NO_OVERDUE_TRANSACTIONS_GRADIENT =
+  "linear-gradient(to right, rgba(52, 211, 153, 0.4), rgba(16, 121, 74, 0.4))";

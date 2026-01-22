@@ -2,6 +2,14 @@
 
 export const INK = "#1E2128";
 export const ACCENT = "#7F5CFF";
+export const ACCENT0 = "#7C6CF1";
+export const ACCENT2 = "#5544D1";
+
+// Sidebar background color
+export const SIDEBAR_BG = "#191732";
+
+// Фон выпадающих списков (селекторы: активы, категории, контрагенты)
+export const DROPDOWN_BG = "#25243F";
 
 // Sidebar text (per design)
 // Inactive: #B5AEE6 @ 70%
@@ -19,4 +27,14 @@ export const RED_FILL = "rgba(251, 76, 79, 0.14)";
 // Green color
 export const GREEN = "#34D399";
 export const GREEN_FILL = "rgba(52, 211, 153, 0.14)";
+
+// Accent fill colors
+// Light fill: #5D5FD7 @ 22%
+export const ACCENT_FILL_LIGHT = "rgba(93, 95, 215, 0.22)";
+// Medium fill: #5D5FD7 @ 40%
+export const ACCENT_FILL_MEDIUM = "rgba(93, 95, 215, 0.40)";
+
+// Placeholder color
+// #C5BFF1 @ 60%
+export const PLACEHOLDER_COLOR = "rgba(197, 191, 241, 0.6)";
 

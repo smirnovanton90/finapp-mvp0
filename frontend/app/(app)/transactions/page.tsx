@@ -12,31 +12,47 @@ import {
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useSearchParams } from "next/navigation";
+import { useSidebar } from "@/components/ui/sidebar-context";
+import { cn } from "@/lib/utils";
+import { ACCENT, ACCENT_FILL_MEDIUM, SIDEBAR_BG, SIDEBAR_TEXT_INACTIVE, SIDEBAR_TEXT_ACTIVE, PLACEHOLDER_COLOR, ACTIVE_TEXT } from "@/lib/colors";
 import {
   ArrowRight,
+  ArrowLeft,
   Ban,
   BadgeCheck,
   Briefcase,
   Building2,
+  Calendar,
   ChevronDown,
+  ChevronLeft,
   CheckCircle2,
   CircleDashed,
+  Coins,
   Factory,
+  FileDown,
+  FileText,
+  Filter,
+  Folder,
   GraduationCap,
   HeartPulse,
   Home,
   Landmark,
+  MessageSquare,
   MoreVertical,
   Pencil,
   Plus,
   QrCode,
+  Receipt,
   Shield,
   ShoppingCart,
   Sparkles,
   Trophy,
   Trash2,
   Truck,
+  Upload,
   User,
+  Users,
+  Wallet,
   Wifi,
   Zap,
   type LucideIcon,
@@ -47,11 +63,13 @@ import jsQR from "jsqr";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AuthInput } from "@/components/ui/auth-input";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
+import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import {
   Dialog,
   DialogContent,
@@ -1267,21 +1285,9 @@ function TransactionCardRow({
       : null;
   const timeValue = formatTime(tx.transaction_date);
 
-  const actualTone = isExpense
-    ? "bg-[linear-gradient(270deg,_#FEF2F2_0%,_#FCA5A5_100%)]"
-    : isIncome
-      ? "bg-[linear-gradient(270deg,_#F4F2E9_0%,_#BDDFB2_100%)]"
-      : "bg-[linear-gradient(270deg,_#F5F3FF_0%,_#C4B5FD_100%)]";
-  const plannedTone = isExpense
-    ? "bg-[linear-gradient(270deg,_#FFF7F7_0%,_#FEE2E2_100%)]"
-    : isIncome
-      ? "bg-[linear-gradient(270deg,_#F9F7F0_0%,_#DDEFD7_100%)]"
-      : "bg-[linear-gradient(270deg,_#FBFAFF_0%,_#DDD6FE_100%)]";
-  const cardTone = tx.isDeleted
-    ? "bg-slate-100"
-    : isPlanned
-      ? plannedTone
-      : actualTone;
+  /* Transparent / subtle fill so APP_BG_GRADIENT shows through; no opaque card background */
+  const cardBg = tx.isDeleted ? "bg-white/5" : "bg-transparent";
+  const defaultBorderClass = "border border-[rgba(93,95,215,0.4)]";
   const plannedBorderClass =
     !tx.isDeleted && isPlanned
       ? isExpense
@@ -1365,7 +1371,7 @@ function TransactionCardRow({
 
   return (
     <div
-      className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardTone} ${plannedBorderClass}`}
+      className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardBg} ${defaultBorderClass} ${plannedBorderClass}`}
     >
       <div className="flex flex-1 flex-wrap items-center gap-3 px-3 py-3 lg:grid lg:grid-cols-[auto_4.5rem_8.5rem_6rem_8.5rem_minmax(10rem,1fr)_auto] lg:items-center lg:gap-2">
         <input
@@ -1708,6 +1714,7 @@ function TransactionsView({
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
+  const { isFilterPanelCollapsed, toggleFilterPanel, isCollapsed } = useSidebar();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
   const defaultShowPlannedRealized = isPlanningView;
@@ -1763,6 +1770,9 @@ function TransactionsView({
     TransactionOut["transaction_type"]
   >(() => initialFormTransactionType);
   const [showActual, setShowActual] = useState(initialShowActual);
+  const [showPlanned, setShowPlanned] = useState(
+    initialShowPlannedRealized || initialShowPlannedUnrealized
+  );
   const [showPlannedRealized, setShowPlannedRealized] = useState(
     initialShowPlannedRealized
   );
@@ -3342,16 +3352,17 @@ function TransactionsView({
 
   const statusFilter = useMemo(() => {
     const values: TransactionOut["status"][] = [];
-    const allowConfirmed = showActual || showPlannedUnrealized;
+    const allowConfirmed = showActual || (showPlanned && showPlannedUnrealized);
     if (allowConfirmed) {
       if (showConfirmed) values.push("CONFIRMED");
       if (showUnconfirmed) values.push("UNCONFIRMED");
     }
-    if (showPlannedRealized) values.push("REALIZED");
+    if (showPlanned && showPlannedRealized) values.push("REALIZED");
     return values;
   }, [
     showActual,
     showConfirmed,
+    showPlanned,
     showPlannedRealized,
     showPlannedUnrealized,
     showUnconfirmed,
@@ -3359,9 +3370,9 @@ function TransactionsView({
   const transactionTypeFilter = useMemo(() => {
     const values: TransactionOut["transaction_type"][] = [];
     if (showActual) values.push("ACTUAL");
-    if (showPlannedRealized || showPlannedUnrealized) values.push("PLANNED");
+    if (showPlanned) values.push("PLANNED");
     return values;
-  }, [showActual, showPlannedRealized, showPlannedUnrealized]);
+  }, [showActual, showPlanned]);
   const directionFilter = useMemo(() => {
     if (selectedDirections.size === 0) return EMPTY_DIRECTION_ARRAY;
     return Array.from(selectedDirections);
@@ -3776,30 +3787,201 @@ function TransactionsView({
   const isTransferSelected = selectedDirections.has("TRANSFER");
 
   return (
-    <main className="min-h-screen px-8 py-8">
+    <main
+      className={cn(
+        "min-h-screen pr-8 py-8",
+        isCollapsed ? "pl-[56px]" : "pl-[32px]"
+      )}
+    >
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        <aside className="w-full max-w-[340px] shrink-0">
-          <div className="rounded-lg border-2 border-border/70 bg-card p-4">
-            <div className="space-y-6">
-              <Dialog
-                open={isDialogOpen}
-                onOpenChange={(open) => {
-                  if (open) {
-                    if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
-                    openCreateDialog();
-                  } else {
-                    closeDialog();
-                  }
-                }}
+        <aside
+          className={`shrink-0 transition-[width] duration-300 ${
+            isFilterPanelCollapsed ? "w-[100px]" : "w-[350px]"
+          }`}
+        >
+          <div 
+            className="sticky top-[10px] flex flex-col rounded-[9px] p-[10px]"
+            style={{ backgroundColor: SIDEBAR_BG }}
+          >
+            {/* Collapse button */}
+            <div className="relative h-[55px] shrink-0">
+              <Button
+                variant="glass"
+                onClick={toggleFilterPanel}
+                className={`absolute top-[10px] h-[35px] w-[35px] rounded-[9px] p-0 ${
+                  isFilterPanelCollapsed ? "left-1/2 -translate-x-1/2" : "right-0"
+                }`}
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
+                  } as React.CSSProperties
+                }
+                aria-label={isFilterPanelCollapsed ? "Развернуть фильтры" : "Свернуть фильтры"}
               >
-                <DialogTrigger asChild>
-                  <Button className="w-full bg-violet-600 text-white hover:bg-violet-700">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Добавить
+                {isFilterPanelCollapsed ? (
+                  <ArrowRight
+                    className="size-[15px]"
+                    strokeWidth={1.5}
+                    style={{ color: SIDEBAR_TEXT_INACTIVE }}
+                  />
+                ) : (
+                  <ArrowLeft
+                    className="size-[15px]"
+                    strokeWidth={1.5}
+                    style={{ color: SIDEBAR_TEXT_INACTIVE }}
+                  />
+                )}
+              </Button>
+            </div>
+            
+            {isFilterPanelCollapsed ? (
+              /* Collapsed state - icons only */
+              <div className="mt-[10px] flex flex-col items-center gap-4 pb-[10px]">
+                <Tooltip content="Добавить транзакцию" side="right">
+                  <Button
+                    className="h-[50px] w-[50px] rounded-[9px] p-0"
+                    style={{
+                      backgroundColor: ACCENT,
+                    }}
+                    onClick={() => {
+                      if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                      openCreateDialog();
+                    }}
+                  >
+                    <Plus className="h-6 w-6 text-white" />
                   </Button>
-                </DialogTrigger>
+                </Tooltip>
+                <Tooltip content="Загрузить чек" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                    onClick={() => qrCodeInputRef.current?.click()}
+                    disabled={isQrCodeLoading}
+                  >
+                    <Receipt className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Импортировать выписку" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                    onClick={() => handleImportOpenChange(true)}
+                  >
+                    <FileDown className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <div className="my-2 h-px w-full bg-[rgba(181,174,230,0.3)]" />
+                <Tooltip content="Вид транзакции" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <ArrowRight className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Сумма" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <Coins className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Дата" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <Calendar className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Валюта" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <Coins className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Активы/обязательства" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <Wallet className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Категории" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <Folder className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Контрагенты" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <Users className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Комментарий" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <MessageSquare className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Статус" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <CheckCircle2 className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+                <Tooltip content="Тип транзакции" side="right">
+                  <button
+                    type="button"
+                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                  >
+                    <FileText className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+                  </button>
+                </Tooltip>
+              </div>
+            ) : (
+              /* Expanded state - full filters */
+              <div className="mt-[10px] flex flex-1 flex-col gap-4 pb-[10px]">
+                <div className="space-y-[10px]">
+                {/* Add button with gradient */}
+                <Dialog
+                  open={isDialogOpen}
+                  onOpenChange={(open) => {
+                    if (open) {
+                      if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                      openCreateDialog();
+                    } else {
+                      closeDialog();
+                    }
+                  }}
+                >
+                  <DialogTrigger asChild>
+                    <Button
+                      className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                      style={{
+                        backgroundColor: ACCENT,
+                      }}
+                    >
+                      <Plus className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                      <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+                    </Button>
+                  </DialogTrigger>
                 <DialogContent
                   className="sm:max-w-[560px]"
                   onCloseAutoFocus={(event) => {
@@ -4540,22 +4722,37 @@ function TransactionsView({
               />
               <Button
                 type="button"
-                variant="outline"
-                className="w-full border-2 border-border/70 bg-card shadow-none"
+                variant="glass"
+                className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as React.CSSProperties
+                }
                 onClick={() => qrCodeInputRef.current?.click()}
                 disabled={isQrCodeLoading}
               >
-                <QrCode className="mr-2 h-4 w-4" />
-                {isQrCodeLoading ? "Обработка..." : "Загрузить QR-код чека"}
+                <QrCode className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                <span style={{ color: "white", opacity: 0.85 }}>
+                  {isQrCodeLoading ? "Обработка..." : "Загрузить чек"}
+                </span>
               </Button>
 
               <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
                 <DialogTrigger asChild>
                   <Button
-                    variant="outline"
-                    className="w-full border-2 border-border/70 bg-card shadow-none"
+                    variant="glass"
+                    className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
+                    style={
+                      {
+                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                      } as React.CSSProperties
+                    }
                   >
-                    Импорт
+                    <FileDown className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                    <span style={{ color: "white", opacity: 0.85 }}>Импортировать выписку</span>
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[520px]">
@@ -4771,192 +4968,189 @@ function TransactionsView({
                 </DialogContent>
               </Dialog>
 
-              <div className="-mx-4 border-t-2 border-border/70" />
-
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
                     Вид транзакции
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() =>
-                      setSelectedDirections(
-                        new Set<TransactionOut["direction"]>()
-                      )
-                    }
-                    disabled={selectedDirections.size === 0}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={isIncomeSelected}
-                    onClick={() => toggleDirectionFilter("INCOME")}
-                    className={`${segmentedButtonBase} ${
-                      isIncomeSelected
-                        ? "bg-green-50 text-green-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Доход
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={isExpenseSelected}
-                    onClick={() => toggleDirectionFilter("EXPENSE")}
-                    className={`${segmentedButtonBase} ${
-                      isExpenseSelected
-                        ? "bg-red-50 text-red-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Расход
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={isTransferSelected}
-                    onClick={() => toggleDirectionFilter("TRANSFER")}
-                    className={`${segmentedButtonBase} ${
-                      isTransferSelected
-                        ? "bg-violet-50 text-violet-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Перевод
-                  </button>
-                </div>
-              </div><div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
-                    Сумма транзакции
-                  </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setAmountFrom("");
-                      setAmountTo("");
-                    }}
-                    disabled={!amountFrom && !amountTo}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-card shadow-none"
-                    placeholder="От"
-                    value={amountFrom}
-                    onChange={(e) =>
-                      setAmountFrom(formatRubInput(e.target.value))
-                    }
-                    onBlur={() =>
-                      setAmountFrom((prev) => normalizeRubOnBlur(prev))
-                    }
-                  />
-                  <span className="text-sm text-muted-foreground">—</span>
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    className="h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-card shadow-none"
-                    placeholder="До"
-                    value={amountTo}
-                    onChange={(e) => setAmountTo(formatRubInput(e.target.value))}
-                    onBlur={() => setAmountTo((prev) => normalizeRubOnBlur(prev))}
-                  />
-                </div>
-              </div><div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
-                    Дата транзакции
-                  </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setDateFrom("");
-                      setDateTo("");
-                    }}
-                    disabled={!dateFrom && !dateTo}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    type="date"
-                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-card shadow-none ${
-                      dateFrom ? "text-foreground" : "text-muted-foreground"
-                    }`}
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                  />
-                  <span className="text-sm text-muted-foreground">—</span>
-                  <Input
-                    type="date"
-                    className={`h-10 w-full min-w-0 flex-1 border-2 border-border/70 bg-card shadow-none ${
-                      dateTo ? "text-foreground" : "text-muted-foreground"
-                    }`}
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                  />
-                </div>
-              </div><div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-1">
+                  {selectedDirections.size > 0 && (
                     <button
                       type="button"
-                      onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
-                      className="text-sm font-semibold text-foreground"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() =>
+                        setSelectedDirections(
+                          new Set<TransactionOut["direction"]>()
+                        )
+                      }
                     >
-                      Валюта
+                      Сбросить
                     </button>
+                  )}
+                </div>
+                <SegmentedSelector
+                  options={[
+                    { value: "INCOME", label: "Доход" },
+                    { value: "EXPENSE", label: "Расход" },
+                    { value: "TRANSFER", label: "Перевод" },
+                  ]}
+                  value={selectedDirections}
+                  onChange={(value) => setSelectedDirections(value as Set<TransactionOut["direction"]>)}
+                  multiple={true}
+                />
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Сумма транзакции
+                  </div>
+                  {(amountFrom || amountTo) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setAmountFrom("");
+                        setAmountTo("");
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                      <AuthInput
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="От"
+                        value={amountFrom}
+                        onChange={(e) =>
+                          setAmountFrom(formatRubInput(e.target.value))
+                        }
+                        onBlur={() =>
+                          setAmountFrom((prev) => normalizeRubOnBlur(prev))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <span className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                      <AuthInput
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="До"
+                        value={amountTo}
+                        onChange={(e) => setAmountTo(formatRubInput(e.target.value))}
+                        onBlur={() => setAmountTo((prev) => normalizeRubOnBlur(prev))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Дата транзакции
+                  </div>
+                  {(dateFrom || dateTo) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setDateFrom("");
+                        setDateTo("");
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
+                      <AuthInput
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        style={{
+                          color: !dateFrom ? PLACEHOLDER_COLOR : ACTIVE_TEXT,
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
+                      <AuthInput
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => setDateTo(e.target.value)}
+                        style={{
+                          color: !dateTo ? PLACEHOLDER_COLOR : ACTIVE_TEXT,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-1">
+                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                      Валюта
+                    </div>
                     <button
                       type="button"
                       aria-label="Свернуть/развернуть"
-                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                      className="rounded-md p-1 hover:bg-[rgba(108,93,215,0.22)] transition-colors"
                       onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
                     >
                       <ChevronDown
                         className={`h-4 w-4 transition-transform ${
                           isCurrencyFilterOpen ? "rotate-0" : "-rotate-90"
                         }`}
+                        style={{ color: SIDEBAR_TEXT_INACTIVE }}
                       />
                     </button>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                      onClick={() => setSelectedCurrencyCodes(new Set<string>())}
-                      disabled={selectedCurrencyCodes.size === 0}
-                    >
-                      Сбросить
-                    </button>
-                  </div>
+                  {selectedCurrencyCodes.size > 0 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="text-sm font-medium hover:underline disabled:opacity-50"
+                        style={{ color: ACCENT }}
+                        onClick={() => setSelectedCurrencyCodes(new Set<string>())}
+                      >
+                        Сбросить
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {isCurrencyFilterOpen && (
                   <div className="space-y-2">
                     {currencyOptions.length === 0 ? (
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
                         Нет валют.
                       </div>
                     ) : (
                       currencyOptions.map((value) => (
                         <label
                           key={value}
-                          className="flex items-center gap-3 text-sm text-foreground"
+                          className="flex items-center gap-3 text-sm cursor-pointer"
+                          style={{ color: SIDEBAR_TEXT_ACTIVE }}
                         >
                           <input
                             type="checkbox"
-                            className="h-5 w-5 accent-violet-600"
+                            className="h-5 w-5"
+                            style={{ accentColor: ACCENT }}
                             checked={selectedCurrencyCodes.has(value)}
                             onChange={() => toggleCurrencySelection(value)}
                           />
@@ -4969,17 +5163,19 @@ function TransactionsView({
               </div>
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
                     Активы/обязательства
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={resetItemFilters}
-                    disabled={selectedItemIds.size === 0}
-                  >
-                    Сбросить
-                  </button>
+                  {selectedItemIds.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={resetItemFilters}
+                    >
+                      Сбросить
+                    </button>
+                  )}
                 </div>
                 <ItemSelector
                   items={activeItems}
@@ -5001,17 +5197,19 @@ function TransactionsView({
               </div>
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
                     Категории
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={resetCategoryFilters}
-                    disabled={selectedCategoryFilterKeys.size === 0}
-                  >
-                    Сбросить
-                  </button>
+                  {selectedCategoryFilterKeys.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={resetCategoryFilters}
+                    >
+                      Сбросить
+                    </button>
+                  )}
                 </div>
                 <CategorySelector
                   categoryNodes={categoryNodes}
@@ -5022,19 +5220,21 @@ function TransactionsView({
                   showChips={true}
                 />
               </div>
-<div className="space-y-3">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
                     Контрагенты
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={resetCounterpartyFilters}
-                    disabled={selectedCounterpartyIds.size === 0}
-                  >
-                    Сбросить
-                  </button>
+                  {selectedCounterpartyIds.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={resetCounterpartyFilters}
+                    >
+                      Сбросить
+                    </button>
+                  )}
                 </div>
                 <CounterpartySelector
                   counterparties={selectableCounterparties}
@@ -5047,213 +5247,208 @@ function TransactionsView({
                   showChips={true}
                 />
               </div>
-<div className="space-y-3">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
                     Комментарий
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => setCommentFilter("")}
-                    disabled={!commentFilter}
-                  >
-                    Сбросить
-                  </button>
+                  {!!commentFilter && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => setCommentFilter("")}
+                    >
+                      Сбросить
+                    </button>
+                  )}
                 </div>
-                <Input
-                  type="text"
-                  className="h-10 w-full border-2 border-border/70 bg-card shadow-none"
-                  placeholder="Введите текст"
-                  value={commentFilter}
-                  onChange={(e) => setCommentFilter(e.target.value)}
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                  <AuthInput
+                    type="text"
+                    placeholder="Введите текст"
+                    value={commentFilter}
+                    onChange={(e) => setCommentFilter(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Статус подтверждения
+                  </div>
+                  {!(showConfirmed && showUnconfirmed) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setShowConfirmed(true);
+                        setShowUnconfirmed(true);
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <SegmentedSelector
+                  options={[
+                    { value: "confirmed", label: "Подтвержденные" },
+                    { value: "unconfirmed", label: "Неподтвержденные" },
+                  ]}
+                  value={[
+                    ...(showConfirmed ? ["confirmed"] : []),
+                    ...(showUnconfirmed ? ["unconfirmed"] : []),
+                  ]}
+                  onChange={(value) => {
+                    const values = Array.isArray(value) ? value : [];
+                    setShowConfirmed(values.includes("confirmed"));
+                    setShowUnconfirmed(values.includes("unconfirmed"));
+                  }}
+                  multiple={true}
                 />
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
-                    Статус подтверждения
-                  </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setShowConfirmed(true);
-                      setShowUnconfirmed(true);
-                    }}
-                    disabled={showConfirmed && showUnconfirmed}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={showConfirmed}
-                    onClick={() => setShowConfirmed((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showConfirmed
-                        ? "bg-violet-50 text-violet-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Подтвержденные
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={showUnconfirmed}
-                    onClick={() => setShowUnconfirmed((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showUnconfirmed
-                        ? "bg-red-50 text-red-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Неподтвержденные
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
                     Тип транзакции
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setShowActual(defaultShowActual);
-                      setShowPlannedRealized(defaultShowPlannedRealized);
-                      setShowPlannedUnrealized(defaultShowPlannedUnrealized);
-                    }}
-                    disabled={
-                      showActual === defaultShowActual &&
-                      showPlannedRealized === defaultShowPlannedRealized &&
-                      showPlannedUnrealized === defaultShowPlannedUnrealized
+                  {(showActual !== defaultShowActual ||
+                    showPlanned !== (defaultShowPlannedRealized || defaultShowPlannedUnrealized)) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setShowActual(defaultShowActual);
+                        setShowPlanned(defaultShowPlannedRealized || defaultShowPlannedUnrealized);
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <SegmentedSelector
+                  options={[
+                    { value: "actual", label: "Фактическая" },
+                    { value: "planned", label: "Плановая" },
+                  ]}
+                  value={[
+                    ...(showActual ? ["actual"] : []),
+                    ...(showPlanned ? ["planned"] : []),
+                  ]}
+                  onChange={(value) => {
+                    const values = Array.isArray(value) ? value : [];
+                    setShowActual(values.includes("actual"));
+                    const newShowPlanned = values.includes("planned");
+                    setShowPlanned(newShowPlanned);
+                    // Если плановая отключена, сбрасываем подтипы
+                    if (!newShowPlanned) {
+                      setShowPlannedRealized(false);
+                      setShowPlannedUnrealized(false);
+                    } else if (!showPlannedRealized && !showPlannedUnrealized) {
+                      // Если плановая включена, но подтипы не выбраны, выбираем оба по умолчанию
+                      setShowPlannedRealized(true);
+                      setShowPlannedUnrealized(true);
                     }
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={showActual}
-                    onClick={() => setShowActual((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showActual
-                        ? "bg-violet-50 text-violet-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Фактическая
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={showPlannedRealized}
-                    onClick={() => setShowPlannedRealized((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showPlannedRealized
-                        ? "bg-sky-50 text-sky-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    } text-xs leading-tight whitespace-normal`}
-                  >
-                    <span className="text-center leading-tight">
-                      <span className="inline-flex items-center gap-2">
-                        <BadgeCheck className="h-4 w-4" />
-                        Плановая
-                      </span>
-                      <br />
-                      реализованная
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={showPlannedUnrealized}
-                    onClick={() => setShowPlannedUnrealized((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showPlannedUnrealized
-                        ? "bg-amber-50 text-amber-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    } text-xs leading-tight whitespace-normal`}
-                  >
-                    <span className="text-center leading-tight">
-                      <span className="inline-flex items-center gap-2">
-                        <Sparkles className="h-4 w-4" />
-                        Плановая
-                      </span>
-                      <br />
-                      нереализованная
-                    </span>
-                  </button>
-                </div>
+                  }}
+                  multiple={true}
+                />
               </div>
+
+              {showPlanned && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                      Тип плановой транзакции
+                    </div>
+                    {(showPlannedRealized !== defaultShowPlannedRealized ||
+                      showPlannedUnrealized !== defaultShowPlannedUnrealized) && (
+                      <button
+                        type="button"
+                        className="text-sm font-medium hover:underline disabled:opacity-50"
+                        style={{ color: ACCENT }}
+                        onClick={() => {
+                          setShowPlannedRealized(defaultShowPlannedRealized);
+                          setShowPlannedUnrealized(defaultShowPlannedUnrealized);
+                        }}
+                      >
+                        Сбросить
+                      </button>
+                    )}
+                  </div>
+                  <SegmentedSelector
+                    options={[
+                      {
+                        value: "realized",
+                        label: "Реализованная",
+                      },
+                      {
+                        value: "unrealized",
+                        label: "Нереализованная",
+                      },
+                    ]}
+                    value={[
+                      ...(showPlannedRealized ? ["realized"] : []),
+                      ...(showPlannedUnrealized ? ["unrealized"] : []),
+                    ]}
+                    onChange={(value) => {
+                      const values = Array.isArray(value) ? value : [];
+                      const newShowPlannedRealized = values.includes("realized");
+                      const newShowPlannedUnrealized = values.includes("unrealized");
+                      setShowPlannedRealized(newShowPlannedRealized);
+                      setShowPlannedUnrealized(newShowPlannedUnrealized);
+                      // Если оба подтипа отключены, отключаем "Плановая"
+                      if (!newShowPlannedRealized && !newShowPlannedUnrealized) {
+                        setShowPlanned(false);
+                      }
+                    }}
+                    multiple={true}
+                  />
+                </div>
+              )}
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
                     Статус транзакции
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setShowActive(true);
-                      setShowDeleted(false);
-                    }}
-                    disabled={showActive && !showDeleted}
-                  >
-                    Сбросить
-                  </button>
+                  {(!showActive || showDeleted) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setShowActive(true);
+                        setShowDeleted(false);
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
                 </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={showActive}
-                    onClick={() => setShowActive((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showActive
-                        ? "bg-violet-50 text-violet-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Активные
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={showDeleted}
-                    onClick={() => setShowDeleted((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showDeleted
-                        ? "bg-muted text-foreground"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Удаленные
-                  </button>
+                <SegmentedSelector
+                  options={[
+                    { value: "active", label: "Активные" },
+                    { value: "deleted", label: "Удаленные" },
+                  ]}
+                  value={[
+                    ...(showActive ? ["active"] : []),
+                    ...(showDeleted ? ["deleted"] : []),
+                  ]}
+                  onChange={(value) => {
+                    const values = Array.isArray(value) ? value : [];
+                    setShowActive(values.includes("active"));
+                    setShowDeleted(values.includes("deleted"));
+                  }}
+                  multiple={true}
+                />
+              </div>
                 </div>
               </div>
-
-              
-
-              
-
-              
-
-              
-
-              
-
-              
-
-              
-
-              
-
-              
-            </div>
+            )}
           </div>
         </aside>
 
@@ -5329,7 +5524,10 @@ function TransactionsView({
                 ))}
               </div>
             ) : sortedTxs.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-muted-foreground">
+              <div
+                className="rounded-lg border border-dashed p-6 text-center text-sm bg-transparent"
+                style={{ borderColor: ACCENT_FILL_MEDIUM, color: ACTIVE_TEXT }}
+              >
                 Нет транзакций.
               </div>
             ) : (

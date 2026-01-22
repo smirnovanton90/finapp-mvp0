@@ -10,13 +10,14 @@ import {
   type CSSProperties,
 } from "react";
 
-import { Input } from "@/components/ui/input";
 import { ItemKind, ItemOut } from "@/lib/api";
 import {
   formatAmount,
   normalizeItemSearch,
   sortItemsByTransactionCount,
 } from "@/lib/item-utils";
+import { ACCENT0, ACCENT2, ACTIVE_TEXT, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { AuthInput } from "@/components/ui/auth-input";
 
 type ItemSelectorProps = {
   items: ItemOut[];
@@ -204,25 +205,23 @@ export function ItemSelector({
 
   return (
     <div className="space-y-3">
-      <div className="relative" ref={anchorRef}>
-        <div className="relative flex items-center">
-          {selectedBankLogoUrl && !query && (
-            <img
-              src={selectedBankLogoUrl}
-              alt={selectedLabel}
-              className="absolute left-4 h-6 w-6 rounded bg-white object-contain z-10 pointer-events-none"
-              loading="lazy"
-            />
-          )}
-          <Input
-            type="text"
-            aria-label={ariaLabel}
-            className={`h-10 w-full border-2 border-border/70 bg-white shadow-none ${
-              selectedBankLogoUrl && !query ? "pl-11" : ""
-            }`}
-            placeholder={placeholder}
-            value={inputValue}
+      <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal" ref={anchorRef}>
+        <AuthInput
+          type="text"
+          aria-label={ariaLabel}
+          placeholder={placeholder}
+          value={inputValue}
           disabled={disabled}
+          prefix={
+            selectedBankLogoUrl && !query ? (
+              <img
+                src={selectedBankLogoUrl}
+                alt={selectedLabel}
+                className="h-6 w-6 rounded bg-white object-contain"
+                loading="lazy"
+              />
+            ) : undefined
+          }
           onChange={(event) => {
             if (disabled) return;
             const value = event.target.value;
@@ -258,17 +257,41 @@ export function ItemSelector({
               applySelection(filteredItems[0].id);
             }
           }}
-          />
-        </div>
+        />
         {open && (
           <div
-            className="absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-md border border-border/70 bg-white p-1 shadow-lg"
+            className="selector-dropdown absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
             style={resolvedDropdownStyle}
           >
+            {/* Gradient border wrapper */}
+            <div className="relative rounded-lg">
+              {/* Stroke layer */}
+              <div
+                className="absolute inset-0 rounded-lg pointer-events-none z-0"
+                style={{
+                  padding: "1px",
+                  background: "linear-gradient(to right, #7C6CF1, #6C5DD7, #5544D1)",
+                  WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+                  WebkitMaskComposite: "xor",
+                  maskComposite: "exclude",
+                  opacity: 1,
+                }}
+              />
+              {/* Inner container */}
+              <div className="relative rounded-lg p-1 z-10" style={{ backgroundColor: DROPDOWN_BG }}>
             {clearLabel && (
               <button
                 type="button"
-                className="w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-slate-100"
+                className="w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                style={{
+                  color: SIDEBAR_TEXT_ACTIVE,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                }}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={clearSelection}
               >
@@ -276,11 +299,11 @@ export function ItemSelector({
               </button>
             )}
             {sortedItems.length === 0 ? (
-              <div className="px-2 py-1 text-sm text-muted-foreground">
+              <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
                 {emptyMessage}
               </div>
             ) : filteredItems.length === 0 ? (
-              <div className="px-2 py-1 text-sm text-muted-foreground">
+              <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
                 {noResultsMessage}
               </div>
             ) : (
@@ -304,16 +327,6 @@ export function ItemSelector({
                   .join(" • ");
                 const isClosed = Boolean(item.closed_at);
                 const isArchived = Boolean(item.archived_at);
-                const nameToneClass = isClosed
-                  ? "text-red-500 opacity-70"
-                  : isArchived
-                  ? "text-slate-400"
-                  : "text-slate-700";
-                const detailsToneClass = isClosed
-                  ? "text-red-400 opacity-70"
-                  : isArchived
-                  ? "text-slate-400"
-                  : "text-muted-foreground";
                 const logoToneClass = isClosed
                   ? "opacity-50"
                   : isArchived
@@ -323,9 +336,21 @@ export function ItemSelector({
                   <button
                     key={item.id}
                     type="button"
-                    className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                      isSelected ? "bg-violet-50" : "hover:bg-slate-100"
-                    }`}
+                    className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                    style={{
+                      backgroundColor: isSelected ? "rgba(127, 92, 255, 0.2)" : "transparent",
+                      color: isSelected ? "white" : SIDEBAR_TEXT_ACTIVE,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) {
+                        e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) {
+                        e.currentTarget.style.backgroundColor = "transparent";
+                      }
+                    }}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => applySelection(item.id)}
                   >
@@ -339,13 +364,33 @@ export function ItemSelector({
                     ) : (
                       <div className="h-6 w-6 rounded bg-slate-100" />
                     )}
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div
-                        className={`text-sm font-medium break-words ${nameToneClass}`}
+                        className="text-sm font-normal break-words"
+                        style={{
+                          color: isClosed
+                            ? "#FB4C4F"
+                            : isArchived
+                            ? SIDEBAR_TEXT_INACTIVE
+                            : isSelected
+                            ? "white"
+                            : SIDEBAR_TEXT_ACTIVE,
+                          opacity: isClosed ? 0.7 : isArchived ? 1 : 1,
+                        }}
                       >
                         {item.name}
                       </div>
-                      <div className={`text-xs ${detailsToneClass}`}>
+                      <div
+                        className="text-xs"
+                        style={{
+                          color: isClosed
+                            ? "#FB4C4F"
+                            : isArchived
+                            ? SIDEBAR_TEXT_INACTIVE
+                            : SIDEBAR_TEXT_INACTIVE,
+                          opacity: isClosed ? 0.7 : 1,
+                        }}
+                      >
                         {details}
                       </div>
                     </div>
@@ -353,6 +398,8 @@ export function ItemSelector({
                 );
               })
             )}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -361,29 +408,34 @@ export function ItemSelector({
           {selectedItems.map((item) => {
             const isClosed = Boolean(item.closed_at);
             const isArchived = Boolean(item.archived_at);
-            const chipClass = isClosed
-              ? "border-red-200 bg-red-50 text-red-700"
-              : isArchived
-              ? "border-slate-200 bg-slate-100 text-slate-500"
-              : "border-violet-200 bg-violet-50 text-violet-800";
-            const chipButtonClass = isClosed
-              ? "text-red-600 hover:text-red-700"
-              : isArchived
-              ? "text-slate-500 hover:text-slate-600"
-              : "text-violet-700 hover:text-violet-900";
+            const useDefaultChipStyle = !isClosed && !isArchived;
             return (
               <div
                 key={item.id}
-                className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${chipClass}`}
+                className={
+                  useDefaultChipStyle
+                    ? "flex items-center gap-2 rounded-full px-3 py-1 text-xs"
+                    : `flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
+                        isClosed
+                          ? "border-red-200 bg-red-50 text-red-700"
+                          : "border-slate-200 bg-slate-100 text-slate-500"
+                      }`
+                }
+                style={
+                  useDefaultChipStyle
+                    ? { backgroundColor: ACCENT2, color: ACTIVE_TEXT }
+                    : undefined
+                }
               >
                 <span>{item.name}</span>
                 <button
                   type="button"
-                  className={chipButtonClass}
+                  className={useDefaultChipStyle ? "transition-colors hover:opacity-80" : isClosed ? "text-red-600 hover:text-red-700" : "text-slate-500 hover:text-slate-600"}
+                  style={useDefaultChipStyle ? { color: ACCENT0 } : undefined}
                   onClick={() => applySelection(item.id)}
                   aria-label={`Удалить фильтр ${item.name}`}
                 >
-                  x
+                  ×
                 </button>
               </div>
             );

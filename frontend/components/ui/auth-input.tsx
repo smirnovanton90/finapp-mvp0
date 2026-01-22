@@ -4,17 +4,20 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
 import { useTheme } from "@/components/theme-provider";
-import { ACCENT } from "@/lib/colors";
+import { ACCENT2, ACCENT_FILL_LIGHT, ACCENT_FILL_MEDIUM, PLACEHOLDER_COLOR, ACTIVE_TEXT } from "@/lib/colors";
 
 interface AuthInputProps extends React.ComponentProps<"input"> {
   icon?: "user" | "lock";
   gradientDirection?: "left-to-right" | "right-to-left";
+  /** Optional left adornment (e.g. icon, logo). When set, inner container gets pl-11. */
+  prefix?: React.ReactNode;
 }
 
 function AuthInput({ 
   className, 
   icon = "user",
   gradientDirection = "left-to-right",
+  prefix,
   ...props 
 }: AuthInputProps) {
   const { theme } = useTheme();
@@ -29,19 +32,25 @@ function AuthInput({
 
   React.useEffect(() => {
     if (props.value !== undefined) {
-      setHasValue(String(props.value).length > 0);
+      const valueStr = String(props.value);
+      setHasValue(valueStr.length > 0 && valueStr !== "");
+    } else if (inputRef.current) {
+      // Also check the actual input value for date inputs
+      setHasValue(inputRef.current.value.length > 0);
     }
   }, [props.value]);
 
-  // Base gradient colors based on direction
-  const baseGradientColors = gradientDirection === "left-to-right"
-    ? { start: "#7C6CF1", middle: "#6C5DD7", end: "#5544D1" }
-    : { start: "#5544D1", middle: "#6C5DD7", end: "#7C6CF1" };
-
-  // Reverse gradient on hover
-  const gradientColors = isHovered
-    ? { start: baseGradientColors.end, middle: baseGradientColors.middle, end: baseGradientColors.start }
-    : baseGradientColors;
+  // Background color based on state
+  const backgroundColor = isFocused || isHovered ? ACCENT_FILL_MEDIUM : ACCENT_FILL_LIGHT;
+  
+  // Border color based on state (focus: ACCENT2)
+  const borderColor = isFocused ? ACCENT2 : ACCENT_FILL_MEDIUM;
+  
+  // Bottom stroke as inset (inside); drop shadow when focused (ACCENT2)
+  const insetBottom = `inset 0 -2px 0 0 ${borderColor}`;
+  const boxShadow = isFocused 
+    ? `${insetBottom}, 0 8px 25px -8px ${ACCENT2}`
+    : insetBottom;
 
   const UserIcon = () => (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
@@ -101,68 +110,70 @@ function AuthInput({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Container with both stroke and fill layers */}
-      <div className="relative rounded-lg">
-        {/* Stroke layer - always visible (creates border effect) */}
-        <div
-          className="absolute inset-0 rounded-lg pointer-events-none z-0"
-          style={{
-            padding: "1px",
-            background: `linear-gradient(to right, ${gradientColors.start}, ${gradientColors.middle}, ${gradientColors.end})`,
-            WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
-            WebkitMaskComposite: "xor",
-            maskComposite: "exclude",
-            opacity: 1,
-            transition: "background 1000ms ease",
-          }}
-        />
-        
-        {/* Fill layer - visible on focus with low opacity */}
-        <div
-          className="absolute inset-0 rounded-lg pointer-events-none transition-opacity duration-300 z-0"
-          style={{
-            background: `linear-gradient(to right, ${gradientColors.start}, ${gradientColors.middle}, ${gradientColors.end})`,
-            opacity: isFocused ? 0.1 : 0,
-          }}
-        />
-        
-        {/* Inner container - transparent (как было) */}
-        <div className="relative flex items-center rounded-lg bg-transparent px-4 h-12 z-10">
+      {/* Container with background, border and shadow */}
+      <div 
+        className="relative rounded-lg transition-all duration-200 box-border"
+        style={{
+          backgroundColor,
+          borderRadius: "8px",
+          boxShadow,
+        }}
+      >
+        {/* Inner container */}
+        <div className={cn("relative flex items-center rounded-lg px-4 h-10 z-10", prefix && "pl-11")}>
+          {prefix && (
+            <div className="absolute left-4 flex h-6 w-6 items-center justify-center shrink-0 pointer-events-none">
+              {prefix}
+            </div>
+          )}
           {/* Input */}
           <input
             {...props}
             ref={inputRef}
             type={isPasswordField && showPassword ? "text" : props.type}
-            style={
-              isDark
-                ? undefined
+            style={{
+              ...(isDark
+                ? {
+                    ["--auth-placeholder-color" as any]: PLACEHOLDER_COLOR,
+                    color: props.style?.color || (hasValue ? ACTIVE_TEXT : PLACEHOLDER_COLOR),
+                  } as React.CSSProperties
                 : ({
-                    ["--auth-placeholder-color" as any]: ACCENT,
-                    ["--auth-placeholder-opacity" as any]: isFocused ? "0.75" : "0.45",
-                  } as React.CSSProperties)
-            }
+                    ["--auth-placeholder-color" as any]: PLACEHOLDER_COLOR,
+                  } as React.CSSProperties)),
+              ...(props.style || {}),
+            }}
             className={cn(
               "auth-input flex-1 bg-transparent border-0 p-0 h-auto text-base",
               isDark
-                ? "text-white placeholder:text-[#8E81E6] placeholder:opacity-30"
-                : "text-foreground",
+                ? "placeholder:text-[rgba(197,191,241,0.6)]"
+                : "text-foreground placeholder:text-[rgba(197,191,241,0.6)]",
               "focus-visible:ring-0 focus-visible:outline-none focus-visible:border-0",
               "transition-all duration-200",
               "selection:bg-primary selection:text-primary-foreground",
-              isFocused &&
-                (isDark
-                  ? "placeholder:text-[#CFCFD6] placeholder:opacity-100"
-                  : ""),
               isPasswordField && "pr-8",
               className
             )}
             onFocus={(e) => {
               setIsFocused(true);
+              // Check value on focus for date inputs
+              if (props.type === "date" && e.currentTarget.value) {
+                setHasValue(true);
+              }
               props.onFocus?.(e);
             }}
             onBlur={(e) => {
               setIsFocused(false);
+              // Check value on blur for date inputs
+              if (props.type === "date") {
+                setHasValue(e.currentTarget.value.length > 0);
+              }
               props.onBlur?.(e);
+            }}
+            onChange={(e) => {
+              // Update hasValue when input changes
+              const newValue = e.target.value;
+              setHasValue(newValue.length > 0);
+              props.onChange?.(e);
             }}
           />
           

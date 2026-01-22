@@ -57,23 +57,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (status === "loading") {
     return (
       <div className="relative min-h-screen overflow-hidden flex items-center justify-center">
-        {/* Dark gradient */}
+        {/* Dark gradient — fixed so APP_BG_GRADIENT stays visible */}
         <div
-          className="pointer-events-none absolute inset-0 transition-opacity duration-700 ease-in-out"
+          className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
             background: APP_BG_GRADIENT,
             opacity: isDark ? 1 : 0,
           }}
         />
-        {/* Light gradient */}
         <div
-          className="pointer-events-none absolute inset-0 transition-opacity duration-700 ease-in-out"
+          className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
             background: AUTH_BG_GRADIENT_LIGHT,
             opacity: isDark ? 0 : 1,
           }}
         />
-        <div className="relative text-muted-foreground">Загрузка…</div>
+        <div className="relative z-10 text-muted-foreground">Загрузка…</div>
       </div>
     );
   }
@@ -89,24 +88,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         className="relative min-h-screen overflow-hidden"
         key={sessionKey}
       >
-        {/* Dark gradient */}
+        {/* APP_BG_GRADIENT / AUTH_BG_GRADIENT_LIGHT — fixed to viewport so they don't scroll away with content */}
         <div
-          className="pointer-events-none absolute inset-0 transition-opacity duration-700 ease-in-out"
+          className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
             background: APP_BG_GRADIENT,
             opacity: isDark ? 1 : 0,
           }}
         />
-        {/* Light gradient */}
         <div
-          className="pointer-events-none absolute inset-0 transition-opacity duration-700 ease-in-out"
+          className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
             background: AUTH_BG_GRADIENT_LIGHT,
             opacity: isDark ? 0 : 1,
           }}
         />
 
-        <div className="relative flex">
+        <div className="relative z-10 flex">
           <Sidebar />
           <div
             className={cn(

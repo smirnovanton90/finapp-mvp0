@@ -11,7 +11,6 @@ import {
 } from "react";
 import { User, Building2 } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
 import { CounterpartyOut, CounterpartyIndustryOut } from "@/lib/api";
 import {
   normalizeCounterpartySearch,
@@ -21,6 +20,8 @@ import {
   buildCounterpartySearchText,
   sortCounterpartiesByTransactionCount,
 } from "@/lib/counterparty-utils";
+import { ACCENT0, ACCENT2, ACTIVE_TEXT, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { AuthInput } from "@/components/ui/auth-input";
 
 type CounterpartySelectorProps = {
   counterparties: CounterpartyOut[];
@@ -222,160 +223,204 @@ export function CounterpartySelector({
     ? selectedCounterparty.entity_type === "PERSON" ? User : Building2
     : null;
 
+  const prefix =
+    selectedImageUrl && !query ? (
+      <img
+        src={selectedImageUrl}
+        alt={selectedLabel}
+        className="h-6 w-6 rounded bg-white object-contain"
+        loading="lazy"
+      />
+    ) : !selectedImageUrl && selectedCounterparty && !query && DefaultIcon ? (
+      <span className="flex h-6 w-6 items-center justify-center rounded bg-white">
+        <DefaultIcon className="h-4 w-4" style={{ color: SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />
+      </span>
+    ) : undefined;
+
   return (
     <div className="space-y-3">
-      <div className="relative" ref={anchorRef}>
-        <div className="relative flex items-center">
-          {selectedImageUrl && !query && (
-            <img
-              src={selectedImageUrl}
-              alt={selectedLabel}
-              className="absolute left-4 h-6 w-6 rounded bg-white object-contain z-10 pointer-events-none"
-              loading="lazy"
-            />
-          )}
-          {!selectedImageUrl && selectedCounterparty && !query && DefaultIcon && (
-            <div className="absolute left-4 flex h-6 w-6 items-center justify-center rounded bg-white text-slate-500 z-10 pointer-events-none">
-              <DefaultIcon className="h-4 w-4" aria-hidden="true" />
-            </div>
-          )}
-          <Input
-            type="text"
-            aria-label={ariaLabel}
-            className={`h-10 w-full border-2 border-border/70 bg-white shadow-none ${
-              (selectedImageUrl || (selectedCounterparty && !query)) ? "pl-11" : ""
-            }`}
-            placeholder={placeholder}
-            value={inputValue}
-            disabled={disabled}
-            onChange={(event) => {
-              if (disabled) return;
-              const value = event.target.value;
-              setQuery(value);
-              if (selectionMode === "single" && value.trim() === "") {
-                onChange([]);
-              }
-              setOpen(true);
-            }}
-            onFocus={(event) => {
-              if (disabled) return;
-              if (selectionMode === "single" && selectedLabel && !query) {
-                event.currentTarget.select();
-              }
-              setOpen(true);
-            }}
-            onClick={(event) => {
-              if (disabled) return;
-              if (selectionMode === "single" && selectedLabel && !query) {
-                event.currentTarget.select();
-              }
-              setOpen(true);
-            }}
-            onBlur={() => setTimeout(() => setOpen(false), 150)}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                open &&
-                query.trim() &&
-                filteredCounterparties.length > 0
-              ) {
-                event.preventDefault();
-                applySelection(filteredCounterparties[0].id);
-              }
-            }}
-          />
-        </div>
+      <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal" ref={anchorRef}>
+        <AuthInput
+          type="text"
+          aria-label={ariaLabel}
+          placeholder={placeholder}
+          value={inputValue}
+          disabled={disabled}
+          prefix={prefix}
+          onChange={(event) => {
+            if (disabled) return;
+            const value = event.target.value;
+            setQuery(value);
+            if (selectionMode === "single" && value.trim() === "") {
+              onChange([]);
+            }
+            setOpen(true);
+          }}
+          onFocus={(event) => {
+            if (disabled) return;
+            if (selectionMode === "single" && selectedLabel && !query) {
+              event.currentTarget.select();
+            }
+            setOpen(true);
+          }}
+          onClick={(event) => {
+            if (disabled) return;
+            if (selectionMode === "single" && selectedLabel && !query) {
+              event.currentTarget.select();
+            }
+            setOpen(true);
+          }}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              open &&
+              query.trim() &&
+              filteredCounterparties.length > 0
+            ) {
+              event.preventDefault();
+              applySelection(filteredCounterparties[0].id);
+            }
+          }}
+        />
         {open && (
           <div
-            className="absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-md border border-border/70 bg-white p-1 shadow-lg"
+            className="selector-dropdown absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
             style={resolvedDropdownStyle}
           >
-            {clearLabel && (
-              <button
-                type="button"
-                className="w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-slate-100"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={clearSelection}
-              >
-                {clearLabel}
-              </button>
-            )}
-            {counterparties.length === 0 ? (
-              <div className="px-2 py-1 text-sm text-muted-foreground">
-                {emptyMessage}
-              </div>
-            ) : filteredCounterparties.length === 0 ? (
-              <div className="px-2 py-1 text-sm text-muted-foreground">
-                {noResultsMessage}
-              </div>
-            ) : (
-              filteredCounterparties.map((counterparty) => {
-                const isSelected = selectedSet.has(counterparty.id);
-                const displayName = buildCounterpartyDisplayName(counterparty);
-                const typeLabel = getCounterpartyTypeLabel(counterparty);
-                const industryName = getCounterpartyIndustryName(
-                  counterparty,
-                  industriesMap
-                );
-                const details = [typeLabel, industryName]
-                  .filter(Boolean)
-                  .join(" • ");
-                const isDeleted = Boolean(counterparty.deleted_at);
-                const nameToneClass = isDeleted
-                  ? "text-slate-400"
-                  : "text-slate-700";
-                const detailsToneClass = isDeleted
-                  ? "text-slate-400"
-                  : "text-muted-foreground";
-                const logoToneClass = isDeleted ? "opacity-50" : "";
-
-                const DefaultIcon =
-                  counterparty.entity_type === "PERSON" ? User : Building2;
-                const imageUrl =
-                  counterparty.entity_type === "PERSON"
-                    ? counterparty.photo_url
-                    : counterparty.logo_url;
-
-                return (
+            {/* Gradient border wrapper */}
+            <div className="relative rounded-lg">
+              {/* Stroke layer */}
+              <div
+                className="absolute inset-0 rounded-lg pointer-events-none z-0"
+                style={{
+                  padding: "1px",
+                  background: "linear-gradient(to right, #7C6CF1, #6C5DD7, #5544D1)",
+                  WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+                  WebkitMaskComposite: "xor",
+                  maskComposite: "exclude",
+                  opacity: 1,
+                }}
+              />
+              {/* Inner container */}
+              <div className="relative rounded-lg p-1 z-10" style={{ backgroundColor: DROPDOWN_BG }}>
+                {clearLabel && (
                   <button
-                    key={counterparty.id}
                     type="button"
-                    className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                      isSelected ? "bg-violet-50" : "hover:bg-slate-100"
-                    }`}
+                    className="w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                    style={{
+                      color: SIDEBAR_TEXT_ACTIVE,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => applySelection(counterparty.id)}
+                    onClick={clearSelection}
                   >
-                    {imageUrl ? (
-                      <img
-                        src={imageUrl}
-                        alt={displayName}
-                        className={`h-6 w-6 rounded bg-white object-contain ${logoToneClass}`}
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div
-                        className={`flex h-6 w-6 items-center justify-center rounded bg-white text-slate-500 ${logoToneClass}`}
-                      >
-                        <DefaultIcon className="h-4 w-4" aria-hidden="true" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div
-                        className={`text-sm font-medium break-words ${nameToneClass}`}
-                      >
-                        {displayName}
-                      </div>
-                      {details && (
-                        <div className={`text-xs ${detailsToneClass}`}>
-                          {details}
-                        </div>
-                      )}
-                    </div>
+                    {clearLabel}
                   </button>
-                );
-              })
-            )}
+                )}
+                {counterparties.length === 0 ? (
+                  <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                    {emptyMessage}
+                  </div>
+                ) : filteredCounterparties.length === 0 ? (
+                  <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                    {noResultsMessage}
+                  </div>
+                ) : (
+                  filteredCounterparties.map((counterparty) => {
+                    const isSelected = selectedSet.has(counterparty.id);
+                    const displayName = buildCounterpartyDisplayName(counterparty);
+                    const typeLabel = getCounterpartyTypeLabel(counterparty);
+                    const industryName = getCounterpartyIndustryName(
+                      counterparty,
+                      industriesMap
+                    );
+                    const details = [typeLabel, industryName]
+                      .filter(Boolean)
+                      .join(" • ");
+                    const isDeleted = Boolean(counterparty.deleted_at);
+                    const logoToneClass = isDeleted ? "opacity-50" : "";
+
+                    const DefaultIcon =
+                      counterparty.entity_type === "PERSON" ? User : Building2;
+                    const imageUrl =
+                      counterparty.entity_type === "PERSON"
+                        ? counterparty.photo_url
+                        : counterparty.logo_url;
+
+                    return (
+                      <button
+                        key={counterparty.id}
+                        type="button"
+                        className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                        style={{
+                          backgroundColor: isSelected ? "rgba(127, 92, 255, 0.2)" : "transparent",
+                          color: isSelected ? "white" : SIDEBAR_TEXT_ACTIVE,
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) {
+                            e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) {
+                            e.currentTarget.style.backgroundColor = "transparent";
+                          }
+                        }}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applySelection(counterparty.id)}
+                      >
+                        {imageUrl ? (
+                          <img
+                            src={imageUrl}
+                            alt={displayName}
+                            className={`h-6 w-6 rounded bg-white object-contain ${logoToneClass}`}
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div
+                            className={`flex h-6 w-6 items-center justify-center rounded bg-white ${logoToneClass}`}
+                          >
+                            <DefaultIcon className="h-4 w-4" style={{ color: isSelected ? "white" : SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="text-sm font-normal break-words"
+                            style={{
+                              color: isDeleted
+                                ? SIDEBAR_TEXT_INACTIVE
+                                : isSelected
+                                ? "white"
+                                : SIDEBAR_TEXT_ACTIVE,
+                            }}
+                          >
+                            {displayName}
+                          </div>
+                          {details && (
+                            <div
+                              className="text-xs"
+                              style={{
+                                color: isDeleted
+                                  ? SIDEBAR_TEXT_INACTIVE
+                                  : SIDEBAR_TEXT_INACTIVE,
+                              }}
+                            >
+                              {details}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -383,25 +428,29 @@ export function CounterpartySelector({
         <div className="flex flex-wrap gap-2">
           {selectedCounterparties.map((counterparty) => {
             const isDeleted = Boolean(counterparty.deleted_at);
-            const chipClass = isDeleted
-              ? "border-slate-200 bg-slate-100 text-slate-500"
-              : "border-violet-200 bg-violet-50 text-violet-800";
-            const chipButtonClass = isDeleted
-              ? "text-slate-500 hover:text-slate-600"
-              : "text-violet-700 hover:text-violet-900";
             return (
               <div
                 key={counterparty.id}
-                className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${chipClass}`}
+                className={
+                  isDeleted
+                    ? "flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs text-slate-500"
+                    : "flex items-center gap-2 rounded-full px-3 py-1 text-xs"
+                }
+                style={
+                  !isDeleted
+                    ? { backgroundColor: ACCENT2, color: ACTIVE_TEXT }
+                    : undefined
+                }
               >
                 <span>{buildCounterpartyDisplayName(counterparty)}</span>
                 <button
                   type="button"
-                  className={chipButtonClass}
+                  className={isDeleted ? "text-slate-500 hover:text-slate-600" : "transition-colors hover:opacity-80"}
+                  style={!isDeleted ? { color: ACCENT0 } : undefined}
                   onClick={() => applySelection(counterparty.id)}
                   aria-label={`Удалить фильтр ${buildCounterpartyDisplayName(counterparty)}`}
                 >
-                  x
+                  ×
                 </button>
               </div>
             );

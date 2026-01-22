@@ -16,7 +16,16 @@ export const AUTH_BG_GRADIENT_LIGHT =
   "linear-gradient(135deg, #FFFFFF 0%, #F3F0FF 45%, #EEE9FF 100%)";
 
 // Dark theme gradient for основное приложение (кабинет, дашборд и т.п.)
-export const APP_BG_GRADIENT = "linear-gradient(135deg, #191727 0%, #4E3B8E 100%)";
+export const APP_BG_GRADIENT = "linear-gradient(135deg, #040308 0%, #4B4197 100%)";
+
+// Градиент выбранного элемента в сайдбаре (и селекторе)
+export const SIDEBAR_SELECTED_GRADIENT =
+  "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)";
+
+// Градиент заливки выбранного элемента селектора
+// Linear gradient: #4638A9 0% -> ACCENT2 (#5544D1) 50% -> #4638A9 100%
+export const SEGMENTED_SELECTOR_SELECTED_GRADIENT =
+  "linear-gradient(to right, #4638A9 0%, #5544D1 50%, #4638A9 100%)";
 
 // Градиент для виджета просроченных транзакций (когда есть просроченные, opacity 40%)
 export const OVERDUE_TRANSACTIONS_GRADIENT =

@@ -11,12 +11,13 @@ import {
   type ComponentType,
 } from "react";
 
-import { Input } from "@/components/ui/input";
 import { CategoryNode, buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
 import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
+import { ACCENT0, ACCENT2, ACTIVE_TEXT, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { AuthInput } from "@/components/ui/auth-input";
 
 export type CategoryPathOption = {
   l1: string;
@@ -318,126 +319,160 @@ export function CategorySelector({
     zIndex: 50,
   };
 
+  const showPrefix = selectionMode === "single" && selectedPath && !query && selectedCategoryIcon;
+  const CategoryIconNode = selectedCategoryIcon;
+
   return (
     <div className="space-y-3">
-      <div className="relative" ref={anchorRef}>
-        <div className="relative flex items-center">
-          {selectionMode === "single" && selectedPath && !query && selectedCategoryIcon && (() => {
-            const CategoryIcon = selectedCategoryIcon;
-            return (
-              <div className="absolute left-4 flex h-6 w-6 items-center justify-center z-10 pointer-events-none">
-                <CategoryIcon className="h-4 w-4 text-violet-600" aria-hidden="true" />
-              </div>
-            );
-          })()}
-          <Input
-            type="text"
-            aria-label={ariaLabel}
-            className={`h-10 w-full border-2 border-border/70 bg-white shadow-none ${
-              selectionMode === "single" && selectedPath && !query && selectedCategoryIcon ? "pl-11" : ""
-            }`}
-            placeholder={placeholder}
-            value={inputValue}
-            disabled={disabled}
-            onChange={(event) => {
-              if (disabled) return;
-              const value = event.target.value;
-              setQuery(value);
-              if (selectionMode === "single" && value.trim() === "" && onChange) {
-                onChange(null);
-              }
-              setOpen(true);
-            }}
-            onFocus={(event) => {
-              if (disabled) return;
-              if (selectionMode === "single" && selectedLabel && !query) {
-                event.currentTarget.select();
-              }
-              setOpen(true);
-            }}
-            onClick={(event) => {
-              if (disabled) return;
-              if (selectionMode === "single" && selectedLabel && !query) {
-                event.currentTarget.select();
-              }
-              setOpen(true);
-            }}
-            onBlur={() => setTimeout(() => setOpen(false), 150)}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                open &&
-                query.trim() &&
-                filteredPaths.length > 0
-              ) {
-                event.preventDefault();
-                applySelection(filteredPaths[0]);
-              }
-            }}
-          />
-        </div>
+      <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal" ref={anchorRef}>
+        <AuthInput
+          type="text"
+          aria-label={ariaLabel}
+          placeholder={placeholder}
+          value={inputValue}
+          disabled={disabled}
+          prefix={
+            showPrefix && CategoryIconNode ? (
+              <CategoryIconNode className="h-4 w-4" style={{ color: SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />
+            ) : undefined
+          }
+          onChange={(event) => {
+            if (disabled) return;
+            const value = event.target.value;
+            setQuery(value);
+            if (selectionMode === "single" && value.trim() === "" && onChange) {
+              onChange(null);
+            }
+            setOpen(true);
+          }}
+          onFocus={(event) => {
+            if (disabled) return;
+            if (selectionMode === "single" && selectedLabel && !query) {
+              event.currentTarget.select();
+            }
+            setOpen(true);
+          }}
+          onClick={(event) => {
+            if (disabled) return;
+            if (selectionMode === "single" && selectedLabel && !query) {
+              event.currentTarget.select();
+            }
+            setOpen(true);
+          }}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              open &&
+              query.trim() &&
+              filteredPaths.length > 0
+            ) {
+              event.preventDefault();
+              applySelection(filteredPaths[0]);
+            }
+          }}
+        />
         {open && (
           <div
-            className="absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-md border border-border/70 bg-white p-1 shadow-lg"
+            className="selector-dropdown absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
             style={resolvedDropdownStyle}
           >
-            {clearLabel && (
-              <button
-                type="button"
-                className="w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-slate-100"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={clearSelection}
-              >
-                {clearLabel}
-              </button>
-            )}
-            {categoryPaths.length === 0 ? (
-              <div className="px-2 py-1 text-sm text-muted-foreground">
-                {emptyMessage}
-              </div>
-            ) : filteredPaths.length === 0 ? (
-              <div className="px-2 py-1 text-sm text-muted-foreground">
-                {noResultsMessage}
-              </div>
-            ) : (
-              filteredPaths.map((path) => {
-                const pathKey = makeCategoryPathKey(
-                  normalizeCategoryValue(path.l1),
-                  normalizeCategoryValue(path.l2),
-                  normalizeCategoryValue(path.l3)
-                );
-                const isSelected =
-                  selectionMode === "single"
-                    ? selectedPath &&
-                      path.l1 === selectedPath.l1 &&
-                      path.l2 === selectedPath.l2 &&
-                      path.l3 === selectedPath.l3
-                    : selectedPathsSet?.has(pathKey) ?? false;
-
-                const CategoryIcon = path.categoryId
-                  ? resolveCategoryIcon(path.categoryId, categoryLookup)
-                  : CATEGORY_ICON_FALLBACK;
-
-                return (
+            {/* Gradient border wrapper */}
+            <div className="relative rounded-lg">
+              {/* Stroke layer */}
+              <div
+                className="absolute inset-0 rounded-lg pointer-events-none z-0"
+                style={{
+                  padding: "1px",
+                  background: "linear-gradient(to right, #7C6CF1, #6C5DD7, #5544D1)",
+                  WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+                  WebkitMaskComposite: "xor",
+                  maskComposite: "exclude",
+                  opacity: 1,
+                }}
+              />
+              {/* Inner container */}
+              <div className="relative rounded-lg p-1 z-10" style={{ backgroundColor: DROPDOWN_BG }}>
+                {clearLabel && (
                   <button
-                    key={`${path.l1}||${path.l2}||${path.l3}`}
                     type="button"
-                    className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                      isSelected ? "bg-violet-50" : "hover:bg-slate-100"
-                    }`}
+                    className="w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                    style={{
+                      color: SIDEBAR_TEXT_ACTIVE,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => applySelection(path)}
+                    onClick={clearSelection}
                   >
-                    <CategoryIcon className="h-4 w-4 text-violet-600" aria-hidden="true" />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium break-words text-slate-700">
-                        {path.label}
-                      </div>
-                    </div>
+                    {clearLabel}
                   </button>
-                );
-              })
-            )}
+                )}
+                {categoryPaths.length === 0 ? (
+                  <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                    {emptyMessage}
+                  </div>
+                ) : filteredPaths.length === 0 ? (
+                  <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                    {noResultsMessage}
+                  </div>
+                ) : (
+                  filteredPaths.map((path) => {
+                    const pathKey = makeCategoryPathKey(
+                      normalizeCategoryValue(path.l1),
+                      normalizeCategoryValue(path.l2),
+                      normalizeCategoryValue(path.l3)
+                    );
+                    const isSelected =
+                      selectionMode === "single"
+                        ? selectedPath &&
+                          path.l1 === selectedPath.l1 &&
+                          path.l2 === selectedPath.l2 &&
+                          path.l3 === selectedPath.l3
+                        : selectedPathsSet?.has(pathKey) ?? false;
+
+                    const CategoryIcon = path.categoryId
+                      ? resolveCategoryIcon(path.categoryId, categoryLookup)
+                      : CATEGORY_ICON_FALLBACK;
+
+                    return (
+                      <button
+                        key={`${path.l1}||${path.l2}||${path.l3}`}
+                        type="button"
+                        className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                        style={{
+                          backgroundColor: isSelected ? "rgba(127, 92, 255, 0.2)" : "transparent",
+                          color: isSelected ? "white" : SIDEBAR_TEXT_ACTIVE,
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) {
+                            e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) {
+                            e.currentTarget.style.backgroundColor = "transparent";
+                          }
+                        }}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applySelection(path)}
+                      >
+                        <CategoryIcon className="h-4 w-4" style={{ color: isSelected ? "white" : SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-normal break-words">
+                            {path.label}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -452,17 +487,19 @@ export function CategorySelector({
             return (
               <div
                 key={pathKey}
-                className="flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs text-violet-800"
+                className="flex items-center gap-2 rounded-full px-3 py-1 text-xs"
+                style={{ backgroundColor: ACCENT2, color: ACTIVE_TEXT }}
               >
                 <span>{path.label}</span>
                 {onTogglePath && (
                   <button
                     type="button"
-                    className="text-violet-700 hover:text-violet-900"
+                    className="transition-colors hover:opacity-80"
+                    style={{ color: ACCENT0 }}
                     onClick={() => onTogglePath(path)}
                     aria-label={`Удалить фильтр ${path.label}`}
                   >
-                    x
+                    ×
                   </button>
                 )}
               </div>

@@ -218,14 +218,23 @@
   }
 
   .auth-input::placeholder {
-    color: var(--auth-placeholder-color);
-    opacity: var(--auth-placeholder-opacity, 0.7);
+    color: var(--auth-placeholder-color, rgba(197, 191, 241, 0.6));
+    opacity: var(--auth-placeholder-opacity, 1);
   }
 
   .auth-input::-ms-input-placeholder {
-    color: var(--auth-placeholder-color);
-    opacity: var(--auth-placeholder-opacity, 0.7);
+    color: var(--auth-placeholder-color, rgba(197, 191, 241, 0.6));
+    opacity: var(--auth-placeholder-opacity, 1);
   }
+
+  /* Calendar picker indicator styling for date inputs - matches PLACEHOLDER_COLOR rgba(197, 191, 241, 0.6) */
+  /* Using filter to convert black icon to #C5BFF1 with 60% opacity */
+  .auth-input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(77%) sepia(8%) saturate(2000%) hue-rotate(220deg) brightness(110%);
+    opacity: 0.6;
+    cursor: pointer;
+  }
+  /* Checkbox: border ACCENT_FILL_MEDIUM; hover fill ACCENT_FILL_LIGHT; checked fill ACCENT_FILL_MEDIUM; checkmark ACCENT */
   input[type="checkbox"] {
     appearance: none;
     -webkit-appearance: none;
@@ -234,23 +243,28 @@
     justify-content: center;
     border-width: 2px;
     border-style: solid;
-    border-color: color-mix(in oklch, var(--border) 70%, transparent);
+    border-color: rgba(93, 95, 215, 0.4);
     border-radius: var(--radius-sm);
-    background-color: var(--background);
+    background-color: transparent;
     box-shadow: none;
     color: transparent;
     cursor: pointer;
-    transition: background-color 150ms ease, border-color 150ms ease,
-      color 150ms ease;
+    transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+  }
+  input[type="checkbox"]:hover {
+    background-color: rgba(93, 95, 215, 0.22);
   }
   input[type="checkbox"]:checked {
-    border-color: color-mix(in oklch, var(--border) 70%, transparent);
-    background-color: var(--accent);
-    color: var(--accent-foreground);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 10.5l3 3 7-7'/%3E%3C/svg%3E");
+    border-color: rgba(93, 95, 215, 0.4);
+    background-color: rgba(93, 95, 215, 0.4);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%237F5CFF' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 10.5l3 3 7-7'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: center;
     background-size: 70% 70%;
+    color: transparent;
+  }
+  input[type="checkbox"]:checked:hover {
+    background-color: rgba(93, 95, 215, 0.4);
   }
   input[type="checkbox"]:focus-visible {
     outline: 2px solid color-mix(in oklch, var(--ring) 40%, transparent);
@@ -260,4 +274,25 @@
     cursor: not-allowed;
     opacity: 0.5;
   }
+}
+
+/* Selector dropdowns (Item, Category, Counterparty): dark-theme scrollbar */
+.dark .selector-dropdown {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(93, 95, 215, 0.5) #25243F;
+}
+.dark .selector-dropdown::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.dark .selector-dropdown::-webkit-scrollbar-track {
+  background: #25243F;
+  border-radius: 4px;
+}
+.dark .selector-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(93, 95, 215, 0.5);
+  border-radius: 4px;
+}
+.dark .selector-dropdown::-webkit-scrollbar-thumb:hover {
+  background: rgba(93, 95, 215, 0.65);
 }

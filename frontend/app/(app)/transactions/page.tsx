@@ -3789,7 +3789,7 @@ function TransactionsView({
   return (
     <main
       className={cn(
-        "min-h-screen pr-8 py-8",
+        "min-h-screen pb-8",
         isCollapsed ? "pl-[56px]" : "pl-[32px]"
       )}
     >
@@ -3798,20 +3798,26 @@ function TransactionsView({
       <div className="flex flex-col gap-6 lg:flex-row">
         <aside
           className={`shrink-0 transition-[width] duration-300 ${
-            isFilterPanelCollapsed ? "w-[100px]" : "w-[350px]"
+            isFilterPanelCollapsed ? "w-[100px]" : "w-[370px]"
           }`}
         >
           <div 
-            className="sticky top-[10px] flex flex-col rounded-[9px] p-[10px]"
-            style={{ backgroundColor: SIDEBAR_BG }}
+            className={cn(
+              "sticky top-0 h-screen p-[10px]",
+              isFilterPanelCollapsed ? "" : ""
+            )}
           >
+            <div 
+              className="flex flex-col rounded-[9px] h-full w-full"
+              style={{ backgroundColor: SIDEBAR_BG }}
+            >
             {/* Collapse button */}
             <div className="relative h-[55px] shrink-0">
               <Button
                 variant="glass"
                 onClick={toggleFilterPanel}
                 className={`absolute top-[10px] h-[35px] w-[35px] rounded-[9px] p-0 ${
-                  isFilterPanelCollapsed ? "left-1/2 -translate-x-1/2" : "right-0"
+                  isFilterPanelCollapsed ? "left-1/2 -translate-x-1/2" : "right-[10px]"
                 }`}
                 style={
                   {
@@ -3838,126 +3844,90 @@ function TransactionsView({
             </div>
             
             {isFilterPanelCollapsed ? (
-              /* Collapsed state - icons only */
-              <div className="mt-[10px] flex flex-col items-center gap-4 pb-[10px]">
-                <Tooltip content="Добавить транзакцию" side="right">
-                  <Button
-                    className="h-[50px] w-[50px] rounded-[9px] p-0"
-                    style={{
-                      backgroundColor: ACCENT,
-                    }}
-                    onClick={() => {
-                      if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
-                      openCreateDialog();
+              /* Collapsed state - action buttons + expand button */
+              <div className="mt-[10px] flex flex-1 flex-col gap-[10px] pb-[10px]">
+                {/* Action buttons */}
+                <div className="space-y-[10px]">
+                  <Dialog
+                    open={isDialogOpen}
+                    onOpenChange={(open) => {
+                      if (open) {
+                        if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                        openCreateDialog();
+                      } else {
+                        closeDialog();
+                      }
                     }}
                   >
-                    <Plus className="h-6 w-6 text-white" />
-                  </Button>
-                </Tooltip>
-                <Tooltip content="Загрузить чек" side="right">
-                  <button
+                    <DialogTrigger asChild>
+                      <Button
+                        className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90"
+                        style={{
+                          backgroundColor: ACCENT,
+                        }}
+                        onClick={() => {
+                          if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                          openCreateDialog();
+                        }}
+                      >
+                        <Plus className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                      </Button>
+                    </DialogTrigger>
+                  </Dialog>
+                  
+                  <Button
                     type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
+                    variant="glass"
+                    className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center"
+                    style={
+                      {
+                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                      } as React.CSSProperties
+                    }
                     onClick={() => qrCodeInputRef.current?.click()}
                     disabled={isQrCodeLoading}
                   >
-                    <Receipt className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Импортировать выписку" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                    onClick={() => handleImportOpenChange(true)}
-                  >
-                    <FileDown className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <div className="my-2 h-px w-full bg-[rgba(181,174,230,0.3)]" />
-                <Tooltip content="Вид транзакции" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <ArrowRight className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Сумма" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <Coins className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Дата" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <Calendar className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Валюта" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <Coins className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Активы/обязательства" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <Wallet className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Категории" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <Folder className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Контрагенты" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <Users className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Комментарий" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <MessageSquare className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Статус" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <CheckCircle2 className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Тип транзакции" side="right">
-                  <button
-                    type="button"
-                    className="flex h-[50px] w-[50px] items-center justify-center rounded-[9px] border border-[rgba(181,174,230,0.7)] bg-transparent transition-colors hover:bg-[rgba(108,93,215,0.22)]"
-                  >
-                    <FileText className="h-6 w-6" style={{ color: SIDEBAR_TEXT_INACTIVE }} />
-                  </button>
-                </Tooltip>
+                    <QrCode className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                  </Button>
+
+                  <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
+                    <DialogTrigger asChild>
+                      <Button
+                        variant="glass"
+                        className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center"
+                        style={
+                          {
+                            "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                            "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                          } as React.CSSProperties
+                        }
+                      >
+                        <FileDown className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                      </Button>
+                    </DialogTrigger>
+                  </Dialog>
+                </div>
+
+                {/* Expand filter panel button */}
+                <Button
+                  variant="glass"
+                  className="mx-[10px] flex-1 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center mt-auto"
+                  style={
+                    {
+                      "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                      "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                    } as React.CSSProperties
+                  }
+                  onClick={toggleFilterPanel}
+                  aria-label="Развернуть фильтры"
+                >
+                  <ArrowRight className="h-6 w-6" style={{ color: "white", opacity: 0.85 }} />
+                </Button>
               </div>
             ) : (
               /* Expanded state - full filters */
-              <div className="mt-[10px] flex flex-1 flex-col gap-4 pb-[10px]">
+              <div className="mt-[10px] flex flex-1 flex-col gap-4 pb-[10px] px-[10px]">
                 <div className="space-y-[10px]">
                 {/* Add button with gradient */}
                 <Dialog
@@ -5455,10 +5425,11 @@ function TransactionsView({
                 </div>
               </div>
             )}
+            </div>
           </div>
         </aside>
 
-        <div className="flex-1">
+        <div className="flex-1 pr-8">
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">

@@ -4,7 +4,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
 import { useTheme } from "@/components/theme-provider";
-import { ACCENT2, ACCENT_FILL_LIGHT, ACCENT_FILL_MEDIUM, PLACEHOLDER_COLOR, ACTIVE_TEXT } from "@/lib/colors";
+import { ACCENT2, ACCENT_FILL_LIGHT, ACCENT_FILL_MEDIUM, PLACEHOLDER_COLOR_DARK, PLACEHOLDER_COLOR_LIGHT, ACTIVE_TEXT_DARK } from "@/lib/colors";
 
 interface AuthInputProps extends Omit<React.ComponentProps<"input">, "prefix"> {
   icon?: "user" | "lock";
@@ -134,22 +134,21 @@ function AuthInput({
             style={{
               ...(isDark
                 ? {
-                    ["--auth-placeholder-color" as any]: PLACEHOLDER_COLOR,
-                    color: props.style?.color || (hasValue ? ACTIVE_TEXT : PLACEHOLDER_COLOR),
+                    ["--auth-placeholder-color" as any]: PLACEHOLDER_COLOR_DARK,
+                    color: props.style?.color || (hasValue ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK),
                   } as React.CSSProperties
                 : ({
-                    ["--auth-placeholder-color" as any]: PLACEHOLDER_COLOR,
+                    ["--auth-placeholder-color" as any]: PLACEHOLDER_COLOR_LIGHT,
                   } as React.CSSProperties)),
               ...(props.style || {}),
             }}
             className={cn(
               "auth-input flex-1 bg-transparent border-0 p-0 h-auto text-base",
               isDark
-                ? "placeholder:text-[rgba(197,191,241,0.6)]"
-                : "text-foreground placeholder:text-[rgba(197,191,241,0.6)]",
+                ? ""
+                : "text-foreground",
               "focus-visible:ring-0 focus-visible:outline-none focus-visible:border-0",
               "transition-all duration-200",
-              "selection:bg-primary selection:text-primary-foreground",
               isPasswordField && "pr-8",
               className
             )}

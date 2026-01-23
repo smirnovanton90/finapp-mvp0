@@ -227,7 +227,18 @@
     opacity: var(--auth-placeholder-opacity, 1);
   }
 
-  /* Calendar picker indicator styling for date inputs - matches PLACEHOLDER_COLOR rgba(197, 191, 241, 0.6) */
+  /* Text selection in input fields: ACCENT2 background */
+  .auth-input::selection {
+    background-color: #5544D1;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .auth-input::-moz-selection {
+    background-color: #5544D1;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  /* Calendar picker indicator styling for date inputs - matches PLACEHOLDER_COLOR_DARK rgba(197, 191, 241, 0.6) */
   /* Using filter to convert black icon to #C5BFF1 with 60% opacity */
   .auth-input[type="date"]::-webkit-calendar-picker-indicator {
     filter: invert(77%) sepia(8%) saturate(2000%) hue-rotate(220deg) brightness(110%);

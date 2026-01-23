@@ -16,7 +16,7 @@ import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
-import { ACCENT0, ACCENT2, ACTIVE_TEXT, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
 
 export type CategoryPathOption = {
@@ -488,7 +488,7 @@ export function CategorySelector({
               <div
                 key={pathKey}
                 className="flex items-center gap-2 rounded-full px-3 py-1 text-xs"
-                style={{ backgroundColor: ACCENT2, color: ACTIVE_TEXT }}
+                style={{ backgroundColor: ACCENT2, color: ACTIVE_TEXT_DARK }}
               >
                 <span>{path.label}</span>
                 {onTogglePath && (

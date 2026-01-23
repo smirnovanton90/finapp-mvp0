@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useSidebar } from "./sidebar-context";
 import { fetchUserMe, fetchUserPhotoAsBlob } from "@/lib/api";
-import { ACTIVE_TEXT, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 
 const nav = [
   { href: "/dashboard", label: "\u0414\u044d\u0448\u0431\u043e\u0440\u0434", icon: LayoutDashboard },
@@ -191,7 +191,7 @@ export function Sidebar() {
                   "--glass-bg-hover": "rgba(108, 93, 215, 0.22)",
                 } as CSSProperties));
 
-            const itemColor = active ? ACTIVE_TEXT : SIDEBAR_TEXT_INACTIVE;
+            const itemColor = active ? ACTIVE_TEXT_DARK : SIDEBAR_TEXT_INACTIVE;
 
             const commonClass = cn(
               "mx-[10px] h-[50px] w-[calc(100%-20px)] justify-start pl-[15px] pr-[15px] text-left",
@@ -274,7 +274,7 @@ export function Sidebar() {
                       <User
                         className="size-[30px]"
                         strokeWidth={1.5}
-                        style={{ color: ACTIVE_TEXT }}
+                        style={{ color: ACTIVE_TEXT_DARK }}
                       />
                     </IconFrame>
                   )}
@@ -313,13 +313,13 @@ export function Sidebar() {
                       <User
                         className="size-[30px]"
                         strokeWidth={1.5}
-                        style={{ color: ACTIVE_TEXT }}
+                        style={{ color: ACTIVE_TEXT_DARK }}
                       />
                     </IconFrame>
                   )}
                   <span
                     className="flex-1 truncate text-base font-normal"
-                    style={{ color: ACTIVE_TEXT }}
+                    style={{ color: ACTIVE_TEXT_DARK }}
                   >
                     Личный кабинет
                   </span>
@@ -345,7 +345,7 @@ export function Sidebar() {
                     <LogOut
                       className="size-[30px]"
                       strokeWidth={1.5}
-                      style={{ color: ACTIVE_TEXT }}
+                      style={{ color: ACTIVE_TEXT_DARK }}
                     />
                   </IconFrame>
                 </Button>
@@ -367,12 +367,12 @@ export function Sidebar() {
                     <LogOut
                       className="size-[30px]"
                       strokeWidth={1.5}
-                      style={{ color: ACTIVE_TEXT }}
+                      style={{ color: ACTIVE_TEXT_DARK }}
                     />
                   </IconFrame>
                   <span
                     className="flex-1 truncate text-base font-normal"
-                    style={{ color: ACTIVE_TEXT }}
+                    style={{ color: ACTIVE_TEXT_DARK }}
                   >
                     Выйти
                   </span>

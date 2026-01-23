@@ -17,8 +17,11 @@ export const DROPDOWN_BG = "#25243F";
 export const SIDEBAR_TEXT_INACTIVE = "rgba(181, 174, 230, 0.7)";
 export const SIDEBAR_TEXT_ACTIVE = "rgba(207, 207, 214, 1)";
 
-// Global active text color (white 85%)
-export const ACTIVE_TEXT = "rgba(255, 255, 255, 0.85)";
+// Основной текст
+// Dark theme: white 85%
+export const ACTIVE_TEXT_DARK = "rgba(255, 255, 255, 0.85)";
+// Light theme: black 70%
+export const ACTIVE_TEXT_LIGHT = "rgba(0, 0, 0, 0.7)";
 
 // Red color
 export const RED = "#FB4C4F";
@@ -34,7 +37,9 @@ export const ACCENT_FILL_LIGHT = "rgba(93, 95, 215, 0.22)";
 // Medium fill: #5D5FD7 @ 40%
 export const ACCENT_FILL_MEDIUM = "rgba(93, 95, 215, 0.40)";
 
-// Placeholder color
-// #C5BFF1 @ 60%
-export const PLACEHOLDER_COLOR = "rgba(197, 191, 241, 0.6)";
+// Placeholder colors
+// Dark theme: #C5BFF1 @ 60%
+export const PLACEHOLDER_COLOR_DARK = "rgba(197, 191, 241, 0.6)";
+// Light theme: #494BA3 @ 60%
+export const PLACEHOLDER_COLOR_LIGHT = "rgba(73, 75, 163, 0.6)";
 

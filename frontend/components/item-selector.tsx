@@ -16,7 +16,7 @@ import {
   normalizeItemSearch,
   sortItemsByTransactionCount,
 } from "@/lib/item-utils";
-import { ACCENT0, ACCENT2, ACTIVE_TEXT, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
 
 type ItemSelectorProps = {
@@ -423,7 +423,7 @@ export function ItemSelector({
                 }
                 style={
                   useDefaultChipStyle
-                    ? { backgroundColor: ACCENT2, color: ACTIVE_TEXT }
+                    ? { backgroundColor: ACCENT2, color: ACTIVE_TEXT_DARK }
                     : undefined
                 }
               >

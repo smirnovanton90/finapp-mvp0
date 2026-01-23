@@ -14,7 +14,7 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { useSearchParams } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
-import { ACCENT, ACCENT_FILL_MEDIUM, SIDEBAR_BG, SIDEBAR_TEXT_INACTIVE, SIDEBAR_TEXT_ACTIVE, PLACEHOLDER_COLOR, ACTIVE_TEXT } from "@/lib/colors";
+import { ACCENT, ACCENT_FILL_MEDIUM, SIDEBAR_BG, SIDEBAR_TEXT_INACTIVE, SIDEBAR_TEXT_ACTIVE, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK } from "@/lib/colors";
 import {
   ArrowRight,
   ArrowLeft,
@@ -5085,7 +5085,7 @@ function TransactionsView({
                         value={dateFrom}
                         onChange={(e) => setDateFrom(e.target.value)}
                         style={{
-                          color: !dateFrom ? PLACEHOLDER_COLOR : ACTIVE_TEXT,
+                          color: !dateFrom ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
                         }}
                       />
                     </div>
@@ -5098,7 +5098,7 @@ function TransactionsView({
                         value={dateTo}
                         onChange={(e) => setDateTo(e.target.value)}
                         style={{
-                          color: !dateTo ? PLACEHOLDER_COLOR : ACTIVE_TEXT,
+                          color: !dateTo ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
                         }}
                       />
                     </div>
@@ -5532,7 +5532,7 @@ function TransactionsView({
             ) : sortedTxs.length === 0 ? (
               <div
                 className="rounded-lg border border-dashed p-6 text-center text-sm bg-transparent"
-                style={{ borderColor: ACCENT_FILL_MEDIUM, color: ACTIVE_TEXT }}
+                style={{ borderColor: ACCENT_FILL_MEDIUM, color: ACTIVE_TEXT_DARK }}
               >
                 Нет транзакций.
               </div>

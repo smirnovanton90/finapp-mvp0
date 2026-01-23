@@ -109,7 +109,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div
             className={cn(
               "flex-1 transition-all duration-300",
-              isCollapsed ? "ml-16" : "ml-72"
+              isCollapsed ? "ml-[120px]" : "ml-[320px]"
             )}
           >
             {children}

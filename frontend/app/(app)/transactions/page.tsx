@@ -3790,7 +3790,7 @@ function TransactionsView({
     <main
       className={cn(
         "min-h-screen pb-8",
-        isCollapsed ? "pl-[56px]" : "pl-[32px]"
+        isCollapsed ? "pl-0" : "pl-0"
       )}
     >
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
@@ -3845,9 +3845,9 @@ function TransactionsView({
             
             {isFilterPanelCollapsed ? (
               /* Collapsed state - action buttons + expand button */
-              <div className="mt-[10px] flex flex-1 flex-col gap-[10px] pb-[10px]">
+              <div className="mt-[10px] flex flex-1 flex-col gap-[10px] pb-[10px] relative z-10">
                 {/* Action buttons */}
-                <div className="space-y-[10px]">
+                <div className="space-y-[10px] relative z-10">
                   <Dialog
                     open={isDialogOpen}
                     onOpenChange={(open) => {
@@ -3861,11 +3861,14 @@ function TransactionsView({
                   >
                     <DialogTrigger asChild>
                       <Button
-                        className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90"
+                        type="button"
+                        className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 relative z-10"
                         style={{
                           backgroundColor: ACCENT,
                         }}
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
                           openCreateDialog();
                         }}
@@ -3878,48 +3881,59 @@ function TransactionsView({
                   <Button
                     type="button"
                     variant="glass"
-                    className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center"
+                    className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center relative z-10"
                     style={
                       {
                         "--glass-bg": "rgba(108, 93, 215, 0.22)",
                         "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
                       } as React.CSSProperties
                     }
-                    onClick={() => qrCodeInputRef.current?.click()}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      qrCodeInputRef.current?.click();
+                    }}
                     disabled={isQrCodeLoading}
                   >
                     <QrCode className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
                   </Button>
 
-                  <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
-                    <DialogTrigger asChild>
-                      <Button
-                        variant="glass"
-                        className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center"
-                        style={
-                          {
-                            "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                            "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                          } as React.CSSProperties
-                        }
-                      >
-                        <FileDown className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                      </Button>
-                    </DialogTrigger>
-                  </Dialog>
+                  <Button
+                    type="button"
+                    variant="glass"
+                    className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center relative z-10"
+                    style={
+                      {
+                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                      } as React.CSSProperties
+                    }
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleImportOpenChange(true);
+                    }}
+                  >
+                    <FileDown className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                  </Button>
                 </div>
 
                 {/* Expand filter panel button */}
                 <Button
+                  type="button"
                   variant="glass"
-                  className="mx-[10px] flex-1 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center mt-auto"
+                  className="mx-[10px] flex-1 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center mt-auto relative z-10"
                   style={
                     {
                       "--glass-bg": "rgba(108, 93, 215, 0.22)",
                       "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
                     } as React.CSSProperties
                   }
-                  onClick={toggleFilterPanel}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleFilterPanel();
+                  }}
                   aria-label="Развернуть фильтры"
                 >
                   <ArrowRight className="h-6 w-6" style={{ color: "white", opacity: 0.85 }} />
@@ -3952,178 +3966,945 @@ function TransactionsView({
                       <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
                     </Button>
                   </DialogTrigger>
-                <DialogContent
-                  className="sm:max-w-[560px]"
-                  onCloseAutoFocus={(event) => {
-                    const lastActive = lastActiveElementRef.current;
-                    if (!lastActive) return;
-                    event.preventDefault();
-                    if (lastActive.isConnected) {
-                      lastActive.focus({ preventScroll: true });
+                </Dialog>
+
+              <Button
+                type="button"
+                variant="glass"
+                className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as React.CSSProperties
+                }
+                onClick={() => qrCodeInputRef.current?.click()}
+                disabled={isQrCodeLoading}
+              >
+                <QrCode className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                <span style={{ color: "white", opacity: 0.85 }}>
+                  {isQrCodeLoading ? "Обработка..." : "Загрузить чек"}
+                </span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="glass"
+                className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as React.CSSProperties
+                }
+                onClick={() => handleImportOpenChange(true)}
+              >
+                <FileDown className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                <span style={{ color: "white", opacity: 0.85 }}>Импортировать выписку</span>
+              </Button>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Вид транзакции
+                  </div>
+                  {selectedDirections.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() =>
+                        setSelectedDirections(
+                          new Set<TransactionOut["direction"]>()
+                        )
+                      }
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <SegmentedSelector
+                  options={[
+                    { value: "INCOME", label: "Доход" },
+                    { value: "EXPENSE", label: "Расход" },
+                    { value: "TRANSFER", label: "Перевод" },
+                  ]}
+                  value={selectedDirections}
+                  onChange={(value) => {
+                    if (value instanceof Set) {
+                      setSelectedDirections(value as Set<TransactionOut["direction"]>);
+                    } else if (Array.isArray(value)) {
+                      setSelectedDirections(new Set(value as TransactionOut["direction"][]));
                     }
-                    lastActiveElementRef.current = null;
                   }}
-                >
-                  <DialogHeader>
-                    <DialogTitle>
-  {isBulkEdit
-    ? "Редактировать транзакции"
-    : isEditMode
-      ? "Редактировать транзакцию"
-      : "Добавить транзакцию"}
-</DialogTitle>
-                  </DialogHeader>
-
-                  <form
-                    className="grid gap-4"
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      setFormError(null);
-
-                      if (isBulkEdit) {
-                        const validationError = validateBulkEdit();
-                        if (validationError) {
-                          setFormError(validationError);
-                          return;
+                  multiple={true}
+                />
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Сумма транзакции
+                  </div>
+                  {(amountFrom || amountTo) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setAmountFrom("");
+                        setAmountTo("");
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                      <AuthInput
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="От"
+                        value={amountFrom}
+                        onChange={(e) =>
+                          setAmountFrom(formatRubInput(e.target.value))
                         }
-                        setIsBulkEditConfirmOpen(true);
+                        onBlur={() =>
+                          setAmountFrom((prev) => normalizeRubOnBlur(prev))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <span className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                      <AuthInput
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="До"
+                        value={amountTo}
+                        onChange={(e) => setAmountTo(formatRubInput(e.target.value))}
+                        onBlur={() => setAmountTo((prev) => normalizeRubOnBlur(prev))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Дата транзакции
+                  </div>
+                  {(dateFrom || dateTo) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setDateFrom("");
+                        setDateTo("");
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
+                      <AuthInput
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        style={{
+                          color: !dateFrom ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
+                      <AuthInput
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => setDateTo(e.target.value)}
+                        style={{
+                          color: !dateTo ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-1">
+                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                      Валюта
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Свернуть/развернуть"
+                      className="rounded-md p-1 hover:bg-[rgba(108,93,215,0.22)] transition-colors"
+                      onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isCurrencyFilterOpen ? "rotate-0" : "-rotate-90"
+                        }`}
+                        style={{ color: SIDEBAR_TEXT_INACTIVE }}
+                      />
+                    </button>
+                  </div>
+                  {selectedCurrencyCodes.size > 0 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="text-sm font-medium hover:underline disabled:opacity-50"
+                        style={{ color: ACCENT }}
+                        onClick={() => setSelectedCurrencyCodes(new Set<string>())}
+                      >
+                        Сбросить
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {isCurrencyFilterOpen && (
+                  <div className="space-y-2">
+                    {currencyOptions.length === 0 ? (
+                      <div className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                        Нет валют.
+                      </div>
+                    ) : (
+                      currencyOptions.map((value) => (
+                        <label
+                          key={value}
+                          className="flex items-center gap-3 text-sm cursor-pointer"
+                          style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5"
+                            style={{ accentColor: ACCENT }}
+                            checked={selectedCurrencyCodes.has(value)}
+                            onChange={() => toggleCurrencySelection(value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Активы/обязательства
+                  </div>
+                  {selectedItemIds.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={resetItemFilters}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <ItemSelector
+                  items={activeItems}
+                  selectedIds={Array.from(selectedItemIds)}
+                  onChange={(ids) => setSelectedItemIds(new Set(ids))}
+                  selectionMode="multi"
+                  placeholder="Начните вводить название"
+                  emptyMessage="Нет активов или обязательств."
+                  noResultsMessage="Ничего не найдено"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
+                  getBankLogoUrl={itemBankLogoUrl}
+                  getBankName={itemBankName}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  itemCounts={itemTxCounts}
+                  resetSignal={itemFilterResetKey}
+                  ariaLabel="Активы/обязательства"
+                />
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Категории
+                  </div>
+                  {selectedCategoryFilterKeys.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={resetCategoryFilters}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <CategorySelector
+                  categoryNodes={categoryNodes}
+                  selectedPathKeys={selectedCategoryFilterKeys}
+                  onTogglePath={toggleCategoryFilterSelection}
+                  selectionMode="multi"
+                  placeholder="Поиск категории"
+                  showChips={true}
+                />
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Контрагенты
+                  </div>
+                  {selectedCounterpartyIds.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={resetCounterpartyFilters}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <CounterpartySelector
+                  counterparties={selectableCounterparties}
+                  selectedIds={Array.from(selectedCounterpartyIds)}
+                  onChange={(ids) => setSelectedCounterpartyIds(new Set(ids))}
+                  selectionMode="multi"
+                  placeholder="Начните вводить название"
+                  industries={industries}
+                  counterpartyCounts={counterpartyTxCounts}
+                  showChips={true}
+                />
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Комментарий
+                  </div>
+                  {!!commentFilter && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => setCommentFilter("")}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                  <AuthInput
+                    type="text"
+                    placeholder="Введите текст"
+                    value={commentFilter}
+                    onChange={(e) => setCommentFilter(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Статус подтверждения
+                  </div>
+                  {!(showConfirmed && showUnconfirmed) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setShowConfirmed(true);
+                        setShowUnconfirmed(true);
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <SegmentedSelector
+                  options={[
+                    { value: "confirmed", label: "Подтвержденные" },
+                    { value: "unconfirmed", label: "Неподтвержденные" },
+                  ]}
+                  value={[
+                    ...(showConfirmed ? ["confirmed"] : []),
+                    ...(showUnconfirmed ? ["unconfirmed"] : []),
+                  ]}
+                  onChange={(value) => {
+                    const values = Array.isArray(value) ? value : [];
+                    setShowConfirmed(values.includes("confirmed"));
+                    setShowUnconfirmed(values.includes("unconfirmed"));
+                  }}
+                  multiple={true}
+                />
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Тип транзакции
+                  </div>
+                  {(showActual !== defaultShowActual ||
+                    showPlanned !== (defaultShowPlannedRealized || defaultShowPlannedUnrealized)) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setShowActual(defaultShowActual);
+                        setShowPlanned(defaultShowPlannedRealized || defaultShowPlannedUnrealized);
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <SegmentedSelector
+                  options={[
+                    { value: "actual", label: "Фактическая" },
+                    { value: "planned", label: "Плановая" },
+                  ]}
+                  value={[
+                    ...(showActual ? ["actual"] : []),
+                    ...(showPlanned ? ["planned"] : []),
+                  ]}
+                  onChange={(value) => {
+                    const values = Array.isArray(value) ? value : [];
+                    setShowActual(values.includes("actual"));
+                    const newShowPlanned = values.includes("planned");
+                    setShowPlanned(newShowPlanned);
+                    // Если плановая отключена, сбрасываем подтипы
+                    if (!newShowPlanned) {
+                      setShowPlannedRealized(false);
+                      setShowPlannedUnrealized(false);
+                    } else if (!showPlannedRealized && !showPlannedUnrealized) {
+                      // Если плановая включена, но подтипы не выбраны, выбираем оба по умолчанию
+                      setShowPlannedRealized(true);
+                      setShowPlannedUnrealized(true);
+                    }
+                  }}
+                  multiple={true}
+                />
+              </div>
+
+              {showPlanned && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                      Тип плановой транзакции
+                    </div>
+                    {(showPlannedRealized !== defaultShowPlannedRealized ||
+                      showPlannedUnrealized !== defaultShowPlannedUnrealized) && (
+                      <button
+                        type="button"
+                        className="text-sm font-medium hover:underline disabled:opacity-50"
+                        style={{ color: ACCENT }}
+                        onClick={() => {
+                          setShowPlannedRealized(defaultShowPlannedRealized);
+                          setShowPlannedUnrealized(defaultShowPlannedUnrealized);
+                        }}
+                      >
+                        Сбросить
+                      </button>
+                    )}
+                  </div>
+                  <SegmentedSelector
+                    options={[
+                      {
+                        value: "realized",
+                        label: "Реализованная",
+                      },
+                      {
+                        value: "unrealized",
+                        label: "Нереализованная",
+                      },
+                    ]}
+                    value={[
+                      ...(showPlannedRealized ? ["realized"] : []),
+                      ...(showPlannedUnrealized ? ["unrealized"] : []),
+                    ]}
+                    onChange={(value) => {
+                      const values = Array.isArray(value) ? value : [];
+                      const newShowPlannedRealized = values.includes("realized");
+                      const newShowPlannedUnrealized = values.includes("unrealized");
+                      setShowPlannedRealized(newShowPlannedRealized);
+                      setShowPlannedUnrealized(newShowPlannedUnrealized);
+                      // Если оба подтипа отключены, отключаем "Плановая"
+                      if (!newShowPlannedRealized && !newShowPlannedUnrealized) {
+                        setShowPlanned(false);
+                      }
+                    }}
+                    multiple={true}
+                  />
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Статус транзакции
+                  </div>
+                  {(!showActive || showDeleted) && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => {
+                        setShowActive(true);
+                        setShowDeleted(false);
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                <SegmentedSelector
+                  options={[
+                    { value: "active", label: "Активные" },
+                    { value: "deleted", label: "Удаленные" },
+                  ]}
+                  value={[
+                    ...(showActive ? ["active"] : []),
+                    ...(showDeleted ? ["deleted"] : []),
+                  ]}
+                  onChange={(value) => {
+                    const values = Array.isArray(value) ? value : [];
+                    setShowActive(values.includes("active"));
+                    setShowDeleted(values.includes("deleted"));
+                  }}
+                  multiple={true}
+                />
+              </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Shared elements for both collapsed and expanded states */}
+            {/* QR Code input for receipt upload */}
+            <input
+              ref={qrCodeInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  handleQrCodeUpload(file);
+                }
+              }}
+            />
+            
+            {/* Dialog for importing statements - shared between collapsed and expanded states */}
+            <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
+              <DialogContent className="sm:max-w-[520px]">
+                <DialogHeader>
+                  <DialogTitle>Импорт</DialogTitle>
+                </DialogHeader>
+                <form className="grid gap-4" onSubmit={handleImportSubmit}>
+                  <div className="grid gap-2">
+                    <Label>Банк</Label>
+                    <div className="relative">
+                      <Input
+                        value={importBankSearch}
+                        onChange={(e) => {
+                          setImportBankSearch(e.target.value);
+                          setImportBankId(null);
+                          setImportBankDropdownOpen(true);
+                          setImportError(null);
+                        }}
+                        onClick={() => {
+                          setImportBankDropdownOpen(true);
+                          setImportError(null);
+                        }}
+                        onBlur={() =>
+                          setTimeout(() => setImportBankDropdownOpen(false), 150)
+                        }
+                        placeholder="Начните вводить название банка"
+                        className="border-2 border-border/70 bg-card shadow-none"
+                      />
+                      {importBankDropdownOpen && (
+                        <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-card shadow-lg">
+                          {filteredImportBanks.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-muted-foreground">
+                              Банк не найден
+                            </div>
+                          ) : (
+                            filteredImportBanks.map((bank) => (
+                              <button
+                                key={bank.id}
+                                type="button"
+                                className={[
+                                  "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50",
+                                  importBankId === bank.id ? "bg-slate-50" : "",
+                                ].join(" ")}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  setImportBankId(bank.id);
+                                  setImportBankSearch(bank.name);
+                                  setImportBankDropdownOpen(false);
+                                  setImportError(null);
+                                }}
+                              >
+                                {bank.logo_url ? (
+                                  <img
+                                    src={bank.logo_url}
+                                    alt=""
+                                    className="h-8 w-8 rounded border border-border/60 object-contain bg-white"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="h-8 w-8 rounded border border-border/60 bg-slate-100" />
+                                )}
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-medium">{bank.name}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {bank.license_status}
+                                  </span>
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {isImportBankInProgress && (
+                    <>
+                      <div className="grid gap-2">
+                        <Label>Файл .pdf</Label>
+                        <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
+                          Поддерживаются выписки Сбербанк Онлайн и Альфа-Банк. Можно
+                          загружать многостраничные документы.
+                        </div>
+                        <Input
+                          ref={importPdfInputRef}
+                          type="file"
+                          accept=".pdf"
+                          className="border-2 border-border/70 bg-card shadow-none"
+                          disabled={isImportFormDisabled}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] ?? null;
+                            setImportPdfFile(file);
+                            setImportError(null);
+                          }}
+                        />
+                      </div>
+
+                      <div className="grid gap-2">
+                        <Label>Счет</Label>
+                        <ItemSelector
+                          items={activeItems}
+                          selectedIds={importItemId ? [importItemId] : []}
+                          onChange={(ids) => {
+                            setImportItemId(ids[0] ?? null);
+                            setImportError(null);
+                          }}
+                          selectionMode="single"
+                          placeholder="Выберите счет"
+                          getItemTypeLabel={getItemTypeLabel}
+                          getItemKind={resolveItemEffectiveKind}
+                          getBankLogoUrl={itemBankLogoUrl}
+                          getBankName={itemBankName}
+                          getItemBalance={getItemDisplayBalanceCents}
+                          itemCounts={itemTxCounts}
+                          disabled={isImportFormDisabled}
+                          ariaLabel="Счет"
+                        />
+                      </div>
+
+                      <label className="flex items-center gap-3 px-3 py-2 text-xs text-foreground">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-violet-600"
+                          disabled={isImportFormDisabled}
+                          checked={importConfirmed}
+                          onChange={(e) => setImportConfirmed(e.target.checked)}
+                        />
+                        Импортировать транзакции сразу в статусе "Подтвержденная"
+                      </label>
+                    </>
+                  )}
+
+                  {isImportBankReady && (
+                    <>
+                  <div className="grid gap-2">
+                    <Label>Файл .xlsx</Label>
+                    <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
+                      Ожидаемые столбцы: {IMPORT_HEADERS.join(", ")}. Один лист,
+                      ровно 4 столбца.
+                    </div>
+                    <Input
+                      ref={importInputRef}
+                      type="file"
+                      accept=".xlsx"
+                      className="border-2 border-border/70 bg-card shadow-none"
+                      disabled={isImportFormDisabled}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        setImportFile(file);
+                        setImportError(null);
+                      }}
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>Счет</Label>
+                    <ItemSelector
+                      items={activeItems}
+                      selectedIds={importItemId ? [importItemId] : []}
+                      onChange={(ids) => {
+                        setImportItemId(ids[0] ?? null);
+                        setImportError(null);
+                      }}
+                      selectionMode="single"
+                      placeholder="Выберите счет"
+                    getItemTypeLabel={getItemTypeLabel}
+                    getItemKind={resolveItemEffectiveKind}
+                    getBankLogoUrl={itemBankLogoUrl}
+                      getBankName={itemBankName}
+                      getItemBalance={getItemDisplayBalanceCents}
+                      itemCounts={itemTxCounts}
+                      disabled={isImportFormDisabled}
+                      ariaLabel="Счет"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-3 px-3 py-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-violet-600"
+                      disabled={isImportFormDisabled}
+                      checked={importConfirmed}
+                      onChange={(e) => setImportConfirmed(e.target.checked)}
+                    />
+                    Импортировать транзакции сразу в статусе "Подтвержденная"
+                  </label>
+                  </>
+                )}
+
+                  {importError && (
+                    <div className="text-sm text-red-600">{importError}</div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-2 border-border/70 bg-card shadow-none"
+                      onClick={() => handleImportOpenChange(false)}
+                      disabled={isImporting}
+                    >
+                      Отмена
+                    </Button>
+                    <Button
+                      type="submit"
+                      className="bg-violet-600 text-white hover:bg-violet-700"
+                      disabled={isImportFormDisabled || !isImportSupported}
+                    >
+                      Импортировать
+                    </Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+            
+            {/* Dialog for creating/editing transactions - shared between collapsed and expanded states */}
+            <Dialog
+              open={isDialogOpen}
+              onOpenChange={(open) => {
+                if (open) {
+                  if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                  openCreateDialog();
+                } else {
+                  closeDialog();
+                }
+              }}
+            >
+              <DialogContent
+                className="sm:max-w-[560px]"
+                onCloseAutoFocus={(event) => {
+                  const lastActive = lastActiveElementRef.current;
+                  if (!lastActive) return;
+                  event.preventDefault();
+                  if (lastActive.isConnected) {
+                    lastActive.focus({ preventScroll: true });
+                  }
+                  lastActiveElementRef.current = null;
+                }}
+              >
+                <DialogHeader>
+                  <DialogTitle>
+                    {isBulkEdit
+                      ? "Редактировать транзакции"
+                      : isEditMode
+                        ? "Редактировать транзакцию"
+                        : "Добавить транзакцию"}
+                  </DialogTitle>
+                </DialogHeader>
+
+                <form
+                  className="grid gap-4"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setFormError(null);
+
+                    if (isBulkEdit) {
+                      const validationError = validateBulkEdit();
+                      if (validationError) {
+                        setFormError(validationError);
+                        return;
+                      }
+                      setIsBulkEditConfirmOpen(true);
+                      return;
+                    }
+
+                    if (isLoanRepayment) {
+                      if (!primaryItemId) {
+                        setFormError("Выберите актив, с которого производится погашение.");
+                        return;
+                      }
+                      if (!counterpartyItemId) {
+                        setFormError("Выберите обязательство.");
+                        return;
+                      }
+                      if (primaryIsMoex || counterpartyIsMoex) {
+                        setFormError("Операции погашения не поддерживают MOEX инструменты.");
                         return;
                       }
 
-                      if (isLoanRepayment) {
-                        if (!primaryItemId) {
-                          setFormError("Выберите актив, с которого производится погашение.");
+                      const primaryMeta = getEffectiveItemMeta(primaryItemId);
+                      if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+                        setFormError(
+                          "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
+                        );
+                        return;
+                      }
+                      const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
+                      if (
+                        counterpartyMeta?.minDate &&
+                        date < counterpartyMeta.minDate
+                      ) {
+                        setFormError(
+                          "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
+                        );
+                        return;
+                      }
+                      if (
+                        primaryMeta?.currencyCode &&
+                        counterpartyMeta?.currencyCode &&
+                        primaryMeta.currencyCode !== counterpartyMeta.currencyCode
+                      ) {
+                        setFormError(
+                          "Для погашения кредита выберите актив и обязательство в одной валюте."
+                        );
+                        return;
+                      }
+                      if (!loanTotalStr.trim()) {
+                        setFormError("Укажите общую сумму платежа.");
+                        return;
+                      }
+                      const totalCents = parseRubToCents(loanTotalStr);
+                      if (!Number.isFinite(totalCents) || totalCents < 0) {
+                        setFormError(
+                          "Введите корректную общую сумму платежа в формате 1234,56."
+                        );
+                        return;
+                      }
+                      if (!loanInterestStr.trim()) {
+                        setFormError("Укажите сумму в погашение процентов.");
+                        return;
+                      }
+                      const interestCents = parseRubToCents(loanInterestStr);
+                      if (!Number.isFinite(interestCents) || interestCents < 0) {
+                        setFormError(
+                          "Введите корректную сумму в погашение процентов в формате 1234,56."
+                        );
+                        return;
+                      }
+                      const principalCents = totalCents - interestCents;
+                      if (principalCents < 0) {
+                        setFormError(
+                          "Сумма в погашение процентов не может превышать общую сумму платежа."
+                        );
+                        return;
+                      }
+                      if (isPlannedTransaction) {
+                        const today = new Date().toISOString().slice(0, 10);
+                        if (date < today) {
+                          setFormError(
+                            "Плановая транзакция не может быть создана ранее текущего дня."
+                          );
                           return;
                         }
-                        if (!counterpartyItemId) {
-                          setFormError("Выберите обязательство.");
-                          return;
-                        }
-                        if (primaryIsMoex || counterpartyIsMoex) {
-                          setFormError("Операции погашения не поддерживают MOEX инструменты.");
-                          return;
-                        }
+                      }
 
-                        const primaryMeta = getEffectiveItemMeta(primaryItemId);
-                        if (primaryMeta?.minDate && date < primaryMeta.minDate) {
-                          setFormError(
-                            "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
-                          );
-                          return;
-                        }
-                        const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
-                        if (
-                          counterpartyMeta?.minDate &&
-                          date < counterpartyMeta.minDate
-                        ) {
-                          setFormError(
-                            "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
-                          );
-                          return;
-                        }
-                        if (
-                          primaryMeta?.currencyCode &&
-                          counterpartyMeta?.currencyCode &&
-                          primaryMeta.currencyCode !== counterpartyMeta.currencyCode
-                        ) {
-                          setFormError(
-                            "Для погашения кредита выберите актив и обязательство в одной валюте."
-                          );
-                          return;
-                        }
-                        if (!loanTotalStr.trim()) {
-                          setFormError("Укажите общую сумму платежа.");
-                          return;
-                        }
-                        const totalCents = parseRubToCents(loanTotalStr);
-                        if (!Number.isFinite(totalCents) || totalCents < 0) {
-                          setFormError(
-                            "Введите корректную общую сумму платежа в формате 1234,56."
-                          );
-                          return;
-                        }
-                        if (!loanInterestStr.trim()) {
-                          setFormError("Укажите сумму в погашение процентов.");
-                          return;
-                        }
-                        const interestCents = parseRubToCents(loanInterestStr);
-                        if (!Number.isFinite(interestCents) || interestCents < 0) {
-                          setFormError(
-                            "Введите корректную сумму в погашение процентов в формате 1234,56."
-                          );
-                          return;
-                        }
-                        const principalCents = totalCents - interestCents;
-                        if (principalCents < 0) {
-                          setFormError(
-                            "Сумма в погашение процентов не может превышать общую сумму платежа."
-                          );
-                          return;
-                        }
-                        if (isPlannedTransaction) {
-                          const today = new Date().toISOString().slice(0, 10);
-                          if (date < today) {
-                            setFormError(
-                              "Плановая транзакция не может быть создана ранее текущего дня."
-                            );
-                            return;
-                          }
-                        }
-
-                      try {
-                        const payloadTransactionType = isRealizeMode
-                          ? "ACTUAL"
-                          : formTransactionType;
-                        const transactionDate =
-                          isEditMode && editingTx
-                            ? mergeDateWithTime(date, editingTx.transaction_date)
-                            : date;
-                        const expenseCategoryId = resolveCategoryId(cat1, cat2, cat3);
-                        if (!expenseCategoryId) {
-                          setFormError("Выберите категорию из списка.");
-                          return;
-                        }
-                        const basePayload = {
-                          transaction_date: transactionDate,
-                          primary_item_id: primaryItemId,
-                          counterparty_id: counterpartyId ?? null,
-                          transaction_type: payloadTransactionType,
-                          description: description || null,
-                          comment: comment || null,
+                    try {
+                      const payloadTransactionType = isRealizeMode
+                        ? "ACTUAL"
+                        : formTransactionType;
+                      const transactionDate =
+                        isEditMode && editingTx
+                          ? mergeDateWithTime(date, editingTx.transaction_date)
+                          : date;
+                      const expenseCategoryId = resolveCategoryId(cat1, cat2, cat3);
+                      if (!expenseCategoryId) {
+                        setFormError("Выберите категорию из списка.");
+                        return;
+                      }
+                      const basePayload = {
+                        transaction_date: transactionDate,
+                        primary_item_id: primaryItemId,
+                        counterparty_id: counterpartyId ?? null,
+                        transaction_type: payloadTransactionType,
+                        description: description || null,
+                        comment: comment || null,
+                      };
+                        const expensePayload = {
+                          ...basePayload,
+                          counterparty_item_id: null,
+                          amount_rub: interestCents,
+                          amount_counterparty: null,
+                          direction: "EXPENSE" as const,
+                          category_id: expenseCategoryId,
                         };
-                          const expensePayload = {
-                            ...basePayload,
-                            counterparty_item_id: null,
-                            amount_rub: interestCents,
-                            amount_counterparty: null,
-                            direction: "EXPENSE" as const,
-                            category_id: expenseCategoryId,
-                          };
-                          const transferPayload = {
-                            ...basePayload,
-                            counterparty_item_id: counterpartyItemId,
-                            amount_rub: principalCents,
-                            amount_counterparty: null,
-                            direction: "TRANSFER" as const,
-                            category_id: null,
-                          };
+                        const transferPayload = {
+                          ...basePayload,
+                          counterparty_item_id: counterpartyItemId,
+                          amount_rub: principalCents,
+                          amount_counterparty: null,
+                          direction: "TRANSFER" as const,
+                          category_id: null,
+                        };
 
-                          await Promise.all([
-                            createTransaction(expensePayload),
-                            createTransaction(transferPayload),
-                          ]);
-                          if (realizeSource) {
-                            try {
-                              await updateTransactionStatus(
-                                realizeSource.id,
-                                "REALIZED"
-                              );
-                            } catch (e: any) {
-                              setError(
-                                e?.message ??
-                                  "Не удалось отметить плановую транзакцию как реализованную."
-                              );
-                            }
+                        await Promise.all([
+                          createTransaction(expensePayload),
+                          createTransaction(transferPayload),
+                        ]);
+                        if (realizeSource) {
+                          try {
+                            await updateTransactionStatus(
+                              realizeSource.id,
+                              "REALIZED"
+                            );
+                          } catch (e: any) {
+                            setError(
+                              e?.message ??
+                                "Не удалось отметить плановую транзакцию как реализованную."
+                            );
+                          }
                             setRealizeSource(null);
                           }
                           closeDialog();
@@ -4677,760 +5458,12 @@ function TransactionsView({
                   </form>
                 </DialogContent>
               </Dialog>
-
-              <input
-                ref={qrCodeInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    handleQrCodeUpload(file);
-                  }
-                }}
-              />
-              <Button
-                type="button"
-                variant="glass"
-                className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as React.CSSProperties
-                }
-                onClick={() => qrCodeInputRef.current?.click()}
-                disabled={isQrCodeLoading}
-              >
-                <QrCode className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                <span style={{ color: "white", opacity: 0.85 }}>
-                  {isQrCodeLoading ? "Обработка..." : "Загрузить чек"}
-                </span>
-              </Button>
-
-              <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="glass"
-                    className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
-                    style={
-                      {
-                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                      } as React.CSSProperties
-                    }
-                  >
-                    <FileDown className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                    <span style={{ color: "white", opacity: 0.85 }}>Импортировать выписку</span>
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[520px]">
-                  <DialogHeader>
-                    <DialogTitle>Импорт</DialogTitle>
-                  </DialogHeader>
-                  <form className="grid gap-4" onSubmit={handleImportSubmit}>
-                    <div className="grid gap-2">
-                      <Label>Банк</Label>
-                      <div className="relative">
-                        <Input
-                          value={importBankSearch}
-                          onChange={(e) => {
-                            setImportBankSearch(e.target.value);
-                            setImportBankId(null);
-                            setImportBankDropdownOpen(true);
-                            setImportError(null);
-                          }}
-                          onClick={() => {
-                            setImportBankDropdownOpen(true);
-                            setImportError(null);
-                          }}
-                          onBlur={() =>
-                            setTimeout(() => setImportBankDropdownOpen(false), 150)
-                          }
-                          placeholder="Начните вводить название банка"
-                          className="border-2 border-border/70 bg-card shadow-none"
-                        />
-                        {importBankDropdownOpen && (
-                          <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-card shadow-lg">
-                            {filteredImportBanks.length === 0 ? (
-                              <div className="px-3 py-2 text-sm text-muted-foreground">
-                                Банк не найден
-                              </div>
-                            ) : (
-                              filteredImportBanks.map((bank) => (
-                                <button
-                                  key={bank.id}
-                                  type="button"
-                                  className={[
-                                    "flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50",
-                                    importBankId === bank.id ? "bg-slate-50" : "",
-                                  ].join(" ")}
-                                  onMouseDown={(event) => event.preventDefault()}
-                                  onClick={() => {
-                                    setImportBankId(bank.id);
-                                    setImportBankSearch(bank.name);
-                                    setImportBankDropdownOpen(false);
-                                    setImportError(null);
-                                  }}
-                                >
-                                  {bank.logo_url ? (
-                                    <img
-                                      src={bank.logo_url}
-                                      alt=""
-                                      className="h-8 w-8 rounded border border-border/60 object-contain bg-white"
-                                      loading="lazy"
-                                    />
-                                  ) : (
-                                    <div className="h-8 w-8 rounded border border-border/60 bg-slate-100" />
-                                  )}
-                                  <div className="flex flex-col">
-                                    <span className="text-sm font-medium">{bank.name}</span>
-                                    <span className="text-xs text-muted-foreground">
-                                      {bank.license_status}
-                                    </span>
-                                  </div>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {isImportBankInProgress && (
-                      <>
-                        <div className="grid gap-2">
-                          <Label>Файл .pdf</Label>
-                          <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
-                            Поддерживаются выписки Сбербанк Онлайн и Альфа-Банк. Можно
-                            загружать многостраничные документы.
-                          </div>
-                          <Input
-                            ref={importPdfInputRef}
-                            type="file"
-                            accept=".pdf"
-                            className="border-2 border-border/70 bg-card shadow-none"
-                            disabled={isImportFormDisabled}
-                            onChange={(e) => {
-                              const file = e.target.files?.[0] ?? null;
-                              setImportPdfFile(file);
-                              setImportError(null);
-                            }}
-                          />
-                        </div>
-
-                        <div className="grid gap-2">
-                          <Label>Счет</Label>
-                          <ItemSelector
-                            items={activeItems}
-                            selectedIds={importItemId ? [importItemId] : []}
-                            onChange={(ids) => {
-                              setImportItemId(ids[0] ?? null);
-                              setImportError(null);
-                            }}
-                            selectionMode="single"
-                            placeholder="Выберите счет"
-                            getItemTypeLabel={getItemTypeLabel}
-                            getItemKind={resolveItemEffectiveKind}
-                            getBankLogoUrl={itemBankLogoUrl}
-                            getBankName={itemBankName}
-                            getItemBalance={getItemDisplayBalanceCents}
-                            itemCounts={itemTxCounts}
-                            disabled={isImportFormDisabled}
-                            ariaLabel="Счет"
-                          />
-                        </div>
-
-                        <label className="flex items-center gap-3 px-3 py-2 text-xs text-foreground">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 accent-violet-600"
-                            disabled={isImportFormDisabled}
-                            checked={importConfirmed}
-                            onChange={(e) => setImportConfirmed(e.target.checked)}
-                          />
-                          Импортировать транзакции сразу в статусе "Подтвержденная"
-                        </label>
-                      </>
-                    )}
-
-                    {isImportBankReady && (
-                      <>
-                    <div className="grid gap-2">
-                      <Label>Файл .xlsx</Label>
-                      <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
-                        Ожидаемые столбцы: {IMPORT_HEADERS.join(", ")}. Один лист,
-                        ровно 4 столбца.
-                      </div>
-                      <Input
-                        ref={importInputRef}
-                        type="file"
-                        accept=".xlsx"
-                        className="border-2 border-border/70 bg-card shadow-none"
-                        disabled={isImportFormDisabled}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] ?? null;
-                          setImportFile(file);
-                          setImportError(null);
-                        }}
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label>Счет</Label>
-                      <ItemSelector
-                        items={activeItems}
-                        selectedIds={importItemId ? [importItemId] : []}
-                        onChange={(ids) => {
-                          setImportItemId(ids[0] ?? null);
-                          setImportError(null);
-                        }}
-                        selectionMode="single"
-                        placeholder="Выберите счет"
-                      getItemTypeLabel={getItemTypeLabel}
-                      getItemKind={resolveItemEffectiveKind}
-                      getBankLogoUrl={itemBankLogoUrl}
-                        getBankName={itemBankName}
-                        getItemBalance={getItemDisplayBalanceCents}
-                        itemCounts={itemTxCounts}
-                        disabled={isImportFormDisabled}
-                        ariaLabel="Счет"
-                      />
-                    </div>
-
-                    <label className="flex items-center gap-3 px-3 py-2 text-xs text-foreground">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 accent-violet-600"
-                        disabled={isImportFormDisabled}
-                        checked={importConfirmed}
-                        onChange={(e) => setImportConfirmed(e.target.checked)}
-                      />
-                      Импортировать транзакции сразу в статусе "Подтвержденная"
-                    </label>
-                    </>
-                  )}
-
-                    {importError && (
-                      <div className="text-sm text-red-600">{importError}</div>
-                    )}
-
-                    <div className="flex justify-end gap-2 pt-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="border-2 border-border/70 bg-card shadow-none"
-                        onClick={() => handleImportOpenChange(false)}
-                        disabled={isImporting}
-                      >
-                        Отмена
-                      </Button>
-                      <Button
-                        type="submit"
-                        className="bg-violet-600 text-white hover:bg-violet-700"
-                        disabled={isImportFormDisabled || !isImportSupported}
-                      >
-                        Импортировать
-                      </Button>
-                    </div>
-                  </form>
-                </DialogContent>
-              </Dialog>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Вид транзакции
-                  </div>
-                  {selectedDirections.size > 0 && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() =>
-                        setSelectedDirections(
-                          new Set<TransactionOut["direction"]>()
-                        )
-                      }
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <SegmentedSelector
-                  options={[
-                    { value: "INCOME", label: "Доход" },
-                    { value: "EXPENSE", label: "Расход" },
-                    { value: "TRANSFER", label: "Перевод" },
-                  ]}
-                  value={selectedDirections}
-                  onChange={(value) => {
-                    if (value instanceof Set) {
-                      setSelectedDirections(value as Set<TransactionOut["direction"]>);
-                    } else if (Array.isArray(value)) {
-                      setSelectedDirections(new Set(value as TransactionOut["direction"][]));
-                    }
-                  }}
-                  multiple={true}
-                />
-              </div>
-              
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Сумма транзакции
-                  </div>
-                  {(amountFrom || amountTo) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setAmountFrom("");
-                        setAmountTo("");
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
-                      <AuthInput
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="От"
-                        value={amountFrom}
-                        onChange={(e) =>
-                          setAmountFrom(formatRubInput(e.target.value))
-                        }
-                        onBlur={() =>
-                          setAmountFrom((prev) => normalizeRubOnBlur(prev))
-                        }
-                      />
-                    </div>
-                  </div>
-                  <span className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
-                      <AuthInput
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="До"
-                        value={amountTo}
-                        onChange={(e) => setAmountTo(formatRubInput(e.target.value))}
-                        onBlur={() => setAmountTo((prev) => normalizeRubOnBlur(prev))}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Дата транзакции
-                  </div>
-                  {(dateFrom || dateTo) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setDateFrom("");
-                        setDateTo("");
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
-                      <AuthInput
-                        type="date"
-                        value={dateFrom}
-                        onChange={(e) => setDateFrom(e.target.value)}
-                        style={{
-                          color: !dateFrom ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <span className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
-                      <AuthInput
-                        type="date"
-                        value={dateTo}
-                        onChange={(e) => setDateTo(e.target.value)}
-                        style={{
-                          color: !dateTo ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-1">
-                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                      Валюта
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Свернуть/развернуть"
-                      className="rounded-md p-1 hover:bg-[rgba(108,93,215,0.22)] transition-colors"
-                      onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
-                    >
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${
-                          isCurrencyFilterOpen ? "rotate-0" : "-rotate-90"
-                        }`}
-                        style={{ color: SIDEBAR_TEXT_INACTIVE }}
-                      />
-                    </button>
-                  </div>
-                  {selectedCurrencyCodes.size > 0 && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="text-sm font-medium hover:underline disabled:opacity-50"
-                        style={{ color: ACCENT }}
-                        onClick={() => setSelectedCurrencyCodes(new Set<string>())}
-                      >
-                        Сбросить
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {isCurrencyFilterOpen && (
-                  <div className="space-y-2">
-                    {currencyOptions.length === 0 ? (
-                      <div className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
-                        Нет валют.
-                      </div>
-                    ) : (
-                      currencyOptions.map((value) => (
-                        <label
-                          key={value}
-                          className="flex items-center gap-3 text-sm cursor-pointer"
-                          style={{ color: SIDEBAR_TEXT_ACTIVE }}
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5"
-                            style={{ accentColor: ACCENT }}
-                            checked={selectedCurrencyCodes.has(value)}
-                            onChange={() => toggleCurrencySelection(value)}
-                          />
-                          <span>{value}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Активы/обязательства
-                  </div>
-                  {selectedItemIds.size > 0 && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={resetItemFilters}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <ItemSelector
-                  items={activeItems}
-                  selectedIds={Array.from(selectedItemIds)}
-                  onChange={(ids) => setSelectedItemIds(new Set(ids))}
-                  selectionMode="multi"
-                  placeholder="Начните вводить название"
-                  emptyMessage="Нет активов или обязательств."
-                  noResultsMessage="Ничего не найдено"
-                  getItemTypeLabel={getItemTypeLabel}
-                  getItemKind={resolveItemEffectiveKind}
-                  getBankLogoUrl={itemBankLogoUrl}
-                  getBankName={itemBankName}
-                  getItemBalance={getItemDisplayBalanceCents}
-                  itemCounts={itemTxCounts}
-                  resetSignal={itemFilterResetKey}
-                  ariaLabel="Активы/обязательства"
-                />
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Категории
-                  </div>
-                  {selectedCategoryFilterKeys.size > 0 && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={resetCategoryFilters}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <CategorySelector
-                  categoryNodes={categoryNodes}
-                  selectedPathKeys={selectedCategoryFilterKeys}
-                  onTogglePath={toggleCategoryFilterSelection}
-                  selectionMode="multi"
-                  placeholder="Поиск категории"
-                  showChips={true}
-                />
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Контрагенты
-                  </div>
-                  {selectedCounterpartyIds.size > 0 && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={resetCounterpartyFilters}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <CounterpartySelector
-                  counterparties={selectableCounterparties}
-                  selectedIds={Array.from(selectedCounterpartyIds)}
-                  onChange={(ids) => setSelectedCounterpartyIds(new Set(ids))}
-                  selectionMode="multi"
-                  placeholder="Начните вводить название"
-                  industries={industries}
-                  counterpartyCounts={counterpartyTxCounts}
-                  showChips={true}
-                />
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Комментарий
-                  </div>
-                  {!!commentFilter && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => setCommentFilter("")}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
-                  <AuthInput
-                    type="text"
-                    placeholder="Введите текст"
-                    value={commentFilter}
-                    onChange={(e) => setCommentFilter(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Статус подтверждения
-                  </div>
-                  {!(showConfirmed && showUnconfirmed) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setShowConfirmed(true);
-                        setShowUnconfirmed(true);
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <SegmentedSelector
-                  options={[
-                    { value: "confirmed", label: "Подтвержденные" },
-                    { value: "unconfirmed", label: "Неподтвержденные" },
-                  ]}
-                  value={[
-                    ...(showConfirmed ? ["confirmed"] : []),
-                    ...(showUnconfirmed ? ["unconfirmed"] : []),
-                  ]}
-                  onChange={(value) => {
-                    const values = Array.isArray(value) ? value : [];
-                    setShowConfirmed(values.includes("confirmed"));
-                    setShowUnconfirmed(values.includes("unconfirmed"));
-                  }}
-                  multiple={true}
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Тип транзакции
-                  </div>
-                  {(showActual !== defaultShowActual ||
-                    showPlanned !== (defaultShowPlannedRealized || defaultShowPlannedUnrealized)) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setShowActual(defaultShowActual);
-                        setShowPlanned(defaultShowPlannedRealized || defaultShowPlannedUnrealized);
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <SegmentedSelector
-                  options={[
-                    { value: "actual", label: "Фактическая" },
-                    { value: "planned", label: "Плановая" },
-                  ]}
-                  value={[
-                    ...(showActual ? ["actual"] : []),
-                    ...(showPlanned ? ["planned"] : []),
-                  ]}
-                  onChange={(value) => {
-                    const values = Array.isArray(value) ? value : [];
-                    setShowActual(values.includes("actual"));
-                    const newShowPlanned = values.includes("planned");
-                    setShowPlanned(newShowPlanned);
-                    // Если плановая отключена, сбрасываем подтипы
-                    if (!newShowPlanned) {
-                      setShowPlannedRealized(false);
-                      setShowPlannedUnrealized(false);
-                    } else if (!showPlannedRealized && !showPlannedUnrealized) {
-                      // Если плановая включена, но подтипы не выбраны, выбираем оба по умолчанию
-                      setShowPlannedRealized(true);
-                      setShowPlannedUnrealized(true);
-                    }
-                  }}
-                  multiple={true}
-                />
-              </div>
-
-              {showPlanned && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                      Тип плановой транзакции
-                    </div>
-                    {(showPlannedRealized !== defaultShowPlannedRealized ||
-                      showPlannedUnrealized !== defaultShowPlannedUnrealized) && (
-                      <button
-                        type="button"
-                        className="text-sm font-medium hover:underline disabled:opacity-50"
-                        style={{ color: ACCENT }}
-                        onClick={() => {
-                          setShowPlannedRealized(defaultShowPlannedRealized);
-                          setShowPlannedUnrealized(defaultShowPlannedUnrealized);
-                        }}
-                      >
-                        Сбросить
-                      </button>
-                    )}
-                  </div>
-                  <SegmentedSelector
-                    options={[
-                      {
-                        value: "realized",
-                        label: "Реализованная",
-                      },
-                      {
-                        value: "unrealized",
-                        label: "Нереализованная",
-                      },
-                    ]}
-                    value={[
-                      ...(showPlannedRealized ? ["realized"] : []),
-                      ...(showPlannedUnrealized ? ["unrealized"] : []),
-                    ]}
-                    onChange={(value) => {
-                      const values = Array.isArray(value) ? value : [];
-                      const newShowPlannedRealized = values.includes("realized");
-                      const newShowPlannedUnrealized = values.includes("unrealized");
-                      setShowPlannedRealized(newShowPlannedRealized);
-                      setShowPlannedUnrealized(newShowPlannedUnrealized);
-                      // Если оба подтипа отключены, отключаем "Плановая"
-                      if (!newShowPlannedRealized && !newShowPlannedUnrealized) {
-                        setShowPlanned(false);
-                      }
-                    }}
-                    multiple={true}
-                  />
-                </div>
-              )}
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Статус транзакции
-                  </div>
-                  {(!showActive || showDeleted) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setShowActive(true);
-                        setShowDeleted(false);
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <SegmentedSelector
-                  options={[
-                    { value: "active", label: "Активные" },
-                    { value: "deleted", label: "Удаленные" },
-                  ]}
-                  value={[
-                    ...(showActive ? ["active"] : []),
-                    ...(showDeleted ? ["deleted"] : []),
-                  ]}
-                  onChange={(value) => {
-                    const values = Array.isArray(value) ? value : [];
-                    setShowActive(values.includes("active"));
-                    setShowDeleted(values.includes("deleted"));
-                  }}
-                  multiple={true}
-                />
-              </div>
-                </div>
-              </div>
-            )}
             </div>
           </div>
         </aside>
 
         <div className="flex-1 pr-8">
-          <div className="space-y-4">
+          <div className="space-y-4 pt-[10px]">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <input

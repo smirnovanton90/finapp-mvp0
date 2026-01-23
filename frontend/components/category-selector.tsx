@@ -131,7 +131,7 @@ function buildCategoryPaths(
 function resolveCategoryIcon(
   categoryId: number | null,
   categoryLookup: ReturnType<typeof buildCategoryLookup>
-): ComponentType<{ className?: string; strokeWidth?: number }> {
+): ComponentType<{ className?: string; strokeWidth?: number; style?: React.CSSProperties; "aria-hidden"?: string }> {
   if (!categoryId) return CATEGORY_ICON_FALLBACK;
   const path = categoryLookup.idToPath.get(categoryId);
   if (!path || path.length === 0) return CATEGORY_ICON_FALLBACK;

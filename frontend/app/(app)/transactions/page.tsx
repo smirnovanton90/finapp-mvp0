@@ -4995,7 +4995,13 @@ function TransactionsView({
                     { value: "TRANSFER", label: "Перевод" },
                   ]}
                   value={selectedDirections}
-                  onChange={(value) => setSelectedDirections(value as Set<TransactionOut["direction"]>)}
+                  onChange={(value) => {
+                    if (value instanceof Set) {
+                      setSelectedDirections(value as Set<TransactionOut["direction"]>);
+                    } else if (Array.isArray(value)) {
+                      setSelectedDirections(new Set(value as TransactionOut["direction"][]));
+                    }
+                  }}
                   multiple={true}
                 />
               </div>

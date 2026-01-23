@@ -11,7 +11,7 @@ export interface SegmentedOption {
 interface SegmentedSelectorProps {
   options: SegmentedOption[];
   value: string | string[] | Set<string>;
-  onChange: (value: string | string[]) => void;
+  onChange: (value: string | string[] | Set<string>) => void;
   multiple?: boolean;
   className?: string;
 }

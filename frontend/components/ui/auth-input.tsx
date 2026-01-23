@@ -6,7 +6,7 @@ import { Input } from "./input";
 import { useTheme } from "@/components/theme-provider";
 import { ACCENT2, ACCENT_FILL_LIGHT, ACCENT_FILL_MEDIUM, PLACEHOLDER_COLOR, ACTIVE_TEXT } from "@/lib/colors";
 
-interface AuthInputProps extends React.ComponentProps<"input"> {
+interface AuthInputProps extends Omit<React.ComponentProps<"input">, "prefix"> {
   icon?: "user" | "lock";
   gradientDirection?: "left-to-right" | "right-to-left";
   /** Optional left adornment (e.g. icon, logo). When set, inner container gets pl-11. */

@@ -14,6 +14,7 @@ import { ItemOut, CounterpartyOut, API_BASE } from "@/lib/api";
 import { getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
+import { useImagePreloader } from "@/hooks/use-image-preloader";
 import {
   MODAL_BG,
   BACKGROUND_DT,
@@ -232,6 +233,22 @@ export function AssetCard({
     setShowCounterpartyIcon(!counterpartyLogoUrlFull);
   }, [counterpartyLogoUrlFull]);
 
+  // Track image loading using universal hook
+  // Main image: hasPhoto or icon3dPath (if exists)
+  // Counterparty logo: only if exists and not showing fallback icon
+  const mainImageUrl = hasPhoto || icon3dPath || null;
+  const counterpartyLogoUrlForPreloader = (counterpartyLogoUrlFull && !showCounterpartyIcon) 
+    ? counterpartyLogoUrlFull 
+    : null;
+
+  const { isReady: isCardReady, imageRefs, setImageRef, handleImageLoad, handleImageError } = useImagePreloader({
+    imageUrls: [mainImageUrl, counterpartyLogoUrlForPreloader],
+    cacheCheckDelay: 0,
+  });
+
+  const mainImageRef = imageRefs[0];
+  const counterpartyLogoRef = imageRefs[1];
+
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
   const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
   const badgeColor = isDeleted ? PLACEHOLDER_COLOR_DARK : undefined;
@@ -241,6 +258,8 @@ export function AssetCard({
       className="relative rounded-lg overflow-hidden"
       style={{
         backgroundColor: cardBg,
+        opacity: isCardReady ? 1 : 0,
+        transition: "opacity 0.2s ease-in-out",
       }}
     >
       {/* Left stripe */}
@@ -257,30 +276,36 @@ export function AssetCard({
             {hasPhoto ? (
               // 1. Priority: User uploaded image
               <img
+                ref={(el) => setImageRef(0, el)}
                 src={hasPhoto}
                 alt={item.name}
                 className="w-[100px] h-[100px] rounded-lg object-cover"
+                onLoad={() => handleImageLoad(0)}
+                onError={() => handleImageError(0)}
               />
             ) : (
               // 2. Priority: 3D icon, fallback to 2D icon
               <>
                 {icon3dPath && (
                   <img
+                    ref={(el) => setImageRef(0, el)}
                     src={icon3dPath}
                     alt=""
                     className="w-[100px] h-[100px] object-contain"
+                    onLoad={() => handleImageLoad(0)}
                     onError={() => {
                       // Try WebP if PNG failed, otherwise fallback to 2D icon
                       if (iconFormat === "png") {
                         setIconFormat("webp");
                       } else {
                         setIconFormat(null);
+                        handleImageError(0); // 2D icon doesn't need loading, mark as "loaded"
                       }
                     }}
                   />
                 )}
                 {!icon3dPath && TypeIcon && (
-                  // 3. Priority: 2D icon
+                  // 3. Priority: 2D icon (doesn't need loading)
                   <div className="w-full h-full flex items-center justify-center">
                     <TypeIcon
                       className="w-16 h-16"
@@ -324,11 +349,16 @@ export function AssetCard({
                 <div className="relative h-5 w-5 shrink-0">
                   {counterpartyLogoUrlFull && !showCounterpartyIcon ? (
                     <img
+                      ref={(el) => setImageRef(1, el)}
                       src={counterpartyLogoUrlFull}
                       alt=""
                       className="h-5 w-5 rounded object-contain"
                       style={{ border: `1px solid ${PLACEHOLDER_COLOR_DARK}40` }}
-                      onError={() => setShowCounterpartyIcon(true)}
+                      onLoad={() => handleImageLoad(1)}
+                      onError={() => {
+                        setShowCounterpartyIcon(true);
+                        handleImageError(1); // Fallback icon doesn't need loading, mark as "loaded"
+                      }}
                     />
                   ) : (
                     <div

@@ -36,6 +36,7 @@ import {
   sortItemsByTransactionCount,
 } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
+import { formatAmount } from "@/lib/item-utils";
 import { cn } from "@/lib/utils";
 
 type ChartPoint = {
@@ -208,12 +209,6 @@ function formatDateLabel(dateKey: string) {
   return `${day}.${month}.${year}`;
 }
 
-function formatAmount(valueInCents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
-}
 
 function formatRate(value: number) {
   return new Intl.NumberFormat("ru-RU", {

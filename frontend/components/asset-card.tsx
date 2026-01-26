@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ItemOut, CounterpartyOut, API_BASE } from "@/lib/api";
-import { getEffectiveItemKind } from "@/lib/item-utils";
+import { getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
 import {
@@ -142,13 +142,6 @@ const CURRENCY_BADGE_CLASSES: Record<string, string> = {
 
 function getCurrencyBadgeClass(code: string) {
   return CURRENCY_BADGE_CLASSES[code] ?? "bg-muted/20 text-slate-600";
-}
-
-function formatAmount(valueInCents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
 }
 
 function formatRate(value: number) {
@@ -404,8 +397,51 @@ export function AssetCard({
           </div>
         </div>
 
+        {/* Deposit details */}
+        {item.type_code === "deposit" && (
+          (item.deposit_term_days != null || item.deposit_end_date != null || item.interest_rate != null) && (
+            <div className="flex items-center justify-center gap-4 mt-3">
+              <div className="flex flex-col items-center gap-1 flex-1">
+                {item.deposit_term_days != null && (
+                  <div className="flex items-baseline gap-2 text-center">
+                    <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      Срок:
+                    </span>
+                    <span className="text-[18px] font-normal" style={{ color: textColor }}>
+                      {item.deposit_term_days}
+                    </span>
+                  </div>
+                )}
+                {item.deposit_end_date != null && (
+                  <div className="flex items-baseline gap-2 text-center">
+                    <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      Закроется:
+                    </span>
+                    <span className="text-[18px] font-normal" style={{ color: textColor }}>
+                      {formatShortDate(item.deposit_end_date)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {item.interest_rate != null && (
+                <div className="flex flex-col items-center gap-1 text-center flex-1">
+                  <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    Ставка
+                  </span>
+                  <span className="text-2xl font-medium" style={{ color: textColor }}>
+                    {new Intl.NumberFormat("ru-RU", {
+                      minimumFractionDigits: 1,
+                      maximumFractionDigits: 1,
+                    }).format(item.interest_rate)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )
+        )}
+
         {/* Financial info */}
-        <div className="grid grid-cols-3 gap-4 mt-4 justify-items-center">
+        <div className="grid grid-cols-3 gap-4 mt-3 justify-items-center">
           {showBalanceAndRate ? (
             <>
               <div className="text-center">

@@ -121,7 +121,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               children
             ) : (
               <div className="w-full h-full flex items-center">
-                <div className="w-[900px] mx-auto">
+                <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto">
                   {children}
                 </div>
               </div>

@@ -124,7 +124,7 @@ import {
   updateTransactionStatus,
   API_BASE,
 } from "@/lib/api";
-import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import {
@@ -257,14 +257,6 @@ function normalizeCounterpartySearch(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
 }
 
-
-function formatAmount(valueInCents: number) {
-  const hasCents = Math.abs(valueInCents) % 100 !== 0;
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: hasCents ? 2 : 0,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
-}
 
 function formatRub(valueInCents: number) {
   const formatted = new Intl.NumberFormat("ru-RU", {
@@ -5193,7 +5185,7 @@ function TransactionsView({
               </Dialog>
 
         <div className="flex-1 min-w-0">
-          <div className="w-full max-w-[900px] mx-auto">
+          <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto">
             <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">

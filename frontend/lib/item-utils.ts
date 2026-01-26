@@ -5,11 +5,21 @@ export function normalizeItemSearch(value: string) {
 }
 
 export function formatAmount(valueInCents: number) {
-  const hasCents = Math.abs(valueInCents) % 100 !== 0;
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: hasCents ? 2 : 0,
+  // Format with 2 decimal places
+  const formatted = new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(valueInCents / 100);
+  
+  // Remove trailing zeros in fractional part
+  // 1 400 000,00 -> 1 400 000
+  // 1 400 000,10 -> 1 400 000,1
+  // 1 400 000,15 -> 1 400 000,15
+  if (formatted.includes(",")) {
+    const trimmed = formatted.replace(/,?0+$/, "");
+    return trimmed;
+  }
+  return formatted;
 }
 
 export function buildItemTransactionCounts(

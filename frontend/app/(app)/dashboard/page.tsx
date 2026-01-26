@@ -37,7 +37,7 @@ import {
   LimitOut,
   TransactionOut,
 } from "@/lib/api";
-import { getEffectiveItemKind } from "@/lib/item-utils";
+import { getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import {
   OVERDUE_TRANSACTIONS_GRADIENT,
   NO_OVERDUE_TRANSACTIONS_GRADIENT,
@@ -220,12 +220,7 @@ function buildTicks(minValue: number, maxValue: number) {
 }
 
 function formatRub(valueInCents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
+  return `${formatAmount(valueInCents)} RUB`;
 }
 
 function formatPercent(value: number) {

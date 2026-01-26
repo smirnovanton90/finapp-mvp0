@@ -92,7 +92,7 @@ import {
   TransactionOut,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
-import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 
@@ -156,12 +156,6 @@ function getCounterpartyFilterText(counterparty: CounterpartyOut) {
   return [base, extra].filter(Boolean).join(" ");
 }
 
-function formatAmount(valueInCents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
-}
 
 function formatChainAmount(chain: TransactionChainOut) {
   if (

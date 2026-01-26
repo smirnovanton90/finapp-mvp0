@@ -109,7 +109,7 @@ import {
   RepaymentType,
   PaymentAmountKind,
 } from "@/lib/api";
-import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
 
@@ -468,13 +468,6 @@ function formatRub(valueInCents: number) {
   }).format(valueInCents / 100);
 }
 
-function formatAmount(valueInCents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
-}
-
 function formatMoney(valueInCents: number | null, currencyCode?: string | null) {
   if (valueInCents == null) return "-";
   const code = currencyCode ?? "";
@@ -631,6 +624,7 @@ export default function Page() {
   const [filterTypeCodes, setFilterTypeCodes] = useState<Set<string>>(new Set());
   const [filterCurrencyCodes, setFilterCurrencyCodes] = useState<Set<string>>(new Set());
   const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
+  const [isTypeCodeFilterOpen, setIsTypeCodeFilterOpen] = useState(false);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ItemOut | null>(null);
@@ -4837,6 +4831,80 @@ export default function Page() {
             />
           </FilterSection>
 
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-1">
+                <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                  Вид актива/обязательства
+                </div>
+                <button
+                  type="button"
+                  aria-label="Свернуть/развернуть"
+                  className="rounded-md p-1 hover:bg-[rgba(108,93,215,0.22)] transition-colors"
+                  onClick={() => setIsTypeCodeFilterOpen((prev) => !prev)}
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${
+                      isTypeCodeFilterOpen ? "rotate-0" : "-rotate-90"
+                    }`}
+                    style={{ color: PLACEHOLDER_COLOR_DARK }}
+                  />
+                </button>
+              </div>
+              {filterTypeCodes.size > 0 && (
+                <button
+                  type="button"
+                  className="text-sm font-medium hover:underline disabled:opacity-50"
+                  style={{ color: ACCENT }}
+                  onClick={() => setFilterTypeCodes(new Set())}
+                >
+                  Сбросить
+                </button>
+              )}
+            </div>
+
+            {isTypeCodeFilterOpen && (
+              <div className="space-y-2">
+                {availableTypeCodes.length === 0 ? (
+                  <div className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    Список видов пока пуст.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {availableTypeCodes.map((typeCode) => {
+                      const label = ITEM_TYPE_LABELS[typeCode] || typeCode;
+                      const isChecked = filterTypeCodes.has(typeCode);
+                      return (
+                        <label
+                          key={typeCode}
+                          className="flex items-center gap-2 cursor-pointer text-sm"
+                          style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            style={{ accentColor: ACCENT }}
+                            checked={isChecked}
+                            onChange={() => {
+                              const next = new Set(filterTypeCodes);
+                              if (isChecked) {
+                                next.delete(typeCode);
+                              } else {
+                                next.add(typeCode);
+                              }
+                              setFilterTypeCodes(next);
+                            }}
+                          />
+                          {label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <FilterSection
             label="Статус"
             onReset={() => setFilterStatus(new Set(["active"]))}
@@ -5022,62 +5090,17 @@ export default function Page() {
               </div>
             )}
           </div>
-
-          <FilterSection
-            label="Вид актива/обязательства"
-            onReset={() => setFilterTypeCodes(new Set())}
-            showReset={filterTypeCodes.size > 0}
-          >
-            {availableTypeCodes.length === 0 ? (
-              <div className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                Список видов пока пуст.
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {availableTypeCodes.map((typeCode) => {
-                  const label = ITEM_TYPE_LABELS[typeCode] || typeCode;
-                  const isChecked = filterTypeCodes.has(typeCode);
-                  return (
-                    <label
-                      key={typeCode}
-                      className="flex items-center gap-2 cursor-pointer text-sm"
-                      style={{ color: SIDEBAR_TEXT_ACTIVE }}
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        checked={isChecked}
-                        onChange={() => {
-                          const next = new Set(filterTypeCodes);
-                          if (isChecked) {
-                            next.delete(typeCode);
-                          } else {
-                            next.add(typeCode);
-                          }
-                          setFilterTypeCodes(next);
-                        }}
-                      />
-                      {label}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </FilterSection>
         </FilterPanel>
 
         <div className="flex-1 min-w-0">
-          <div className="w-full max-w-[900px] mx-auto" style={{ paddingTop: "30px" }}>
+          <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
             {visibleItems.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 Нет активов или обязательств
               </div>
             ) : (
               <div 
-                style={{
-                  columnCount: 2,
-                  columnGap: "1rem",
-                }}
+                className="columns-2 xl:columns-3 gap-4"
               >
                 {visibleItems.map((item, index) => {
                   const rate = rateByCode[item.currency_code];

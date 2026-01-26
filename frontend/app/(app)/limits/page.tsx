@@ -52,6 +52,7 @@ import {
   TransactionOut,
   updateLimit,
 } from "@/lib/api";
+import { formatAmount } from "@/lib/item-utils";
 import { useOnboarding } from "@/components/onboarding-context";
 
 const CATEGORY_PLACEHOLDER = "-";
@@ -73,12 +74,7 @@ type CategoryPathOption = {
 };
 
 function formatRub(valueInCents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
+  return `${formatAmount(valueInCents)} RUB`;
 }
 
 function formatAmountInput(valueInCents: number) {

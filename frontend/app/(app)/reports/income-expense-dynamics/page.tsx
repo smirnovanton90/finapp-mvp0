@@ -26,6 +26,7 @@ import {
 import { CATEGORY_ICON_BY_NAME, CATEGORY_ICON_FALLBACK } from "@/lib/category-icons";
 import { CategoryNode } from "@/lib/categories";
 import { cn } from "@/lib/utils";
+import { formatAmount } from "@/lib/item-utils";
 
 type CategoryRow = {
   id: number;
@@ -75,12 +76,7 @@ function formatMonthLabel(monthKey: string) {
 }
 
 function formatRub(valueInCents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
+  return `${formatAmount(valueInCents)} RUB`;
 }
 
 function buildCategoryIndex(nodes: CategoryNode[]) {

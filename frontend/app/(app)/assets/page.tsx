@@ -25,9 +25,11 @@ import {
   Info,
   Upload,
   Camera,
+  ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogPortal } from "@/components/ui/dialog";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,7 +44,7 @@ import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
-import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT } from "@/lib/colors";
+import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 
 import {
@@ -53,7 +55,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSession } from "next-auth/react";
 
 import {
@@ -92,6 +94,8 @@ import {
   updateItem,
   archiveItem,
   closeItem,
+  uploadItemPhoto,
+  API_BASE,
   CardKind,
   ItemKind,
   ItemCreate,
@@ -725,6 +729,7 @@ export default function Page() {
   const itemPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [icon3dFormat, setIcon3dFormat] = useState<"png" | "webp" | null>("png");
   const [show2dIcon, setShow2dIcon] = useState(false);
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
 
   useEffect(() => {
     if (!isWizardOpen) {
@@ -742,23 +747,30 @@ export default function Page() {
       URL.revokeObjectURL(itemPhotoPreview);
     }
 
+    const getEditingItemPhotoUrl = () => {
+      if (!editingItem?.photo_url) return null;
+      return editingItem.photo_url.startsWith("http")
+        ? editingItem.photo_url
+        : `${API_BASE}${editingItem.photo_url.startsWith("/") ? editingItem.photo_url : `/${editingItem.photo_url}`}`;
+    };
+
     if (!file) {
       setItemPhotoFile(null);
-      setItemPhotoPreview(editingItem?.photo_url ?? null);
+      setItemPhotoPreview(getEditingItemPhotoUrl());
       return;
     }
 
     if (!ALLOWED_PHOTO_TYPES.includes(file.type)) {
       setItemPhotoError("Разрешены PNG, JPG или WEBP.");
       setItemPhotoFile(null);
-      setItemPhotoPreview(editingItem?.photo_url ?? null);
+      setItemPhotoPreview(getEditingItemPhotoUrl());
       return;
     }
 
     if (file.size > MAX_PHOTO_BYTES) {
       setItemPhotoError(`Размер фотографии не больше ${formatSize(MAX_PHOTO_BYTES)}.`);
       setItemPhotoFile(null);
-      setItemPhotoPreview(editingItem?.photo_url ?? null);
+      setItemPhotoPreview(getEditingItemPhotoUrl());
       return;
     }
 
@@ -769,7 +781,7 @@ export default function Page() {
         setItemPhotoError(`Разрешение не больше ${MAX_PHOTO_DIM}px.`);
         URL.revokeObjectURL(objectUrl);
         setItemPhotoFile(null);
-        setItemPhotoPreview(editingItem?.photo_url ?? null);
+        setItemPhotoPreview(getEditingItemPhotoUrl());
         return;
       }
       setItemPhotoFile(file);
@@ -779,7 +791,7 @@ export default function Page() {
       URL.revokeObjectURL(objectUrl);
       setItemPhotoError("Не удалось прочитать изображение.");
       setItemPhotoFile(null);
-      setItemPhotoPreview(editingItem?.photo_url ?? null);
+      setItemPhotoPreview(getEditingItemPhotoUrl());
     };
     image.src = objectUrl;
   };
@@ -837,6 +849,7 @@ export default function Page() {
     setOriginalPlanSignature(null);
     setSectionId("");
     setIsGeneralCreate(false);
+    // Clear photo
     if (itemPhotoPreview?.startsWith("blob:")) {
       URL.revokeObjectURL(itemPhotoPreview);
     }
@@ -1347,6 +1360,38 @@ export default function Page() {
   const showMoexCommission =
     isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW" && hasNonZeroLots;
   const commissionAllowed = showMoexCommission;
+  
+  // Check if there are any additional fields to show in the right panel
+  const hasAdditionalFields = useMemo(() => {
+    return (
+      showMoexPricing ||
+      showMoexCommission ||
+      showBankAccountFields ||
+      showBankCardFields ||
+      showContractNumberField ||
+      showDepositFields ||
+      showInterestFields ||
+      showPlanSection ||
+      showOpeningCounterparty
+    );
+  }, [
+    showMoexPricing,
+    showMoexCommission,
+    showBankAccountFields,
+    showBankCardFields,
+    showContractNumberField,
+    showDepositFields,
+    showInterestFields,
+    showPlanSection,
+    showOpeningCounterparty,
+  ]);
+  
+  // Close right panel when there are no additional fields
+  useEffect(() => {
+    if (!hasAdditionalFields) {
+      setIsRightPanelOpen(false);
+    }
+  }, [hasAdditionalFields]);
   const showMoexStartDatePricing =
     showMoexPricing &&
     resolvedHistoryStatus === "HISTORICAL" &&
@@ -2689,9 +2734,13 @@ export default function Page() {
     );
     setOriginalPlanSignature(buildPlanSignatureFromItem(item));
     loadLinkedChains(item.id);
-    // TODO: Load item photo_url when backend supports it
-    // setItemPhotoPreview(item.photo_url ?? null);
-    setItemPhotoPreview(null);
+    // Load item photo_url
+    const itemPhotoUrl = item.photo_url 
+      ? (item.photo_url.startsWith("http") 
+          ? item.photo_url 
+          : `${API_BASE}${item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`}`)
+      : null;
+    setItemPhotoPreview(itemPhotoUrl);
     setItemPhotoFile(null);
     setItemPhotoError(null);
     setIcon3dFormat("png");
@@ -3217,13 +3266,52 @@ export default function Page() {
             return;
           }
         }
-        await updateItem(
+        const updatedItem = await updateItem(
           editingItem.id,
           payload,
           isCardLinkChange ? { purgeCardTransactions: true } : undefined
         );
+        // Upload photo if provided
+        let itemWithPhoto = updatedItem;
+        if (itemPhotoFile) {
+          try {
+            itemWithPhoto = await uploadItemPhoto(editingItem.id, itemPhotoFile);
+          } catch (photoError: any) {
+            // If photo upload fails, log error but don't fail the entire operation
+            console.warn("Failed to upload item photo:", photoError?.message);
+            // Photo upload is optional, so we continue even if it fails
+          }
+        }
+        // Update the item in the list with the new data
+        setItems((prevItems) =>
+          prevItems.map((item) =>
+            item.id === itemWithPhoto.id ? itemWithPhoto : item
+          )
+        );
       } else {
-        await createItem(payload);
+        const createdItem = await createItem(payload);
+        // Upload photo if provided
+        let itemWithPhoto = createdItem;
+        if (itemPhotoFile) {
+          try {
+            itemWithPhoto = await uploadItemPhoto(createdItem.id, itemPhotoFile);
+          } catch (photoError: any) {
+            // If photo upload fails, log error but don't fail the entire operation
+            console.warn("Failed to upload item photo:", photoError?.message);
+            // Photo upload is optional, so we continue even if it fails
+          }
+        }
+        // Add the new item to the list
+        setItems((prevItems) => {
+          // Check if item already exists (shouldn't happen, but just in case)
+          const existingIndex = prevItems.findIndex((item) => item.id === itemWithPhoto.id);
+          if (existingIndex >= 0) {
+            return prevItems.map((item) =>
+              item.id === itemWithPhoto.id ? itemWithPhoto : item
+            );
+          }
+          return [...prevItems, itemWithPhoto];
+        });
       }
   
       // очищаем форму и закрываем модалку
@@ -3231,7 +3319,15 @@ export default function Page() {
       setAmountStr("");
       setIsCreateOpen(false);
       setEditingItem(null);
+      // Clear photo
+      if (itemPhotoPreview?.startsWith("blob:")) {
+        URL.revokeObjectURL(itemPhotoPreview);
+      }
+      setItemPhotoFile(null);
+      setItemPhotoPreview(null);
+      setItemPhotoError(null);
   
+      // Reload items to get all updates from backend
       await loadItems();
       await loadTransactions();
     } catch (e: any) {
@@ -3792,14 +3888,16 @@ export default function Page() {
             setFormError(null);
             resetCreateForm();
             setEditingItem(null);
+            setIsRightPanelOpen(false);
           }
         }}
       >
         <DialogContent
           ref={dialogContentRef}
-          className="max-h-[90vh] overflow-y-auto overflow-x-hidden sm:max-w-[1040px]"
-          style={{ backgroundColor: MODAL_BG }}
+          className="max-h-[90vh] overflow-y-auto overflow-x-hidden"
+          style={{ backgroundColor: MODAL_BG, maxWidth: "none", width: "auto" }}
         >
+
           <div className="grid gap-4">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-3 text-[32px] font-medium">
@@ -3817,8 +3915,9 @@ export default function Page() {
               </div>
             )}
 
-            <div className="grid items-start gap-6 md:grid-cols-2">
-              <div className="grid content-start gap-4">
+            <div className="flex items-start gap-0 transition-all duration-300">
+              {/* Left part - fixed 700px width */}
+              <div className="w-[700px] grid content-start gap-4 flex-shrink-0">
             {/* Item Photo Upload and Type Selection in one row */}
             <div className="grid grid-cols-[200px_1fr] gap-4 items-start">
               {/* Item Photo Upload */}
@@ -3855,10 +3954,10 @@ export default function Page() {
                         />
                       )}
                       {show2dIcon && TYPE_ICON_BY_CODE[typeCode] && (
-                        <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: ACCENT2 }}>
+                        <div className="w-full h-full flex items-center justify-center">
                           {React.createElement(TYPE_ICON_BY_CODE[typeCode], {
-                            className: "w-12 h-12",
-                            style: { color: ACTIVE_TEXT_DARK },
+                            className: "w-24 h-24",
+                            style: { color: ACCENT },
                             strokeWidth: 1.5,
                           })}
                         </div>
@@ -3957,8 +4056,13 @@ export default function Page() {
             </div>
 
 
-            {isMoexType && (
-              <div className="grid gap-3 rounded-lg border-2 border-border/70 p-3" style={{ backgroundColor: BACKGROUND_DT }}>
+            <div
+              className={`overflow-hidden transition-all duration-300 ${
+                isMoexType ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
+              }`}
+            >
+              {isMoexType && (
+                <div className="grid gap-3 rounded-lg border-2 border-border/70 p-3" style={{ backgroundColor: BACKGROUND_DT }}>
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
                     <Label style={{ color: ACTIVE_TEXT_DARK }}>Ценная бумага</Label>
@@ -4113,8 +4217,9 @@ export default function Page() {
                     placeholder="Например: 123,45"
                   />
                 )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
 
             <TextField
               label="Название актива"
@@ -4123,63 +4228,75 @@ export default function Page() {
               placeholder="Например: Кошелек / Ипотека"
             />
 
-            {showCounterpartyField && (
-              <div className="grid gap-2">
-                <Label>{isBankCounterparty ? "Банк" : "Контрагент"}</Label>
-                <CounterpartySelector
-                  counterparties={counterparties}
-                  selectedIds={counterpartyId ? [counterpartyId] : []}
-                  onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
-                  selectionMode="single"
-                  placeholder="Начните вводить название"
-                  industries={industries}
-                  disabled={counterpartyLoading}
-                  counterpartyCounts={counterpartyTxCounts}
-                  filterByIndustryId={
-                    isBankCounterparty
-                      ? industries.find((ind) => ind.name === "Банки")?.id ?? null
-                      : null
-                  }
-                />
-                {counterpartyError && (
-                  <p className="text-xs text-red-600">{counterpartyError}</p>
-                )}
-              </div>
-            )}
-
-            {showBankCardFields && (
-              <>
-                <SelectField
-                  label="Вид карты"
-                  value={cardKind}
-                  onValueChange={(value) => setCardKind(value as CardKind)}
-                  disabled={isEditing}
-                  options={[
-                    { value: "DEBIT", label: "Дебетовая" },
-                    { value: "CREDIT", label: "Кредитная" },
-                  ]}
-                  placeholder="Выберите вид карты"
-                />
-
-                {isCreditCard && (
-                  <TextField
-                    label="Кредитный лимит"
-                    value={creditLimit}
-                    onChange={(e) => {
-                      const formatted = formatRubInput(e.target.value).replace(/^-/, "");
-                      setCreditLimit(formatted);
-                    }}
-                    onBlur={() =>
-                      setCreditLimit((prev) =>
-                        normalizeRubOnBlur(prev.replace(/^-/, ""))
-                      )
+            <div
+              className={`overflow-hidden transition-all duration-300 ${
+                showCounterpartyField ? "max-h-[200px] opacity-100" : "max-h-0 opacity-0"
+              }`}
+            >
+              {showCounterpartyField && (
+                <div className="grid gap-2">
+                  <Label>{isBankCounterparty ? "Банк" : "Контрагент"}</Label>
+                  <CounterpartySelector
+                    counterparties={counterparties}
+                    selectedIds={counterpartyId ? [counterpartyId] : []}
+                    onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                    selectionMode="single"
+                    placeholder="Начните вводить название"
+                    industries={industries}
+                    disabled={counterpartyLoading}
+                    counterpartyCounts={counterpartyTxCounts}
+                    filterByIndustryId={
+                      isBankCounterparty
+                        ? industries.find((ind) => ind.name === "Банки")?.id ?? null
+                        : null
                     }
-                    inputMode="decimal"
-                    placeholder="Например: 120 000"
                   />
-                )}
-              </>
-            )}
+                  {counterpartyError && (
+                    <p className="text-xs text-red-600">{counterpartyError}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div
+              className={`overflow-hidden transition-all duration-300 ${
+                showBankCardFields ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+              }`}
+            >
+              {showBankCardFields && (
+                <>
+                  <SelectField
+                    label="Вид карты"
+                    value={cardKind}
+                    onValueChange={(value) => setCardKind(value as CardKind)}
+                    disabled={isEditing}
+                    options={[
+                      { value: "DEBIT", label: "Дебетовая" },
+                      { value: "CREDIT", label: "Кредитная" },
+                    ]}
+                    placeholder="Выберите вид карты"
+                  />
+
+                  {isCreditCard && (
+                    <TextField
+                      label="Кредитный лимит"
+                      value={creditLimit}
+                      onChange={(e) => {
+                        const formatted = formatRubInput(e.target.value).replace(/^-/, "");
+                        setCreditLimit(formatted);
+                      }}
+                      onBlur={() =>
+                        setCreditLimit((prev) =>
+                          normalizeRubOnBlur(prev.replace(/^-/, ""))
+                        )
+                      }
+                      inputMode="decimal"
+                      placeholder="Например: 120 000"
+                    />
+                  )}
+                </>
+              )}
+            </div>
 
             <div className="grid gap-2">
               <div className="flex items-center justify-between">
@@ -4276,8 +4393,38 @@ export default function Page() {
               </div>
             )}
 
-            </div>
-            <div className="grid content-start gap-4">
+              </div>
+
+              {/* Toggle button for right panel - only show when there are additional fields */}
+              <div
+                className={`overflow-hidden transition-all duration-300 self-stretch flex items-center ${
+                  hasAdditionalFields ? "w-8 opacity-100" : "w-0 opacity-0"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+                  className="w-8 h-full flex items-center justify-center transition-all cursor-pointer hover:bg-[rgba(93,95,215,0.22)] flex-shrink-0"
+                  style={{
+                    backgroundColor: MODAL_BG,
+                  }}
+                  aria-label={isRightPanelOpen ? "Скрыть дополнительные поля" : "Показать дополнительные поля"}
+                >
+                  {isRightPanelOpen ? (
+                    <ChevronLeft className="w-5 h-5" style={{ color: ACTIVE_TEXT_DARK }} />
+                  ) : (
+                    <ChevronRight className="w-5 h-5" style={{ color: ACTIVE_TEXT_DARK }} />
+                  )}
+                </button>
+              </div>
+
+              {/* Right panel - collapsible */}
+              <div
+                className={`overflow-hidden transition-all duration-300 ${
+                  isRightPanelOpen ? "w-[340px] opacity-100" : "w-0 opacity-0"
+                }`}
+              >
+                <div className="w-[340px] grid content-start gap-4 pl-4">
             {showMoexPricing && (
               <div className="rounded-lg border-2 border-border/70 p-3 text-sm" style={{ backgroundColor: BACKGROUND_DT }}>
                 <div className="font-medium">
@@ -4789,7 +4936,8 @@ export default function Page() {
               </div>
             )}
 
-            </div>
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -4803,7 +4951,11 @@ export default function Page() {
                     "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
                   } as React.CSSProperties
                 }
-                onClick={() => setIsCreateOpen(false)}
+                onClick={() => {
+                  resetCreateForm();
+                  setIsCreateOpen(false);
+                  setEditingItem(null);
+                }}
               >
                 Отмена
               </Button>

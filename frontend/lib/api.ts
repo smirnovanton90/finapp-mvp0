@@ -57,6 +57,7 @@ export type ItemOut = {
   closed_at: string | null;
   archived_at: string | null;
   plan_settings?: ItemPlanSettings | null;
+  photo_url: string | null;
 };
 
 export type ItemCreate = {
@@ -791,6 +792,17 @@ export async function updateItem(
   const res = await authFetch(`${API_BASE}/items/${id}${qs ? `?${qs}` : ""}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function uploadItemPhoto(itemId: number, file: File): Promise<ItemOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await authFetch(`${API_BASE}/items/${itemId}/photo`, {
+    method: "POST",
+    body: formData,
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

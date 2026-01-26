@@ -23,6 +23,7 @@ import {
   ACTIVE_TEXT_DARK,
   PINK_GRADIENT,
   ACCENT2,
+  ACCENT,
 } from "@/lib/colors";
 import { PINK_GRADIENT as PINK_GRADIENT_CONST } from "@/lib/gradients";
 import {
@@ -201,9 +202,11 @@ export function AssetCard({
   // Try PNG first, then WebP, then fallback to 2D icon
   const [iconFormat, setIconFormat] = React.useState<"png" | "webp" | null>("png");
   const icon3dPath = iconFormat ? `/icons-3d/${item.type_code}.${iconFormat}` : null;
-  // TODO: Uncomment when backend supports photo_url
-  // const hasPhoto = item.photo_url ?? null;
-  const hasPhoto = null; // TODO: implement photo upload when backend supports it
+  const hasPhoto = item.photo_url 
+    ? (item.photo_url.startsWith("http") 
+        ? item.photo_url 
+        : `${API_BASE}${item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`}`)
+    : null;
 
   // Counterparty logo/icon handling
   const counterpartyLogoUrl = counterparty
@@ -278,10 +281,10 @@ export function AssetCard({
                 )}
                 {!icon3dPath && TypeIcon && (
                   // 3. Priority: 2D icon
-                  <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: ACCENT2 }}>
+                  <div className="w-full h-full flex items-center justify-center">
                     <TypeIcon
-                      className="w-12 h-12"
-                      style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}
+                      className="w-16 h-16"
+                      style={{ color: ACCENT }}
                       strokeWidth={1.5}
                     />
                   </div>

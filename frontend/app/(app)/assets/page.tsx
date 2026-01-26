@@ -23,6 +23,8 @@ import {
   Wallet,
   LineChart,
   Info,
+  Upload,
+  Camera,
 } from "lucide-react";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -40,7 +42,7 @@ import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
-import { ACCENT, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT } from "@/lib/colors";
+import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 
 import {
@@ -598,6 +600,16 @@ function findPriceOnOrBefore(
 
 /* ------------------ страница ------------------ */
 
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
+const MAX_PHOTO_DIM = 1024;
+const ALLOWED_PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
+  return `${Math.round(bytes / (1024 * 1024))} МБ`;
+}
+
 export default function Page() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
@@ -707,6 +719,12 @@ export default function Page() {
   const logoNaturalSizeRef = useRef<{ width: number; height: number } | null>(null);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const onboardingAppliedRef = useRef<string | null>(null);
+  const [itemPhotoFile, setItemPhotoFile] = useState<File | null>(null);
+  const [itemPhotoPreview, setItemPhotoPreview] = useState<string | null>(null);
+  const [itemPhotoError, setItemPhotoError] = useState<string | null>(null);
+  const itemPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const [icon3dFormat, setIcon3dFormat] = useState<"png" | "webp" | null>("png");
+  const [show2dIcon, setShow2dIcon] = useState(false);
 
   useEffect(() => {
     if (!isWizardOpen) {
@@ -716,6 +734,55 @@ export default function Page() {
   const isEditing = Boolean(editingItem);
   const segmentedButtonBase =
     "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
+
+  const handleItemPhotoChange = (file: File | null) => {
+    setItemPhotoError(null);
+
+    if (itemPhotoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(itemPhotoPreview);
+    }
+
+    if (!file) {
+      setItemPhotoFile(null);
+      setItemPhotoPreview(editingItem?.photo_url ?? null);
+      return;
+    }
+
+    if (!ALLOWED_PHOTO_TYPES.includes(file.type)) {
+      setItemPhotoError("Разрешены PNG, JPG или WEBP.");
+      setItemPhotoFile(null);
+      setItemPhotoPreview(editingItem?.photo_url ?? null);
+      return;
+    }
+
+    if (file.size > MAX_PHOTO_BYTES) {
+      setItemPhotoError(`Размер фотографии не больше ${formatSize(MAX_PHOTO_BYTES)}.`);
+      setItemPhotoFile(null);
+      setItemPhotoPreview(editingItem?.photo_url ?? null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      if (image.width > MAX_PHOTO_DIM || image.height > MAX_PHOTO_DIM) {
+        setItemPhotoError(`Разрешение не больше ${MAX_PHOTO_DIM}px.`);
+        URL.revokeObjectURL(objectUrl);
+        setItemPhotoFile(null);
+        setItemPhotoPreview(editingItem?.photo_url ?? null);
+        return;
+      }
+      setItemPhotoFile(file);
+      setItemPhotoPreview(objectUrl);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setItemPhotoError("Не удалось прочитать изображение.");
+      setItemPhotoFile(null);
+      setItemPhotoPreview(editingItem?.photo_url ?? null);
+    };
+    image.src = objectUrl;
+  };
 
   function resetCreateForm() {
     setName("");
@@ -770,6 +837,14 @@ export default function Page() {
     setOriginalPlanSignature(null);
     setSectionId("");
     setIsGeneralCreate(false);
+    if (itemPhotoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(itemPhotoPreview);
+    }
+    setItemPhotoFile(null);
+    setItemPhotoPreview(null);
+    setItemPhotoError(null);
+    setIcon3dFormat("png");
+    setShow2dIcon(false);
   }
 
   function parseRubToCents(input: string): number {
@@ -2614,6 +2689,13 @@ export default function Page() {
     );
     setOriginalPlanSignature(buildPlanSignatureFromItem(item));
     loadLinkedChains(item.id);
+    // TODO: Load item photo_url when backend supports it
+    // setItemPhotoPreview(item.photo_url ?? null);
+    setItemPhotoPreview(null);
+    setItemPhotoFile(null);
+    setItemPhotoError(null);
+    setIcon3dFormat("png");
+    setShow2dIcon(false);
     setFormError(null);
     setIsCreateOpen(true);
   };
@@ -3720,7 +3802,8 @@ export default function Page() {
         >
           <div className="grid gap-4">
             <DialogHeader>
-              <DialogTitle>
+              <DialogTitle className="flex items-center gap-3 text-[32px] font-medium">
+                <Wallet className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />
                 {isEditing
                   ? "Редактирование актива/обязательства"
                   : "Добавление актива/обязательства"}
@@ -3736,57 +3819,142 @@ export default function Page() {
 
             <div className="grid items-start gap-6 md:grid-cols-2">
               <div className="grid content-start gap-4">
-            {isGeneralCreate && (
-              <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
-                <SegmentedSelector
-                  options={[
-                    { value: "ASSET", label: "Актив", colorScheme: "green" },
-                    { value: "LIABILITY", label: "Обязательство", colorScheme: "red" },
-                  ]}
-                  value={kind}
-                  onChange={(value) => {
-                    const newKind = value as ItemKind;
-                    setKind(newKind);
-                    setSectionId("");
-                    setTypeCode("");
+            {/* Item Photo Upload and Type Selection in one row */}
+            <div className="grid grid-cols-[200px_1fr] gap-4 items-start">
+              {/* Item Photo Upload */}
+              <div className="relative">
+                <div
+                  className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
+                  onClick={() => itemPhotoInputRef.current?.click()}
+                >
+                  {itemPhotoPreview ? (
+                    // 1. Priority: User uploaded image
+                    <img
+                      src={itemPhotoPreview}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : typeCode ? (
+                    // 2. Priority: 3D icon, fallback to 2D icon
+                    <>
+                      {!show2dIcon && icon3dFormat && (
+                        <img
+                          src={`/icons-3d/${typeCode}.${icon3dFormat}`}
+                          alt=""
+                          className="w-full h-full object-contain"
+                          onError={() => {
+                            // Try WebP if PNG failed
+                            if (icon3dFormat === "png") {
+                              setIcon3dFormat("webp");
+                            } else {
+                              // Fallback to 2D icon
+                              setIcon3dFormat(null);
+                              setShow2dIcon(true);
+                            }
+                          }}
+                        />
+                      )}
+                      {show2dIcon && TYPE_ICON_BY_CODE[typeCode] && (
+                        <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: ACCENT2 }}>
+                          {React.createElement(TYPE_ICON_BY_CODE[typeCode], {
+                            className: "w-12 h-12",
+                            style: { color: ACTIVE_TEXT_DARK },
+                            strokeWidth: 1.5,
+                          })}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    // Camera icon when type is not selected
+                    <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
+                      <Camera className="w-12 h-12" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                    </div>
+                  )}
+                  {/* Overlay on hover */}
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                    <Upload className="w-8 h-8 text-white" />
+                  </div>
+                </div>
+                <input
+                  ref={itemPhotoInputRef}
+                  type="file"
+                  accept={ALLOWED_PHOTO_TYPES.join(",")}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    handleItemPhotoChange(file);
                   }}
                 />
+                {itemPhotoError && (
+                  <p className="text-xs mt-1" style={{ color: "#FB4C4F" }}>
+                    {itemPhotoError}
+                  </p>
+                )}
               </div>
-            )}
 
-            {isGeneralCreate && (
-              <SelectField
-                label="Раздел"
-                value={sectionId}
-                onValueChange={(value) => {
-                  setSectionId(value);
-                  setTypeCode("");
-                }}
-                options={sectionOptions.map((section) => ({
-                  value: section.id,
-                  label: section.label,
-                }))}
-                placeholder={
-                  kind === "ASSET"
-                    ? "Выберите раздел актива"
-                    : "Выберите раздел обязательства"
-                }
-              />
-            )}
+              {/* Type Selection Fields */}
+              <div className="grid content-start gap-4">
+                {isGeneralCreate && (
+                  <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
+                    <SegmentedSelector
+                      options={[
+                        { value: "ASSET", label: "Актив", colorScheme: "green" },
+                        { value: "LIABILITY", label: "Обязательство", colorScheme: "red" },
+                      ]}
+                      value={kind}
+                      onChange={(value) => {
+                        const newKind = value as ItemKind;
+                        setKind(newKind);
+                        setSectionId("");
+                        setTypeCode("");
+                        setIcon3dFormat("png");
+                        setShow2dIcon(false);
+                      }}
+                    />
+                  </div>
+                )}
 
-            <SelectField
-              label="Вид"
-              value={typeCode}
-              onValueChange={setTypeCode}
-              disabled={isGeneralCreate && !sectionId}
-              options={typeOptions.map((t) => ({
-                value: t.code,
-                label: t.label,
-              }))}
-              placeholder={
-                isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"
-              }
-            />
+                {isGeneralCreate && (
+                  <SelectField
+                    label="Раздел"
+                    value={sectionId}
+                    onValueChange={(value) => {
+                      setSectionId(value);
+                      setTypeCode("");
+                      setIcon3dFormat("png");
+                      setShow2dIcon(false);
+                    }}
+                    options={sectionOptions.map((section) => ({
+                      value: section.id,
+                      label: section.label,
+                    }))}
+                    placeholder={
+                      kind === "ASSET"
+                        ? "Выберите раздел актива"
+                        : "Выберите раздел обязательства"
+                    }
+                  />
+                )}
+
+                <SelectField
+                  label="Вид"
+                  value={typeCode}
+                  onValueChange={(value) => {
+                    setTypeCode(value);
+                    setIcon3dFormat("png");
+                    setShow2dIcon(false);
+                  }}
+                  disabled={isGeneralCreate && !sectionId}
+                  options={typeOptions.map((t) => ({
+                    value: t.code,
+                    label: t.label,
+                  }))}
+                  placeholder={
+                    isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"
+                  }
+                />
+              </div>
+            </div>
 
 
             {isMoexType && (
@@ -4643,7 +4811,7 @@ export default function Page() {
                 type="submit"
                 variant="authPrimary"
                 disabled={loading}
-                className="rounded-lg border-0 h-10 text-base font-bold"
+                className="rounded-lg border-0"
                 style={
                   {
                     "--auth-primary-bg":

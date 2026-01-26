@@ -22,6 +22,7 @@ import {
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
   PINK_GRADIENT,
+  ACCENT2,
 } from "@/lib/colors";
 import { PINK_GRADIENT as PINK_GRADIENT_CONST } from "@/lib/gradients";
 import {
@@ -196,11 +197,13 @@ export function AssetCard({
     ? formatShortDate(item.open_date)
     : "";
 
-  // Try to load 3D icon, fallback to 2D icon
+  // Priority: 1. User uploaded photo, 2. 3D icon, 3. 2D icon
   // Try PNG first, then WebP, then fallback to 2D icon
   const [iconFormat, setIconFormat] = React.useState<"png" | "webp" | null>("png");
   const icon3dPath = iconFormat ? `/icons-3d/${item.type_code}.${iconFormat}` : null;
-  const hasPhoto = false; // TODO: implement photo upload when backend supports it
+  // TODO: Uncomment when backend supports photo_url
+  // const hasPhoto = item.photo_url ?? null;
+  const hasPhoto = null; // TODO: implement photo upload when backend supports it
 
   // Counterparty logo/icon handling
   const counterpartyLogoUrl = counterparty
@@ -249,12 +252,14 @@ export function AssetCard({
           {/* Icon */}
           <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
             {hasPhoto ? (
+              // 1. Priority: User uploaded image
               <img
                 src={hasPhoto}
                 alt={item.name}
                 className="w-[100px] h-[100px] rounded-lg object-cover"
               />
             ) : (
+              // 2. Priority: 3D icon, fallback to 2D icon
               <>
                 {icon3dPath && (
                   <img
@@ -272,11 +277,14 @@ export function AssetCard({
                   />
                 )}
                 {!icon3dPath && TypeIcon && (
-                  <TypeIcon
-                    className="w-12 h-12"
-                    style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : undefined }}
-                    strokeWidth={1.5}
-                  />
+                  // 3. Priority: 2D icon
+                  <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: ACCENT2 }}>
+                    <TypeIcon
+                      className="w-12 h-12"
+                      style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}
+                      strokeWidth={1.5}
+                    />
+                  </div>
                 )}
               </>
             )}

@@ -1402,7 +1402,7 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen px-8 py-8">
-      <div className="mx-auto flex w-full max-w-[900px] flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
 
         <div className="grid gap-4 items-stretch md:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)]">
           <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500 text-white shadow-[0_20px_50px_-28px_rgba(76,29,149,0.8)]">

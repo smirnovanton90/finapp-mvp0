@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { AccountingStartGate } from "@/components/accounting-start-gate";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { signOut, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
@@ -16,10 +16,12 @@ const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
   const { isCollapsed } = useSidebar();
   const sessionKey = (session?.user as { id?: string })?.id ?? "anon";
   const { theme } = useTheme();
   const isDark = theme === "dark";
+  const isTransactionsPage = pathname === "/transactions" || pathname?.startsWith("/transactions/");
 
   useEffect(() => {
     if (status !== "loading" && !session) {
@@ -109,10 +111,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div
             className={cn(
               "flex-1 transition-all duration-300",
-              isCollapsed ? "ml-[120px]" : "ml-[320px]"
+              isCollapsed ? "ml-[120px]" : "ml-[320px]",
+              !isTransactionsPage && "min-h-screen flex items-center"
             )}
           >
-            {children}
+            {isTransactionsPage ? (
+              children
+            ) : (
+              <div className="w-full h-full flex items-center">
+                <div className="w-[900px] mx-auto">
+                  {children}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

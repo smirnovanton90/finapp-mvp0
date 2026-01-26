@@ -5462,8 +5462,9 @@ function TransactionsView({
           </div>
         </aside>
 
-        <div className="flex-1 pr-8">
-          <div className="space-y-4 pt-[10px]">
+        <div className="flex-1 flex items-center min-h-screen py-8">
+          <div className="w-[900px] mx-auto">
+            <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <input
@@ -5581,6 +5582,7 @@ function TransactionsView({
                 </Button>
               </div>
             )}
+            </div>
           </div>
         </div>
       </div>

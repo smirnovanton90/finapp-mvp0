@@ -1,12 +1,27 @@
 "use client";
 
 import React from "react";
-import { ACCENT2, ACCENT_FILL_LIGHT, ACCENT_FILL_MEDIUM, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
+import {
+  ACCENT2,
+  ACCENT_FILL_LIGHT,
+  ACCENT_FILL_MEDIUM,
+  PLACEHOLDER_COLOR_DARK,
+  ACTIVE_TEXT_DARK,
+  GREEN,
+  GREEN_FILL,
+  RED,
+  RED_FILL,
+  ORANGE,
+  ORANGE_FILL,
+} from "@/lib/colors";
 
 export interface SegmentedOption {
   value: string;
   label: React.ReactNode;
+  colorScheme?: SegmentedSelectorColorScheme; // Individual color scheme for this option
 }
+
+export type SegmentedSelectorColorScheme = "purple" | "green" | "red" | "orange";
 
 interface SegmentedSelectorProps {
   options: SegmentedOption[];
@@ -14,6 +29,7 @@ interface SegmentedSelectorProps {
   onChange: (value: string | string[] | Set<string>) => void;
   multiple?: boolean;
   className?: string;
+  colorScheme?: SegmentedSelectorColorScheme;
 }
 
 export function SegmentedSelector({
@@ -22,6 +38,7 @@ export function SegmentedSelector({
   onChange,
   multiple = false,
   className = "",
+  colorScheme = "purple",
 }: SegmentedSelectorProps) {
   const isSelected = (optionValue: string): boolean => {
     if (multiple) {
@@ -58,27 +75,53 @@ export function SegmentedSelector({
     }
   };
 
+  // Get colors based on color scheme
+  const getColors = (scheme: SegmentedSelectorColorScheme) => {
+    switch (scheme) {
+      case "green":
+        return {
+          fill: GREEN_FILL,
+          shadow: GREEN,
+          hover: GREEN_FILL,
+        };
+      case "red":
+        return {
+          fill: RED_FILL,
+          shadow: RED,
+          hover: RED_FILL,
+        };
+      case "orange":
+        return {
+          fill: ORANGE_FILL,
+          shadow: ORANGE,
+          hover: ORANGE_FILL,
+        };
+      case "purple":
+      default:
+        return {
+          fill: ACCENT_FILL_LIGHT,
+          shadow: ACCENT2,
+          hover: ACCENT_FILL_LIGHT,
+        };
+    }
+  };
+
   return (
-    <div className={`relative w-full rounded-lg ${className}`}>
-      {/* Stroke layer - border color ACCENT_FILL_MEDIUM */}
-      <div
-        className="absolute inset-0 rounded-lg pointer-events-none z-0"
-        style={{
-          padding: "1px",
-          background: ACCENT_FILL_MEDIUM,
-          WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
-          WebkitMaskComposite: "xor",
-          maskComposite: "exclude",
-          opacity: 1,
-        }}
-      />
+    <div className={`relative w-full ${className}`}>
       {/* Inner container - h-10 (40px) to match filter fields */}
-      <div
-        className="relative inline-flex h-10 w-full items-stretch overflow-hidden rounded-lg bg-transparent p-[3px] z-10"
-        style={{ ["--segment-hover" as string]: ACCENT_FILL_LIGHT }}
+      <div 
+        className="relative inline-flex h-10 w-full items-stretch overflow-hidden rounded-[9px] bg-transparent p-[3px] z-10"
+        style={{
+          boxShadow: `0 0 0 1px ${ACCENT_FILL_MEDIUM}`,
+        }}
       >
         {options.map((option) => {
           const selected = isSelected(option.value);
+          // Use option-specific color scheme if provided, otherwise use default
+          const optionColorScheme = option.colorScheme || colorScheme;
+          const optionColors = getColors(optionColorScheme);
+          const hoverVarName = `--segment-hover-${option.value}`;
+          
           return (
             <button
               key={option.value}
@@ -86,15 +129,16 @@ export function SegmentedSelector({
               aria-pressed={selected}
               onClick={() => handleOptionClick(option.value)}
               className={`flex-1 min-w-0 px-3 py-1.5 text-sm font-normal transition-colors whitespace-normal break-words text-center ${
-                selected ? "text-white" : "bg-transparent hover:bg-[var(--segment-hover)]"
+                selected ? "" : "bg-transparent hover:bg-[var(--segment-hover)]"
               }`}
               style={{
-                background: selected ? ACCENT_FILL_LIGHT : undefined,
-                borderRadius: "7px",
-                color: selected ? "white" : SIDEBAR_TEXT_ACTIVE,
+                background: selected ? optionColors.fill : undefined,
+                borderRadius: "6px",
+                color: selected ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,
                 boxShadow: selected
-                  ? `inset 0 -26px 41px -28px ${ACCENT2}, inset 0 -2px 0 0 ${ACCENT2}`
+                  ? `inset 0 -26px 41px -28px ${optionColors.shadow}, inset 0 -2px 0 0 ${optionColors.shadow}`
                   : undefined,
+                "--segment-hover": optionColors.hover,
               } as React.CSSProperties}
             >
               {option.label}

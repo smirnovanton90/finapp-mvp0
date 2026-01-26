@@ -4025,9 +4025,9 @@ function TransactionsView({
                 </div>
                 <SegmentedSelector
                   options={[
-                    { value: "INCOME", label: "Доход" },
-                    { value: "EXPENSE", label: "Расход" },
-                    { value: "TRANSFER", label: "Перевод" },
+                    { value: "INCOME", label: "Доход", colorScheme: "green" },
+                    { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                    { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
                   ]}
                   value={selectedDirections}
                   onChange={(value) => {

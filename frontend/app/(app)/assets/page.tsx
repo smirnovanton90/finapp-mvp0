@@ -33,7 +33,7 @@ import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
-import { FilterPanel, FilterSection, TypeFilter } from "@/components/filter-panel";
+import { FilterPanel, FilterSection } from "@/components/filter-panel";
 import { AssetCard } from "@/components/asset-card";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
@@ -619,7 +619,7 @@ export default function Page() {
   const [showArchived, setShowArchived] = useState(false);
 
   // Filter states
-  const [filterType, setFilterType] = useState<Set<string>>(new Set(["ASSET", "LIABILITY"]));
+  const [filterType, setFilterType] = useState<Set<string>>(new Set());
   const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set(["active"]));
   const [filterName, setFilterName] = useState("");
   const [filterAmountFrom, setFilterAmountFrom] = useState("");
@@ -4762,10 +4762,18 @@ export default function Page() {
         >
           <FilterSection
             label="Тип"
-            onReset={() => setFilterType(new Set(["ASSET", "LIABILITY"]))}
-            showReset={filterType.size !== 2 || !filterType.has("ASSET") || !filterType.has("LIABILITY")}
+            onReset={() => setFilterType(new Set())}
+            showReset={filterType.size > 0}
           >
-            <TypeFilter value={filterType} onChange={setFilterType} />
+            <SegmentedSelector
+              options={[
+                { value: "ASSET", label: "Активы", colorScheme: "green" },
+                { value: "LIABILITY", label: "Обязательства", colorScheme: "red" },
+              ]}
+              value={filterType}
+              onChange={setFilterType}
+              multiple={true}
+            />
           </FilterSection>
 
           <FilterSection

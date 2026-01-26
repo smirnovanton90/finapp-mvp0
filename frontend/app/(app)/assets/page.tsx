@@ -39,7 +39,8 @@ import { AssetCard } from "@/components/asset-card";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
-import { ACCENT, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
+import { TextField, DateField, SelectField } from "@/components/ui/form-field";
+import { ACCENT, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 
 import {
@@ -50,7 +51,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSession } from "next-auth/react";
 
 import {
@@ -656,6 +657,8 @@ export default function Page() {
   const [selectedInstrument, setSelectedInstrument] = useState<MarketInstrumentOut | null>(
     null
   );
+  const instrumentAnchorRef = useRef<HTMLDivElement | null>(null);
+  const [instrumentDropdownStyle, setInstrumentDropdownStyle] = useState<CSSProperties | null>(null);
   const [instrumentBoards, setInstrumentBoards] = useState<MarketBoardOut[]>([]);
   const [instrumentBoardId, setInstrumentBoardId] = useState("");
   const [positionLots, setPositionLots] = useState("");
@@ -2274,6 +2277,51 @@ export default function Page() {
     };
   }, [selectedInstrument, instrumentBoardId, name]);
 
+  const updateInstrumentDropdownPosition = useCallback(() => {
+    const anchor = instrumentAnchorRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const container = anchor.closest('[data-slot="dialog-content"]');
+    const containerRect = container?.getBoundingClientRect();
+    const containerTop = containerRect ? containerRect.top : 0;
+    const containerBottom = containerRect
+      ? containerRect.bottom
+      : window.innerHeight;
+    const padding = 8;
+    const maxHeight = 256;
+    const spaceBelow = containerBottom - rect.bottom - padding;
+    const spaceAbove = rect.top - containerTop - padding;
+    const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+    const availableSpace = Math.max(0, openUp ? spaceAbove : spaceBelow);
+    const height = Math.min(maxHeight, availableSpace);
+    const resolvedHeight = height > 0 ? height : maxHeight;
+    setInstrumentDropdownStyle({
+      position: "absolute",
+      top: openUp ? "auto" : "calc(100% + 4px)",
+      bottom: openUp ? "calc(100% + 4px)" : "auto",
+      left: 0,
+      right: 0,
+      maxHeight: resolvedHeight,
+      zIndex: 50,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!instrumentDropdownOpen) return;
+    updateInstrumentDropdownPosition();
+  }, [instrumentDropdownOpen, updateInstrumentDropdownPosition, instrumentOptions.length]);
+
+  useEffect(() => {
+    if (!instrumentDropdownOpen) return;
+    const handle = () => updateInstrumentDropdownPosition();
+    window.addEventListener("resize", handle);
+    window.addEventListener("scroll", handle, true);
+    return () => {
+      window.removeEventListener("resize", handle);
+      window.removeEventListener("scroll", handle, true);
+    };
+  }, [instrumentDropdownOpen, updateInstrumentDropdownPosition]);
+
   useEffect(() => {
     if (!selectedInstrument || !instrumentBoardId) {
       setMarketPrice(null);
@@ -3668,6 +3716,7 @@ export default function Page() {
         <DialogContent
           ref={dialogContentRef}
           className="max-h-[90vh] overflow-y-auto overflow-x-hidden sm:max-w-[1040px]"
+          style={{ backgroundColor: MODAL_BG }}
         >
           <div className="grid gap-4">
             <DialogHeader>
@@ -3689,103 +3738,62 @@ export default function Page() {
               <div className="grid content-start gap-4">
             {isGeneralCreate && (
               <div className="grid gap-2" role="group" aria-label="Тип актива или обязательства">
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={kind === "ASSET"}
-                    onClick={() => {
-                      setKind("ASSET");
-                      setSectionId("");
-                      setTypeCode("");
-                    }}
-                    className={`${segmentedButtonBase} ${
-                      kind === "ASSET"
-                        ? "bg-violet-50 text-violet-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Актив
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={kind === "LIABILITY"}
-                    onClick={() => {
-                      setKind("LIABILITY");
-                      setSectionId("");
-                      setTypeCode("");
-                    }}
-                    className={`${segmentedButtonBase} ${
-                      kind === "LIABILITY"
-                        ? "bg-rose-50 text-rose-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Обязательство
-                  </button>
-                </div>
+                <SegmentedSelector
+                  options={[
+                    { value: "ASSET", label: "Актив", colorScheme: "green" },
+                    { value: "LIABILITY", label: "Обязательство", colorScheme: "red" },
+                  ]}
+                  value={kind}
+                  onChange={(value) => {
+                    const newKind = value as ItemKind;
+                    setKind(newKind);
+                    setSectionId("");
+                    setTypeCode("");
+                  }}
+                />
               </div>
             )}
 
             {isGeneralCreate && (
-              <div className="grid gap-2">
-                <Label>Раздел</Label>
-                <Select
-                  value={sectionId}
-                  onValueChange={(value) => {
-                    setSectionId(value);
-                    setTypeCode("");
-                  }}
-                >
-                  <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                    <SelectValue
-                      placeholder={
-                        kind === "ASSET"
-                          ? "Выберите раздел актива"
-                          : "Выберите раздел обязательства"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sectionOptions.map((section) => (
-                      <SelectItem key={section.id} value={section.id}>
-                        {section.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <SelectField
+                label="Раздел"
+                value={sectionId}
+                onValueChange={(value) => {
+                  setSectionId(value);
+                  setTypeCode("");
+                }}
+                options={sectionOptions.map((section) => ({
+                  value: section.id,
+                  label: section.label,
+                }))}
+                placeholder={
+                  kind === "ASSET"
+                    ? "Выберите раздел актива"
+                    : "Выберите раздел обязательства"
+                }
+              />
             )}
 
-            <div className="grid gap-2">
-              <Label>Вид</Label>
-              <Select
-                value={typeCode}
-                onValueChange={setTypeCode}
-                disabled={isGeneralCreate && !sectionId}
-              >
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                  <SelectValue
-                    placeholder={
-                      isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {typeOptions.map((t) => (
-                    <SelectItem key={t.code} value={t.code}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <SelectField
+              label="Вид"
+              value={typeCode}
+              onValueChange={setTypeCode}
+              disabled={isGeneralCreate && !sectionId}
+              options={typeOptions.map((t) => ({
+                value: t.code,
+                label: t.label,
+              }))}
+              placeholder={
+                isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"
+              }
+            />
 
 
             {isMoexType && (
-              <div className="grid gap-3 rounded-lg border-2 border-border/70 bg-card p-3">
+              <div className="grid gap-3 rounded-lg border-2 border-border/70 p-3" style={{ backgroundColor: BACKGROUND_DT }}>
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
-                    <Label>Ценная бумага</Label>
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Ценная бумага</Label>
                     <div className="group relative">
                       <Info className="h-4 w-4 text-muted-foreground cursor-help" />
                       <div className="absolute left-0 top-6 z-50 hidden w-64 rounded-md border border-border/60 bg-white p-2 text-xs text-muted-foreground shadow-lg group-hover:block">
@@ -3793,8 +3801,9 @@ export default function Page() {
                       </div>
                     </div>
                   </div>
-                  <div className="relative">
-                    <Input
+                  <div className="relative" ref={instrumentAnchorRef}>
+                    <TextField
+                      label=""
                       value={instrumentQuery}
                       onChange={(e) => {
                         setInstrumentQuery(e.target.value);
@@ -3804,125 +3813,147 @@ export default function Page() {
                       onFocus={() => setInstrumentDropdownOpen(true)}
                       onBlur={() => setTimeout(() => setInstrumentDropdownOpen(false), 150)}
                       placeholder="Введите тикер или название"
-                      className="border-2 border-border/70 bg-white shadow-none"
                     />
                     {instrumentDropdownOpen && (
-                      <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border/60 bg-white shadow-lg">
-                        {instrumentLoading && (
-                          <div className="px-3 py-2 text-sm text-muted-foreground">
-                            Загружаем инструменты...
+                      <div
+                        className="selector-dropdown absolute z-50 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
+                        style={instrumentDropdownStyle ?? {
+                          position: "absolute",
+                          top: "calc(100% + 4px)",
+                          left: 0,
+                          right: 0,
+                          maxHeight: 256,
+                          zIndex: 50,
+                        }}
+                      >
+                        {/* Gradient border wrapper */}
+                        <div className="relative rounded-lg">
+                          {/* Stroke layer */}
+                          <div
+                            className="absolute inset-0 rounded-lg pointer-events-none z-0"
+                            style={{
+                              padding: "1px",
+                              background: "linear-gradient(to right, #7C6CF1, #6C5DD7, #5544D1)",
+                              WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+                              WebkitMaskComposite: "xor",
+                              maskComposite: "exclude",
+                              opacity: 1,
+                            }}
+                          />
+                          {/* Inner container */}
+                          <div className="relative rounded-lg p-1 z-10" style={{ backgroundColor: DROPDOWN_BG }}>
+                            {instrumentLoading && (
+                              <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                                Загружаем инструменты...
+                              </div>
+                            )}
+                            {!instrumentLoading && instrumentError && (
+                              <div className="px-2 py-1 text-sm text-red-600">{instrumentError}</div>
+                            )}
+                            {!instrumentLoading && !instrumentError && instrumentOptions.length === 0 && (
+                              <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                                Ничего не найдено
+                              </div>
+                            )}
+                            {!instrumentLoading &&
+                              !instrumentError &&
+                              instrumentOptions.map((option) => {
+                                const title = option.short_name || option.name || option.secid;
+                                const subtitle =
+                                  option.name &&
+                                  option.short_name &&
+                                  option.name !== option.short_name
+                                    ? option.name
+                                    : null;
+                                return (
+                                  <button
+                                    key={option.secid}
+                                    type="button"
+                                    className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                                    style={{
+                                      backgroundColor: "transparent",
+                                      color: SIDEBAR_TEXT_ACTIVE,
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.backgroundColor = "transparent";
+                                    }}
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => {
+                                      setSelectedInstrument(option);
+                                      setInstrumentQuery(`${option.secid} - ${title}`);
+                                      setInstrumentDropdownOpen(false);
+                                    }}
+                                  >
+                                    <span className="text-sm font-normal" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                                      {option.secid} - {title}
+                                    </span>
+                                    {subtitle && (
+                                      <span className="text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                                        {subtitle}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
                           </div>
-                        )}
-                        {!instrumentLoading && instrumentError && (
-                          <div className="px-3 py-2 text-sm text-red-600">{instrumentError}</div>
-                        )}
-                        {!instrumentLoading && !instrumentError && instrumentOptions.length === 0 && (
-                          <div className="px-3 py-2 text-sm text-muted-foreground">
-                            Ничего не найдено
-                          </div>
-                        )}
-                        {!instrumentLoading &&
-                          !instrumentError &&
-                          instrumentOptions.map((option) => {
-                            const title = option.short_name || option.name || option.secid;
-                            const subtitle =
-                              option.name &&
-                              option.short_name &&
-                              option.name !== option.short_name
-                                ? option.name
-                                : null;
-                            return (
-                              <button
-                                key={option.secid}
-                                type="button"
-                                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => {
-                                  setSelectedInstrument(option);
-                                  setInstrumentQuery(`${option.secid} - ${title}`);
-                                  setInstrumentDropdownOpen(false);
-                                }}
-                              >
-                                <span className="text-sm font-medium">{option.secid} - {title}</span>
-                                {subtitle && (
-                                  <span className="text-xs text-muted-foreground">{subtitle}</span>
-                                )}
-                              </button>
-                            );
-                          })}
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label>Торговый режим</Label>
-                  <Select
-                    value={instrumentBoardId}
-                    onValueChange={setInstrumentBoardId}
-                    disabled={instrumentBoards.length === 0}
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                      <SelectValue placeholder="Выберите режим" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {instrumentBoards.map((board) => {
-                        const boardLabel = board.title
-                          ? `${board.board_id} - ${board.title}`
-                          : board.board_id;
-                        return (
-                          <SelectItem key={board.board_id} value={board.board_id}>
-                            {boardLabel}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <SelectField
+                  label="Торговый режим"
+                  value={instrumentBoardId}
+                  onValueChange={setInstrumentBoardId}
+                  disabled={instrumentBoards.length === 0}
+                  options={instrumentBoards.map((board) => {
+                    const boardLabel = board.title
+                      ? `${board.board_id} - ${board.title}`
+                      : board.board_id;
+                    return {
+                      value: board.board_id,
+                      label: boardLabel,
+                    };
+                  })}
+                  placeholder="Выберите режим"
+                />
 
-                <div className="grid gap-2">
-                  <Label>Количество лотов</Label>
-                  <Input
-                    value={positionLots}
-                    onChange={(e) => setPositionLots(e.target.value)}
-                    inputMode="numeric"
-                    placeholder="Например: 10"
-                    className="border-2 border-border/70 bg-white shadow-none"
-                  />
-                </div>
+                <TextField
+                  label="Количество лотов"
+                  value={positionLots}
+                  onChange={(e) => setPositionLots(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="Например: 10"
+                />
 
                 {resolvedHistoryStatus === "NEW" && (
-                  <div className="grid gap-2">
-                    <Label>
-                      {"\u0426\u0435\u043d\u0430 \u043f\u043e\u043a\u0443\u043f\u043a\u0438 (\u0437\u0430 1 \u0448\u0442.)"}
-                    </Label>
-                    <Input
-                      value={moexPurchasePrice}
-                      onChange={(e) => {
-                        const formatted = formatRubInput(e.target.value);
-                        setMoexPurchasePrice(formatted);
-                      }}
-                      onBlur={() =>
-                        setMoexPurchasePrice((prev) => normalizeRubOnBlur(prev))
-                      }
-                      inputMode="decimal"
-                      placeholder={"\u041d\u0430\u043f\u0440\u0438\u043c\u0435\u0440: 123,45"}
-                      className="border-2 border-border/70 bg-white shadow-none"
-                    />
-                  </div>
+                  <TextField
+                    label="Цена покупки (за 1 шт.)"
+                    value={moexPurchasePrice}
+                    onChange={(e) => {
+                      const formatted = formatRubInput(e.target.value);
+                      setMoexPurchasePrice(formatted);
+                    }}
+                    onBlur={() =>
+                      setMoexPurchasePrice((prev) => normalizeRubOnBlur(prev))
+                    }
+                    inputMode="decimal"
+                    placeholder="Например: 123,45"
+                  />
                 )}
               </div>
             )}
 
-            <div className="grid gap-2">
-              <Label>Название</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Например: Кошелек / Ипотека Газпромбанк"
-                className="border-2 border-border/70 bg-white shadow-none"
-              />
-            </div>
+            <TextField
+              label="Название актива"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Например: Кошелек / Ипотека"
+            />
 
             {showCounterpartyField && (
               <div className="grid gap-2">
@@ -3950,42 +3981,34 @@ export default function Page() {
 
             {showBankCardFields && (
               <>
-                <div className="grid gap-2">
-                  <Label>Вид карты</Label>
-                  <Select
-                    value={cardKind}
-                    onValueChange={(value) => setCardKind(value as CardKind)}
-                    disabled={isEditing}
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                      <SelectValue placeholder="Выберите вид карты" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="DEBIT">Дебетовая</SelectItem>
-                      <SelectItem value="CREDIT">Кредитная</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <SelectField
+                  label="Вид карты"
+                  value={cardKind}
+                  onValueChange={(value) => setCardKind(value as CardKind)}
+                  disabled={isEditing}
+                  options={[
+                    { value: "DEBIT", label: "Дебетовая" },
+                    { value: "CREDIT", label: "Кредитная" },
+                  ]}
+                  placeholder="Выберите вид карты"
+                />
 
                 {isCreditCard && (
-                  <div className="grid gap-2">
-                    <Label>Кредитный лимит</Label>
-                    <Input
-                      value={creditLimit}
-                      onChange={(e) => {
-                        const formatted = formatRubInput(e.target.value).replace(/^-/, "");
-                        setCreditLimit(formatted);
-                      }}
-                      onBlur={() =>
-                        setCreditLimit((prev) =>
-                          normalizeRubOnBlur(prev.replace(/^-/, ""))
-                        )
-                      }
-                      inputMode="decimal"
-                      placeholder="Например: 120 000"
-                      className="border-2 border-border/70 bg-white shadow-none"
-                    />
-                  </div>
+                  <TextField
+                    label="Кредитный лимит"
+                    value={creditLimit}
+                    onChange={(e) => {
+                      const formatted = formatRubInput(e.target.value).replace(/^-/, "");
+                      setCreditLimit(formatted);
+                    }}
+                    onBlur={() =>
+                      setCreditLimit((prev) =>
+                        normalizeRubOnBlur(prev.replace(/^-/, ""))
+                      )
+                    }
+                    inputMode="decimal"
+                    placeholder="Например: 120 000"
+                  />
                 )}
               </>
             )}
@@ -3993,7 +4016,7 @@ export default function Page() {
             <div className="grid gap-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Label>{openDateLabel}</Label>
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>{openDateLabel}</Label>
                   <Tooltip
                     content={openDateHelpText}
                     contentClassName="w-80 max-w-[calc(100vw-2rem)]"
@@ -4009,19 +4032,19 @@ export default function Page() {
                 {accountingStartDate && (
                   <button
                     type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline"
+                    className="text-sm font-medium hover:underline"
+                    style={{ color: ACCENT }}
                     onClick={() => setOpenDate(accountingStartDate)}
                   >
                     В дату начала учета
                   </button>
                 )}
               </div>
-              <Input
-                type="date"
+              <DateField
+                label=""
                 value={openDate}
                 onChange={(e) => setOpenDate(e.target.value)}
                 max={getTodayDateKey()}
-                className="border-2 border-border/70 bg-white shadow-none"
               />
               {resolvedHistoryStatus && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -4040,40 +4063,34 @@ export default function Page() {
 
 
 
-            <div className="grid gap-2">
-              <Label>Валюта</Label>
-              <Select
-                value={currencyCode}
-                onValueChange={setCurrencyCode}
-                disabled={currencies.length === 0}
-              >
-                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                  <SelectValue placeholder="Выберите валюту" />
-                </SelectTrigger>
-                <SelectContent>
-                  {currencies.map((c) => (
-                    <SelectItem key={c.iso_char_code} value={c.iso_char_code}>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={[
-                            "inline-flex min-w-10 items-center justify-center rounded-full px-1.5 py-[1px] text-[11px] font-semibold uppercase",
-                            getCurrencyBadgeClass(c.iso_char_code),
-                          ].join(" ")}
-                        >
-                          {c.iso_char_code}
-                        </span>
-                        <span>{c.name}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <SelectField
+              label="Валюта"
+              value={currencyCode}
+              onValueChange={setCurrencyCode}
+              disabled={currencies.length === 0}
+              options={currencies.map((c) => ({
+                value: c.iso_char_code,
+                label: (
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={[
+                        "inline-flex min-w-10 items-center justify-center rounded-full px-1.5 py-[1px] text-[11px] font-semibold uppercase",
+                        getCurrencyBadgeClass(c.iso_char_code),
+                      ].join(" ")}
+                    >
+                      {c.iso_char_code}
+                    </span>
+                    <span>{c.name}</span>
+                  </div>
+                ),
+              }))}
+              placeholder="Выберите валюту"
+            />
 
             {!hideInitialAmountField && (
               <div className="grid gap-2">
-                <Label>{amountLabel}</Label>
-                <Input
+                <TextField
+                  label={amountLabel}
                   value={amountStr}
                   onChange={(e) => {
                     const formatted = formatRubInput(e.target.value);
@@ -4081,8 +4098,7 @@ export default function Page() {
                   }}
                   onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
                   inputMode="decimal"
-                  placeholder="Например: 1 234 567,89"
-                  className="border-2 border-border/70 bg-white shadow-none"
+                  placeholder="Укажите сумму"
                 />
                 {showLoanPlanSettings && (
                   <div className="text-xs text-muted-foreground">
@@ -4095,7 +4111,7 @@ export default function Page() {
             </div>
             <div className="grid content-start gap-4">
             {showMoexPricing && (
-              <div className="rounded-lg border-2 border-border/70 bg-card p-3 text-sm">
+              <div className="rounded-lg border-2 border-border/70 p-3 text-sm" style={{ backgroundColor: BACKGROUND_DT }}>
                 <div className="font-medium">
                   {"MOEX: \u0446\u0435\u043d\u044b \u0438 \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c"}
                 </div>
@@ -4161,7 +4177,7 @@ export default function Page() {
               </div>
             )}
             {showMoexCommission && (
-              <div className="rounded-lg border-2 border-border/70 bg-card p-3 text-sm">
+              <div className="rounded-lg border-2 border-border/70 p-3 text-sm" style={{ backgroundColor: BACKGROUND_DT }}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 font-medium">
                     {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u043f\u0440\u0438 \u043f\u043e\u043a\u0443\u043f\u043a\u0435"}
@@ -4179,26 +4195,21 @@ export default function Page() {
                     onCheckedChange={setCommissionEnabled}
                   />
                 </div>
-                {commissionEnabled && (
-                  <div className="mt-3 grid gap-2">
-                    <div className="grid gap-2">
-                      <Label>
-                        {"\u0421\u0443\u043c\u043c\u0430 \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"}
-                      </Label>
-                      <Input
-                        value={commissionAmount}
-                        onChange={(e) => {
-                          const formatted = formatRubInput(e.target.value);
-                          setCommissionAmount(formatted);
-                        }}
-                        onBlur={() =>
-                          setCommissionAmount((prev) => normalizeRubOnBlur(prev))
-                        }
-                        inputMode="decimal"
-                        placeholder={"\u041d\u0430\u043f\u0440\u0438\u043c\u0435\u0440: 1 234,56"}
-                        className="border-2 border-border/70 bg-white shadow-none"
-                      />
-                    </div>
+                    {commissionEnabled && (
+                      <div className="mt-3 grid gap-2">
+                        <TextField
+                          label="Сумма комиссии"
+                          value={commissionAmount}
+                          onChange={(e) => {
+                            const formatted = formatRubInput(e.target.value);
+                            setCommissionAmount(formatted);
+                          }}
+                          onBlur={() =>
+                            setCommissionAmount((prev) => normalizeRubOnBlur(prev))
+                          }
+                          inputMode="decimal"
+                          placeholder="Например: 1 234,56"
+                        />
                     <div className="grid gap-2">
                       <Label>
                         {"\u0421\u0447\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"}
@@ -4231,38 +4242,32 @@ export default function Page() {
               </div>
             )}
             {showBankAccountFields && (
-              <div className="grid gap-2">
-                <Label>Последние 7 цифр номера счета</Label>
-                <Input
-                  value={accountLast7}
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/\D/g, "").slice(0, 7);
-                    setAccountLast7(digits);
-                  }}
-                  inputMode="numeric"
-                  maxLength={7}
-                  placeholder="Например: 1234567"
-                  className="border-2 border-border/70 bg-white shadow-none"
-                />
-              </div>
+              <TextField
+                label="Последние 7 цифр номера счета"
+                value={accountLast7}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, "").slice(0, 7);
+                  setAccountLast7(digits);
+                }}
+                inputMode="numeric"
+                maxLength={7}
+                placeholder="Например: 1234567"
+              />
             )}
 
             {showBankCardFields && (
               <>
-                <div className="grid gap-2">
-                  <Label>Последние 4 цифры номера карты</Label>
-                  <Input
-                    value={cardLast4}
-                    onChange={(e) => {
-                      const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
-                      setCardLast4(digits);
-                    }}
-                    inputMode="numeric"
-                    maxLength={4}
-                    placeholder="Например: 1234"
-                    className="border-2 border-border/70 bg-white shadow-none"
-                  />
-                </div>
+                <TextField
+                  label="Последние 4 цифры номера карты"
+                  value={cardLast4}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
+                    setCardLast4(digits);
+                  }}
+                  inputMode="numeric"
+                  maxLength={4}
+                  placeholder="Например: 1234"
+                />
 
                 {!isCreditCard && (
                   <div className="grid gap-2">
@@ -4300,87 +4305,68 @@ export default function Page() {
             )}
 
             {showContractNumberField && (
-              <div className="grid gap-2">
-                <Label>Номер договора</Label>
-                <Input
-                  value={contractNumber}
-                  onChange={(e) => setContractNumber(e.target.value)}
-                  placeholder="Например: 01-2025/123"
-                  className="border-2 border-border/70 bg-white shadow-none"
-                />
-              </div>
+              <TextField
+                label="Номер договора"
+                value={contractNumber}
+                onChange={(e) => setContractNumber(e.target.value)}
+                placeholder="Например: 01-2025/123"
+              />
             )}
 
             {showDepositFields && (
               <div className="grid gap-2">
-                <Label>Срок вклада в днях</Label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    value={depositTermDays}
-                    onChange={(e) => setDepositTermDays(e.target.value.replace(/\D/g, ""))}
-                    inputMode="numeric"
-                    placeholder="Например: 365"
-                    className="border-2 border-border/70 bg-white shadow-none"
-                  />
-                  <div className="text-sm text-muted-foreground min-w-[140px]">
-                    {depositEndDateText
-                      ? `Дата окончания: ${depositEndDateText}`
-                      : "Дата окончания: —"}
-                  </div>
+                <TextField
+                  label="Срок вклада в днях"
+                  value={depositTermDays}
+                  onChange={(e) => setDepositTermDays(e.target.value.replace(/\D/g, ""))}
+                  inputMode="numeric"
+                  placeholder="Например: 365"
+                />
+                <div className="text-sm text-muted-foreground">
+                  {depositEndDateText
+                    ? `Дата окончания: ${depositEndDateText}`
+                    : "Дата окончания: —"}
                 </div>
               </div>
             )}
 
             {showInterestFields && (
               <>
-                <div className="grid gap-2">
-                  <Label>Процентная ставка</Label>
-                  <Input
-                    value={interestRate}
-                    onChange={(e) => setInterestRate(e.target.value.replace(/[^\d.,]/g, ""))}
-                    inputMode="decimal"
-                    placeholder="Например: 8,5"
-                    className="border-2 border-border/70 bg-white shadow-none"
-                  />
-                </div>
+                <TextField
+                  label="Процентная ставка"
+                  value={interestRate}
+                  onChange={(e) => setInterestRate(e.target.value.replace(/[^\d.,]/g, ""))}
+                  inputMode="decimal"
+                  placeholder="Например: 8,5"
+                />
 
-                <div className="grid gap-2">
-                  <Label>Порядок выплаты процентов</Label>
-                  <Select
-                    value={interestPayoutOrder}
-                    onValueChange={(value) =>
-                      setInterestPayoutOrder(value === "__none" ? "" : value)
-                    }
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                      <SelectValue placeholder="Выберите вариант" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">Не выбрано</SelectItem>
-                      <SelectItem value="END_OF_TERM">В конце срока</SelectItem>
-                      <SelectItem value="MONTHLY">Ежемесячно</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <SelectField
+                  label="Порядок выплаты процентов"
+                  value={interestPayoutOrder || "__none"}
+                  onValueChange={(value) =>
+                    setInterestPayoutOrder(value === "__none" ? "" : value)
+                  }
+                  options={[
+                    { value: "__none", label: "Не выбрано" },
+                    { value: "END_OF_TERM", label: "В конце срока" },
+                    { value: "MONTHLY", label: "Ежемесячно" },
+                  ]}
+                  placeholder="Выберите вариант"
+                />
 
-                <div className="grid gap-2">
-                  <Label>Капитализация процентов</Label>
-                  <Select
-                    value={interestCapitalization}
-                    onValueChange={(value) =>
-                      setInterestCapitalization(value === "__none" ? "" : value)
-                    }
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                      <SelectValue placeholder="Выберите вариант" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">Не выбрано</SelectItem>
-                      <SelectItem value="true">Да</SelectItem>
-                      <SelectItem value="false">Нет</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <SelectField
+                  label="Капитализация процентов"
+                  value={interestCapitalization || "__none"}
+                  onValueChange={(value) =>
+                    setInterestCapitalization(value === "__none" ? "" : value)
+                  }
+                  options={[
+                    { value: "__none", label: "Не выбрано" },
+                    { value: "true", label: "Да" },
+                    { value: "false", label: "Нет" },
+                  ]}
+                  placeholder="Выберите вариант"
+                />
 
                 {interestCapitalization !== "true" && (
                   <div className="grid gap-2">
@@ -4426,41 +4412,30 @@ export default function Page() {
                     {showInterestPlanSettings && (
                       <>
                         {interestPayoutOrder === "MONTHLY" && (
-                          <div className="grid gap-2">
-                            <Label>Правило первой выплаты</Label>
-                            <Select
-                              value={firstPayoutRule || "__none"}
-                              onValueChange={(value) =>
-                                setFirstPayoutRule(
-                                  value === "__none" ? "" : (value as FirstPayoutRule)
-                                )
-                              }
-                            >
-                              <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                                <SelectValue placeholder="Выберите правило" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none">Не выбрано</SelectItem>
-                                <SelectItem value="OPEN_DATE">В дату открытия</SelectItem>
-                                <SelectItem value="MONTH_END">В конце месяца</SelectItem>
-                                <SelectItem value="SHIFT_ONE_MONTH">
-                                  В конце следующего месяца
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
+                          <SelectField
+                            label="Правило первой выплаты"
+                            value={firstPayoutRule || "__none"}
+                            onValueChange={(value) =>
+                              setFirstPayoutRule(
+                                value === "__none" ? "" : (value as FirstPayoutRule)
+                              )
+                            }
+                            options={[
+                              { value: "__none", label: "Не выбрано" },
+                              { value: "OPEN_DATE", label: "В дату открытия" },
+                              { value: "MONTH_END", label: "В конце месяца" },
+                              { value: "SHIFT_ONE_MONTH", label: "В конце следующего месяца" },
+                            ]}
+                            placeholder="Выберите правило"
+                          />
                         )}
                         {typeCode === "savings_account" && (
-                          <div className="grid gap-2">
-                            <Label>Дата окончания планирования</Label>
-                            <Input
-                              type="date"
-                              value={planEndDate}
-                              min={minPlanDate || undefined}
-                              onChange={(e) => setPlanEndDate(e.target.value)}
-                              className="border-2 border-border/70 bg-white shadow-none"
-                            />
-                          </div>
+                          <DateField
+                            label="Дата окончания планирования"
+                            value={planEndDate}
+                            min={minPlanDate || undefined}
+                            onChange={(e) => setPlanEndDate(e.target.value)}
+                          />
                         )}
                       </>
                     )}
@@ -4487,160 +4462,116 @@ export default function Page() {
                             ariaLabel="Счет погашения"
                           />
                         </div>
-                        <div className="grid gap-2">
-                          <Label>Частота выплат</Label>
-                          <Select
-                            value={repaymentFrequency}
-                            onValueChange={(value) =>
-                              setRepaymentFrequency(value as TransactionChainFrequency)
-                            }
-                          >
-                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                              <SelectValue placeholder="Выберите вариант" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="DAILY">Ежедневно</SelectItem>
-                              <SelectItem value="WEEKLY">Еженедельно</SelectItem>
-                              <SelectItem value="MONTHLY">Ежемесячно</SelectItem>
-                              <SelectItem value="REGULAR">Регулярно</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                        <SelectField
+                          label="Частота выплат"
+                          value={repaymentFrequency}
+                          onValueChange={(value) =>
+                            setRepaymentFrequency(value as TransactionChainFrequency)
+                          }
+                          options={[
+                            { value: "DAILY", label: "Ежедневно" },
+                            { value: "WEEKLY", label: "Еженедельно" },
+                            { value: "MONTHLY", label: "Ежемесячно" },
+                            { value: "REGULAR", label: "Регулярно" },
+                          ]}
+                          placeholder="Выберите вариант"
+                        />
                         {repaymentFrequency === "WEEKLY" && (
-                          <div className="grid gap-2">
-                            <Label>День недели</Label>
-                            <Select
-                              value={String(repaymentWeeklyDay)}
-                              onValueChange={(value) => setRepaymentWeeklyDay(Number(value))}
-                            >
-                              <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                                <SelectValue placeholder="Выберите день" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {WEEKDAY_LABELS.map((label, index) => (
-                                  <SelectItem key={label} value={String(index)}>
-                                    {label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
+                          <SelectField
+                            label="День недели"
+                            value={String(repaymentWeeklyDay)}
+                            onValueChange={(value) => setRepaymentWeeklyDay(Number(value))}
+                            options={WEEKDAY_LABELS.map((label, index) => ({
+                              value: String(index),
+                              label,
+                            }))}
+                            placeholder="Выберите день"
+                          />
                         )}
                         {repaymentFrequency === "REGULAR" && (
-                          <div className="grid gap-2">
-                            <Label>Интервал, дней</Label>
-                            <Input
-                              value={repaymentIntervalDays}
-                              onChange={(e) =>
-                                setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))
-                              }
-                              inputMode="numeric"
-                              placeholder="Например: 30"
-                              className="border-2 border-border/70 bg-white shadow-none"
-                            />
-                          </div>
+                          <TextField
+                            label="Интервал, дней"
+                            value={repaymentIntervalDays}
+                            onChange={(e) =>
+                              setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))
+                            }
+                            inputMode="numeric"
+                            placeholder="Например: 30"
+                          />
                         )}
                         {repaymentFrequency === "MONTHLY" && (
-                          <div className="grid gap-2">
-                            <Label>Правило первого платежа</Label>
-                            <Select
-                              value={firstPayoutRule || "__none"}
-                              onValueChange={(value) =>
-                                setFirstPayoutRule(
-                                  value === "__none" ? "" : (value as FirstPayoutRule)
-                                )
-                              }
-                            >
-                              <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                                <SelectValue placeholder="Выберите правило" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none">Не выбрано</SelectItem>
-                                <SelectItem value="OPEN_DATE">В дату открытия</SelectItem>
-                                <SelectItem value="MONTH_END">В конце месяца</SelectItem>
-                                <SelectItem value="SHIFT_ONE_MONTH">
-                                  В конце следующего месяца
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-                        <div className="grid gap-2">
-                          <Label>Тип выплат</Label>
-                          <Select
-                            value={repaymentType || "__none"}
+                          <SelectField
+                            label="Правило первого платежа"
+                            value={firstPayoutRule || "__none"}
                             onValueChange={(value) =>
-                              setRepaymentType(value === "__none" ? "" : (value as RepaymentType))
+                              setFirstPayoutRule(
+                                value === "__none" ? "" : (value as FirstPayoutRule)
+                              )
                             }
-                          >
-                            <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                              <SelectValue placeholder="Выберите тип" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none">Не выбрано</SelectItem>
-                              <SelectItem value="ANNUITY">Аннуитетный</SelectItem>
-                              <SelectItem value="DIFFERENTIATED">Дифференцированный</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="grid gap-2">
-                          <Label>Дата окончания планирования</Label>
-                          <Input
-                            type="date"
-                            value={planEndDate}
-                            min={minPlanDate || undefined}
-                            onChange={(e) => setPlanEndDate(e.target.value)}
-                            className="border-2 border-border/70 bg-white shadow-none"
+                            options={[
+                              { value: "__none", label: "Не выбрано" },
+                              { value: "OPEN_DATE", label: "В дату открытия" },
+                              { value: "MONTH_END", label: "В конце месяца" },
+                              { value: "SHIFT_ONE_MONTH", label: "В конце следующего месяца" },
+                            ]}
+                            placeholder="Выберите правило"
                           />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label>Дата окончания кредита</Label>
-                          <Input
-                            type="date"
-                            value={loanEndDate}
-                            min={minPlanDate || undefined}
-                            onChange={(e) => setLoanEndDate(e.target.value)}
-                            className="border-2 border-border/70 bg-white shadow-none"
-                          />
-                        </div>
+                        )}
+                        <SelectField
+                          label="Тип выплат"
+                          value={repaymentType || "__none"}
+                          onValueChange={(value) =>
+                            setRepaymentType(value === "__none" ? "" : (value as RepaymentType))
+                          }
+                          options={[
+                            { value: "__none", label: "Не выбрано" },
+                            { value: "ANNUITY", label: "Аннуитетный" },
+                            { value: "DIFFERENTIATED", label: "Дифференцированный" },
+                          ]}
+                          placeholder="Выберите тип"
+                        />
+                        <DateField
+                          label="Дата окончания планирования"
+                          value={planEndDate}
+                          min={minPlanDate || undefined}
+                          onChange={(e) => setPlanEndDate(e.target.value)}
+                        />
+                        <DateField
+                          label="Дата окончания кредита"
+                          value={loanEndDate}
+                          min={minPlanDate || undefined}
+                          onChange={(e) => setLoanEndDate(e.target.value)}
+                        />
                         {requiresLoanPaymentInput && (
                           <>
-                            <div className="grid gap-2">
-                              <Label>Тип платежей</Label>
-                              <Select
-                                value={paymentAmountKind || "__none"}
-                                onValueChange={(value) =>
-                                  setPaymentAmountKind(
-                                    value === "__none" ? "" : (value as PaymentAmountKind)
-                                  )
-                                }
-                              >
-                                <SelectTrigger className="border-2 border-border/70 bg-white shadow-none">
-                                  <SelectValue placeholder="Выберите вариант" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none">Не выбрано</SelectItem>
-                                  <SelectItem value="TOTAL">Полный платеж</SelectItem>
-                                  <SelectItem value="PRINCIPAL">Только тело</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="grid gap-2">
-                              <Label>Сумма платежа</Label>
-                              <Input
-                                value={paymentAmountStr}
-                                onChange={(e) => {
-                                  const formatted = formatRubInput(e.target.value);
-                                  setPaymentAmountStr(formatted);
-                                }}
-                                onBlur={() =>
-                                  setPaymentAmountStr((prev) => normalizeRubOnBlur(prev))
-                                }
-                                inputMode="decimal"
-                                placeholder="Например: 10 000,00"
-                                className="border-2 border-border/70 bg-white shadow-none"
-                              />
-                            </div>
+                            <SelectField
+                              label="Тип платежей"
+                              value={paymentAmountKind || "__none"}
+                              onValueChange={(value) =>
+                                setPaymentAmountKind(
+                                  value === "__none" ? "" : (value as PaymentAmountKind)
+                                )
+                              }
+                              options={[
+                                { value: "__none", label: "Не выбрано" },
+                                { value: "TOTAL", label: "Полный платеж" },
+                                { value: "PRINCIPAL", label: "Только тело" },
+                              ]}
+                              placeholder="Выберите вариант"
+                            />
+                            <TextField
+                              label="Сумма платежа"
+                              value={paymentAmountStr}
+                              onChange={(e) => {
+                                const formatted = formatRubInput(e.target.value);
+                                setPaymentAmountStr(formatted);
+                              }}
+                              onBlur={() =>
+                                setPaymentAmountStr((prev) => normalizeRubOnBlur(prev))
+                              }
+                              inputMode="decimal"
+                              placeholder="Например: 10 000,00"
+                            />
                           </>
                         )}
                       </>
@@ -4650,7 +4581,7 @@ export default function Page() {
               </div>
             )}
             {showOpeningCounterparty && (
-              <div className="rounded-lg border-2 border-border/70 bg-card p-3">
+              <div className="rounded-lg border-2 border-border/70 p-3" style={{ backgroundColor: BACKGROUND_DT }}>
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
                     <Label>{openingCounterpartyLabel}</Label>
@@ -4696,16 +4627,31 @@ export default function Page() {
             <div className="flex justify-end gap-2 pt-2">
               <Button
                 type="button"
-                variant="outline"
-                className="border-2 border-border/70 bg-white shadow-none"
+                variant="glass"
+                className="rounded-lg border-0"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as React.CSSProperties
+                }
                 onClick={() => setIsCreateOpen(false)}
               >
                 Отмена
               </Button>
               <Button
                 type="submit"
+                variant="authPrimary"
                 disabled={loading}
-                className="bg-violet-600 hover:bg-violet-700 text-white"
+                className="rounded-lg border-0 h-10 text-base font-bold"
+                style={
+                  {
+                    "--auth-primary-bg":
+                      "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                    "--auth-primary-bg-hover":
+                      "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                  } as React.CSSProperties
+                }
               >
                 {loading ? "Сохраняем..." : isEditing ? "Сохранить" : "Добавить"}
               </Button>

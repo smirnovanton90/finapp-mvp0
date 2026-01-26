@@ -33,6 +33,13 @@ import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
+import { FilterPanel, FilterSection, TypeFilter } from "@/components/filter-panel";
+import { AssetCard } from "@/components/asset-card";
+import { AuthInput } from "@/components/ui/auth-input";
+import { SegmentedSelector } from "@/components/ui/segmented-selector";
+import { useSidebar } from "@/components/ui/sidebar-context";
+import { ACCENT, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
+import { cn } from "@/lib/utils";
 
 import {
   Select,
@@ -610,6 +617,15 @@ export default function Page() {
   const [formError, setFormError] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+
+  // Filter states
+  const [filterType, setFilterType] = useState<Set<string>>(new Set(["ASSET", "LIABILITY"]));
+  const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set(["active"]));
+  const [filterName, setFilterName] = useState("");
+  const [filterAmountFrom, setFilterAmountFrom] = useState("");
+  const [filterAmountTo, setFilterAmountTo] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ItemOut | null>(null);
@@ -1303,14 +1319,70 @@ export default function Page() {
   );
   const itemTxCounts = useMemo(() => buildItemTransactionCounts(txs), [txs]);
   const counterpartyTxCounts = useMemo(() => buildCounterpartyTransactionCounts(txs), [txs]);
+  // Apply filters
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      // Type filter
+      if (filterType.size > 0) {
+        const kind = getEffectiveItemKind(item, item.current_value_rub);
+        if (!filterType.has(kind)) return false;
+      }
+
+      // Status filter
+      const isArchived = Boolean(item.archived_at);
+      const isClosed = Boolean(item.closed_at);
+      const statusSet = new Set<string>();
+      if (!isArchived && !isClosed) statusSet.add("active");
+      if (isClosed) statusSet.add("closed");
+      if (isArchived) statusSet.add("deleted");
+      
+      const hasMatchingStatus = Array.from(filterStatus).some((status) => statusSet.has(status));
+      if (!hasMatchingStatus) return false;
+
+      // Name filter
+      if (filterName.trim()) {
+        const searchTerm = filterName.trim().toLowerCase();
+        if (!item.name.toLowerCase().includes(searchTerm)) return false;
+      }
+
+      // Amount filter
+      const displayBalanceCents = getItemDisplayBalanceCents(item);
+      const balanceRub = displayBalanceCents / 100;
+      if (filterAmountFrom) {
+        const fromValue = parseFloat(filterAmountFrom.replace(/\s/g, "").replace(",", "."));
+        if (!isNaN(fromValue) && balanceRub < fromValue) return false;
+      }
+      if (filterAmountTo) {
+        const toValue = parseFloat(filterAmountTo.replace(/\s/g, "").replace(",", "."));
+        if (!isNaN(toValue) && balanceRub > toValue) return false;
+      }
+
+      // Date filter
+      if (filterDateFrom && item.open_date) {
+        if (item.open_date < filterDateFrom) return false;
+      }
+      if (filterDateTo && item.open_date) {
+        if (item.open_date > filterDateTo) return false;
+      }
+
+      return true;
+    });
+  }, [
+    items,
+    filterType,
+    filterStatus,
+    filterName,
+    filterAmountFrom,
+    filterAmountTo,
+    filterDateFrom,
+    filterDateTo,
+    getItemDisplayBalanceCents,
+    getEffectiveItemKind,
+  ]);
+
   const visibleItems = useMemo(
-    () =>
-      items.filter((item) => {
-        if (item.archived_at) return showArchived;
-        if (item.closed_at) return showClosed;
-        return true;
-      }),
-    [items, showArchived, showClosed]
+    () => filteredItems,
+    [filteredItems]
   );
   const activeAssetItems = useMemo(
     () =>
@@ -3518,8 +3590,15 @@ export default function Page() {
 
   /* ------------------ основной UI ------------------ */
 
+  const { isCollapsed } = useSidebar();
+
   return (
-    <main className="min-h-screen px-8 py-8">
+    <main
+      className={cn(
+        "min-h-screen pb-8",
+        isCollapsed ? "pl-0" : "pl-0"
+      )}
+    >
       <Dialog
         open={isCreateOpen}
         onOpenChange={(open) => {
@@ -4674,212 +4753,162 @@ export default function Page() {
         </DialogContent>
       </Dialog>
 
-      <div className="space-y-6">
-        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border/70 bg-white px-4 py-3">
-          <span className="text-sm font-medium text-muted-foreground">Показывать:</span>
-          <div className="inline-flex items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-            <button
-              type="button"
-              aria-pressed={!showClosed && !showArchived}
-              onClick={() => {
-                setShowClosed(false);
-                setShowArchived(false);
-              }}
-              className={`${segmentedButtonBase} ${
-                !showClosed && !showArchived
-                  ? "bg-violet-50 text-violet-700"
-                  : "bg-card text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              Активные
-            </button>
-            <button
-              type="button"
-              aria-pressed={showClosed}
-              onClick={() => setShowClosed((prev) => !prev)}
-              className={`${segmentedButtonBase} ${
-                showClosed
-                  ? "bg-muted text-foreground"
-                  : "bg-card text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              Закрытые
-            </button>
-            <button
-              type="button"
-              aria-pressed={showArchived}
-              onClick={() => setShowArchived((prev) => !prev)}
-              className={`${segmentedButtonBase} ${
-                showArchived
-                  ? "bg-muted text-foreground"
-                  : "bg-card text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              Удаленные
-            </button>
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            className="ml-auto h-8 bg-violet-600 hover:bg-violet-700 text-white"
-            onClick={() => openCreateModal("ASSET", ALL_TYPE_CODES, { general: true })}
+      {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <FilterPanel
+          onAddClick={() => openCreateModal("ASSET", ALL_TYPE_CODES, { general: true })}
+          addButtonLabel="Добавить"
+        >
+          <FilterSection
+            label="Тип"
+            onReset={() => setFilterType(new Set(["ASSET", "LIABILITY"]))}
+            showReset={filterType.size !== 2 || !filterType.has("ASSET") || !filterType.has("LIABILITY")}
           >
-            <Plus className="mr-2 h-4 w-4" />
-            Добавить
-          </Button>
+            <TypeFilter value={filterType} onChange={setFilterType} />
+          </FilterSection>
+
+          <FilterSection
+            label="Статус"
+            onReset={() => setFilterStatus(new Set(["active"]))}
+            showReset={!filterStatus.has("active") || filterStatus.size > 1}
+          >
+            <SegmentedSelector
+              options={[
+                { value: "active", label: "Активный" },
+                { value: "closed", label: "Закрытый" },
+                { value: "deleted", label: "Удаленный" },
+              ]}
+              value={Array.from(filterStatus)}
+              onChange={(value) => {
+                const values = Array.isArray(value) ? value : [];
+                setFilterStatus(new Set(values));
+              }}
+              multiple={true}
+            />
+          </FilterSection>
+
+          <FilterSection
+            label="Название"
+            onReset={() => setFilterName("")}
+            showReset={!!filterName}
+          >
+            <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+              <AuthInput
+                type="text"
+                placeholder="Начните вводить название"
+                value={filterName}
+                onChange={(e) => setFilterName(e.target.value)}
+              />
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Сумма"
+            onReset={() => {
+              setFilterAmountFrom("");
+              setFilterAmountTo("");
+            }}
+            showReset={!!filterAmountFrom || !!filterAmountTo}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                  <AuthInput
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="От"
+                    value={filterAmountFrom}
+                    onChange={(e) => setFilterAmountFrom(formatRubInput(e.target.value))}
+                    onBlur={() => setFilterAmountFrom((prev) => normalizeRubOnBlur(prev))}
+                  />
+                </div>
+              </div>
+              <span className="text-sm" style={{ color: SIDEBAR_TEXT_ACTIVE }}>—</span>
+              <div className="flex-1 min-w-0">
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                  <AuthInput
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="До"
+                    value={filterAmountTo}
+                    onChange={(e) => setFilterAmountTo(formatRubInput(e.target.value))}
+                    onBlur={() => setFilterAmountTo((prev) => normalizeRubOnBlur(prev))}
+                  />
+                </div>
+              </div>
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Дата появления"
+            onReset={() => {
+              setFilterDateFrom("");
+              setFilterDateTo("");
+            }}
+            showReset={!!filterDateFrom || !!filterDateTo}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
+                  <AuthInput
+                    type="date"
+                    value={filterDateFrom}
+                    onChange={(e) => setFilterDateFrom(e.target.value)}
+                    style={{
+                      color: !filterDateFrom ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
+                    }}
+                  />
+                </div>
+              </div>
+              <span className="text-sm" style={{ color: SIDEBAR_TEXT_ACTIVE }}>—</span>
+              <div className="flex-1 min-w-0">
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
+                  <AuthInput
+                    type="date"
+                    value={filterDateTo}
+                    onChange={(e) => setFilterDateTo(e.target.value)}
+                    style={{
+                      color: !filterDateTo ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </FilterSection>
+        </FilterPanel>
+
+        <div className="flex-1 min-w-0">
+          <div className="w-full max-w-[900px] mx-auto">
+            {visibleItems.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                Нет активов или обязательств
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                {visibleItems.map((item, index) => {
+                  const rate = rateByCode[item.currency_code];
+                  const rubEquivalent = getRubEquivalentCents(item);
+                  return (
+                    <AssetCard
+                      key={item.id}
+                      item={item}
+                      accountingStartDate={accountingStartDate}
+                      rate={rate}
+                      rubEquivalent={rubEquivalent}
+                      onEdit={(item) => openEditModal(item)}
+                      onDelete={(item) => onArchive(item)}
+                      onArchive={(item) => onArchive(item)}
+                      onClose={(item) => onClose(item)}
+                      getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
-
-        {cashItems.length > 0 && (
-          <CategoryTable
-            title="Денежные активы"
-            items={cashItems}
-            total={cashTotal}
-            icon={Wallet}
-            onAdd={() => openCreateModal("ASSET", CASH_TYPES)}
-          />
-        )}
-
-        {investmentItems.length > 0 && (
-          <CategoryTable
-            title="Инвестиционные активы"
-            items={investmentItems}
-            total={investmentTotal}
-            icon={TrendingUp}
-            onAdd={() => openCreateModal("ASSET", INVESTMENT_TYPES)}
-            isInvestmentAssets={true}
-          />
-        )}
-
-        {thirdPartyDebtItems.length > 0 && (
-          <CategoryTable
-            title="Долги третьих лиц"
-            items={thirdPartyDebtItems}
-            total={thirdPartyDebtTotal}
-            icon={Users}
-            onAdd={() => openCreateModal("ASSET", THIRD_PARTY_DEBT_TYPES)}
-          />
-        )}
-
-        {realEstateItems.length > 0 && (
-          <CategoryTable
-            title="Недвижимость"
-            items={realEstateItems}
-            total={realEstateTotal}
-            icon={Home}
-            onAdd={() => openCreateModal("ASSET", REAL_ESTATE_TYPES)}
-          />
-        )}
-
-        {transportItems.length > 0 && (
-          <CategoryTable
-            title="Транспорт"
-            items={transportItems}
-            total={transportTotal}
-            icon={Car}
-            onAdd={() => openCreateModal("ASSET", TRANSPORT_TYPES)}
-          />
-        )}
-
-        {valuablesItems.length > 0 && (
-          <CategoryTable
-            title="Имущество"
-            items={valuablesItems}
-            total={valuablesTotal}
-            icon={Package}
-            onAdd={() => openCreateModal("ASSET", VALUABLES_TYPES)}
-          />
-        )}
-
-        {pensionItems.length > 0 && (
-          <CategoryTable
-            title="Пенсионные и страховые активы"
-            items={pensionItems}
-            total={pensionTotal}
-            icon={PiggyBank}
-            onAdd={() => openCreateModal("ASSET", PENSION_TYPES)}
-          />
-        )}
-
-        {otherAssetItems.length > 0 && (
-          <CategoryTable
-            title="Прочие активы"
-            items={otherAssetItems}
-            total={otherAssetTotal}
-            icon={Package}
-            onAdd={() => openCreateModal("ASSET", OTHER_ASSET_TYPES)}
-          />
-        )}
-
-        {creditLiabilityItems.length > 0 && (
-          <CategoryTable
-            title="Кредитные обязательства"
-            items={creditLiabilityItems}
-            total={creditLiabilityTotal}
-            isLiability={true}
-            icon={CreditCard}
-            onAdd={() => openCreateModal("LIABILITY", CREDIT_LIABILITY_TYPES)}
-          />
-        )}
-
-        {thirdPartyLoanItems.length > 0 && (
-          <CategoryTable
-            title="Займы от третьих лиц"
-            items={thirdPartyLoanItems}
-            total={thirdPartyLoanTotal}
-            isLiability={true}
-            icon={Users}
-            onAdd={() => openCreateModal("LIABILITY", THIRD_PARTY_LOAN_TYPES)}
-          />
-        )}
-
-        {taxLiabilityItems.length > 0 && (
-          <CategoryTable
-            title="Налоги и обязательные платежи"
-            items={taxLiabilityItems}
-            total={taxLiabilityTotal}
-            isLiability={true}
-            icon={Receipt}
-            onAdd={() => openCreateModal("LIABILITY", TAX_LIABILITY_TYPES)}
-          />
-        )}
-
-        {utilityLiabilityItems.length > 0 && (
-          <CategoryTable
-            title="Коммунальные и бытовые долги"
-            items={utilityLiabilityItems}
-            total={utilityLiabilityTotal}
-            isLiability={true}
-            icon={Receipt}
-            onAdd={() => openCreateModal("LIABILITY", UTILITY_LIABILITY_TYPES)}
-          />
-        )}
-
-        {legalLiabilityItems.length > 0 && (
-          <CategoryTable
-            title="Судебные и иные обязательства"
-            items={legalLiabilityItems}
-            total={legalLiabilityTotal}
-            isLiability={true}
-            icon={AlertCircle}
-            onAdd={() => openCreateModal("LIABILITY", LEGAL_LIABILITY_TYPES)}
-          />
-        )}
-
-        {otherLiabilityItems.length > 0 && (
-          <CategoryTable
-            title="Прочие обязательства"
-            items={otherLiabilityItems}
-            total={otherLiabilityTotal}
-            isLiability={true}
-            icon={AlertCircle}
-            onAdd={() => openCreateModal("LIABILITY", OTHER_LIABILITY_TYPES)}
-          />
-        )}
       </div>
-
-      {error && (
-        <div className="mt-4 text-sm text-red-600">Ошибка: {error}</div>
-      )}
     </main>
   );
 }

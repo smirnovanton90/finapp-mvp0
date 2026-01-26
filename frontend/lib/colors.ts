@@ -5,8 +5,12 @@ export const ACCENT = "#7F5CFF";
 export const ACCENT0 = "#7C6CF1";
 export const ACCENT2 = "#5544D1";
 
-// Sidebar background color
-export const SIDEBAR_BG = "#191732";
+// Sidebar background color (renamed to BACKGROUND_DT for deleted items)
+export const BACKGROUND_DT = "#191732";
+export const SIDEBAR_BG = BACKGROUND_DT; // Keep for backward compatibility
+
+// Modal/card background color
+export const MODAL_BG = "#25243F";
 
 // Фон выпадающих списков (селекторы: активы, категории, контрагенты)
 export const DROPDOWN_BG = "#25243F";
@@ -30,6 +34,10 @@ export const RED_FILL = "rgba(251, 76, 79, 0.14)";
 // Green color
 export const GREEN = "#34D399";
 export const GREEN_FILL = "rgba(52, 211, 153, 0.14)";
+
+// Orange color
+export const ORANGE = "#FF8D28";
+export const ORANGE_FILL = "rgba(255, 141, 40, 0.22)";
 
 // Accent fill colors
 // Light fill: #5D5FD7 @ 22%

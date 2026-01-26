@@ -22,6 +22,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const isTransactionsPage = pathname === "/transactions" || pathname?.startsWith("/transactions/");
+  const isAssetsPage = pathname === "/assets" || pathname?.startsWith("/assets/");
+  const isSpecialPage = isTransactionsPage || isAssetsPage;
 
   useEffect(() => {
     if (status !== "loading" && !session) {
@@ -112,10 +114,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             className={cn(
               "flex-1 transition-all duration-300",
               isCollapsed ? "ml-[120px]" : "ml-[320px]",
-              !isTransactionsPage && "min-h-screen flex items-center"
+              !isSpecialPage && "min-h-screen flex items-center"
             )}
           >
-            {isTransactionsPage ? (
+            {isSpecialPage ? (
               children
             ) : (
               <div className="w-full h-full flex items-center">

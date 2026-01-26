@@ -6,6 +6,7 @@ import {
   Banknote,
   BarChart3,
   Car,
+  ChevronDown,
   Coins,
   CreditCard,
   Home,
@@ -110,7 +111,7 @@ import {
 } from "@/lib/api";
 import { buildItemTransactionCounts, getEffectiveItemKind } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
-import { getItemTypeLabel } from "@/lib/item-types";
+import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
 
 
 /* ------------------ справочники ------------------ */
@@ -626,6 +627,10 @@ export default function Page() {
   const [filterAmountTo, setFilterAmountTo] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterCounterpartyIds, setFilterCounterpartyIds] = useState<number[]>([]);
+  const [filterTypeCodes, setFilterTypeCodes] = useState<Set<string>>(new Set());
+  const [filterCurrencyCodes, setFilterCurrencyCodes] = useState<Set<string>>(new Set());
+  const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ItemOut | null>(null);
@@ -1177,6 +1182,40 @@ export default function Page() {
     () => new Map(counterparties.map((cp) => [cp.id, cp])),
     [counterparties]
   );
+
+  // Get unique type codes from user's items
+  const availableTypeCodes = useMemo(() => {
+    const typeCodes = new Set<string>();
+    items.forEach((item) => {
+      typeCodes.add(item.type_code);
+    });
+    return Array.from(typeCodes).sort((a, b) => {
+      const labelA = ITEM_TYPE_LABELS[a] || a;
+      const labelB = ITEM_TYPE_LABELS[b] || b;
+      return labelA.localeCompare(labelB, "ru");
+    });
+  }, [items]);
+
+  // Get unique currency codes from user's items
+  const currencyOptions = useMemo(() => {
+    const values = new Set<string>();
+    items.forEach((item) => {
+      if (item.currency_code) values.add(item.currency_code);
+    });
+    return Array.from(values).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [items]);
+
+  const toggleCurrencySelection = (value: string) => {
+    setFilterCurrencyCodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        next.delete(value);
+      } else {
+        next.add(value);
+      }
+      return next;
+    });
+  };
   const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
     if (!id) return null;
     const cpId = itemsById.get(id)?.counterparty_id;
@@ -1365,6 +1404,25 @@ export default function Page() {
         if (item.open_date > filterDateTo) return false;
       }
 
+      // Counterparty filter
+      if (filterCounterpartyIds.length > 0) {
+        if (!item.counterparty_id || !filterCounterpartyIds.includes(item.counterparty_id)) {
+          return false;
+        }
+      }
+
+      // Type code filter (вид актива/обязательства)
+      if (filterTypeCodes.size > 0) {
+        if (!filterTypeCodes.has(item.type_code)) return false;
+      }
+
+      // Currency filter
+      if (filterCurrencyCodes.size > 0) {
+        if (!item.currency_code || !filterCurrencyCodes.has(item.currency_code)) {
+          return false;
+        }
+      }
+
       return true;
     });
   }, [
@@ -1376,6 +1434,9 @@ export default function Page() {
     filterAmountTo,
     filterDateFrom,
     filterDateTo,
+    filterCounterpartyIds,
+    filterTypeCodes,
+    filterCurrencyCodes,
     getItemDisplayBalanceCents,
     getEffectiveItemKind,
   ]);
@@ -4884,32 +4945,167 @@ export default function Page() {
               </div>
             </div>
           </FilterSection>
+
+          <FilterSection
+            label="Контрагент"
+            onReset={() => setFilterCounterpartyIds([])}
+            showReset={filterCounterpartyIds.length > 0}
+          >
+            <CounterpartySelector
+              counterparties={counterparties}
+              selectedIds={filterCounterpartyIds}
+              onChange={setFilterCounterpartyIds}
+              selectionMode="multi"
+              placeholder="Начните вводить название"
+              emptyMessage="Нет контрагентов"
+              noResultsMessage="Ничего не найдено"
+              counterpartyCounts={counterpartyTxCounts}
+            />
+          </FilterSection>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-1">
+                <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                  Валюта
+                </div>
+                <button
+                  type="button"
+                  aria-label="Свернуть/развернуть"
+                  className="rounded-md p-1 hover:bg-[rgba(108,93,215,0.22)] transition-colors"
+                  onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${
+                      isCurrencyFilterOpen ? "rotate-0" : "-rotate-90"
+                    }`}
+                    style={{ color: PLACEHOLDER_COLOR_DARK }}
+                  />
+                </button>
+              </div>
+              {filterCurrencyCodes.size > 0 && (
+                <button
+                  type="button"
+                  className="text-sm font-medium hover:underline disabled:opacity-50"
+                  style={{ color: ACCENT }}
+                  onClick={() => setFilterCurrencyCodes(new Set<string>())}
+                >
+                  Сбросить
+                </button>
+              )}
+            </div>
+
+            {isCurrencyFilterOpen && (
+              <div className="space-y-2">
+                {currencyOptions.length === 0 ? (
+                  <div className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    Нет валют.
+                  </div>
+                ) : (
+                  currencyOptions.map((value) => (
+                    <label
+                      key={value}
+                      className="flex items-center gap-3 text-sm cursor-pointer"
+                      style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
+                        style={{ accentColor: ACCENT }}
+                        checked={filterCurrencyCodes.has(value)}
+                        onChange={() => toggleCurrencySelection(value)}
+                      />
+                      <span>{value}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <FilterSection
+            label="Вид актива/обязательства"
+            onReset={() => setFilterTypeCodes(new Set())}
+            showReset={filterTypeCodes.size > 0}
+          >
+            {availableTypeCodes.length === 0 ? (
+              <div className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                Список видов пока пуст.
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                {availableTypeCodes.map((typeCode) => {
+                  const label = ITEM_TYPE_LABELS[typeCode] || typeCode;
+                  const isChecked = filterTypeCodes.has(typeCode);
+                  return (
+                    <label
+                      key={typeCode}
+                      className="flex items-center gap-2 cursor-pointer text-sm"
+                      style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={isChecked}
+                        onChange={() => {
+                          const next = new Set(filterTypeCodes);
+                          if (isChecked) {
+                            next.delete(typeCode);
+                          } else {
+                            next.add(typeCode);
+                          }
+                          setFilterTypeCodes(next);
+                        }}
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </FilterSection>
         </FilterPanel>
 
         <div className="flex-1 min-w-0">
-          <div className="w-full max-w-[900px] mx-auto">
+          <div className="w-full max-w-[900px] mx-auto" style={{ paddingTop: "30px" }}>
             {visibleItems.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 Нет активов или обязательств
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-4">
+              <div 
+                style={{
+                  columnCount: 2,
+                  columnGap: "1rem",
+                }}
+              >
                 {visibleItems.map((item, index) => {
                   const rate = rateByCode[item.currency_code];
                   const rubEquivalent = getRubEquivalentCents(item);
+                  const counterparty = item.counterparty_id
+                    ? counterpartiesById.get(item.counterparty_id) ?? null
+                    : null;
                   return (
-                    <AssetCard
+                    <div
                       key={item.id}
-                      item={item}
-                      accountingStartDate={accountingStartDate}
-                      rate={rate}
-                      rubEquivalent={rubEquivalent}
-                      onEdit={(item) => openEditModal(item)}
-                      onDelete={(item) => onArchive(item)}
-                      onArchive={(item) => onArchive(item)}
-                      onClose={(item) => onClose(item)}
-                      getItemDisplayBalanceCents={getItemDisplayBalanceCents}
-                    />
+                      style={{
+                        breakInside: "avoid",
+                        marginBottom: "1rem",
+                      }}
+                    >
+                      <AssetCard
+                        item={item}
+                        accountingStartDate={accountingStartDate}
+                        rate={rate}
+                        rubEquivalent={rubEquivalent}
+                        counterparty={counterparty}
+                        onEdit={(item) => openEditModal(item)}
+                        onDelete={(item) => onArchive(item)}
+                        onArchive={(item) => onArchive(item)}
+                        onClose={(item) => onClose(item)}
+                        getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                      />
+                    </div>
                   );
                 })}
               </div>

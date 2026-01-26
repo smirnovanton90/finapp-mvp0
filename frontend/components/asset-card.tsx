@@ -10,9 +10,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ItemOut } from "@/lib/api";
+import { ItemOut, CounterpartyOut, API_BASE } from "@/lib/api";
 import { getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
+import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
 import {
   MODAL_BG,
   BACKGROUND_DT,
@@ -39,6 +40,8 @@ import {
   TrendingUp,
   Receipt,
   AlertCircle,
+  User,
+  Factory,
 } from "lucide-react";
 
 const TYPE_ICON_BY_CODE: Record<
@@ -113,11 +116,20 @@ interface AssetCardProps {
   accountingStartDate: string | null;
   rate?: number | null;
   rubEquivalent?: number | null;
+  counterparty?: CounterpartyOut | null;
   onEdit?: (item: ItemOut) => void;
   onDelete?: (item: ItemOut) => void;
   onArchive?: (item: ItemOut) => void;
   onClose?: (item: ItemOut) => void;
   getItemDisplayBalanceCents: (item: ItemOut) => number;
+}
+
+// Simplified industry icon mapping (can be expanded if needed)
+const INDUSTRY_ICON_BY_ID: Record<number, React.ComponentType<{ className?: string; strokeWidth?: number }>> = {};
+
+function getLegalDefaultIcon(industryId: number | null): React.ComponentType<{ className?: string; strokeWidth?: number }> {
+  if (!industryId) return Factory;
+  return INDUSTRY_ICON_BY_ID[industryId] ?? Factory;
 }
 
 const CURRENCY_BADGE_CLASSES: Record<string, string> = {
@@ -159,6 +171,7 @@ export function AssetCard({
   accountingStartDate,
   rate,
   rubEquivalent,
+  counterparty,
   onEdit,
   onDelete,
   onArchive,
@@ -191,9 +204,34 @@ export function AssetCard({
     : "";
 
   // Try to load 3D icon, fallback to 2D icon
-  const icon3dPath = `/icons-3d/${item.type_code}.png`;
+  // Try PNG first, then WebP, then fallback to 2D icon
+  const [iconFormat, setIconFormat] = React.useState<"png" | "webp" | null>("png");
+  const icon3dPath = iconFormat ? `/icons-3d/${item.type_code}.${iconFormat}` : null;
   const hasPhoto = false; // TODO: implement photo upload when backend supports it
-  const [show3dIcon, setShow3dIcon] = React.useState(true);
+
+  // Counterparty logo/icon handling
+  const counterpartyLogoUrl = counterparty
+    ? (counterparty.entity_type === "PERSON" ? counterparty.photo_url : counterparty.logo_url)
+    : null;
+  const rawCounterpartyLogoUrl = counterpartyLogoUrl;
+  const counterpartyLogoUrlFull = rawCounterpartyLogoUrl
+    ? rawCounterpartyLogoUrl.startsWith("http")
+      ? rawCounterpartyLogoUrl
+      : rawCounterpartyLogoUrl.startsWith("/")
+      ? `${API_BASE}${rawCounterpartyLogoUrl}`
+      : `${API_BASE}/${rawCounterpartyLogoUrl}`
+    : null;
+  const CounterpartyFallbackIcon = counterparty
+    ? (counterparty.entity_type === "PERSON"
+        ? User
+        : getLegalDefaultIcon(counterparty.industry_id ?? null))
+    : null;
+  const [showCounterpartyIcon, setShowCounterpartyIcon] = React.useState(!counterpartyLogoUrlFull);
+  
+  // Reset icon state when counterparty changes
+  React.useEffect(() => {
+    setShowCounterpartyIcon(!counterpartyLogoUrlFull);
+  }, [counterpartyLogoUrlFull]);
 
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
   const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
@@ -214,167 +252,184 @@ export function AssetCard({
 
       <div className="pl-4 pr-4 pt-4 pb-4">
         {/* Header */}
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-start gap-3 flex-1 min-w-0">
-            {/* Icon */}
-            <div className="w-16 h-16 flex items-center justify-center shrink-0 relative">
-              {hasPhoto ? (
-                <img
-                  src={hasPhoto}
-                  alt={item.name}
-                  className="w-16 h-16 rounded-lg object-cover"
-                />
-              ) : (
-                <>
-                  {show3dIcon && (
-                    <img
-                      src={icon3dPath}
-                      alt=""
-                      className="w-16 h-16 object-contain"
-                      onError={() => setShow3dIcon(false)}
-                    />
-                  )}
-                  {!show3dIcon && TypeIcon && (
-                    <TypeIcon
-                      className="w-12 h-12"
-                      style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : undefined }}
-                      strokeWidth={1.5}
-                    />
-                  )}
-                </>
+        <div className="flex items-center justify-between mb-3">
+          {/* Icon */}
+          <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
+            {hasPhoto ? (
+              <img
+                src={hasPhoto}
+                alt={item.name}
+                className="w-[100px] h-[100px] rounded-lg object-cover"
+              />
+            ) : (
+              <>
+                {icon3dPath && (
+                  <img
+                    src={icon3dPath}
+                    alt=""
+                    className="w-[100px] h-[100px] object-contain"
+                    onError={() => {
+                      // Try WebP if PNG failed, otherwise fallback to 2D icon
+                      if (iconFormat === "png") {
+                        setIconFormat("webp");
+                      } else {
+                        setIconFormat(null);
+                      }
+                    }}
+                  />
+                )}
+                {!icon3dPath && TypeIcon && (
+                  <TypeIcon
+                    className="w-12 h-12"
+                    style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : undefined }}
+                    strokeWidth={1.5}
+                  />
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Info */}
+          <div className="flex flex-col items-center justify-center flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1 flex-wrap justify-center">
+              <span
+                className="text-sm font-normal"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+              >
+                {typeLabel}
+              </span>
+              {currencyCode && (
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase ${
+                    getCurrencyBadgeClass(currencyCode)
+                  }`}
+                  style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined}
+                >
+                  {currencyCode}
+                </span>
               )}
             </div>
-
-            {/* Info */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <h3
+              className="text-2xl font-medium mb-1 text-center"
+              style={{ color: textColor }}
+            >
+              {item.name}
+            </h3>
+            {counterparty && CounterpartyFallbackIcon && (
+              <div className="flex items-center gap-2 mb-1 justify-center">
+                <div className="relative h-5 w-5 shrink-0">
+                  {counterpartyLogoUrlFull && !showCounterpartyIcon ? (
+                    <img
+                      src={counterpartyLogoUrlFull}
+                      alt=""
+                      className="h-5 w-5 rounded object-contain"
+                      style={{ border: `1px solid ${PLACEHOLDER_COLOR_DARK}40` }}
+                      onError={() => setShowCounterpartyIcon(true)}
+                    />
+                  ) : (
+                    <div
+                      className="h-5 w-5 rounded flex items-center justify-center"
+                      style={{
+                        border: `1px solid ${PLACEHOLDER_COLOR_DARK}40`,
+                        backgroundColor: `${PLACEHOLDER_COLOR_DARK}10`,
+                      }}
+                    >
+                      <CounterpartyFallbackIcon
+                        className="h-3.5 w-3.5"
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                        strokeWidth={1.5}
+                      />
+                    </div>
+                  )}
+                </div>
                 <span
-                  className="text-sm"
-                  style={{ color: textColor }}
+                  className="text-sm font-normal text-center"
+                  style={{ color: PLACEHOLDER_COLOR_DARK }}
                 >
-                  {typeLabel}
+                  {buildCounterpartyDisplayName(counterparty)}
                 </span>
-                {currencyCode && (
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase ${
-                      getCurrencyBadgeClass(currencyCode)
-                    }`}
-                    style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined}
-                  >
-                    {currencyCode}
-                  </span>
-                )}
               </div>
-              <h3
-                className="text-lg font-bold mb-1"
-                style={{ color: textColor }}
-              >
-                {item.name}
-              </h3>
-              <div className="flex items-center gap-2 flex-wrap">
-                {openDateLabel && (
-                  <span
-                    className="text-sm"
-                    style={{ color: textColor }}
-                  >
-                    с {openDateLabel}
-                  </span>
-                )}
-                {historyStatus && (
-                  <span
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    style={{
-                      backgroundColor: isDeleted
-                        ? `${PLACEHOLDER_COLOR_DARK}20`
-                        : historyStatus === "NEW"
-                        ? "rgba(52, 211, 153, 0.2)"
-                        : "rgba(93, 95, 215, 0.2)",
-                      color: badgeColor || (historyStatus === "NEW" ? GREEN : undefined),
-                    }}
-                  >
-                    {historyStatus === "NEW" ? "Новый" : "Исторический"}
-                  </span>
-                )}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="shrink-0 hover:bg-transparent"
-                style={{ color: textColor }}
-              >
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              {onEdit && !isArchived && !isClosed && (
-                <DropdownMenuItem onClick={() => onEdit(item)}>
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Редактировать
-                </DropdownMenuItem>
-              )}
-              {onClose && !isArchived && !isClosed && (
-                <DropdownMenuItem onClick={() => onClose(item)}>
-                  <Archive className="mr-2 h-4 w-4" />
-                  Закрыть
-                </DropdownMenuItem>
-              )}
-              {onArchive && !isArchived && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => onArchive(item)}>
+          <div className="shrink-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0 hover:bg-transparent"
+                  style={{ color: textColor }}
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {onEdit && !isArchived && !isClosed && (
+                  <DropdownMenuItem onClick={() => onEdit(item)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Редактировать
+                  </DropdownMenuItem>
+                )}
+                {onClose && !isArchived && !isClosed && (
+                  <DropdownMenuItem onClick={() => onClose(item)}>
                     <Archive className="mr-2 h-4 w-4" />
-                    Архивировать
+                    Закрыть
                   </DropdownMenuItem>
-                </>
-              )}
-              {onDelete && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => onDelete(item)}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Удалить
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                )}
+                {onArchive && !isArchived && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => onArchive(item)}>
+                      <Archive className="mr-2 h-4 w-4" />
+                      Архивировать
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {onDelete && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => onDelete(item)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Удалить
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
         {/* Financial info */}
-        <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t" style={{ borderColor: `${textColor}20` }}>
+        <div className="grid grid-cols-3 gap-4 mt-4 justify-items-center">
           {showBalanceAndRate ? (
             <>
-              <div>
-                <div className="text-xs mb-1" style={{ color: textColor }}>
+              <div className="text-center">
+                <div className="text-sm font-normal mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                   Баланс
                 </div>
-                <div className="text-base font-semibold" style={{ color: textColor }}>
+                <div className="text-lg font-normal" style={{ color: textColor }}>
                   {formatAmount(displayBalanceCents)}
                 </div>
               </div>
-              <div>
-                <div className="text-xs mb-1" style={{ color: textColor }}>
+              <div className="text-center">
+                <div className="text-sm font-normal mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                   Курс
                 </div>
-                <div className="text-base font-semibold" style={{ color: textColor }}>
+                <div className="text-lg font-normal" style={{ color: textColor }}>
                   {rate ? formatRate(rate) : "-"}
                 </div>
               </div>
-              <div>
-                <div className="text-xs mb-1" style={{ color: textColor }}>
+              <div className="text-center">
+                <div className="text-sm font-normal mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                   Баланс
                 </div>
                 <div
-                  className="text-lg font-bold"
+                  className="text-2xl font-medium"
                   style={{
                     background: isDeleted ? undefined : PINK_GRADIENT_CONST,
                     WebkitBackgroundClip: isDeleted ? undefined : "text",
@@ -387,12 +442,12 @@ export function AssetCard({
               </div>
             </>
           ) : (
-            <div className="col-span-3">
-              <div className="text-xs mb-1" style={{ color: textColor }}>
+            <div className="col-span-3 text-center">
+              <div className="text-sm font-normal mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                 Баланс
               </div>
               <div
-                className="text-lg font-bold"
+                className="text-2xl font-medium"
                 style={{
                   background: isDeleted ? undefined : PINK_GRADIENT_CONST,
                   WebkitBackgroundClip: isDeleted ? undefined : "text",

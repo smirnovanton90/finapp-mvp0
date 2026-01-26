@@ -70,6 +70,7 @@ import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
+import { FilterPanel, FilterSection } from "@/components/filter-panel";
 import {
   Dialog,
   DialogContent,
@@ -3796,233 +3797,54 @@ function TransactionsView({
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        <aside
-          className={`shrink-0 transition-[width] duration-300 ${
-            isFilterPanelCollapsed ? "w-[100px]" : "w-[370px]"
-          }`}
-        >
-          <div 
-            className={cn(
-              "sticky top-0 h-screen p-[10px]",
-              isFilterPanelCollapsed ? "" : ""
-            )}
-          >
-            <div 
-              className="flex flex-col rounded-[9px] h-full w-full"
-              style={{ backgroundColor: SIDEBAR_BG }}
+        <FilterPanel
+          addButton={
+            <Dialog
+              open={isDialogOpen}
+              onOpenChange={(open) => {
+                if (open) {
+                  if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                  openCreateDialog();
+                } else {
+                  closeDialog();
+                }
+              }}
             >
-            {/* Collapse button */}
-            <div className="relative h-[55px] shrink-0">
-              <Button
-                variant="glass"
-                onClick={toggleFilterPanel}
-                className={`absolute top-[10px] h-[35px] w-[35px] rounded-[9px] p-0 ${
-                  isFilterPanelCollapsed ? "left-1/2 -translate-x-1/2" : "right-[10px]"
-                }`}
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
-                  } as React.CSSProperties
-                }
-                aria-label={isFilterPanelCollapsed ? "Развернуть фильтры" : "Свернуть фильтры"}
-              >
-                {isFilterPanelCollapsed ? (
-                  <ArrowRight
-                    className="size-[15px]"
-                    strokeWidth={1.5}
-                    style={{ color: SIDEBAR_TEXT_INACTIVE }}
-                  />
-                ) : (
-                  <ArrowLeft
-                    className="size-[15px]"
-                    strokeWidth={1.5}
-                    style={{ color: SIDEBAR_TEXT_INACTIVE }}
-                  />
-                )}
-              </Button>
-            </div>
-            
-            {isFilterPanelCollapsed ? (
-              /* Collapsed state - action buttons + expand button */
-              <div className="mt-[10px] flex flex-1 flex-col gap-[10px] pb-[10px] relative z-10">
-                {/* Action buttons */}
-                <div className="space-y-[10px] relative z-10">
-                  <Dialog
-                    open={isDialogOpen}
-                    onOpenChange={(open) => {
-                      if (open) {
-                        if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
-                        openCreateDialog();
-                      } else {
-                        closeDialog();
-                      }
-                    }}
-                  >
-                    <DialogTrigger asChild>
-                      <Button
-                        type="button"
-                        className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 relative z-10"
-                        style={{
-                          backgroundColor: ACCENT,
-                        }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
-                          openCreateDialog();
-                        }}
-                      >
-                        <Plus className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                      </Button>
-                    </DialogTrigger>
-                  </Dialog>
-                  
-                  <Button
-                    type="button"
-                    variant="glass"
-                    className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center relative z-10"
-                    style={
-                      {
-                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                      } as React.CSSProperties
-                    }
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      qrCodeInputRef.current?.click();
-                    }}
-                    disabled={isQrCodeLoading}
-                  >
-                    <QrCode className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="glass"
-                    className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center relative z-10"
-                    style={
-                      {
-                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                      } as React.CSSProperties
-                    }
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleImportOpenChange(true);
-                    }}
-                  >
-                    <FileDown className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                  </Button>
-                </div>
-
-                {/* Expand filter panel button */}
+              <DialogTrigger asChild>
                 <Button
-                  type="button"
-                  variant="glass"
-                  className="mx-[10px] flex-1 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center mt-auto relative z-10"
-                  style={
-                    {
-                      "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                      "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                    } as React.CSSProperties
-                  }
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    toggleFilterPanel();
+                  className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                  style={{
+                    backgroundColor: ACCENT,
                   }}
-                  aria-label="Развернуть фильтры"
                 >
-                  <ArrowRight className="h-6 w-6" style={{ color: "white", opacity: 0.85 }} />
+                  <Plus className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                  <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
                 </Button>
-              </div>
-            ) : (
-              /* Expanded state - full filters */
-              <div className="mt-[10px] flex flex-1 flex-col gap-4 pb-[10px] px-[10px]">
-                <div className="space-y-[10px]">
-                {/* Add button with gradient */}
-                <Dialog
-                  open={isDialogOpen}
-                  onOpenChange={(open) => {
-                    if (open) {
-                      if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
-                      openCreateDialog();
-                    } else {
-                      closeDialog();
-                    }
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button
-                      className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-                      style={{
-                        backgroundColor: ACCENT,
-                      }}
-                    >
-                      <Plus className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                      <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
-                    </Button>
-                  </DialogTrigger>
-                </Dialog>
-
-              <Button
-                type="button"
-                variant="glass"
-                className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as React.CSSProperties
-                }
-                onClick={() => qrCodeInputRef.current?.click()}
-                disabled={isQrCodeLoading}
-              >
-                <QrCode className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                <span style={{ color: "white", opacity: 0.85 }}>
-                  {isQrCodeLoading ? "Обработка..." : "Загрузить чек"}
-                </span>
-              </Button>
-
-              <Button
-                type="button"
-                variant="glass"
-                className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as React.CSSProperties
-                }
-                onClick={() => handleImportOpenChange(true)}
-              >
-                <FileDown className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                <span style={{ color: "white", opacity: 0.85 }}>Импортировать выписку</span>
-              </Button>
-
+              </DialogTrigger>
+            </Dialog>
+          }
+          additionalActions={[
+            {
+              icon: <QrCode className="h-5 w-5" />,
+              label: "Загрузить чек",
+              onClick: () => qrCodeInputRef.current?.click(),
+              disabled: isQrCodeLoading,
+              variant: "glass",
+            },
+            {
+              icon: <FileDown className="h-5 w-5" />,
+              label: "Импортировать выписку",
+              onClick: () => handleImportOpenChange(true),
+              variant: "glass",
+            },
+          ]}
+        >
+          <FilterSection
+            label="Вид транзакции"
+            onReset={() => setSelectedDirections(new Set<TransactionOut["direction"]>())}
+            showReset={selectedDirections.size > 0}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Вид транзакции
-                  </div>
-                  {selectedDirections.size > 0 && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() =>
-                        setSelectedDirections(
-                          new Set<TransactionOut["direction"]>()
-                        )
-                      }
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
                 <SegmentedSelector
                   options={[
                     { value: "INCOME", label: "Доход", colorScheme: "green" },
@@ -4040,29 +3862,20 @@ function TransactionsView({
                   multiple={true}
                 />
               </div>
+          </FilterSection>
               
+          <FilterSection
+            label="Сумма транзакции"
+            onReset={() => {
+              setAmountFrom("");
+              setAmountTo("");
+            }}
+            showReset={!!amountFrom || !!amountTo}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Сумма транзакции
-                  </div>
-                  {(amountFrom || amountTo) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setAmountFrom("");
-                        setAmountTo("");
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <div className="flex-1 min-w-0 basis-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white min-w-0">
                       <AuthInput
                         type="text"
                         inputMode="decimal"
@@ -4077,9 +3890,9 @@ function TransactionsView({
                       />
                     </div>
                   </div>
-                  <span className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                  <span className="text-sm shrink-0" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
+                  <div className="flex-1 min-w-0 basis-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white min-w-0">
                       <AuthInput
                         type="text"
                         inputMode="decimal"
@@ -4092,29 +3905,20 @@ function TransactionsView({
                   </div>
                 </div>
               </div>
+          </FilterSection>
               
+          <FilterSection
+            label="Дата транзакции"
+            onReset={() => {
+              setDateFrom("");
+              setDateTo("");
+            }}
+            showReset={!!dateFrom || !!dateTo}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Дата транзакции
-                  </div>
-                  {(dateFrom || dateTo) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setDateFrom("");
-                        setDateTo("");
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <div className="flex-1 min-w-0 basis-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal min-w-0">
                       <AuthInput
                         type="date"
                         value={dateFrom}
@@ -4125,9 +3929,9 @@ function TransactionsView({
                       />
                     </div>
                   </div>
-                  <span className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal">
+                  <span className="text-sm shrink-0" style={{ color: SIDEBAR_TEXT_INACTIVE }}>—</span>
+                  <div className="flex-1 min-w-0 basis-0">
+                    <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal min-w-0">
                       <AuthInput
                         type="date"
                         value={dateTo}
@@ -4140,42 +3944,41 @@ function TransactionsView({
                   </div>
                 </div>
               </div>
+          </FilterSection>
               
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-1">
-                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                      Валюта
-                    </div>
-                    <button
-                      type="button"
-                      aria-label="Свернуть/развернуть"
-                      className="rounded-md p-1 hover:bg-[rgba(108,93,215,0.22)] transition-colors"
-                      onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
-                    >
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${
-                          isCurrencyFilterOpen ? "rotate-0" : "-rotate-90"
-                        }`}
-                        style={{ color: SIDEBAR_TEXT_INACTIVE }}
-                      />
-                    </button>
-                  </div>
-                  {selectedCurrencyCodes.size > 0 && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="text-sm font-medium hover:underline disabled:opacity-50"
-                        style={{ color: ACCENT }}
-                        onClick={() => setSelectedCurrencyCodes(new Set<string>())}
-                      >
-                        Сбросить
-                      </button>
-                    </div>
-                  )}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-1">
+                <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                  Валюта
                 </div>
+                <button
+                  type="button"
+                  aria-label="Свернуть/развернуть"
+                  className="rounded-md p-1 hover:bg-[rgba(108,93,215,0.22)] transition-colors"
+                  onClick={() => setIsCurrencyFilterOpen((prev) => !prev)}
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${
+                      isCurrencyFilterOpen ? "rotate-0" : "-rotate-90"
+                    }`}
+                    style={{ color: SIDEBAR_TEXT_INACTIVE }}
+                  />
+                </button>
+              </div>
+              {selectedCurrencyCodes.size > 0 && (
+                <button
+                  type="button"
+                  className="text-sm font-medium hover:underline disabled:opacity-50"
+                  style={{ color: ACCENT }}
+                  onClick={() => setSelectedCurrencyCodes(new Set<string>())}
+                >
+                  Сбросить
+                </button>
+              )}
+            </div>
 
-                {isCurrencyFilterOpen && (
+            {isCurrencyFilterOpen && (
                   <div className="space-y-2">
                     {currencyOptions.length === 0 ? (
                       <div className="text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
@@ -4201,23 +4004,13 @@ function TransactionsView({
                     )}
                   </div>
                 )}
-              </div>
+          </div>
+          <FilterSection
+            label="Активы/обязательства"
+            onReset={resetItemFilters}
+            showReset={selectedItemIds.size > 0}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Активы/обязательства
-                  </div>
-                  {selectedItemIds.size > 0 && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={resetItemFilters}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
                 <ItemSelector
                   items={activeItems}
                   selectedIds={Array.from(selectedItemIds)}
@@ -4236,22 +4029,13 @@ function TransactionsView({
                   ariaLabel="Активы/обязательства"
                 />
               </div>
+          </FilterSection>
+          <FilterSection
+            label="Категории"
+            onReset={resetCategoryFilters}
+            showReset={selectedCategoryFilterKeys.size > 0}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Категории
-                  </div>
-                  {selectedCategoryFilterKeys.size > 0 && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={resetCategoryFilters}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
                 <CategorySelector
                   categoryNodes={categoryNodes}
                   selectedPathKeys={selectedCategoryFilterKeys}
@@ -4261,22 +4045,13 @@ function TransactionsView({
                   showChips={true}
                 />
               </div>
+          </FilterSection>
+          <FilterSection
+            label="Контрагенты"
+            onReset={resetCounterpartyFilters}
+            showReset={selectedCounterpartyIds.size > 0}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Контрагенты
-                  </div>
-                  {selectedCounterpartyIds.size > 0 && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={resetCounterpartyFilters}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
                 <CounterpartySelector
                   counterparties={selectableCounterparties}
                   selectedIds={Array.from(selectedCounterpartyIds)}
@@ -4288,22 +4063,13 @@ function TransactionsView({
                   showChips={true}
                 />
               </div>
+          </FilterSection>
+          <FilterSection
+            label="Комментарий"
+            onReset={() => setCommentFilter("")}
+            showReset={!!commentFilter}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Комментарий
-                  </div>
-                  {!!commentFilter && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => setCommentFilter("")}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
                 <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
                   <AuthInput
                     type="text"
@@ -4313,26 +4079,17 @@ function TransactionsView({
                   />
                 </div>
               </div>
+          </FilterSection>
 
+          <FilterSection
+            label="Статус подтверждения"
+            onReset={() => {
+              setShowConfirmed(true);
+              setShowUnconfirmed(true);
+            }}
+            showReset={!(showConfirmed && showUnconfirmed)}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Статус подтверждения
-                  </div>
-                  {!(showConfirmed && showUnconfirmed) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setShowConfirmed(true);
-                        setShowUnconfirmed(true);
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
                 <SegmentedSelector
                   options={[
                     { value: "confirmed", label: "Подтвержденные" },
@@ -4350,27 +4107,20 @@ function TransactionsView({
                   multiple={true}
                 />
               </div>
+          </FilterSection>
 
+          <FilterSection
+            label="Тип транзакции"
+            onReset={() => {
+              setShowActual(defaultShowActual);
+              setShowPlanned(defaultShowPlannedRealized || defaultShowPlannedUnrealized);
+            }}
+            showReset={
+              showActual !== defaultShowActual ||
+              showPlanned !== (defaultShowPlannedRealized || defaultShowPlannedUnrealized)
+            }
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Тип транзакции
-                  </div>
-                  {(showActual !== defaultShowActual ||
-                    showPlanned !== (defaultShowPlannedRealized || defaultShowPlannedUnrealized)) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setShowActual(defaultShowActual);
-                        setShowPlanned(defaultShowPlannedRealized || defaultShowPlannedUnrealized);
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
                 <SegmentedSelector
                   options={[
                     { value: "actual", label: "Фактическая" },
@@ -4398,28 +4148,21 @@ function TransactionsView({
                   multiple={true}
                 />
               </div>
+          </FilterSection>
 
-              {showPlanned && (
+          {showPlanned && (
+            <FilterSection
+              label="Тип плановой транзакции"
+              onReset={() => {
+                setShowPlannedRealized(defaultShowPlannedRealized);
+                setShowPlannedUnrealized(defaultShowPlannedUnrealized);
+              }}
+              showReset={
+                showPlannedRealized !== defaultShowPlannedRealized ||
+                showPlannedUnrealized !== defaultShowPlannedUnrealized
+              }
+            >
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                      Тип плановой транзакции
-                    </div>
-                    {(showPlannedRealized !== defaultShowPlannedRealized ||
-                      showPlannedUnrealized !== defaultShowPlannedUnrealized) && (
-                      <button
-                        type="button"
-                        className="text-sm font-medium hover:underline disabled:opacity-50"
-                        style={{ color: ACCENT }}
-                        onClick={() => {
-                          setShowPlannedRealized(defaultShowPlannedRealized);
-                          setShowPlannedUnrealized(defaultShowPlannedUnrealized);
-                        }}
-                      >
-                        Сбросить
-                      </button>
-                    )}
-                  </div>
                   <SegmentedSelector
                     options={[
                       {
@@ -4449,27 +4192,18 @@ function TransactionsView({
                     multiple={true}
                   />
                 </div>
-              )}
+            </FilterSection>
+          )}
 
+          <FilterSection
+            label="Статус транзакции"
+            onReset={() => {
+              setShowActive(true);
+              setShowDeleted(false);
+            }}
+            showReset={!showActive || showDeleted}
+          >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                    Статус транзакции
-                  </div>
-                  {(!showActive || showDeleted) && (
-                    <button
-                      type="button"
-                      className="text-sm font-medium hover:underline disabled:opacity-50"
-                      style={{ color: ACCENT }}
-                      onClick={() => {
-                        setShowActive(true);
-                        setShowDeleted(false);
-                      }}
-                    >
-                      Сбросить
-                    </button>
-                  )}
-                </div>
                 <SegmentedSelector
                   options={[
                     { value: "active", label: "Активные" },
@@ -4487,9 +4221,8 @@ function TransactionsView({
                   multiple={true}
                 />
               </div>
-                </div>
-              </div>
-            )}
+          </FilterSection>
+        </FilterPanel>
             
             {/* Shared elements for both collapsed and expanded states */}
             {/* QR Code input for receipt upload */}
@@ -5458,12 +5191,9 @@ function TransactionsView({
                   </form>
                 </DialogContent>
               </Dialog>
-            </div>
-          </div>
-        </aside>
 
-        <div className="flex-1 flex items-center min-h-screen py-8">
-          <div className="w-[900px] mx-auto">
+        <div className="flex-1 min-w-0">
+          <div className="w-full max-w-[900px] mx-auto">
             <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">

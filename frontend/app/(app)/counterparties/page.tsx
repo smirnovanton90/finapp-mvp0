@@ -65,6 +65,8 @@ import {
   uploadCounterpartyPhoto,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
+import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { SegmentedSelector } from "@/components/ui/segmented-selector";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const MAX_LOGO_DIM = 1024;
@@ -539,36 +541,57 @@ export default function CounterpartiesPage() {
     });
   };
 
-  const segmentedButtonBase =
-    "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
+  // Convert boolean states to Set for SegmentedSelector
+  const statusFilter = useMemo(() => {
+    const set = new Set<string>();
+    if (showActiveStatus) set.add("ACTIVE");
+    if (showDeletedStatus) set.add("DELETED");
+    return set;
+  }, [showActiveStatus, showDeletedStatus]);
+
+  const handleStatusFilterChange = (value: Set<string>) => {
+    setShowActiveStatus(value.has("ACTIVE"));
+    setShowDeletedStatus(value.has("DELETED"));
+  };
+
+  const entityTypeFilter = useMemo(() => {
+    const set = new Set<string>();
+    if (showLegalEntities) set.add("LEGAL");
+    if (showPersonEntities) set.add("PERSON");
+    return set;
+  }, [showLegalEntities, showPersonEntities]);
+
+  const handleEntityTypeFilterChange = (value: Set<string>) => {
+    setShowLegalEntities(value.has("LEGAL"));
+    setShowPersonEntities(value.has("PERSON"));
+  };
 
   return (
     <main className="min-h-screen px-8 py-8">
       <div className="flex flex-col gap-6 lg:flex-row">
-        <aside className="w-full max-w-[340px] shrink-0">
-          <div className="rounded-lg border-2 border-border/70 bg-card p-4">
-            <div className="space-y-6">
-              <Dialog
-                open={isDialogOpen}
-                onOpenChange={(open) => {
-                  setIsDialogOpen(open);
-                  if (!open) {
+        <FilterPanel
+          addButton={
+            <Dialog
+              open={isDialogOpen}
+              onOpenChange={(open) => {
+                setIsDialogOpen(open);
+                if (!open) {
+                  setEditing(null);
+                  setFormError(null);
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button
+                  className="w-full bg-violet-600 text-white hover:bg-violet-700"
+                  onClick={() => {
                     setEditing(null);
-                    setFormError(null);
-                  }
-                }}
-              >
-                <DialogTrigger asChild>
-                  <Button
-                    className="w-full bg-violet-600 text-white hover:bg-violet-700"
-                    onClick={() => {
-                      setEditing(null);
-                    }}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Добавить
-                  </Button>
-                </DialogTrigger>
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Добавить
+                </Button>
+              </DialogTrigger>
                 <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>
@@ -797,21 +820,13 @@ export default function CounterpartiesPage() {
           </form>
         </DialogContent>
       </Dialog>
-
-      <div className="-mx-4 border-t-2 border-border/70" />
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">Название</div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => setNameFilter("")}
-                    disabled={!nameFilter}
-                  >
-                    Сбросить
-                  </button>
-                </div>
+          }
+        >
+              <FilterSection
+                label="Название"
+                onReset={() => setNameFilter("")}
+                showReset={!!nameFilter}
+              >
                 <Input
                   type="text"
                   className="h-10 w-full border-2 border-border/70 bg-card shadow-none"
@@ -819,122 +834,58 @@ export default function CounterpartiesPage() {
                   value={nameFilter}
                   onChange={(e) => setNameFilter(e.target.value)}
                 />
-              </div>
+              </FilterSection>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
-                    Созданные самостоятельно
-                  </div>
-                  <Switch
-                    checked={showUserCreated}
-                    onCheckedChange={setShowUserCreated}
-                  />
-                </div>
-              </div>
+              <FilterSection label="Созданные самостоятельно">
+                <Switch
+                  checked={showUserCreated}
+                  onCheckedChange={setShowUserCreated}
+                />
+              </FilterSection>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
-                    Статус контрагента
-                  </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setShowActiveStatus(true);
-                      setShowDeletedStatus(true);
-                    }}
-                    disabled={showActiveStatus && showDeletedStatus}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={showActiveStatus}
-                    onClick={() => setShowActiveStatus((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showActiveStatus
-                        ? "bg-violet-50 text-violet-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Активные
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={showDeletedStatus}
-                    onClick={() => setShowDeletedStatus((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showDeletedStatus
-                        ? "bg-slate-100 text-slate-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    Удаленные
-                  </button>
-                </div>
-              </div>
+              <FilterSection
+                label="Статус контрагента"
+                onReset={() => {
+                  setShowActiveStatus(true);
+                  setShowDeletedStatus(true);
+                }}
+                showReset={!(showActiveStatus && showDeletedStatus)}
+              >
+                <SegmentedSelector
+                  options={[
+                    { value: "ACTIVE", label: "Активные", colorScheme: "purple" },
+                    { value: "DELETED", label: "Удаленные", colorScheme: "orange" },
+                  ]}
+                  value={statusFilter}
+                  onChange={handleStatusFilterChange}
+                  multiple={true}
+                />
+              </FilterSection>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">
-                    Тип контрагента
-                  </div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => {
-                      setShowLegalEntities(true);
-                      setShowPersonEntities(true);
-                    }}
-                    disabled={showLegalEntities && showPersonEntities}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-white p-0.5">
-                  <button
-                    type="button"
-                    aria-pressed={showLegalEntities}
-                    onClick={() => setShowLegalEntities((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showLegalEntities
-                        ? "bg-violet-50 text-violet-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    ЮЛ/ИП
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={showPersonEntities}
-                    onClick={() => setShowPersonEntities((prev) => !prev)}
-                    className={`${segmentedButtonBase} ${
-                      showPersonEntities
-                        ? "bg-slate-100 text-slate-700"
-                        : "bg-card text-muted-foreground hover:bg-accent"
-                    }`}
-                  >
-                    ФЛ
-                  </button>
-                </div>
-              </div>
+              <FilterSection
+                label="Тип контрагента"
+                onReset={() => {
+                  setShowLegalEntities(true);
+                  setShowPersonEntities(true);
+                }}
+                showReset={!(showLegalEntities && showPersonEntities)}
+              >
+                <SegmentedSelector
+                  options={[
+                    { value: "LEGAL", label: "ЮЛ/ИП", colorScheme: "purple" },
+                    { value: "PERSON", label: "ФЛ", colorScheme: "orange" },
+                  ]}
+                  value={entityTypeFilter}
+                  onChange={handleEntityTypeFilterChange}
+                  multiple={true}
+                />
+              </FilterSection>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-sm font-semibold text-foreground">Отрасль</div>
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-violet-600 hover:underline disabled:text-slate-300"
-                    onClick={() => setSelectedIndustryIds(new Set())}
-                    disabled={selectedIndustryIds.size === 0}
-                  >
-                    Сбросить
-                  </button>
-                </div>
+              <FilterSection
+                label="Отрасль"
+                onReset={() => setSelectedIndustryIds(new Set())}
+                showReset={selectedIndustryIds.size > 0}
+              >
                 {industries.length === 0 ? (
                   <div className="text-xs text-muted-foreground">
                     Список отраслей пока пуст.
@@ -957,10 +908,8 @@ export default function CounterpartiesPage() {
                     ))}
                   </div>
                 )}
-              </div>
-            </div>
-          </div>
-        </aside>
+              </FilterSection>
+        </FilterPanel>
 
         <div className="flex-1">
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">

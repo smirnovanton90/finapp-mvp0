@@ -4819,9 +4819,9 @@ export default function Page() {
             }}
             showReset={!!filterAmountFrom || !!filterAmountTo}
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex-1 min-w-0">
-                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <div className="flex-1 min-w-0 basis-0">
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white min-w-0">
                   <AuthInput
                     type="text"
                     inputMode="decimal"
@@ -4832,9 +4832,9 @@ export default function Page() {
                   />
                 </div>
               </div>
-              <span className="text-sm" style={{ color: SIDEBAR_TEXT_ACTIVE }}>—</span>
-              <div className="flex-1 min-w-0">
-                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+              <span className="text-sm shrink-0" style={{ color: SIDEBAR_TEXT_ACTIVE }}>—</span>
+              <div className="flex-1 min-w-0 basis-0">
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white min-w-0">
                   <AuthInput
                     type="text"
                     inputMode="decimal"

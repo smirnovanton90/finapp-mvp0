@@ -117,7 +117,7 @@ import {
   RepaymentType,
   PaymentAmountKind,
 } from "@/lib/api";
-import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
 
@@ -1561,8 +1561,8 @@ export default function Page() {
   ]);
 
   const visibleItems = useMemo(
-    () => filteredItems,
-    [filteredItems]
+    () => sortItemsByTransactionCount(filteredItems, itemTxCounts),
+    [filteredItems, itemTxCounts]
   );
 
   // Отслеживание готовности карточек для скрытия скелетонов

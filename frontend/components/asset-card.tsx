@@ -458,7 +458,7 @@ export function AssetCard({
         {item.type_code === "deposit" && (
           (item.deposit_term_days != null || item.deposit_end_date != null || item.interest_rate != null) && (
             <div className="flex items-center justify-center gap-4 mt-3">
-              <div className="flex flex-col items-center gap-1 flex-1">
+              <div className="flex flex-col items-center gap-0.5 flex-1">
                 {item.deposit_term_days != null && (
                   <div className="flex items-baseline gap-2 text-center">
                     <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
@@ -481,7 +481,7 @@ export function AssetCard({
                 )}
               </div>
               {item.interest_rate != null && (
-                <div className="flex flex-col items-center gap-1 text-center flex-1">
+                <div className="flex flex-col items-center gap-0.5 text-center flex-1">
                   <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                     Ставка
                   </span>

@@ -34,6 +34,7 @@ import {
 import {
   ArrowRight,
   ArrowLeft,
+  ArrowLeftRight,
   Ban,
   BadgeCheck,
   Briefcase,
@@ -4606,6 +4607,7 @@ function TransactionsView({
                     ? "Редактировать транзакцию"
                     : "Добавить транзакцию"
               }
+              icon={<ArrowLeftRight className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
               formError={formError}
               onSubmit={async (e) => {
                     e.preventDefault();

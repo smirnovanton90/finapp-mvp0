@@ -58,6 +58,7 @@ export type ItemOut = {
   archived_at: string | null;
   plan_settings?: ItemPlanSettings | null;
   photo_url: string | null;
+  photo_updated_at: string | null;
 };
 
 export type ItemCreate = {

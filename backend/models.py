@@ -370,6 +370,12 @@ class Item(Base):
     closed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archived_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    photo_mime: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    photo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    photo_updated_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     plan_settings: Mapped[Optional["ItemPlanSettings"]] = relationship(
         back_populates="item",
         uselist=False,

@@ -362,6 +362,8 @@ class ItemOut(BaseModel):
     closed_at: datetime | None
     archived_at: datetime | None
     plan_settings: ItemPlanSettingsBase | None = None
+    photo_url: str | None = None
+    photo_updated_at: datetime | None = None
 
     class Config:
         from_attributes = True

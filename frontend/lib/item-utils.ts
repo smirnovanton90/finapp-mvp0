@@ -1,5 +1,20 @@
 import { ItemKind, ItemOut, TransactionOut } from "@/lib/api";
 
+/** Build full item photo URL with cache-busting so updated images refresh without reload. */
+export function getItemPhotoUrl(
+  item: { photo_url: string | null; photo_updated_at?: string | null } | null,
+  apiBase: string
+): string | null {
+  if (!item?.photo_url) return null;
+  const base = item.photo_url.startsWith("http")
+    ? item.photo_url
+    : `${apiBase}${item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`}`;
+  const qs = item.photo_updated_at
+    ? `?t=${new Date(item.photo_updated_at).getTime()}`
+    : "";
+  return `${base}${qs}`;
+}
+
 export function normalizeItemSearch(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
 }

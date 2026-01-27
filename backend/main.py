@@ -373,6 +373,25 @@ def _apply_logo_url(counterparty: Counterparty) -> None:
     )
 
 
+MAX_ITEM_PHOTO_BYTES = 2 * 1024 * 1024
+MAX_ITEM_PHOTO_DIM = 1024
+ALLOWED_ITEM_PHOTO_FORMATS = {"PNG", "JPEG", "WEBP"}
+_FORMAT_TO_MIME = {
+    "PNG": "image/png",
+    "JPEG": "image/jpeg",
+    "WEBP": "image/webp",
+}
+
+
+def _apply_item_photo_url(item: Item) -> None:
+    url = (
+        f"{settings.public_base_url}/items/{item.id}/photo"
+        if item.photo_data
+        else None
+    )
+    setattr(item, "photo_url", url)
+
+
 def _resolve_card_account_id(
     db: Session,
     user: User,
@@ -738,6 +757,8 @@ def list_items(
         value = _compute_market_value_rub(item, price, db)
         if value is not None:
             item.current_value_rub = value
+    for item in items:
+        _apply_item_photo_url(item)
     return items
 
 
@@ -1060,6 +1081,7 @@ def create_item(
 
     db.commit()
     db.refresh(item)
+    _apply_item_photo_url(item)
     return item
 
 @app.patch("/items/{item_id}", response_model=ItemOut)
@@ -1398,6 +1420,7 @@ def update_item(
 
     db.commit()
     db.refresh(item)
+    _apply_item_photo_url(item)
     return item
 
 @app.patch("/items/{item_id}/archive", response_model=ItemOut)
@@ -1417,6 +1440,7 @@ def archive_item(
 
     db.commit()
     db.refresh(item)
+    _apply_item_photo_url(item)
     return item
 
 @app.patch("/items/{item_id}/close", response_model=ItemOut)
@@ -1588,7 +1612,68 @@ def close_item(
 
     db.commit()
     db.refresh(item)
+    _apply_item_photo_url(item)
     return item
+
+@app.get("/items/{item_id}/photo")
+def get_item_photo(
+    item_id: int,
+    db: Session = Depends(get_db),
+):
+    item = db.get(Item, item_id)
+    if not item or not item.photo_data:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    media_type = item.photo_mime or "application/octet-stream"
+    return Response(content=item.photo_data, media_type=media_type)
+
+
+@app.post("/items/{item_id}/photo", response_model=ItemOut)
+async def upload_item_photo(
+    item_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found.")
+    if item.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot edit archived item.")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Файл не загружен.")
+    if len(data) > MAX_ITEM_PHOTO_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Размер фотографии не должен превышать {MAX_ITEM_PHOTO_BYTES // (1024 * 1024)} МБ.",
+        )
+
+    try:
+        image = Image.open(BytesIO(data))
+        image.verify()
+        image = Image.open(BytesIO(data))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Неверный формат изображения.") from exc
+
+    if image.format not in ALLOWED_ITEM_PHOTO_FORMATS:
+        raise HTTPException(status_code=400, detail="Недопустимый формат изображения.")
+
+    width, height = image.size
+    if width > MAX_ITEM_PHOTO_DIM or height > MAX_ITEM_PHOTO_DIM:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Разрешение фотографии не должно превышать {MAX_ITEM_PHOTO_DIM}px.",
+        )
+
+    item.photo_mime = _FORMAT_TO_MIME[image.format]
+    item.photo_data = data
+    item.photo_updated_at = func.now()
+    db.commit()
+    db.refresh(item)
+    _apply_item_photo_url(item)
+    return item
+
 
 @app.get("/items/archived", response_model=list[ItemOut])
 def list_archived_items(

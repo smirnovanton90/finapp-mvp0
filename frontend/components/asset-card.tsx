@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ItemOut, CounterpartyOut, API_BASE } from "@/lib/api";
-import { getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
+import { getEffectiveItemKind, formatAmount, getItemPhotoUrl } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
 import { useImagePreloader } from "@/hooks/use-image-preloader";
@@ -205,11 +205,7 @@ export function AssetCard({
   // Try PNG first, then WebP, then fallback to 2D icon
   const [iconFormat, setIconFormat] = React.useState<"png" | "webp" | null>("png");
   const icon3dPath = iconFormat ? `/icons-3d/${item.type_code}.${iconFormat}` : null;
-  const hasPhoto = item.photo_url 
-    ? (item.photo_url.startsWith("http") 
-        ? item.photo_url 
-        : `${API_BASE}${item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`}`)
-    : null;
+  const hasPhoto = getItemPhotoUrl(item, API_BASE);
 
   // Counterparty logo/icon handling
   const counterpartyLogoUrl = counterparty

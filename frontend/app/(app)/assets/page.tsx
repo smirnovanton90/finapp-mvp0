@@ -117,7 +117,7 @@ import {
   RepaymentType,
   PaymentAmountKind,
 } from "@/lib/api";
-import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, sortItemsByTransactionCount } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
 
@@ -749,12 +749,7 @@ export default function Page() {
       URL.revokeObjectURL(itemPhotoPreview);
     }
 
-    const getEditingItemPhotoUrl = () => {
-      if (!editingItem?.photo_url) return null;
-      return editingItem.photo_url.startsWith("http")
-        ? editingItem.photo_url
-        : `${API_BASE}${editingItem.photo_url.startsWith("/") ? editingItem.photo_url : `/${editingItem.photo_url}`}`;
-    };
+    const getEditingItemPhotoUrl = () => getItemPhotoUrl(editingItem ?? null, API_BASE);
 
     if (!file) {
       setItemPhotoFile(null);
@@ -851,13 +846,16 @@ export default function Page() {
     setOriginalPlanSignature(null);
     setSectionId("");
     setIsGeneralCreate(false);
-    // Clear photo
+    // Clear photo (same pattern as counterparties)
     if (itemPhotoPreview?.startsWith("blob:")) {
       URL.revokeObjectURL(itemPhotoPreview);
     }
     setItemPhotoFile(null);
     setItemPhotoPreview(null);
     setItemPhotoError(null);
+    if (itemPhotoInputRef.current) {
+      itemPhotoInputRef.current.value = "";
+    }
     setIcon3dFormat("png");
     setShow2dIcon(false);
   }
@@ -2646,6 +2644,17 @@ export default function Page() {
     setLinkedChains([]);
     setOriginalPlanSignature(null);
     setFormError(null);
+    if (itemPhotoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(itemPhotoPreview);
+    }
+    setItemPhotoFile(null);
+    setItemPhotoPreview(null);
+    setItemPhotoError(null);
+    if (itemPhotoInputRef.current) {
+      itemPhotoInputRef.current.value = "";
+    }
+    setIcon3dFormat("png");
+    setShow2dIcon(false);
     setIsCreateOpen(true);
   };
 
@@ -2783,15 +2792,17 @@ export default function Page() {
     );
     setOriginalPlanSignature(buildPlanSignatureFromItem(item));
     loadLinkedChains(item.id);
-    // Load item photo_url
-    const itemPhotoUrl = item.photo_url 
-      ? (item.photo_url.startsWith("http") 
-          ? item.photo_url 
-          : `${API_BASE}${item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`}`)
-      : null;
+    // Load item photo_url (same pattern as counterparties: preview from existing, clear new file)
+    if (itemPhotoPreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(itemPhotoPreview);
+    }
+    const itemPhotoUrl = getItemPhotoUrl(item, API_BASE);
     setItemPhotoPreview(itemPhotoUrl);
     setItemPhotoFile(null);
     setItemPhotoError(null);
+    if (itemPhotoInputRef.current) {
+      itemPhotoInputRef.current.value = "";
+    }
     setIcon3dFormat("png");
     setShow2dIcon(false);
     setFormError(null);
@@ -3368,14 +3379,17 @@ export default function Page() {
       setAmountStr("");
       setIsCreateOpen(false);
       setEditingItem(null);
-      // Clear photo
+      // Clear photo (same pattern as counterparties)
       if (itemPhotoPreview?.startsWith("blob:")) {
         URL.revokeObjectURL(itemPhotoPreview);
       }
       setItemPhotoFile(null);
       setItemPhotoPreview(null);
       setItemPhotoError(null);
-  
+      if (itemPhotoInputRef.current) {
+        itemPhotoInputRef.current.value = "";
+      }
+
       // Reload items to get all updates from backend
       await loadItems();
       await loadTransactions();
@@ -4033,6 +4047,9 @@ export default function Page() {
                     handleItemPhotoChange(file);
                   }}
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  До {formatSize(MAX_PHOTO_BYTES)}, не больше {MAX_PHOTO_DIM}px, PNG/JPG/WEBP.
+                </p>
                 {itemPhotoError && (
                   <p className="text-xs mt-1" style={{ color: "#FB4C4F" }}>
                     {itemPhotoError}

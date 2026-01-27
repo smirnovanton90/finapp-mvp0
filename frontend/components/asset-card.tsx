@@ -125,6 +125,7 @@ interface AssetCardProps {
   onArchive?: (item: ItemOut) => void;
   onClose?: (item: ItemOut) => void;
   getItemDisplayBalanceCents: (item: ItemOut) => number;
+  onReady?: () => void;
 }
 
 // Simplified industry icon mapping (can be expanded if needed)
@@ -173,6 +174,7 @@ export function AssetCard({
   onArchive,
   onClose,
   getItemDisplayBalanceCents,
+  onReady,
 }: AssetCardProps) {
   const isArchived = Boolean(item.archived_at);
   const isClosed = Boolean(item.closed_at);
@@ -248,6 +250,20 @@ export function AssetCard({
 
   const mainImageRef = imageRefs[0];
   const counterpartyLogoRef = imageRefs[1];
+  const hasCalledOnReady = React.useRef(false);
+
+  // Вызываем onReady один раз, когда карточка готова
+  React.useEffect(() => {
+    if (isCardReady && onReady && !hasCalledOnReady.current) {
+      hasCalledOnReady.current = true;
+      onReady();
+    }
+  }, [isCardReady, onReady]);
+
+  // Сбрасываем флаг при изменении item
+  React.useEffect(() => {
+    hasCalledOnReady.current = false;
+  }, [item.id]);
 
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
   const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;

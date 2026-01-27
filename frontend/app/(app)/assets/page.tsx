@@ -40,6 +40,7 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterPanel, FilterSection } from "@/components/filter-panel";
 import { AssetCard } from "@/components/asset-card";
+import { AssetCardSkeleton } from "@/components/asset-card-skeleton";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
@@ -623,8 +624,9 @@ export default function Page() {
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Начинаем с true, чтобы сразу показать скелетон
   const [error, setError] = useState<string | null>(null);
+  const [showSkeletons, setShowSkeletons] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -1562,6 +1564,53 @@ export default function Page() {
     () => filteredItems,
     [filteredItems]
   );
+
+  // Отслеживание готовности карточек для скрытия скелетонов
+  const [readyCardsCount, setReadyCardsCount] = useState(0);
+  const readyCardsSet = useRef<Set<number>>(new Set());
+  
+  // Обновляем счетчик при изменении списка элементов (удаляем только те, которых больше нет)
+  useEffect(() => {
+    const currentItemIds = new Set(visibleItems.map(item => item.id));
+    // Удаляем ID карточек, которых больше нет в списке
+    let hasChanges = false;
+    readyCardsSet.current.forEach(id => {
+      if (!currentItemIds.has(id)) {
+        readyCardsSet.current.delete(id);
+        hasChanges = true;
+      }
+    });
+    // Обновляем счетчик, если были изменения
+    if (hasChanges) {
+      setReadyCardsCount(readyCardsSet.current.size);
+    }
+    // Если список пустой, очищаем все
+    if (visibleItems.length === 0) {
+      readyCardsSet.current.clear();
+      setReadyCardsCount(0);
+    }
+  }, [visibleItems.map(item => item.id).join(',')]);
+
+  // Показывать скелетоны во время загрузки или пока не все карточки готовы
+  useEffect(() => {
+    if (loading) {
+      // Показываем скелетоны во время загрузки данных
+      setShowSkeletons(true);
+    } else if (visibleItems.length > 0) {
+      // Показываем скелетоны при появлении элементов
+      setShowSkeletons(true);
+    } else {
+      setShowSkeletons(false);
+    }
+  }, [loading, visibleItems.length]);
+
+  // Скрываем скелетоны, когда все карточки готовы
+  useEffect(() => {
+    if (!loading && visibleItems.length > 0 && readyCardsCount >= visibleItems.length) {
+      setShowSkeletons(false);
+    }
+  }, [loading, visibleItems.length, readyCardsCount]);
+
   const activeAssetItems = useMemo(
     () =>
       activeItems.filter(
@@ -5360,43 +5409,83 @@ export default function Page() {
 
         <div className="flex-1 min-w-0">
           <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
-            {visibleItems.length === 0 ? (
+            {visibleItems.length === 0 && !loading ? (
               <div className="text-center py-12 text-muted-foreground">
                 Нет активов или обязательств
               </div>
             ) : (
-              <div 
-                className="columns-2 xl:columns-3 gap-4"
-              >
-                {visibleItems.map((item, index) => {
-                  const rate = rateByCode[item.currency_code];
-                  const rubEquivalent = getRubEquivalentCents(item);
-                  const counterparty = item.counterparty_id
-                    ? counterpartiesById.get(item.counterparty_id) ?? null
-                    : null;
-                  return (
-                    <div
-                      key={item.id}
-                      style={{
-                        breakInside: "avoid",
-                        marginBottom: "1rem",
-                      }}
-                    >
-                      <AssetCard
-                        item={item}
-                        accountingStartDate={accountingStartDate}
-                        rate={rate}
-                        rubEquivalent={rubEquivalent}
-                        counterparty={counterparty}
-                        onEdit={(item) => openEditModal(item)}
-                        onDelete={(item) => onArchive(item)}
-                        onArchive={(item) => onArchive(item)}
-                        onClose={(item) => onClose(item)}
+              <div className="relative">
+                {/* Скелетоны для загрузки */}
+                {showSkeletons && (
+                  <div 
+                    className="columns-2 xl:columns-3 gap-4"
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      zIndex: 1,
+                    }}
+                  >
+                    {Array.from({ length: Math.min(visibleItems.length || 6, 6) }).map((_, index) => (
+                      <div
+                        key={`skeleton-${index}`}
+                        style={{
+                          breakInside: "avoid",
+                          marginBottom: "1rem",
+                        }}
+                      >
+                        <AssetCardSkeleton />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Карточки активов */}
+                <div 
+                  className="columns-2 xl:columns-3 gap-4"
+                  style={{
+                    position: "relative",
+                    zIndex: 2,
+                    opacity: showSkeletons ? 0 : 1,
+                    transition: "opacity 0.3s ease-in-out",
+                  }}
+                >
+                  {visibleItems.map((item, index) => {
+                    const rate = rateByCode[item.currency_code];
+                    const rubEquivalent = getRubEquivalentCents(item);
+                    const counterparty = item.counterparty_id
+                      ? counterpartiesById.get(item.counterparty_id) ?? null
+                      : null;
+                    return (
+                      <div
+                        key={item.id}
+                        style={{
+                          breakInside: "avoid",
+                          marginBottom: "1rem",
+                        }}
+                      >
+                        <AssetCard
+                          item={item}
+                          accountingStartDate={accountingStartDate}
+                          rate={rate}
+                          rubEquivalent={rubEquivalent}
+                          counterparty={counterparty}
+                          onEdit={(item) => openEditModal(item)}
+                          onDelete={(item) => onArchive(item)}
+                          onArchive={(item) => onArchive(item)}
+                          onClose={(item) => onClose(item)}
                         getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                        onReady={() => {
+                          if (!readyCardsSet.current.has(item.id)) {
+                            readyCardsSet.current.add(item.id);
+                            setReadyCardsCount((prev) => prev + 1);
+                          }
+                        }}
                       />
-                    </div>
-                  );
-                })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

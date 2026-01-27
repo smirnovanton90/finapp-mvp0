@@ -56,31 +56,33 @@ const DialogContent = React.forwardRef<
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
-      <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto">
-        <DialogPrimitive.Content
-          ref={ref}
-          data-slot="dialog-content"
-          className={cn(
-            "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 relative w-full max-w-[calc(100%-2rem)] mx-auto my-8 grid gap-4 rounded-lg p-6 shadow-lg duration-200 outline-none sm:max-w-lg",
-            className
-          )}
-          {...props}
-        >
-          {children}
-          {showCloseButton && (
-            <DialogPrimitive.Close
-              data-slot="dialog-close"
-              asChild
-            >
-              <IconButton
-                className="absolute top-4 right-4"
-                aria-label="Закрыть модальное окно"
+      <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden overscroll-contain">
+        <div className="min-h-full flex flex-col items-center py-6">
+          <DialogPrimitive.Content
+            ref={ref}
+            data-slot="dialog-content"
+            className={cn(
+              "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 relative w-full max-w-[calc(100%-2rem)] sm:max-w-lg mx-auto my-auto grid gap-4 rounded-lg p-6 shadow-lg duration-200 outline-none",
+              className
+            )}
+            {...props}
+          >
+            {children}
+            {showCloseButton && (
+              <DialogPrimitive.Close
+                data-slot="dialog-close"
+                asChild
               >
-                <XIcon />
-              </IconButton>
-            </DialogPrimitive.Close>
-          )}
-        </DialogPrimitive.Content>
+                <IconButton
+                  className="absolute top-4 right-4"
+                  aria-label="Закрыть модальное окно"
+                >
+                  <XIcon />
+                </IconButton>
+              </DialogPrimitive.Close>
+            )}
+          </DialogPrimitive.Content>
+        </div>
       </div>
     </DialogPortal>
   )

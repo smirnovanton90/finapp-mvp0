@@ -212,6 +212,7 @@ export function ItemSelector({
           placeholder={placeholder}
           value={inputValue}
           disabled={disabled}
+          prefixPlClass="pl-12"
           prefix={
             selectedBankLogoUrl && !query ? (
               <img

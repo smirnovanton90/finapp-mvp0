@@ -26,25 +26,23 @@ interface FilterPanelProps {
   children: ReactNode;
   onAddClick?: () => void;
   addButtonLabel?: string;
-  addButton?: ReactNode; // Custom add button (e.g., wrapped in Dialog)
+  /** Custom add button, or (collapsed) => node to show icon-only when collapsed */
+  addButton?: ReactNode | ((collapsed: boolean) => ReactNode);
   additionalActions?: FilterPanelAction[];
 }
 
 export function FilterPanel({ children, onAddClick, addButtonLabel = "Добавить", addButton, additionalActions = [] }: FilterPanelProps) {
   const { isFilterPanelCollapsed, toggleFilterPanel } = useSidebar();
+  const resolvedAddButton =
+    typeof addButton === "function" ? addButton(isFilterPanelCollapsed) : addButton;
 
   return (
     <aside
       className={`shrink-0 transition-[width] duration-300 ${
-        isFilterPanelCollapsed ? "w-[100px]" : "w-[370px]"
+        isFilterPanelCollapsed ? "w-[100px]" : "w-[400px]"
       }`}
     >
-      <div
-        className={cn(
-          "sticky top-0 h-screen p-[12px]",
-          isFilterPanelCollapsed ? "" : ""
-        )}
-      >
+      <div className="p-[12px]">
         <div
           className="flex flex-col rounded-[9px] h-full w-full"
           style={{ backgroundColor: SIDEBAR_BG }}
@@ -86,8 +84,8 @@ export function FilterPanel({ children, onAddClick, addButtonLabel = "Добав
             <div className="mt-[10px] flex flex-1 flex-col gap-[10px] pb-[10px] relative z-10">
               {/* Action buttons */}
               <div className="space-y-[10px] relative z-10">
-                {addButton ? (
-                  <div className="mx-[10px]">{addButton}</div>
+                {resolvedAddButton ? (
+                  <div className="mx-[10px]">{resolvedAddButton}</div>
                 ) : onAddClick ? (
                   <Button
                     type="button"
@@ -142,12 +140,12 @@ export function FilterPanel({ children, onAddClick, addButtonLabel = "Добав
               </Button>
             </div>
           ) : (
-            /* Expanded state - full filters */
-            <div className="mt-[10px] flex flex-1 flex-col gap-4 pb-[10px] px-[12px] overflow-y-auto overflow-x-hidden">
+            /* Expanded state - full filters (scroll вместе со страницей) */
+            <div className="mt-[10px] flex flex-1 flex-col gap-4 pb-[10px] px-[12px] overflow-x-hidden">
               <div className="space-y-[10px]">
                 {/* Add button */}
-                {addButton ? (
-                  addButton
+                {resolvedAddButton ? (
+                  resolvedAddButton
                 ) : onAddClick ? (
                   <Button
                     className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"

@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -825,24 +826,18 @@ export default function LimitsPage() {
                             <div className="text-sm font-semibold text-foreground">
                               {formatRub(limit.amount_rub)}
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="text-muted-foreground hover:bg-transparent hover:text-violet-600"
-                              onClick={() => openEditDialog(limit)}
+                            <IconButton
                               aria-label="Изменить лимит"
+                              onClick={() => openEditDialog(limit)}
                             >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="text-muted-foreground hover:bg-transparent hover:text-rose-500"
-                              onClick={() => setDeleteTarget(limit)}
+                              <Pencil />
+                            </IconButton>
+                            <IconButton
                               aria-label="Удалить лимит"
+                              onClick={() => setDeleteTarget(limit)}
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                              <Trash2 />
+                            </IconButton>
                           </div>
                         </div>
                       </CardHeader>

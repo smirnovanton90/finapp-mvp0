@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -1006,27 +1007,21 @@ export default function CounterpartiesPage() {
                             )}
                             {isUser && !isDeleted && (
                               <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  className="text-muted-foreground hover:bg-transparent hover:text-violet-600"
+                                <IconButton
+                                  aria-label="Изменить контрагента"
                                   onClick={() => {
                                     setEditing(item);
                                     setIsDialogOpen(true);
                                   }}
-                                  aria-label="Изменить контрагента"
                                 >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  className="text-muted-foreground hover:bg-transparent hover:text-rose-500"
-                                  onClick={() => setDeleteTarget(item)}
+                                  <Pencil />
+                                </IconButton>
+                                <IconButton
                                   aria-label="Удалить контрагента"
+                                  onClick={() => setDeleteTarget(item)}
                                 >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                                  <Trash2 />
+                                </IconButton>
                               </>
                             )}
                           </div>

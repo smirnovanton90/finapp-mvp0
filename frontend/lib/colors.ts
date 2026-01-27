@@ -34,6 +34,7 @@ export const RED_FILL = "rgba(251, 76, 79, 0.14)";
 // Green color
 export const GREEN = "#34D399";
 export const GREEN_FILL = "rgba(52, 211, 153, 0.14)";
+export const GREEN_TRANSACTION = "#009A62";
 
 // Orange color
 export const ORANGE = "#FF8D28";

@@ -331,6 +331,7 @@ export function CategorySelector({
           placeholder={placeholder}
           value={inputValue}
           disabled={disabled}
+          prefixPlClass="pl-12"
           prefix={
             showPrefix && CategoryIconNode ? (
               <CategoryIconNode className="h-4 w-4" style={{ color: SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />

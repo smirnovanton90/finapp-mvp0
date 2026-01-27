@@ -40,6 +40,7 @@ import {
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, User } from "lucide-react";
+import { IconButton } from "@/components/ui/icon-button";
 
 type DeleteTarget = {
   id: number;
@@ -188,36 +189,27 @@ function CategoryTree({
                   <span className={cn("h-2 w-2 rounded-full", scopeMeta.dotClass)} />
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground hover:bg-transparent hover:text-violet-600"
-                    onClick={() => onEdit(node)}
+                  <IconButton
                     aria-label="Изменить категорию"
+                    onClick={() => onEdit(node)}
                   >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
+                    <Pencil />
+                  </IconButton>
                   {depth < MAX_DEPTH && (
-                    <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground hover:bg-transparent hover:text-violet-600"
-                    onClick={() => onAddChild(node, depth)}
-                    aria-label="Добавить подкатегорию"
+                    <IconButton
+                      aria-label="Добавить подкатегорию"
+                      onClick={() => onAddChild(node, depth)}
+                    >
+                      <Plus />
+                    </IconButton>
+                  )}
+                  <IconButton
+                    aria-label="Удалить категорию"
+                    onClick={() => onDelete(node)}
                   >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground hover:bg-transparent hover:text-rose-500"
-                  onClick={() => onDelete(node)}
-                  aria-label="Удалить категорию"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+                    <Trash2 />
+                  </IconButton>
+                </div>
             </div>
             {isExpanded && node.children && node.children.length > 0 && (
               <CategoryTree

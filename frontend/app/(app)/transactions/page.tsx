@@ -14,7 +14,22 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { useSearchParams } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
-import { ACCENT, ACCENT_FILL_MEDIUM, SIDEBAR_BG, SIDEBAR_TEXT_INACTIVE, SIDEBAR_TEXT_ACTIVE, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK } from "@/lib/colors";
+import {
+  ACCENT,
+  ACCENT_FILL_MEDIUM,
+  SIDEBAR_BG,
+  SIDEBAR_TEXT_INACTIVE,
+  SIDEBAR_TEXT_ACTIVE,
+  PLACEHOLDER_COLOR_DARK,
+  ACTIVE_TEXT_DARK,
+  GREEN,
+  GREEN_FILL,
+  GREEN_TRANSACTION,
+  RED,
+  RED_FILL,
+  ACCENT2,
+  ACCENT_FILL_LIGHT,
+} from "@/lib/colors";
 import {
   ArrowRight,
   ArrowLeft,
@@ -62,6 +77,7 @@ import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import jsQR from "jsqr";
 
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { AuthInput } from "@/components/ui/auth-input";
 import { Label } from "@/components/ui/label";
@@ -135,6 +151,7 @@ import {
 import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
+  CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
 import { useOnboarding } from "@/components/onboarding-context";
 
@@ -1278,35 +1295,44 @@ function TransactionCardRow({
       : null;
   const timeValue = formatTime(tx.transaction_date);
 
-  /* Transparent / subtle fill so APP_BG_GRADIENT shows through; no opaque card background */
-  const cardBg = tx.isDeleted ? "bg-white/5" : "bg-transparent";
-  const defaultBorderClass = "border border-[rgba(93,95,215,0.4)]";
-  const plannedBorderClass =
-    !tx.isDeleted && isPlanned
-      ? isExpense
-        ? "border-2 border-dashed border-rose-300"
-        : isIncome
-          ? "border-2 border-dashed border-emerald-500"
-          : "border-2 border-dashed border-violet-300"
-      : "";
+  const dateKey = getDateKey(tx.transaction_date);
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const isOverduePlanned = isPlanned && !isRealized && dateKey < todayKey;
 
-  const textClass = tx.isDeleted ? "text-muted-foreground" : "text-foreground";
+  // Цвета и заливки по новому дизайну карточки
+  const stripeColor = isIncome ? GREEN : isExpense ? RED : ACCENT2;
+  const fillColor = isIncome ? GREEN_FILL : isExpense ? RED_FILL : ACCENT_FILL_LIGHT;
 
-  const mutedTextClass = tx.isDeleted ? "text-muted-foreground" : "text-muted-foreground";
-  const chainTextClass = tx.isDeleted ? "text-muted-foreground" : "text-violet-700";
+  // Фон всей карточки: только для фактических транзакций
+  const outerBackgroundColor =
+    !isPlanned && !tx.isDeleted ? fillColor : "transparent";
 
-  const amountClass = tx.isDeleted
-    ? "text-muted-foreground"
+  // Обводка: у плановых по всем сторонам, у фактических — без обводки
+  const outerBorderColor = tx.isDeleted
+    ? "rgba(148,163,184,0.4)"
     : isIncome
-      ? "text-emerald-600"
-      : isExpense
-        ? "text-rose-600"
-        : "text-foreground";
-  const transferNegativeClass = tx.isDeleted ? "text-muted-foreground" : "text-rose-600";
-  const transferPositiveClass = tx.isDeleted ? "text-muted-foreground" : "text-emerald-600";
+      ? GREEN_TRANSACTION
+      : stripeColor;
 
-  const actionTextClass = tx.isDeleted ? "text-muted-foreground" : "text-foreground";
-  const actionHoverClass = tx.isDeleted ? "" : "hover:text-foreground";
+  const outerBorderStyle =
+    isPlanned && !tx.isDeleted
+      ? {
+          borderColor: outerBorderColor,
+          borderStyle: "solid" as const,
+          borderWidth: 1,
+          borderLeftWidth: 7,
+        }
+      : {
+          borderColor: "transparent",
+          borderStyle: "solid" as const,
+          borderWidth: 0,
+        };
+
+  const textColor = tx.isDeleted ? "rgba(148,163,184,1)" : ACTIVE_TEXT_DARK;
+  const subtleTextColor = tx.isDeleted ? "rgba(148,163,184,1)" : PLACEHOLDER_COLOR_DARK;
+
+  const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-100";
+  const actionHoverClass = tx.isDeleted ? "" : "hover:text-white";
   const isEditDisabled = tx.isDeleted || isDeleting;
   const isDeleteDisabled = tx.isDeleted || isDeleting;
   const isCreateDisabled = isDeleting;
@@ -1355,255 +1381,450 @@ function TransactionCardRow({
     counterparty?.entity_type === "PERSON"
       ? User
       : getLegalDefaultIcon(counterparty?.industry_id ?? null);
-  const counterpartyIconTone = tx.isDeleted ? "text-slate-400" : "text-muted-foreground";
+  const counterpartyIconTone = tx.isDeleted ? "text-slate-400" : "text-slate-300";
 
   const categoryLines = categoryLinesForId(tx.category_id);
   const CategoryIcon = categoryIconForId(tx.category_id);
+
+  // 3D иконка категории — при наличии показываем 3D, иначе 2D
+  const categoryL1 = categoryLines[0];
+  const categoryIconName = categoryL1
+    ? CATEGORY_ICON_NAME_BY_L1[categoryL1] ?? null
+    : null;
+  const [categoryIconFormat, setCategoryIconFormat] = useState<"png" | "webp" | null>(
+    categoryIconName ? "png" : null
+  );
+  const categoryIcon3dPath =
+    categoryIconName && categoryIconFormat
+      ? `/icons-3d/categories/${categoryIconName}.${categoryIconFormat}`
+      : null;
+
+  // 3D иконка стрелки для переводов
+  const [transferIconFormat, setTransferIconFormat] = useState<"png" | "webp" | null>("png");
+  const transferIcon3dPath = transferIconFormat
+    ? `/icons-3d/transfer-arrow.${transferIconFormat}`
+    : null;
 
   const checkboxDisabled = tx.isDeleted || isDeleting;
 
   return (
     <div
-      className={`flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1 ${cardBg} ${defaultBorderClass} ${plannedBorderClass}`}
+      className="flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1"
+      style={{
+        width: 900,
+        boxSizing: "border-box",
+        backgroundColor: outerBackgroundColor,
+        ...outerBorderStyle,
+      }}
     >
-      <div className="flex flex-1 flex-wrap items-center gap-3 px-3 py-3 lg:grid lg:grid-cols-[auto_4.5rem_8.5rem_6rem_8.5rem_minmax(10rem,1fr)_auto] lg:items-center lg:gap-2">
-        <input
-          type="checkbox"
-          className="h-5 w-5 accent-violet-600"
-          checked={isSelected}
-          onChange={(e) => onToggleSelection(tx.id, e.target.checked)}
-          disabled={checkboxDisabled}
-          aria-label={`Выбрать транзакцию ${tx.id}`}
-        />
+      {/* Контейнер 1 — подсветка */}
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: 10,
+          padding: 0,
+          marginLeft: !tx.isDeleted ? -10 : 0,
+          // у фактических транзакций полоса заливается по направлению
+          backgroundColor:
+            !isPlanned && !tx.isDeleted
+              ? isIncome
+                ? GREEN_TRANSACTION
+                : isExpense
+                  ? RED
+                  : ACCENT2
+              : "transparent",
+          boxShadow:
+            !isPlanned && !tx.isDeleted
+              ? `0 0 250px 500px ${
+                  isIncome ? GREEN_TRANSACTION : isExpense ? RED : ACCENT2
+                }`
+              : "none",
+        }}
+      />
 
-        <div className="w-16 shrink-0">
-          <div className={`text-sm font-medium ${mutedTextClass}`}>
+      {/* Контейнер 2 — контент */}
+      <div
+        className="flex items-stretch"
+        style={{
+          width: 890,
+          paddingTop: 4,
+          paddingBottom: 4,
+          paddingLeft: 0,
+          paddingRight: 0,
+          // внутренний контейнер всегда без собственной заливки
+        }}
+      >
+        {/* Контейнер 1: чекбокс */}
+        <div
+          className="flex items-center justify-center"
+          style={{ width: 48, padding: 0 }}
+        >
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-violet-600"
+            checked={isSelected}
+            onChange={(e) => onToggleSelection(tx.id, e.target.checked)}
+            disabled={checkboxDisabled}
+            aria-label={`Выбрать транзакцию ${tx.id}`}
+          />
+        </div>
+
+        {/* Контейнер 2: дата и время */}
+        <div
+          className="flex flex-col items-center justify-center"
+          style={{ width: 80, padding: 0 }}
+        >
+          <div
+            style={{
+              fontSize: 16,
+              fontWeight: 400,
+              color: isOverduePlanned ? RED : ACTIVE_TEXT_DARK,
+              textShadow: isOverduePlanned
+                ? `0 0 15px ${RED}`
+                : "none",
+            }}
+          >
             {formatDate(tx.transaction_date)}
           </div>
           {timeValue && (
-            <div className={`text-xs ${mutedTextClass}`}>{timeValue}</div>
+            <div
+              style={{
+                marginTop: 2,
+                fontSize: 10,
+                fontWeight: 400,
+                color: PLACEHOLDER_COLOR_DARK,
+              }}
+            >
+              {timeValue}
+            </div>
           )}
         </div>
 
-        {isTransfer ? (
-          <>
-            <div className="flex h-full w-full min-w-[112px] flex-col self-stretch text-left sm:w-36 lg:w-full">
-              <div className="flex flex-1 flex-col items-start justify-end">
-                <div className="flex items-baseline gap-1">
-                  <div
-                    className={`text-xl font-semibold tabular-nums ${transferNegativeClass}`}
-                  >
-                    -{amountValue}
-                  </div>
-                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                    {itemCurrencyCode(primaryDisplayId)}
-                  </div>
-                </div>
+        {/* Контейнер 3: сумма, актив/обязательство и иконка банка */}
+        <div
+          className="flex flex-col items-center justify-center"
+          style={{ width: 150, padding: 0 }}
+        >
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 500,
+              color: textColor,
+              textAlign: "center",
+            }}
+          >
+            {isTransfer ? (
+              <>-{amountValue}</>
+            ) : (
+              <>
+                {isExpense ? "-" : "+"}
+                {amountValue}
+              </>
+            )}
+          </div>
+          {showRubEquivalent && !isTransfer && rubEquivalent !== null && (
+            <div
+              style={{
+                marginTop: 2,
+                fontSize: 12,
+                fontWeight: 400,
+                color: subtleTextColor,
+              }}
+            >
+              {formatRub(rubEquivalent)}
+            </div>
+          )}
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 14,
+              fontWeight: 400,
+              color: textColor,
+              textAlign: "center",
+            }}
+          >
+            {itemName(primaryDisplayId)}
+          </div>
+          {primaryBankLogo && (
+            <div
+              className="flex items-center justify-center"
+              style={{ marginTop: 4 }}
+            >
+              <img
+                src={primaryBankLogo}
+                alt={primaryBankName || ""}
+                className="rounded bg-white object-contain"
+                style={{ width: 20, height: 20 }}
+                loading="lazy"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Контейнер 4: 3D иконка категории или 3D стрелка перевода */}
+        <div
+          className="flex items-center justify-center"
+          style={{
+            width: 90,
+            height: 90,
+            padding: 0,
+          }}
+        >
+          {isTransfer ? (
+            transferIcon3dPath ? (
+              <img
+                src={transferIcon3dPath}
+                alt=""
+                style={{
+                  width: 90,
+                  height: 90,
+                  objectFit: "contain",
+                  filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
+                }}
+                onError={() => {
+                  if (transferIconFormat === "png") {
+                    setTransferIconFormat("webp");
+                  } else {
+                    setTransferIconFormat(null);
+                  }
+                }}
+              />
+            ) : (
+              <ArrowRight
+                className="text-white"
+                style={{
+                  width: 56,
+                  height: 56,
+                  filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
+                }}
+              />
+            )
+          ) : categoryIcon3dPath ? (
+            <img
+              src={categoryIcon3dPath}
+              alt=""
+              style={{
+                width: 90,
+                height: 90,
+                objectFit: "contain",
+                filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
+              }}
+              onError={() => {
+                if (categoryIconFormat === "png") {
+                  setCategoryIconFormat("webp");
+                } else {
+                  setCategoryIconFormat(null);
+                }
+              }}
+            />
+          ) : (
+            <div
+              className="flex items-center justify-center"
+              style={{
+                width: 90,
+                height: 90,
+                filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
+              }}
+            >
+              <CategoryIcon
+                className="text-white"
+                strokeWidth={1.5}
+                style={{ width: 56, height: 56 }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Контейнер 5: категории (доход/расход) или корреспондирующий актив (перевод) */}
+        <div
+          className="flex flex-col justify-center"
+          style={{
+            width: 200,
+            paddingTop: 0,
+            paddingBottom: 0,
+            paddingLeft: 12,
+            paddingRight: 0,
+          }}
+        >
+          {isTransfer ? (
+            <>
+              <div
+                style={{
+                  fontSize: 24,
+                  fontWeight: 500,
+                  color: textColor,
+                  textAlign: "center",
+                }}
+              >
+                +{counterpartyAmountValue}
               </div>
-              <div className="flex flex-1 items-start gap-2">
-                {primaryBankLogo && (
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 14,
+                  fontWeight: 400,
+                  color: textColor,
+                  textAlign: "center",
+                }}
+              >
+                {itemName(counterpartyDisplayId)}
+              </div>
+              {counterpartyBankLogo && (
+                <div
+                  className="flex items-center justify-center"
+                  style={{ marginTop: 4 }}
+                >
                   <img
-                    src={primaryBankLogo}
-                    alt={primaryBankName || ""}
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded bg-white object-contain"
+                    src={counterpartyBankLogo}
+                    alt={counterpartyBankName || ""}
+                    className="rounded bg-white object-contain"
+                    style={{ width: 20, height: 20 }}
                     loading="lazy"
                   />
-                )}
-                <div
-                  className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
-                >
-                  {itemName(primaryDisplayId)}
                 </div>
-              </div>
-            </div>
-
-            <div className="relative flex w-24 shrink-0 items-center justify-center self-stretch">
+              )}
               {conversionRate !== null && foreignCurrency && (
                 <div
-                  className={`absolute left-0 top-1/2 -translate-y-1/2 text-left text-xs font-semibold ${mutedTextClass} z-10`}
+                  style={{
+                    marginTop: 4,
+                    fontSize: 10,
+                    fontWeight: 400,
+                    color: subtleTextColor,
+                  }}
                 >
                   {formatRate(conversionRate)} RUB/{foreignCurrency}
                 </div>
               )}
-              <ArrowRight className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 text-white opacity-45" />
-            </div>
-
-            <div className="flex h-full w-full min-w-[112px] flex-col self-stretch text-left sm:w-36 lg:w-full">
-              <div className="flex flex-1 flex-col items-start justify-end">
-                <div className="flex items-baseline gap-1">
-                  <div
-                    className={`text-xl font-semibold tabular-nums ${transferPositiveClass}`}
-                  >
-                    +{counterpartyAmountValue}
-                  </div>
-                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                    {itemCurrencyCode(counterpartyDisplayId)}
-                  </div>
-                </div>
-              </div>
-              <div className="flex flex-1 items-start gap-2">
-                {counterpartyBankLogo && (
-                  <img
-                    src={counterpartyBankLogo}
-                    alt={counterpartyBankName || ""}
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded bg-white object-contain"
-                    loading="lazy"
-                  />
-                )}
-                <div
-                  className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
-                >
-                  {itemName(counterpartyDisplayId)}
-                </div>
-              </div>
-            </div>
-
-            <div className="min-w-[120px] flex-1">
-              <div className="space-y-1">
-                {counterpartyName && (
-                  <div className="flex items-center gap-2">
-                    {counterpartyLogoUrl ? (
-                      <img
-                        src={counterpartyLogoUrl}
-                        alt=""
-                        className="h-4 w-4 shrink-0 rounded bg-white object-contain"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div
-                        className={`flex h-4 w-4 items-center justify-center rounded bg-white ${counterpartyIconTone}`}
-                      >
-                        <CounterpartyFallbackIcon
-                          className="h-3 w-3"
-                          aria-hidden="true"
-                        />
-                      </div>
-                    )}
-                    <div
-                      className={`text-xs font-semibold break-words whitespace-normal ${textClass}`}
-                    >
-                      {counterpartyName}
-                    </div>
-                  </div>
-                )}
-                {chainLabel && (
-                  <div
-                    className={`text-xs font-semibold break-words whitespace-normal ${chainTextClass}`}
-                  >
-                    Цепочка: {chainLabel}
-                  </div>
-                )}
-                <div
-                  className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
-                >
-                  {commentText}
-                </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="flex h-full w-full min-w-[112px] flex-col self-stretch text-left sm:w-36 lg:w-full">
-              <div className="flex flex-1 flex-col items-start justify-end">
-                <div className="flex items-baseline gap-1">
-                  <div className={`text-xl font-semibold tabular-nums ${amountClass}`}>
-                    {isExpense ? "-" : "+"}
-                    {amountValue}
-                  </div>
-                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                    {currencyCode}
-                  </div>
-                </div>
-                {showRubEquivalent && (
-                  <div className={`text-xs font-semibold ${mutedTextClass}`}>
-                    {formatRub(rubEquivalent)}
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-1 items-start gap-2">
-                {primaryBankLogo && (
-                  <img
-                    src={primaryBankLogo}
-                    alt={primaryBankName || ""}
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded bg-white object-contain"
-                    loading="lazy"
-                  />
-                )}
-                <div
-                  className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
-                >
-                  {itemName(primaryDisplayId)}
-                </div>
-              </div>
-            </div>
-
-            <div className="relative flex w-24 shrink-0 items-center justify-center self-stretch">
-              <CategoryIcon
-                className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 text-white opacity-45"
-                strokeWidth={1.5}
-              />
-            </div>
-
-            <div className="w-full min-w-[112px] text-left sm:w-36 lg:w-full">
+            </>
+          ) : (
+            <>
               <div
-                className={`space-y-0.5 text-xs font-semibold leading-tight break-words whitespace-normal ${mutedTextClass}`}
+                style={{
+                  fontSize: 14,
+                  fontWeight: 400,
+                  color: ACTIVE_TEXT_DARK,
+                }}
               >
+                {categoryLines[0]}
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 10,
+                  fontWeight: 400,
+                  color: ACTIVE_TEXT_DARK,
+                }}
+              >
+                {categoryLines[1]}
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 10,
+                  fontWeight: 400,
+                  color: ACTIVE_TEXT_DARK,
+                }}
+              >
+                {categoryLines[2]}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Контейнер 6: контрагент и комментарий (вертикально) */}
+        <div
+          className="flex flex-col justify-center"
+          style={{
+            width: 200,
+            paddingTop: 0,
+            paddingBottom: 0,
+            paddingLeft: 12,
+            paddingRight: 0,
+          }}
+        >
+          {counterpartyName && (
+            <div
+              className="flex items-center gap-2"
+              style={{ marginBottom: 4 }}
+            >
+              {counterpartyLogoUrl ? (
+                <img
+                  src={counterpartyLogoUrl}
+                  alt=""
+                  className="rounded bg-white object-contain"
+                  style={{ width: 20, height: 20 }}
+                  loading="lazy"
+                />
+              ) : (
                 <div
-                  className={`text-sm font-semibold break-words whitespace-normal ${textClass}`}
+                  className={`flex items-center justify-center rounded bg-white ${counterpartyIconTone}`}
+                  style={{ width: 20, height: 20 }}
                 >
-                  {categoryLines[0]}
+                  <CounterpartyFallbackIcon
+                    className="h-4 w-4"
+                    aria-hidden="true"
+                  />
                 </div>
-                <div>{categoryLines[1]}</div>
-                <div>{categoryLines[2]}</div>
+              )}
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 400,
+                  color: ACTIVE_TEXT_DARK,
+                }}
+              >
+                {counterpartyName}
               </div>
             </div>
+          )}
 
-            <div className="min-w-[120px] flex-1">
-              <div className="space-y-1">
-                {counterpartyName && (
-                  <div className="flex items-center gap-2">
-                    {counterpartyLogoUrl ? (
-                      <img
-                        src={counterpartyLogoUrl}
-                        alt=""
-                        className="h-4 w-4 shrink-0 rounded bg-white object-contain"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div
-                        className={`flex h-4 w-4 items-center justify-center rounded bg-white ${counterpartyIconTone}`}
-                      >
-                        <CounterpartyFallbackIcon
-                          className="h-3 w-3"
-                          aria-hidden="true"
-                        />
-                      </div>
-                    )}
-                    <div
-                      className={`text-xs font-semibold break-words whitespace-normal ${textClass}`}
-                    >
-                      {counterpartyName}
-                    </div>
-                  </div>
-                )}
-                {chainLabel && (
-                  <div
-                    className={`text-xs font-semibold break-words whitespace-normal ${chainTextClass}`}
-                  >
-                    Цепочка: {chainLabel}
-                  </div>
-                )}
-                <div
-                  className={`whitespace-normal break-words text-xs leading-tight ${mutedTextClass}`}
-                >
-                  {commentText}
-                </div>
+          {commentText && commentText !== "-" && (
+            <div className="flex items-center gap-2">
+              <MessageSquare
+                style={{
+                  width: 20,
+                  height: 20,
+                  color: PLACEHOLDER_COLOR_DARK,
+                  flexShrink: 0,
+                }}
+              />
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 400,
+                  color: PLACEHOLDER_COLOR_DARK,
+                }}
+              >
+                {commentText}
               </div>
             </div>
-          </>
-        )}
+          )}
 
-        <div className="flex items-center gap-2">
+          {chainLabel && (
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 10,
+                fontWeight: 400,
+                color: subtleTextColor,
+              }}
+            >
+              Цепочка: {chainLabel}
+            </div>
+          )}
+        </div>
+
+        {/* Контейнер 7: действия и иконки справа */}
+        <div
+          className="flex items-center justify-end gap-2"
+          style={{
+            flex: 1,
+            paddingTop: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            paddingRight: 12,
+          }}
+        >
           {tx.isDeleted && (
             <Tooltip content="Удалена">
               <span className="inline-flex items-center text-slate-400" aria-label="Удалена">
@@ -1614,11 +1835,10 @@ function TransactionCardRow({
 
           <div className="flex flex-col items-center gap-1">
             <Tooltip content={statusHint}>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className={`hover:bg-transparent ${statusBaseClass} ${statusHoverClass}`}
+              <IconButton
                 aria-label={statusHint}
+                appearance={isConfirmed ? "inactive" : "default"}
+                style={isConfirmed ? { color: GREEN } : undefined}
                 onClick={() => onConfirm(tx)}
                 disabled={
                   tx.isDeleted ||
@@ -1627,24 +1847,21 @@ function TransactionCardRow({
                   isConfirmed ||
                   isRealized
                 }
-              >
-                <StatusIcon className="h-4 w-4" />
-              </Button>
+                >
+                  <StatusIcon />
+                </IconButton>
             </Tooltip>
             {canRealize && (
               <Tooltip content="Реализовать">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
+                <IconButton
                   aria-label="Реализовать"
                   onClick={(event) =>
                     onRealize(tx, event.currentTarget as HTMLElement)
                   }
                   disabled={isRealizeDisabled}
                 >
-                  <Sparkles className="h-4 w-4" />
-                </Button>
+                  <Sparkles />
+                </IconButton>
               </Tooltip>
             )}
           </div>
@@ -1652,15 +1869,12 @@ function TransactionCardRow({
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className={`hover:bg-transparent ${actionTextClass} ${actionHoverClass}`}
+              <IconButton
                 aria-label="Открыть меню действий"
                 disabled={isDeleting}
               >
-                <MoreVertical className="h-4 w-4" />
-              </Button>
+                <MoreVertical />
+              </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuItem
@@ -3782,7 +3996,7 @@ function TransactionsView({
   return (
     <main
       className={cn(
-        "min-h-screen pb-8",
+        "min-h-screen pb-8 pt-[30px]",
         isCollapsed ? "pl-0" : "pl-0"
       )}
     >
@@ -3790,7 +4004,7 @@ function TransactionsView({
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <FilterPanel
-          addButton={
+          addButton={(collapsed) => (
             <Dialog
               open={isDialogOpen}
               onOpenChange={(open) => {
@@ -3808,13 +4022,19 @@ function TransactionsView({
                   style={{
                     backgroundColor: ACCENT,
                   }}
+                  aria-label={collapsed ? "Добавить" : undefined}
                 >
-                  <Plus className="mr-2 h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                  <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+                  <Plus
+                    className={cn("h-5 w-5", !collapsed && "mr-2")}
+                    style={{ color: "white", opacity: 0.85 }}
+                  />
+                  {!collapsed && (
+                    <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+                  )}
                 </Button>
               </DialogTrigger>
             </Dialog>
-          }
+          )}
           additionalActions={[
             {
               icon: <QrCode className="h-5 w-5" />,

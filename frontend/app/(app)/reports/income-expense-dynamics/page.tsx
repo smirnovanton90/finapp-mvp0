@@ -487,7 +487,7 @@ function CategorySectionBody({
                 return (
                   <TableCell
                     key={`${sectionId}:${row.id}-${monthKey}`}
-                    className="text-right tabular-nums text-foreground"
+                    className="text-right text-foreground"
                   >
                     {formatRub(value)}
                   </TableCell>
@@ -572,7 +572,7 @@ function CategoryTable({
                     {monthKeys.map((monthKey) => (
                       <TableCell
                         key={`summary-${monthKey}`}
-                        className="text-right tabular-nums font-semibold text-foreground"
+                        className="text-right font-semibold text-foreground"
                       >
                         {formatRub(summaryTotals[monthKey] ?? 0)}
                       </TableCell>

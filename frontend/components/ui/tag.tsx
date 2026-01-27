@@ -18,7 +18,7 @@ export function Tag({ children, variant, className }: TagProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-lg border px-2 py-0.5 text-[11px] font-medium tabular-nums",
+        "inline-flex items-center rounded-lg border px-2 py-0.5 text-[11px] font-medium",
         className
       )}
       style={{

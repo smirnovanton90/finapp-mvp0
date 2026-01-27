@@ -246,6 +246,7 @@ export function CounterpartySelector({
           placeholder={placeholder}
           value={inputValue}
           disabled={disabled}
+          prefixPlClass="pl-12"
           prefix={prefix}
           onChange={(event) => {
             if (disabled) return;

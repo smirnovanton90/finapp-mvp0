@@ -1420,7 +1420,7 @@ export default function AssetsDynamicsPage() {
                               className="flex items-center justify-between gap-3"
                             >
                               <span className="truncate opacity-80">{item.name}</span>
-                              <span className="tabular-nums">
+                              <span>
                                 {signedRub === null
                                   ? "—"
                                   : formatSignedValue(signedRub, formatRub)}
@@ -1659,7 +1659,7 @@ export default function AssetsDynamicsPage() {
                               <>
                                 <TableCell
                                   className={cn(
-                                    "text-right font-semibold tabular-nums",
+                                    "text-right font-semibold",
                                     (row.totalCurrencyCents ?? 0) < 0 && "text-red-600"
                                   )}
                                 >
@@ -1677,7 +1677,7 @@ export default function AssetsDynamicsPage() {
                             )}
                             <TableCell
                               className={cn(
-                                "text-right font-semibold tabular-nums",
+                                "text-right font-semibold",
                                 totalRub < 0 && "text-red-600"
                               )}
                             >
@@ -1702,7 +1702,7 @@ export default function AssetsDynamicsPage() {
                                 <TableCell
                                   key={`${row.date}-${item.id}`}
                                   className={cn(
-                                    "text-right tabular-nums",
+                                    "text-right",
                                     effectiveKind === "LIABILITY" && "text-red-600",
                                     index === selectedItems.length - 1 && "pr-8"
                                   )}

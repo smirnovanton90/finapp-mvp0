@@ -195,10 +195,12 @@
   }
   html {
     font-family: var(--font-sans);
+    line-height: 1.125;
   }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
+    line-height: 1.125;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     transition: background-color 700ms ease, color 700ms ease;

@@ -11,6 +11,10 @@ interface AuthInputProps extends Omit<React.ComponentProps<"input">, "prefix"> {
   gradientDirection?: "left-to-right" | "right-to-left";
   /** Optional left adornment (e.g. icon, logo). When set, inner container gets pl-11. */
   prefix?: React.ReactNode;
+  /** Override prefix icon position (e.g. "left-2"). Default "left-4". */
+  prefixLeftClass?: string;
+  /** Override inner container padding-left when prefix (e.g. "pl-12"). Default "pl-11". */
+  prefixPlClass?: string;
 }
 
 function AuthInput({ 
@@ -18,6 +22,8 @@ function AuthInput({
   icon = "user",
   gradientDirection = "left-to-right",
   prefix,
+  prefixLeftClass = "left-4",
+  prefixPlClass = "pl-11",
   ...props 
 }: AuthInputProps) {
   const { theme } = useTheme();
@@ -120,9 +126,9 @@ function AuthInput({
         }}
       >
         {/* Inner container */}
-        <div className={cn("relative flex items-center rounded-lg px-4 h-10 z-10", prefix && "pl-11")}>
+        <div className={cn("relative flex items-center rounded-lg px-4 h-10 z-10", prefix && prefixPlClass)}>
           {prefix && (
-            <div className="absolute left-4 flex h-6 w-6 items-center justify-center shrink-0 pointer-events-none">
+            <div className={cn("absolute flex h-6 w-6 items-center justify-center shrink-0 pointer-events-none", prefixLeftClass)}>
               {prefix}
             </div>
           )}

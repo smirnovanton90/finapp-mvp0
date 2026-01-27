@@ -69,6 +69,7 @@ import {
   TableFooter,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
@@ -3758,7 +3759,7 @@ export default function Page() {
 
                       <TableCell
                         className={[
-                          "text-right font-semibold tabular-nums",
+                          "text-right font-semibold",
                           isArchived
                             ? "text-slate-400"
                             : isClosed
@@ -3833,7 +3834,7 @@ export default function Page() {
 
                       <TableCell
                         className={[
-                          "text-right font-semibold tabular-nums",
+                          "text-right font-semibold",
                           isArchived
                             ? "text-slate-400"
                             : isClosed
@@ -3855,22 +3856,12 @@ export default function Page() {
                       <TableCell className="pr-[2.5rem] sm:pr-[3rem] text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className={[
-                                "hover:bg-transparent",
-                                isArchived
-                                  ? "text-slate-400"
-                                  : isClosed
-                                  ? "text-slate-400"
-                                  : "text-muted-foreground",
-                              ].join(" ")}
+                            <IconButton
                               aria-label="Открыть меню действий"
                               disabled={isArchived && !canDelete}
                             >
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
+                              <MoreVertical />
+                            </IconButton>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuItem
@@ -3915,7 +3906,7 @@ export default function Page() {
                   <TableCell />
                   <TableCell
                     className={[
-                      "text-right font-semibold tabular-nums",
+                      "text-right font-semibold",
                       isLiability ? "text-red-600" : "",
                     ].join(" ")}
                   >
@@ -4017,10 +4008,12 @@ export default function Page() {
                         />
                       )}
                       {show2dIcon && TYPE_ICON_BY_CODE[typeCode] && (
-                        <div className="w-full h-full flex items-center justify-center">
+                        <div
+                          className="w-full h-full flex items-center justify-center"
+                          style={{ color: ACCENT }}
+                        >
                           {React.createElement(TYPE_ICON_BY_CODE[typeCode], {
                             className: "w-24 h-24",
-                            style: { color: ACCENT },
                             strokeWidth: 1.5,
                           })}
                         </div>
@@ -4047,9 +4040,6 @@ export default function Page() {
                     handleItemPhotoChange(file);
                   }}
                 />
-                <p className="text-xs text-muted-foreground mt-1">
-                  До {formatSize(MAX_PHOTO_BYTES)}, не больше {MAX_PHOTO_DIM}px, PNG/JPG/WEBP.
-                </p>
                 {itemPhotoError && (
                   <p className="text-xs mt-1" style={{ color: "#FB4C4F" }}>
                     {itemPhotoError}
@@ -4295,73 +4285,69 @@ export default function Page() {
             />
 
             <div
-              className={`overflow-hidden transition-all duration-300 ${
-                showCounterpartyField ? "max-h-[200px] opacity-100" : "max-h-0 opacity-0"
+              className={`transition-all duration-300 ${
+                showCounterpartyField || showBankCardFields
+                  ? "max-h-[600px] opacity-100 overflow-visible"
+                  : "max-h-0 opacity-0 overflow-hidden"
               }`}
             >
-              {showCounterpartyField && (
-                <div className="grid gap-2">
-                  <Label>{isBankCounterparty ? "Банк" : "Контрагент"}</Label>
-                  <CounterpartySelector
-                    counterparties={counterparties}
-                    selectedIds={counterpartyId ? [counterpartyId] : []}
-                    onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
-                    selectionMode="single"
-                    placeholder="Начните вводить название"
-                    industries={industries}
-                    disabled={counterpartyLoading}
-                    counterpartyCounts={counterpartyTxCounts}
-                    filterByIndustryId={
-                      isBankCounterparty
-                        ? industries.find((ind) => ind.name === "Банки")?.id ?? null
-                        : null
-                    }
-                  />
-                  {counterpartyError && (
-                    <p className="text-xs text-red-600">{counterpartyError}</p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div
-              className={`overflow-hidden transition-all duration-300 ${
-                showBankCardFields ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
-              }`}
-            >
-              {showBankCardFields && (
-                <>
-                  <SelectField
-                    label="Вид карты"
-                    value={cardKind}
-                    onValueChange={(value) => setCardKind(value as CardKind)}
-                    disabled={isEditing}
-                    options={[
-                      { value: "DEBIT", label: "Дебетовая" },
-                      { value: "CREDIT", label: "Кредитная" },
-                    ]}
-                    placeholder="Выберите вид карты"
-                  />
-
-                  {isCreditCard && (
-                    <TextField
-                      label="Кредитный лимит"
-                      value={creditLimit}
-                      onChange={(e) => {
-                        const formatted = formatRubInput(e.target.value).replace(/^-/, "");
-                        setCreditLimit(formatted);
-                      }}
-                      onBlur={() =>
-                        setCreditLimit((prev) =>
-                          normalizeRubOnBlur(prev.replace(/^-/, ""))
-                        )
+              <div className="grid gap-4">
+                {showCounterpartyField && (
+                  <div className="grid gap-2">
+                    <Label>{isBankCounterparty ? "Банк" : "Контрагент"}</Label>
+                    <CounterpartySelector
+                      counterparties={counterparties}
+                      selectedIds={counterpartyId ? [counterpartyId] : []}
+                      onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                      selectionMode="single"
+                      placeholder="Начните вводить название"
+                      industries={industries}
+                      disabled={counterpartyLoading}
+                      counterpartyCounts={counterpartyTxCounts}
+                      filterByIndustryId={
+                        isBankCounterparty
+                          ? industries.find((ind) => ind.name === "Банки")?.id ?? null
+                          : null
                       }
-                      inputMode="decimal"
-                      placeholder="Например: 120 000"
                     />
-                  )}
-                </>
-              )}
+                    {counterpartyError && (
+                      <p className="text-xs text-red-600">{counterpartyError}</p>
+                    )}
+                  </div>
+                )}
+                {showBankCardFields && (
+                  <div className="grid gap-2">
+                    <SelectField
+                      label="Вид карты"
+                      value={cardKind}
+                      onValueChange={(value) => setCardKind(value as CardKind)}
+                      disabled={isEditing}
+                      options={[
+                        { value: "DEBIT", label: "Дебетовая" },
+                        { value: "CREDIT", label: "Кредитная" },
+                      ]}
+                      placeholder="Выберите вид карты"
+                    />
+                    {isCreditCard && (
+                      <TextField
+                        label="Кредитный лимит"
+                        value={creditLimit}
+                        onChange={(e) => {
+                          const formatted = formatRubInput(e.target.value).replace(/^-/, "");
+                          setCreditLimit(formatted);
+                        }}
+                        onBlur={() =>
+                          setCreditLimit((prev) =>
+                            normalizeRubOnBlur(prev.replace(/^-/, ""))
+                          )
+                        }
+                        inputMode="decimal"
+                        placeholder="Например: 120 000"
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="grid gap-2">
@@ -4517,10 +4503,10 @@ export default function Page() {
                           {formatShortDate(accountingStartDate)}
                           {")"}
                         </td>
-                        <td className="py-1 text-right tabular-nums">
+                        <td className="py-1 text-right">
                           {formatMoexPrice(moexStartDatePrice)}
                         </td>
-                        <td className="py-1 text-right tabular-nums">
+                        <td className="py-1 text-right">
                           {formatMoexValue(moexStartDatePrice)}
                         </td>
                       </tr>
@@ -4532,10 +4518,10 @@ export default function Page() {
                           {formatShortDate(openDate)}
                           {")"}
                         </td>
-                        <td className="py-1 text-right tabular-nums">
+                        <td className="py-1 text-right">
                           {formatMoexPrice(moexOpenDatePrice)}
                         </td>
-                        <td className="py-1 text-right tabular-nums">
+                        <td className="py-1 text-right">
                           {formatMoexValue(moexOpenDatePrice)}
                         </td>
                       </tr>
@@ -4546,10 +4532,10 @@ export default function Page() {
                         {formatShortDate(getTodayDateKey())}
                         {")"}
                       </td>
-                      <td className="py-1 text-right tabular-nums">
+                      <td className="py-1 text-right">
                         {formatMoexPrice(marketPrice)}
                       </td>
-                      <td className="py-1 text-right tabular-nums">
+                      <td className="py-1 text-right">
                         {formatMoexValue(marketPrice)}
                       </td>
                     </tr>
@@ -4778,7 +4764,10 @@ export default function Page() {
             )}
 
             {showPlanSection && (
-              <div className={`rounded-lg border-2 border-border/70 bg-white ${planEnabled ? 'p-4 grid gap-4' : 'p-4 self-start'}`}>
+              <div
+                className={`rounded-lg border-2 border-border/70 ${planEnabled ? "p-4 grid gap-4" : "p-4 self-start"}`}
+                style={{ backgroundColor: BACKGROUND_DT }}
+              >
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="text-sm font-medium">Плановые транзакции</div>
@@ -5487,6 +5476,11 @@ export default function Page() {
                           rate={rate}
                           rubEquivalent={rubEquivalent}
                           counterparty={counterparty}
+                          moexMarketPrice={
+                            MOEX_TYPE_CODES.includes(item.type_code)
+                              ? moexMarketPrices.get(item.id) ?? null
+                              : null
+                          }
                           onEdit={(item) => openEditModal(item)}
                           onDelete={(item) => onArchive(item)}
                           onArchive={(item) => onArchive(item)}

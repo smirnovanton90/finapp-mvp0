@@ -14,6 +14,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, Target, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Tag } from "@/components/ui/tag";
 import {
   buildCategoryDescendants,
@@ -1449,7 +1450,7 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="break-words text-[48px] font-semibold leading-tight text-white tabular-nums">
+              <div className="break-words text-[48px] font-semibold leading-tight text-white">
                 {loading
                   ? "..."
                   : netTotal < 0
@@ -1465,13 +1466,13 @@ export default function DashboardPage() {
               <div className="space-y-1 text-xs text-white/80">
                 <div className="flex items-center justify-between">
                   <span>Активы</span>
-                  <span className="tabular-nums whitespace-nowrap text-white/90">
+                  <span className="whitespace-nowrap text-white/90">
                     {loading ? "..." : formatRub(totalAssets)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Обязательства</span>
-                  <span className="tabular-nums whitespace-nowrap text-white/90">
+                  <span className="whitespace-nowrap text-white/90">
                     {loading ? "..." : `-${formatRub(totalLiabilities)}`}
                   </span>
                 </div>
@@ -1505,25 +1506,21 @@ export default function DashboardPage() {
                     </span>
                   </CardTitle>
                   {hasOverduePlanned && (
-                    <Button
+                    <IconButton
                       asChild
-                      size="icon"
-                      variant="ghost"
-                      className="h-12 w-12 shrink-0 self-start rounded-xl bg-white/10 text-white/85 shadow-none hover:bg-white/20 hover:text-white"
+                      aria-label="Открыть просроченные транзакции"
+                      className="self-start"
                     >
-                      <Link
-                        href="/transactions?preset=overdue-planned"
-                        aria-label="Открыть просроченные транзакции"
-                      >
-                        <ArrowRight className="h-5 w-5" />
+                      <Link href="/transactions?preset=overdue-planned">
+                        <ArrowRight />
                       </Link>
-                    </Button>
+                    </IconButton>
                   )}
                 </div>
               </CardHeader>
               <div className="flex flex-1 items-end px-6 -mt-6 pb-0">
                 <div
-                  className="pointer-events-none select-none w-full text-right text-[180px] font-semibold leading-none tabular-nums"
+                  className="pointer-events-none select-none w-full text-right text-[180px] font-semibold leading-none"
                   style={{
                     color: hasOverduePlanned
                       ? "rgba(174, 43, 91, 0.75)"
@@ -1545,7 +1542,7 @@ export default function DashboardPage() {
                 <span style={{ color: ACCENT }}>{previousMonthLabel}</span>
               </div>
               <div
-                className="text-lg font-semibold tabular-nums whitespace-nowrap"
+                className="text-lg font-semibold whitespace-nowrap"
                 style={{ color: GREEN }}
               >
                 {loading ? "..." : formatRub(incomeBreakdown.total)}
@@ -1608,10 +1605,10 @@ export default function DashboardPage() {
                             {row.label}
                           </span>
                         </div>
-                        <span className="tabular-nums text-right text-foreground whitespace-nowrap">
+                        <span className="text-right text-foreground whitespace-nowrap">
                           {formatRub(row.value)}
                         </span>
-                        <span className="tabular-nums text-right text-white/80 whitespace-nowrap">
+                        <span className="text-right text-white/80 whitespace-nowrap">
                           {formatPercent(row.percent * 100)}%
                         </span>
                         <div className="flex justify-end">
@@ -1639,7 +1636,7 @@ export default function DashboardPage() {
                 <span style={{ color: ACCENT }}>{previousMonthLabel}</span>
               </div>
               <div
-                className="text-lg font-semibold tabular-nums whitespace-nowrap"
+                className="text-lg font-semibold whitespace-nowrap"
                 style={{ color: RED }}
               >
                 {loading ? "..." : formatRub(expenseBreakdown.total)}
@@ -1702,10 +1699,10 @@ export default function DashboardPage() {
                             {row.label}
                           </span>
                         </div>
-                        <span className="tabular-nums text-right text-foreground whitespace-nowrap">
+                        <span className="text-right text-foreground whitespace-nowrap">
                           {formatRub(row.value)}
                         </span>
-                        <span className="tabular-nums text-right text-white/80 whitespace-nowrap">
+                        <span className="text-right text-white/80 whitespace-nowrap">
                           {formatPercent(row.percent * 100)}%
                         </span>
                         <div className="flex justify-end">
@@ -1774,7 +1771,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div
-                          className="shrink-0 text-sm font-semibold tabular-nums whitespace-nowrap"
+                          className="shrink-0 text-sm font-semibold whitespace-nowrap"
                         >
                           <span style={{ color: textColor }}>
                             {formatRub(summary.spent)}

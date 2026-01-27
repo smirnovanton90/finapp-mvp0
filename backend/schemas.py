@@ -380,7 +380,6 @@ class TransactionBase(BaseModel):
     direction: TransactionDirection
     transaction_type: TransactionType
     category_id: int | None = None
-    description: str | None = None
     comment: str | None = None
 
     @model_validator(mode="after")
@@ -436,7 +435,6 @@ class TransactionChainCreate(BaseModel):
     amount_counterparty: int | None = Field(default=None, ge=0)
     direction: TransactionDirection
     category_id: int | None = None
-    description: str | None = None
     comment: str | None = None
 
     @model_validator(mode="after")
@@ -509,7 +507,6 @@ class TransactionChainOut(BaseModel):
     amount_counterparty: int | None
     direction: TransactionDirection
     category_id: int | None
-    description: str | None
     comment: str | None
     deleted_at: datetime | None
     created_at: datetime

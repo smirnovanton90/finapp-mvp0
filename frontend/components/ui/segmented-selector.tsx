@@ -108,9 +108,9 @@ export function SegmentedSelector({
 
   return (
     <div className={`relative w-full ${className}`}>
-      {/* Inner container - h-10 (40px) to match filter fields */}
+      {/* Inner container - min-h-10 so it can grow vertically for multi-line labels */}
       <div 
-        className="relative inline-flex h-10 w-full items-stretch overflow-hidden rounded-[9px] bg-transparent p-[3px] z-10"
+        className="relative inline-flex min-h-10 w-full items-stretch rounded-[9px] bg-transparent p-[3px] z-10"
         style={{
           boxShadow: `0 0 0 1px ${ACCENT_FILL_MEDIUM}`,
         }}
@@ -120,7 +120,6 @@ export function SegmentedSelector({
           // Use option-specific color scheme if provided, otherwise use default
           const optionColorScheme = option.colorScheme || colorScheme;
           const optionColors = getColors(optionColorScheme);
-          const hoverVarName = `--segment-hover-${option.value}`;
           
           return (
             <button
@@ -128,7 +127,7 @@ export function SegmentedSelector({
               type="button"
               aria-pressed={selected}
               onClick={() => handleOptionClick(option.value)}
-              className={`flex-1 min-w-0 px-3 py-1.5 text-sm font-normal transition-colors whitespace-normal break-words text-center ${
+              className={`flex-1 min-w-0 px-3 py-2 text-sm font-normal transition-colors whitespace-normal break-words text-center leading-tight ${
                 selected ? "" : "bg-transparent hover:bg-[var(--segment-hover)]"
               }`}
               style={{

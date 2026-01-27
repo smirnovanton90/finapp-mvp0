@@ -451,7 +451,6 @@ def create_transaction(
         transaction_type=data.transaction_type,
         status=status_value,
         category_id=category.id if category else None,
-        description=data.description,
         comment=data.comment,
     )
 
@@ -782,7 +781,6 @@ def update_transaction(
     if data.status is not None:
         tx.status = data.status
     tx.category_id = category.id if category else None
-    tx.description = data.description
     tx.comment = data.comment
 
     db.commit()

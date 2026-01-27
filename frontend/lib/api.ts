@@ -274,7 +274,6 @@ export type TransactionOut = {
 
   category_id: number | null;
 
-  description: string | null;
   comment: string | null;
 
   created_at: string;
@@ -350,7 +349,6 @@ export type TransactionChainCreate = {
   counterparty_quantity_lots?: number | null;
   direction: TransactionDirection;
   category_id: number | null;
-  description?: string | null;
   comment?: string | null;
 };
 
@@ -373,7 +371,6 @@ export type TransactionChainOut = {
   amount_counterparty: number | null;
   direction: TransactionDirection;
   category_id: number | null;
-  description: string | null;
   comment: string | null;
   deleted_at: string | null;
   created_at: string;
@@ -424,7 +421,6 @@ export type TransactionCreate = {
 
   category_id: number | null;
 
-  description?: string | null;
   comment?: string | null;
 };
 

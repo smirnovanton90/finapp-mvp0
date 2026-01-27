@@ -29,7 +29,8 @@ import {
   ChevronLeft,
 } from "lucide-react";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogPortal } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FormModal } from "@/components/form-modal";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -118,6 +119,7 @@ import {
   RepaymentType,
   PaymentAmountKind,
 } from "@/lib/api";
+import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
@@ -860,98 +862,6 @@ export default function Page() {
     setIcon3dFormat("png");
     setShow2dIcon(false);
   }
-
-  function parseRubToCents(input: string): number {
-    const normalized = input
-      .trim()
-      .replace(/\s/g, "")      // убираем пробелы-разделители
-      .replace(",", ".");      // запятая -> точка
-  
-    const value = Number(normalized);
-    if (!Number.isFinite(value)) return NaN;
-  
-    return Math.round(value * 100);
-  }
-
-  function formatRubInput(raw: string): string {
-    if (!raw) return "";
-    const trimmed = raw.trim();
-    const isNegative = trimmed.startsWith("-");
-  
-    // оставляем только цифры и разделители
-    const cleaned = trimmed.replace(/[^\d.,]/g, "");
-    if (!cleaned) return isNegative ? "-" : "";
-  
-    // запоминаем: пользователь только что ввёл разделитель в конце
-    const endsWithSep = /[.,]$/.test(cleaned);
-  
-    // берём первую встреченную точку/запятую как разделитель
-    const sepIndex = cleaned.search(/[.,]/);
-  
-    let intPart = "";
-    let decPart = "";
-  
-    if (sepIndex === -1) {
-      intPart = cleaned;
-    } else {
-      intPart = cleaned.slice(0, sepIndex);
-      decPart = cleaned.slice(sepIndex + 1).replace(/[.,]/g, ""); // убираем лишние разделители
-    }
-  
-    // если начали с ",5" → считаем как "0,5"
-    if (sepIndex === 0) intPart = "0";
-  
-    // нормализуем целую часть (убираем лидирующие нули)
-    intPart = intPart.replace(/^0+(?=\d)/, "");
-    if (!intPart) intPart = "0";
-  
-    // форматируем целую часть с пробелами
-    const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  
-    // ограничиваем копейки
-    const formattedDec = decPart.slice(0, 2);
-  
-    // если пользователь только что ввёл запятую, показываем её
-    if (endsWithSep && formattedDec.length === 0) {
-      const value = `${formattedInt},`;
-      return isNegative ? `-${value}` : value;
-    }
-  
-    const value =
-      formattedDec.length > 0 ? `${formattedInt},${formattedDec}` : formattedInt;
-    return isNegative ? `-${value}` : value;
-  }  
-  
-  function normalizeRubOnBlur(value: string): string {
-    const v = value.trim();
-    if (!v) return "";
-    const isNegative = v.startsWith("-");
-    const absValue = isNegative ? v.slice(1).trim() : v;
-    if (!absValue) return "";
-  
-    // если заканчивается запятой: "123," -> "123,00"
-    if (absValue.endsWith(",")) {
-      const result = `${absValue}00`;
-      return isNegative ? `-${result}` : result;
-    }
-  
-    const parts = absValue.split(",");
-    const intPart = parts[0] || "0";
-    const decPart = parts[1] ?? "";
-  
-    const normalized =
-      decPart.length === 0
-        ? `${intPart},00`
-        : decPart.length === 1
-        ? `${intPart},${decPart}0`
-        : `${intPart},${decPart.slice(0, 2)}`;
-    if (isNegative && normalized !== "0,00") {
-      return `-${normalized}`;
-    }
-    return normalized;
-  
-    // если больше 2 - обрежем
-  }  
 
   function buildPlanSignatureFromState(): string {
     const amountCents = isMoexType ? moexInitialValueCents ?? NaN : parseRubToCents(amountStr);
@@ -3934,7 +3844,7 @@ export default function Page() {
         isCollapsed ? "pl-0" : "pl-0"
       )}
     >
-      <Dialog
+      <FormModal
         open={isCreateOpen}
         onOpenChange={(open) => {
           setIsCreateOpen(open);
@@ -3945,31 +3855,27 @@ export default function Page() {
             setIsRightPanelOpen(false);
           }
         }}
+        title={
+          isEditing
+            ? "Редактирование актива/обязательства"
+            : "Добавление актива/обязательства"
+        }
+        icon={<Wallet className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+        formError={formError}
+        onSubmit={onCreate}
+        onCancel={() => {
+          resetCreateForm();
+          setIsCreateOpen(false);
+          setEditingItem(null);
+        }}
+        submitLabel={
+          loading ? "Сохраняем..." : isEditing ? "Сохранить" : "Добавить"
+        }
+        loading={loading}
+        size="wide"
+        contentRef={dialogContentRef}
       >
-        <DialogContent
-          ref={dialogContentRef}
-          className="max-h-[90vh] overflow-y-auto overflow-x-hidden"
-          style={{ backgroundColor: MODAL_BG, maxWidth: "none", width: "auto" }}
-        >
-
-          <div className="grid gap-4">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-3 text-[32px] font-medium">
-                <Wallet className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />
-                {isEditing
-                  ? "Редактирование актива/обязательства"
-                  : "Добавление актива/обязательства"}
-              </DialogTitle>
-            </DialogHeader>
-
-            <form onSubmit={onCreate} noValidate className="grid gap-6">
-            {formError && (
-              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
-                {formError}
-              </div>
-            )}
-
-            <div className="flex items-start gap-0 transition-all duration-300">
+        <div className="flex items-start gap-0 transition-all duration-300">
               {/* Left part - fixed 700px width */}
               <div className="w-[700px] grid content-start gap-4 flex-shrink-0">
             {/* Item Photo Upload and Type Selection in one row */}
@@ -4994,47 +4900,7 @@ export default function Page() {
                 </div>
               </div>
             </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button
-                type="button"
-                variant="glass"
-                className="rounded-lg border-0"
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as React.CSSProperties
-                }
-                onClick={() => {
-                  resetCreateForm();
-                  setIsCreateOpen(false);
-                  setEditingItem(null);
-                }}
-              >
-                Отмена
-              </Button>
-              <Button
-                type="submit"
-                variant="authPrimary"
-                disabled={loading}
-                className="rounded-lg border-0"
-                style={
-                  {
-                    "--auth-primary-bg":
-                      "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-                    "--auth-primary-bg-hover":
-                      "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
-                  } as React.CSSProperties
-                }
-              >
-                {loading ? "Сохраняем..." : isEditing ? "Сохранить" : "Добавить"}
-              </Button>
-            </div>
-            </form>
-          </div>
-        </DialogContent>
-      </Dialog>
+      </FormModal>
 
       <Dialog open={closeItemDialogOpen} onOpenChange={setCloseItemDialogOpen}>
         <DialogContent className="max-w-md">

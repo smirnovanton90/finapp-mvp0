@@ -88,6 +88,8 @@ import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { FormModal } from "@/components/form-modal";
+import { TextField, DateField, FormField } from "@/components/ui/form-field";
 import {
   Dialog,
   DialogContent,
@@ -141,6 +143,12 @@ import {
   updateTransactionStatus,
   API_BASE,
 } from "@/lib/api";
+import {
+  formatRubInput,
+  normalizeRubOnBlur,
+  parseRubToCents,
+  formatCentsForInput,
+} from "@/lib/format-rub";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
@@ -175,7 +183,6 @@ type BulkEditBaseline = {
   cat1: string;
   cat2: string;
   cat3: string;
-  description: string;
   comment: string;
 };
 
@@ -1053,13 +1060,6 @@ function parseAmountFilter(value: string) {
   return Math.round(num * 100);
 }
 
-function parseRubToCents(input: string): number {
-  const normalized = input.trim().replace(/\s/g, "").replace(",", ".");
-  const value = Number(normalized);
-  if (!Number.isFinite(value)) return NaN;
-  return Math.round(value * 100);
-}
-
 function parseLots(input: string): number {
   const trimmed = input.trim();
   if (!trimmed) return NaN;
@@ -1067,67 +1067,6 @@ function parseLots(input: string): number {
   const value = Number(cleaned);
   if (!Number.isFinite(value) || !Number.isInteger(value)) return NaN;
   return value;
-}
-
-function formatRubInput(raw: string): string {
-  if (!raw) return "";
-
-  const cleaned = raw.replace(/[^\d.,]/g, "");
-  const endsWithSep = /[.,]$/.test(cleaned);
-  const sepIndex = cleaned.search(/[.,]/);
-
-  let intPart = "";
-  let decPart = "";
-
-  if (sepIndex === -1) {
-    intPart = cleaned;
-  } else {
-    intPart = cleaned.slice(0, sepIndex);
-    decPart = cleaned.slice(sepIndex + 1).replace(/[.,]/g, "");
-  }
-
-  if (sepIndex === 0) intPart = "0";
-
-  intPart = intPart.replace(/^0+(?=\d)/, "");
-  if (!intPart) intPart = "0";
-
-  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  const formattedDec = decPart.slice(0, 2);
-
-  if (endsWithSep && formattedDec.length === 0) {
-    return `${formattedInt},`;
-  }
-
-  return formattedDec.length > 0 ? `${formattedInt},${formattedDec}` : formattedInt;
-}
-
-function formatAmountForInput(valueInCents: number): string {
-  const value = valueInCents / 100;
-  const valueStr = value.toFixed(2);
-  const parts = valueStr.split(".");
-  const intPart = parts[0] || "0";
-  const decPart = parts[1] || "00";
-  
-  // Форматируем целую часть с разделителями тысяч
-  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  
-  return `${formattedInt},${decPart}`;
-}
-
-function normalizeRubOnBlur(value: string): string {
-  const v = value.trim();
-  if (!v) return "";
-
-  if (v.endsWith(",")) return `${v}00`;
-
-  const parts = v.split(",");
-  const intPart = parts[0] || "0";
-  const decPart = parts[1] ?? "";
-
-  if (decPart.length === 0) return `${intPart},00`;
-  if (decPart.length === 1) return `${intPart},${decPart}0`;
-
-  return `${intPart},${decPart.slice(0, 2)}`;
 }
 
 type ParsedReceiptData = {
@@ -2035,7 +1974,6 @@ function TransactionsView({
     l3: string;
   } | null>(null);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
-  const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importBankId, setImportBankId] = useState<number | null>(null);
@@ -2446,11 +2384,11 @@ function TransactionsView({
       if (!rate) return null;
       // Конвертируем из рублей в валюту: рубли / курс
       const amountInCurrency = balanceCents / 100 / rate;
-      return formatAmountForInput(Math.round(amountInCurrency * 100));
+      return formatCentsForInput(Math.round(amountInCurrency * 100));
     }
 
     // Для RUB просто форматируем
-    return formatAmountForInput(balanceCents);
+    return formatCentsForInput(balanceCents);
   }, [primaryItemId, isTransfer, itemsById, primaryCurrencyCode, date, getItemDisplayBalanceCents, getFxRateForDate]);
 
   const handleFullAmountClick = useCallback(() => {
@@ -2490,8 +2428,6 @@ function TransactionsView({
     if (counterpartyQuantityLots) setCounterpartyQuantityLots("");
   }, [counterpartyIsMoex, counterpartyQuantityLots, isTransfer]);
 
-  const segmentedButtonBase =
-    "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 flex items-center justify-center";
   const isDialogOpen = dialogMode !== null;
   const isEditMode = dialogMode === "edit";
   const isBulkEdit = dialogMode === "bulk-edit";
@@ -2543,14 +2479,7 @@ function TransactionsView({
     setLoanTotalStr("");
     setLoanInterestStr("");
     applyCategorySelection("", "", "");
-    setDescription("");
     setComment("");
-  };
-
-  const formatCentsForInput = (cents?: number | null) => {
-    if (cents == null) return "";
-    const raw = (cents / 100).toFixed(2).replace(".", ",");
-    return formatRubInput(raw);
   };
 
   const closeDialog = () => {
@@ -2615,7 +2544,6 @@ function TransactionsView({
       setLoanTotalStr("");
       setLoanInterestStr("");
       applyCategorySelection("", "", "");
-      setDescription("");
       
       // Формируем комментарий с параметрами чека
       const commentParts: string[] = [];
@@ -2669,7 +2597,6 @@ function TransactionsView({
       setPrimaryItemId(demoItem.id);
     }
     setAmountStr("450");
-    setDescription("Кофе");
 
     if (scopedCategoryMaps.l1.length > 0) {
       const l1 = scopedCategoryMaps.l1[0];
@@ -2730,7 +2657,6 @@ function TransactionsView({
         : ""
     );
     applyCategorySelectionById(tx.category_id);
-    setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
   };
 
@@ -2771,7 +2697,6 @@ function TransactionsView({
         : ""
     );
     applyCategorySelectionById(tx.category_id);
-    setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
   };
 
@@ -2812,7 +2737,6 @@ function TransactionsView({
         : ""
     );
     applyCategorySelectionById(tx.category_id);
-    setDescription(tx.description ?? "");
     setComment(tx.comment ?? "");
   };
 
@@ -2851,7 +2775,6 @@ function TransactionsView({
       cat1: baselineCat1,
       cat2: baselineCat2 || CATEGORY_PLACEHOLDER,
       cat3: baselineCat3 || CATEGORY_PLACEHOLDER,
-      description: baselineTx.description ?? "",
       comment: baselineTx.comment ?? "",
     };
 
@@ -2873,7 +2796,6 @@ function TransactionsView({
     setPrimaryQuantityLots(baseline.primaryQuantityLots);
     setCounterpartyQuantityLots(baseline.counterpartyQuantityLots);
     applyCategorySelection(baseline.cat1, baseline.cat2, baseline.cat3);
-    setDescription(baseline.description);
     setComment(baseline.comment);
   };
 
@@ -2914,7 +2836,6 @@ function TransactionsView({
       hasCat1Changed: cat1 !== bulkEditBaseline.cat1,
       hasCat2Changed: cat2 !== bulkEditBaseline.cat2,
       hasCat3Changed: cat3 !== bulkEditBaseline.cat3,
-      hasDescriptionChanged: description !== bulkEditBaseline.description,
       hasCommentChanged: comment !== bulkEditBaseline.comment,
     };
   };
@@ -3174,9 +3095,6 @@ function TransactionsView({
               const nextL3 = changes.hasCat3Changed ? cat3 : existingL3;
               return resolveCategoryId(nextL1, nextL2, nextL3);
             })(),
-            description: changes.hasDescriptionChanged
-              ? description || null
-              : tx.description ?? null,
             comment: changes.hasCommentChanged ? comment || null : tx.comment ?? null,
           };
 
@@ -3428,7 +3346,6 @@ function TransactionsView({
               transaction_type: importTxType,
               status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
               category_id: categoryId,
-              description: null,
               comment: commentValue ? commentValue : null,
             },
           });
@@ -3526,7 +3443,6 @@ function TransactionsView({
               transaction_type: importTxType,
               status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
               category_id: categoryId,
-              description: null,
               comment: commentValue ? commentValue : null,
             },
           });
@@ -4673,7 +4589,7 @@ function TransactionsView({
             </Dialog>
             
             {/* Dialog for creating/editing transactions - shared between collapsed and expanded states */}
-            <Dialog
+            <FormModal
               open={isDialogOpen}
               onOpenChange={(open) => {
                 if (open) {
@@ -4683,32 +4599,15 @@ function TransactionsView({
                   closeDialog();
                 }
               }}
-            >
-              <DialogContent
-                className="sm:max-w-[560px]"
-                onCloseAutoFocus={(event) => {
-                  const lastActive = lastActiveElementRef.current;
-                  if (!lastActive) return;
-                  event.preventDefault();
-                  if (lastActive.isConnected) {
-                    lastActive.focus({ preventScroll: true });
-                  }
-                  lastActiveElementRef.current = null;
-                }}
-              >
-                <DialogHeader>
-                  <DialogTitle>
-                    {isBulkEdit
-                      ? "Редактировать транзакции"
-                      : isEditMode
-                        ? "Редактировать транзакцию"
-                        : "Добавить транзакцию"}
-                  </DialogTitle>
-                </DialogHeader>
-
-                <form
-                  className="grid gap-4"
-                  onSubmit={async (e) => {
+              title={
+                isBulkEdit
+                  ? "Редактировать транзакции"
+                  : isEditMode
+                    ? "Редактировать транзакцию"
+                    : "Добавить транзакцию"
+              }
+              formError={formError}
+              onSubmit={async (e) => {
                     e.preventDefault();
                     setFormError(null);
 
@@ -4820,7 +4719,6 @@ function TransactionsView({
                         primary_item_id: primaryItemId,
                         counterparty_id: counterpartyId ?? null,
                         transaction_type: payloadTransactionType,
-                        description: description || null,
                         comment: comment || null,
                       };
                         const expensePayload = {
@@ -4976,7 +4874,6 @@ function TransactionsView({
                           direction,
                           transaction_type: payloadTransactionType,
                           category_id: resolvedCategoryId,
-                          description: description || null,
                           comment: comment || null,
                         };
 
@@ -5007,138 +4904,86 @@ function TransactionsView({
                         setFormError(e?.message ?? "Не удалось создать транзакцию.");
                       }
                     }}
-                  >
-                    {formError && (
-                      <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                        {formError}
-                      </div>
-                    )}
-
+                  onCancel={closeDialog}
+                  submitLabel={
+                    isEditMode || isBulkEdit
+                      ? "Сохранить изменения"
+                      : isLoanRepayment
+                        ? "Добавить транзакции"
+                        : "Добавить транзакцию"
+                  }
+                  loading={loading}
+                  disabled={isBulkEditing}
+                  size="medium"
+                  onCloseAutoFocus={(event) => {
+                    const lastActive = lastActiveElementRef.current;
+                    if (!lastActive) return;
+                    event.preventDefault();
+                    if (lastActive.isConnected) {
+                      lastActive.focus({ preventScroll: true });
+                    }
+                    lastActiveElementRef.current = null;
+                  }}
+                >
+                  <div className="grid gap-4">
                     {!isBulkEdit && !isRealizeMode && (
-                      <div className="grid gap-2" role="group" aria-label="Тип транзакции">
-                        <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-                          <button
-                            type="button"
-                            aria-pressed={isActualTransaction}
-                            onClick={() => setFormTransactionType("ACTUAL")}
-                            className={`${segmentedButtonBase} ${
-                              isActualTransaction
-                                ? "bg-violet-50 text-violet-700"
-                                : "bg-card text-muted-foreground hover:bg-accent"
-                            }`}
-                          >
-                            Фактическая
-                          </button>
-                          <button
-                            type="button"
-                            aria-pressed={isPlannedTransaction}
-                            onClick={() => setFormTransactionType("PLANNED")}
-                            className={`${segmentedButtonBase} ${
-                              isPlannedTransaction
-                                ? "bg-amber-50 text-amber-700"
-                                : "bg-card text-muted-foreground hover:bg-accent"
-                            }`}
-                          >
-                            Плановая
-                          </button>
-                        </div>
-                      </div>
+                      <FormField label="Тип транзакции">
+                        <SegmentedSelector
+                          options={[
+                            { value: "ACTUAL", label: "Фактическая", colorScheme: "purple" },
+                            { value: "PLANNED", label: "Плановая", colorScheme: "orange" },
+                          ]}
+                          value={formTransactionType}
+                          onChange={(v) => setFormTransactionType(v as TransactionOut["transaction_type"])}
+                        />
+                      </FormField>
                     )}
 
-                    <div className="grid gap-2" role="group" aria-label="Характер транзакции">
-                      <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-                        <button
-                          type="button"
-                          aria-pressed={!isLoanRepayment && direction === "INCOME"}
-                          onClick={() => {
-                            setFormMode("STANDARD");
-                            setDirection("INCOME");
-                            setCounterpartyItemId(null);
-                            applyCategorySelection("", "", "");
-                          }}
-                          className={`${segmentedButtonBase} ${
-                            !isLoanRepayment && direction === "INCOME"
-                              ? "bg-green-50 text-green-700"
-                              : "bg-card text-muted-foreground hover:bg-accent"
-                          }`}
-                        >
-                          Доход
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={!isLoanRepayment && direction === "EXPENSE"}
-                          onClick={() => {
-                            setFormMode("STANDARD");
+                    <FormField label="Характер транзакции">
+                      <SegmentedSelector
+                        options={[
+                          { value: "INCOME", label: "Доход", colorScheme: "green" },
+                          { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                          { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
+                          ...(!isEditMode && !isBulkEdit
+                            ? [
+                                {
+                                  value: "LOAN_REPAYMENT",
+                                  label: "Погашение кредитов",
+                                  colorScheme: "orange" as const,
+                                },
+                              ]
+                            : []),
+                        ]}
+                        value={isLoanRepayment ? "LOAN_REPAYMENT" : direction}
+                        onChange={(v) => {
+                          if (v === "LOAN_REPAYMENT") {
+                            setFormMode("LOAN_REPAYMENT");
                             setDirection("EXPENSE");
-                            setCounterpartyItemId(null);
                             applyCategorySelection("", "", "");
-                          }}
-                          className={`${segmentedButtonBase} ${
-                            !isLoanRepayment && direction === "EXPENSE"
-                              ? "bg-red-50 text-red-700"
-                              : "bg-card text-muted-foreground hover:bg-accent"
-                          }`}
-                        >
-                          Расход
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={!isLoanRepayment && direction === "TRANSFER"}
-                          onClick={() => {
+                          } else {
                             setFormMode("STANDARD");
-                            setDirection("TRANSFER");
+                            setDirection(v as "INCOME" | "EXPENSE" | "TRANSFER");
                             setCounterpartyItemId(null);
                             applyCategorySelection("", "", "");
-                          }}
-                          className={`${segmentedButtonBase} ${
-                            !isLoanRepayment && direction === "TRANSFER"
-                              ? "bg-violet-50 text-violet-700"
-                              : "bg-card text-muted-foreground hover:bg-accent"
-                          }`}
-                        >
-                          Перевод
-                        </button>
-                        {!isEditMode && !isBulkEdit && (
-                          <button
-                            type="button"
-                            aria-pressed={isLoanRepayment}
-                            onClick={() => {
-                              setFormMode("LOAN_REPAYMENT");
-                              setDirection("EXPENSE");
-                              applyCategorySelection("", "", "");
-                            }}
-                            className={`${segmentedButtonBase} whitespace-normal leading-tight ${
-                              isLoanRepayment
-                                ? "bg-amber-50 text-amber-700"
-                                : "bg-card text-muted-foreground hover:bg-accent"
-                            }`}
-                          >
-                            <span>
-                              Погашение
-                              <br />
-                              кредитов
-                            </span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label>Дата транзакции</Label>
-                      <Input
-                        type="date"
-                        className="border-2 border-border/70 bg-card shadow-none"
-                        value={date}
-                        onChange={(e) => setDate(e.target.value)}
+                          }
+                        }}
                       />
-                    </div>
+                    </FormField>
 
-                    <div className="grid gap-2">
-                      <Label>
-                        {isLoanRepayment
+                    <DateField
+                      label="Дата транзакции"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                    />
+
+                    <FormField
+                      label={
+                        isLoanRepayment
                           ? "Актив, с которого производится погашение"
-                          : "Актив / обязательство"}
-                      </Label>
+                          : "Актив / обязательство"
+                      }
+                    >
                       <ItemSelector
                         items={primarySelectItems}
                         selectedIds={primaryItemId ? [primaryItemId] : []}
@@ -5153,15 +4998,16 @@ function TransactionsView({
                         itemCounts={itemTxCounts}
                         disabled={isImportFormDisabled}
                       />
-                    </div>
+                    </FormField>
 
                     {showCounterpartySelect && (
-                      <div className="grid gap-2">
-                        <Label>
-                          {isLoanRepayment
+                      <FormField
+                        label={
+                          isLoanRepayment
                             ? "Обязательство"
-                            : "Корреспондирующий актив"}
-                        </Label>
+                            : "Корреспондирующий актив"
+                        }
+                      >
                         <ItemSelector
                           items={counterpartySelectItems.filter(
                             (it) => it.id !== primaryItemId
@@ -5179,12 +5025,11 @@ function TransactionsView({
                           getItemBalance={getItemDisplayBalanceCents}
                           itemCounts={itemTxCounts}
                         />
-                      </div>
+                      </FormField>
                     )}
 
                     {!isTransfer && (
-                      <div className="grid gap-2">
-                        <Label>Контрагент</Label>
+                      <FormField label="Контрагент" error={counterpartyError ?? undefined}>
                         <CounterpartySelector
                           counterparties={selectableCounterparties}
                           selectedIds={counterpartyId ? [counterpartyId] : []}
@@ -5195,41 +5040,34 @@ function TransactionsView({
                           disabled={counterpartyLoading}
                           counterpartyCounts={counterpartyTxCounts}
                         />
-                        {counterpartyError && (
-                          <p className="text-xs text-red-600">{counterpartyError}</p>
-                        )}
-                      </div>
+                      </FormField>
                     )}
 
                     {isLoanRepayment ? (
                       <>
-                        <div className="grid gap-2">
-                          <Label>
-                            {primaryCurrencyCode
+                        <TextField
+                          label={
+                            primaryCurrencyCode
                               ? `Общая сумма платежа (${primaryCurrencyCode})`
-                              : "Общая сумма платежа"}
-                          </Label>
-                          <Input
-                            className="border-2 border-border/70 bg-card shadow-none"
-                            value={loanTotalStr}
-                            onChange={(e) =>
-                              setLoanTotalStr(formatRubInput(e.target.value))
-                            }
-                            onBlur={() =>
-                              setLoanTotalStr((prev) => normalizeRubOnBlur(prev))
-                            }
-                            inputMode="decimal"
-                            placeholder="Например: 1 234,56"
-                          />
-                        </div>
+                              : "Общая сумма платежа"
+                          }
+                          value={loanTotalStr}
+                          onChange={(e) =>
+                            setLoanTotalStr(formatRubInput(e.target.value))
+                          }
+                          onBlur={() =>
+                            setLoanTotalStr((prev) => normalizeRubOnBlur(prev))
+                          }
+                          inputMode="decimal"
+                          placeholder="Например: 1 234,56"
+                        />
                         <div className="grid gap-2">
-                          <Label>
-                            {primaryCurrencyCode
-                              ? `Сумма в погашение процентов (${primaryCurrencyCode})`
-                              : "Сумма в погашение процентов"}
-                          </Label>
-                          <Input
-                            className="border-2 border-border/70 bg-card shadow-none"
+                          <TextField
+                            label={
+                              primaryCurrencyCode
+                                ? `Сумма в погашение процентов (${primaryCurrencyCode})`
+                                : "Сумма в погашение процентов"
+                            }
                             value={loanInterestStr}
                             onChange={(e) =>
                               setLoanInterestStr(formatRubInput(e.target.value))
@@ -5247,42 +5085,32 @@ function TransactionsView({
                       </>
                     ) : isTransfer && isCrossCurrencyTransfer ? (
                       <>
-                        <div className="grid gap-2">
-                          <Label>
-                            {`Сумма списания (${primaryCurrencyCode ?? "-"})`}
-                          </Label>
-                          <Input
-                            className="border-2 border-border/70 bg-card shadow-none"
-                            value={amountStr}
-                            onChange={(e) =>
-                              setAmountStr(formatRubInput(e.target.value))
-                            }
-                            onBlur={() =>
-                              setAmountStr((prev) => normalizeRubOnBlur(prev))
-                            }
-                            inputMode="decimal"
-                            placeholder="Например: 1 234,56"
-                          />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label>
-                            {`Сумма поступления (${counterpartyCurrencyCode ?? "-"})`}
-                          </Label>
-                          <Input
-                            className="border-2 border-border/70 bg-card shadow-none"
-                            value={amountCounterpartyStr}
-                            onChange={(e) =>
-                              setAmountCounterpartyStr(formatRubInput(e.target.value))
-                            }
-                            onBlur={() =>
-                              setAmountCounterpartyStr((prev) =>
-                                normalizeRubOnBlur(prev)
-                              )
-                            }
-                            inputMode="decimal"
-                            placeholder="Например: 1 234,56"
-                          />
-                        </div>
+                        <TextField
+                          label={`Сумма списания (${primaryCurrencyCode ?? "-"})`}
+                          value={amountStr}
+                          onChange={(e) =>
+                            setAmountStr(formatRubInput(e.target.value))
+                          }
+                          onBlur={() =>
+                            setAmountStr((prev) => normalizeRubOnBlur(prev))
+                          }
+                          inputMode="decimal"
+                          placeholder="Например: 1 234,56"
+                        />
+                        <TextField
+                          label={`Сумма поступления (${counterpartyCurrencyCode ?? "-"})`}
+                          value={amountCounterpartyStr}
+                          onChange={(e) =>
+                            setAmountCounterpartyStr(formatRubInput(e.target.value))
+                          }
+                          onBlur={() =>
+                            setAmountCounterpartyStr((prev) =>
+                              normalizeRubOnBlur(prev)
+                            )
+                          }
+                          inputMode="decimal"
+                          placeholder="Например: 1 234,56"
+                        />
                       </>
                     ) : (
                       <div className="grid gap-2">
@@ -5302,8 +5130,8 @@ function TransactionsView({
                             </button>
                           )}
                         </div>
-                        <Input
-                          className="border-2 border-border/70 bg-card shadow-none"
+                        <TextField
+                          label=""
                           value={amountStr}
                           onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                           onBlur={() =>
@@ -5319,35 +5147,28 @@ function TransactionsView({
                       (primaryIsMoex || (isTransfer && counterpartyIsMoex)) && (
                         <div className="grid gap-3 rounded-lg border border-dashed border-violet-200 bg-violet-50/40 p-3">
                           {primaryIsMoex && (
-                            <div className="grid gap-2">
-                              <Label>Количество лотов (основной актив)</Label>
-                              <Input
-                                className="border-2 border-border/70 bg-card shadow-none"
-                                value={primaryQuantityLots}
-                                onChange={(e) => setPrimaryQuantityLots(e.target.value)}
-                                inputMode="numeric"
-                                placeholder="Например: 10"
-                              />
-                            </div>
+                            <TextField
+                              label="Количество лотов (основной актив)"
+                              value={primaryQuantityLots}
+                              onChange={(e) => setPrimaryQuantityLots(e.target.value)}
+                              inputMode="numeric"
+                              placeholder="Например: 10"
+                            />
                           )}
                           {isTransfer && counterpartyIsMoex && (
-                            <div className="grid gap-2">
-                              <Label>Количество лотов (контрагент)</Label>
-                              <Input
-                                className="border-2 border-border/70 bg-card shadow-none"
-                                value={counterpartyQuantityLots}
-                                onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
-                                inputMode="numeric"
-                                placeholder="Например: 10"
-                              />
-                            </div>
+                            <TextField
+                              label="Количество лотов (контрагент)"
+                              value={counterpartyQuantityLots}
+                              onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
+                              inputMode="numeric"
+                              placeholder="Например: 10"
+                            />
                           )}
                         </div>
                       )}
 
                     {!isTransfer && (
-                      <div className="grid gap-2">
-                        <Label>Категория</Label>
+                      <FormField label="Категория">
                         <CategorySelector
                           categoryNodes={categoryNodes}
                           selectedPath={selectedCategoryPath}
@@ -5362,53 +5183,17 @@ function TransactionsView({
                           direction={direction}
                           disabled={false}
                         />
-                      </div>
+                      </FormField>
                     )}
 
-                    <div className="grid gap-2">
-                      <Label>Описание</Label>
-                      <Input
-                        className="border-2 border-border/70 bg-card shadow-none"
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        placeholder="Например: обед в кафе"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label>Комментарий</Label>
-                      <Input
-                        className="border-2 border-border/70 bg-card shadow-none"
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        placeholder="Например: с коллегами"
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="border-2 border-border/70 bg-card shadow-none"
-                        onClick={closeDialog}
-                      >
-                        Отмена
-                      </Button>
-                      <Button
-                        type="submit"
-                        className="bg-violet-600 text-white hover:bg-violet-700"
-                        disabled={loading || isBulkEditing}
-                      >
-                        {isEditMode || isBulkEdit
-                          ? "Сохранить изменения"
-                          : isLoanRepayment
-                            ? "Добавить транзакции"
-                            : "Добавить транзакцию"}
-                      </Button>
-                    </div>
-                  </form>
-                </DialogContent>
-              </Dialog>
+                    <TextField
+                      label="Комментарий"
+                      value={comment}
+                      onChange={(e) => setComment(e.target.value)}
+                      placeholder="Например: с коллегами"
+                    />
+                  </div>
+                </FormModal>
 
         <div className="flex-1 min-w-0">
           <div className="w-[900px] mx-auto">

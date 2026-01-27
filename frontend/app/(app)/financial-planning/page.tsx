@@ -303,7 +303,6 @@ export default function FinancialPlanningPage() {
     l2: string;
     l3: string;
   } | null>(null);
-  const [description, setDescription] = useState("");
   const [comment, setComment] = useState("");
   const onboardingAppliedRef = useRef<string | null>(null);
 
@@ -588,7 +587,6 @@ export default function FinancialPlanningPage() {
     setCounterpartyId(null);
     setAmountStr("");
     setAmountCounterpartyStr("");
-    setDescription("");
     setComment("");
     setFormError(null);
     setSelectedCategoryPath(null);
@@ -762,7 +760,6 @@ export default function FinancialPlanningPage() {
       amount_counterparty: direction === "TRANSFER" ? counterpartyCents : null,
       direction,
       category_id: resolvedCategoryId,
-      description: description || null,
       comment: comment || null,
     };
 
@@ -1044,11 +1041,6 @@ export default function FinancialPlanningPage() {
                             {counterpartyName}
                           </span>
                         </span>
-                      </div>
-                    )}
-                    {chain.description && (
-                      <div className="text-muted-foreground">
-                        {chain.description}
                       </div>
                     )}
                     {chain.comment && (
@@ -1495,16 +1487,6 @@ export default function FinancialPlanningPage() {
                 />
               </div>
             )}
-
-            <div className="grid gap-2">
-              <Label>Описание</Label>
-              <Input
-                className="border-2 border-border/70 bg-card shadow-none"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Назначение транзакции"
-              />
-            </div>
 
             <div className="grid gap-2">
               <Label>Комментарий</Label>

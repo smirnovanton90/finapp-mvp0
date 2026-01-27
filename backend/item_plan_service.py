@@ -943,7 +943,6 @@ def _create_chain_with_transactions(
         amount_max_rub=amount_max,
         direction=direction,
         category_id=category_id,
-        description=None,
         comment=None,
     )
     db.add(chain)
@@ -969,7 +968,6 @@ def _create_chain_with_transactions(
                 transaction_type="PLANNED",
                 status="CONFIRMED",
                 category_id=category_id,
-                description=None,
                 comment=None,
             )
         )

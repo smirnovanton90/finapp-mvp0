@@ -279,7 +279,6 @@ def create_transaction_chain(
         amount_max_rub=None,
         direction=data.direction,
         category_id=category.id if category else None,
-        description=data.description,
         comment=data.comment,
     )
     db.add(chain)
@@ -305,7 +304,6 @@ def create_transaction_chain(
                 transaction_type="PLANNED",
                 status="CONFIRMED",
                 category_id=category.id if category else None,
-                description=data.description,
                 comment=data.comment,
             )
         )

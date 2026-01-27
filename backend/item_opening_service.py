@@ -225,7 +225,6 @@ def _create_transfer(
         transaction_type=transaction_type,
         status="CONFIRMED",
         category_id=None,
-        description=None,
         comment=comment,
         source=source,
     )
@@ -289,7 +288,6 @@ def _create_income_expense(
         transaction_type="ACTUAL",
         status="CONFIRMED",
         category_id=category.id,
-        description=None,
         comment=comment,
         source=source,
     )

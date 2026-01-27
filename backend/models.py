@@ -552,7 +552,6 @@ class Transaction(Base):
     )
     category: Mapped[Optional["Category"]] = relationship()
 
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -646,7 +645,6 @@ class TransactionChain(Base):
     )
     category: Mapped[Optional["Category"]] = relationship()
 
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

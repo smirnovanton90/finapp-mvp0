@@ -20,7 +20,7 @@ import { useImagePreloader } from "@/hooks/use-image-preloader";
 import {
   MODAL_BG,
   BACKGROUND_DT,
-  GREEN,
+  GREEN_TRANSACTION,
   RED,
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
@@ -251,7 +251,7 @@ export function AssetCard({
   const isDeleted = isArchived;
   const kind = getEffectiveItemKind(item, item.current_value_rub);
   const isAsset = kind === "ASSET";
-  const stripeColor = isAsset ? GREEN : RED;
+  const stripeColor = isAsset ? GREEN_TRANSACTION : RED;
   const typeLabel = getItemTypeLabel(item);
   const currencyCode = item.currency_code || "";
   const TypeIcon = TYPE_ICON_BY_CODE[item.type_code];
@@ -355,11 +355,11 @@ export function AssetCard({
     >
       {/* Left stripe */}
       <div
-        className="absolute left-0 top-0 bottom-0 w-1"
+        className="absolute left-0 top-0 bottom-0 w-[7px] rounded-l-md"
         style={{ backgroundColor: stripeColor }}
       />
 
-      <div className="pl-4 pr-4 pt-4 pb-4">
+      <div className="p-[12px] pl-[19px]">
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           {/* Icon */}
@@ -720,16 +720,18 @@ export function AssetCard({
                   ? formatRate(rate)
                   : "-"}
               </div>
-              <div
-                className="flex h-9 w-full items-center justify-center text-2xl font-medium"
-                style={{
-                  background: isDeleted ? undefined : PINK_GRADIENT_CONST,
-                  WebkitBackgroundClip: isDeleted ? undefined : "text",
-                  WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
-                  backgroundClip: isDeleted ? undefined : "text",
-                }}
-              >
-                {rubEquivalent ? formatAmount(rubEquivalent) : "-"}
+              <div className="flex h-9 w-full items-center justify-center">
+                <span
+                  className="text-2xl font-medium"
+                  style={{
+                    background: isDeleted ? undefined : PINK_GRADIENT_CONST,
+                    WebkitBackgroundClip: isDeleted ? undefined : "text",
+                    WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
+                    backgroundClip: isDeleted ? undefined : "text",
+                  }}
+                >
+                  {rubEquivalent ? formatAmount(rubEquivalent) : "-"}
+                </span>
               </div>
             </>
           ) : (
@@ -742,16 +744,18 @@ export function AssetCard({
                   {useCreditPrincipalLabel ? "Остаток основного долга" : useMarketValueLabel ? "Рыночная стоимость" : "Баланс"}
                 </span>
               </div>
-              <div
-                className="col-span-3 flex h-9 w-full items-center justify-center text-2xl font-medium"
-                style={{
-                  background: isDeleted ? undefined : PINK_GRADIENT_CONST,
-                  WebkitBackgroundClip: isDeleted ? undefined : "text",
-                  WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
-                  backgroundClip: isDeleted ? undefined : "text",
-                }}
-              >
-                {formatAmount(displayBalanceCents)}
+              <div className="col-span-3 flex h-9 w-full items-center justify-center">
+                <span
+                  className="text-2xl font-medium"
+                  style={{
+                    background: isDeleted ? undefined : PINK_GRADIENT_CONST,
+                    WebkitBackgroundClip: isDeleted ? undefined : "text",
+                    WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
+                    backgroundClip: isDeleted ? undefined : "text",
+                  }}
+                >
+                  {formatAmount(displayBalanceCents)}
+                </span>
               </div>
             </>
           )}

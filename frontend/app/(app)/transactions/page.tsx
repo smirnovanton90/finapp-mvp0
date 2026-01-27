@@ -3919,7 +3919,7 @@ function TransactionsView({
   return (
     <main
       className={cn(
-        "min-h-screen pb-8 pt-[30px]",
+        "min-h-screen pb-8",
         isCollapsed ? "pl-0" : "pl-0"
       )}
     >
@@ -5197,7 +5197,7 @@ function TransactionsView({
                   </div>
                 </FormModal>
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 pt-[30px]">
           <div className="w-[900px] mx-auto">
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">

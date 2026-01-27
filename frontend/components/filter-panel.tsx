@@ -38,11 +38,12 @@ export function FilterPanel({ children, onAddClick, addButtonLabel = "Добав
 
   return (
     <aside
-      className={`shrink-0 transition-[width] duration-300 ${
-        isFilterPanelCollapsed ? "w-[100px]" : "w-[400px]"
-      }`}
+      className={cn(
+        "shrink-0 transition-[width] duration-300",
+        isFilterPanelCollapsed ? "w-[100px] sticky top-0 h-screen" : "w-[400px]"
+      )}
     >
-      <div className="p-[12px]">
+      <div className={cn("p-[12px]", isFilterPanelCollapsed && "h-full")}>
         <div
           className="flex flex-col rounded-[9px] h-full w-full"
           style={{ backgroundColor: SIDEBAR_BG }}

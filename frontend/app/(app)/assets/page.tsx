@@ -5147,7 +5147,15 @@ export default function Page() {
                 { value: "LIABILITY", label: "Обязательства", colorScheme: "red" },
               ]}
               value={filterType}
-              onChange={setFilterType}
+              onChange={(value) => {
+                if (value instanceof Set) {
+                  setFilterType(value);
+                } else if (Array.isArray(value)) {
+                  setFilterType(new Set(value));
+                } else {
+                  setFilterType(new Set([value]));
+                }
+              }}
               multiple={true}
             />
           </FilterSection>

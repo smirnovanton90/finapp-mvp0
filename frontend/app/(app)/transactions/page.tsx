@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ComponentType,
+  type CSSProperties,
   type FormEvent,
 } from "react";
 import { useSession } from "next-auth/react";
@@ -1234,7 +1235,11 @@ function TransactionCardRow({
   itemBankName: (id: number | null | undefined) => string;
   categoryIconForId: (
     categoryId: number | null
-  ) => ComponentType<{ className?: string; strokeWidth?: number }>;
+  ) => ComponentType<{
+    className?: string;
+    strokeWidth?: number;
+    style?: CSSProperties;
+  }>;
   categoryLinesForId: (
     categoryId: number | null
   ) => [string, string, string];
@@ -1855,6 +1860,7 @@ function TransactionCardRow({
               <Tooltip content="Реализовать">
                 <IconButton
                   aria-label="Реализовать"
+                  style={{ color: ACCENT }}
                   onClick={(event) =>
                     onRealize(tx, event.currentTarget as HTMLElement)
                   }
@@ -5405,55 +5411,56 @@ function TransactionsView({
               </Dialog>
 
         <div className="flex-1 min-w-0">
-          <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto">
+          <div className="w-[900px] mx-auto">
             <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <input
-                  ref={selectAllRef}
-                  type="checkbox"
-                  className="h-5 w-5 accent-violet-600"
-                  checked={allSelected}
-                  onChange={(e) => toggleAllSelection(e.target.checked)}
-                  disabled={selectableIds.length === 0}
-                  aria-label="Выбрать все транзакции"
-                />
-                <span>Выбрать все</span>
-              </div>
-              {selectedVisibleCount > 1 && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    className="bg-violet-600 text-white hover:bg-violet-700"
-                    onClick={handleBulkConfirm}
-                    disabled={
-                      isBulkConfirming ||
-                      isBulkEditing ||
-                      selectedConfirmableIds.length === 0
-                    }
-                  >
-                    Подтвердить
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="border-2 border-violet-200 bg-white text-violet-700 shadow-none hover:bg-violet-50"
-                    onClick={openBulkEditDialog}
-                    disabled={isBulkEditing || isBulkConfirming}
-                  >
-                    Редактировать транзакции
-                  </Button>
-                  <Button
-                    type="button"
-                    className="bg-red-600 text-white hover:bg-red-700"
-                    onClick={() => openDeleteDialog(selectedVisibleIds)}
-                    disabled={isDeleting || isBulkEditing || isBulkConfirming}
-                  >
-                    Удалить выбранные
-                  </Button>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className="h-5 w-5 accent-violet-600"
+                    checked={allSelected}
+                    onChange={(e) => toggleAllSelection(e.target.checked)}
+                    disabled={selectableIds.length === 0}
+                    aria-label="Выбрать все транзакции"
+                  />
+                  <span>Выбрать все</span>
                 </div>
-              )}
-            </div>
+                {selectedVisibleCount > 1 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <IconButton
+                      type="button"
+                      aria-label="Подтвердить выбранные транзакции"
+                      onClick={handleBulkConfirm}
+                      disabled={
+                        isBulkConfirming ||
+                        isBulkEditing ||
+                        selectedConfirmableIds.length === 0
+                      }
+                      style={{ color: GREEN }}
+                    >
+                      <CheckCircle2 />
+                    </IconButton>
+                    <IconButton
+                      type="button"
+                      aria-label="Редактировать выбранные транзакции"
+                      onClick={openBulkEditDialog}
+                      disabled={isBulkEditing || isBulkConfirming}
+                    >
+                      <Pencil />
+                    </IconButton>
+                    <IconButton
+                      type="button"
+                      aria-label="Удалить выбранные транзакции"
+                      onClick={() => openDeleteDialog(selectedVisibleIds)}
+                      disabled={isDeleting || isBulkEditing || isBulkConfirming}
+                      style={{ color: RED }}
+                    >
+                      <Trash2 />
+                    </IconButton>
+                  </div>
+                )}
+              </div>
             {showSkeleton ? (
               <div className="space-y-3" aria-hidden="true">
                 {Array.from({ length: 6 }).map((_, index) => (

@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { type CSSProperties, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AuthInput } from "@/components/ui/auth-input";
@@ -59,7 +59,7 @@ export function FilterPanel({ children, onAddClick, addButtonLabel = "Добав
                 {
                   "--glass-bg": "rgba(108, 93, 215, 0.22)",
                   "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
-                } as React.CSSProperties
+                } as CSSProperties
               }
               aria-label={isFilterPanelCollapsed ? "Развернуть фильтры" : "Свернуть фильтры"}
             >
@@ -105,12 +105,12 @@ export function FilterPanel({ children, onAddClick, addButtonLabel = "Добав
                     variant={action.variant || "glass"}
                     className="mx-[10px] h-10 w-[calc(100%-20px)] rounded-[9px] border-0 flex items-center justify-center relative z-10"
                     style={
-                      action.variant === "default"
+                      (action.variant === "default"
                         ? { backgroundColor: ACCENT }
                         : {
                             "--glass-bg": "rgba(108, 93, 215, 0.22)",
                             "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                          }
+                          }) as CSSProperties
                     }
                     onClick={action.onClick}
                     disabled={action.disabled}
@@ -131,7 +131,7 @@ export function FilterPanel({ children, onAddClick, addButtonLabel = "Добав
                   {
                     "--glass-bg": "rgba(108, 93, 215, 0.22)",
                     "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as React.CSSProperties
+                  } as CSSProperties
                 }
                 onClick={toggleFilterPanel}
                 aria-label="Развернуть фильтры"
@@ -166,12 +166,12 @@ export function FilterPanel({ children, onAddClick, addButtonLabel = "Добав
                     variant={action.variant || "glass"}
                     className="w-full h-10 text-sm font-normal rounded-[9px] border-0 flex items-center justify-center"
                     style={
-                      action.variant === "default"
+                      (action.variant === "default"
                         ? { backgroundColor: ACCENT }
                         : {
                             "--glass-bg": "rgba(108, 93, 215, 0.22)",
                             "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                          }
+                          }) as CSSProperties
                     }
                     onClick={action.onClick}
                     disabled={action.disabled}

@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import type { ComponentType, CSSProperties } from "react";
 import {
   Ban,
   BadgePercent,
@@ -70,7 +70,11 @@ import {
   Zap,
 } from "lucide-react";
 
-type CategoryIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
+type CategoryIcon = ComponentType<{
+  className?: string;
+  strokeWidth?: number;
+  style?: CSSProperties;
+}>;
 
 export const CATEGORY_ICON_FALLBACK: CategoryIcon = PiggyBank;
 

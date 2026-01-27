@@ -550,9 +550,14 @@ export default function CounterpartiesPage() {
     return set;
   }, [showActiveStatus, showDeletedStatus]);
 
-  const handleStatusFilterChange = (value: Set<string>) => {
-    setShowActiveStatus(value.has("ACTIVE"));
-    setShowDeletedStatus(value.has("DELETED"));
+  const handleStatusFilterChange = (value: string | string[] | Set<string>) => {
+    const valueSet =
+      value instanceof Set
+        ? value
+        : new Set(Array.isArray(value) ? value : [value]);
+
+    setShowActiveStatus(valueSet.has("ACTIVE"));
+    setShowDeletedStatus(valueSet.has("DELETED"));
   };
 
   const entityTypeFilter = useMemo(() => {
@@ -562,9 +567,14 @@ export default function CounterpartiesPage() {
     return set;
   }, [showLegalEntities, showPersonEntities]);
 
-  const handleEntityTypeFilterChange = (value: Set<string>) => {
-    setShowLegalEntities(value.has("LEGAL"));
-    setShowPersonEntities(value.has("PERSON"));
+  const handleEntityTypeFilterChange = (value: string | string[] | Set<string>) => {
+    const valueSet =
+      value instanceof Set
+        ? value
+        : new Set(Array.isArray(value) ? value : [value]);
+
+    setShowLegalEntities(valueSet.has("LEGAL"));
+    setShowPersonEntities(valueSet.has("PERSON"));
   };
 
   return (

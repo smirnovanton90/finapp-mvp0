@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import type { CSSProperties } from "react";
 import { MoreVertical, Pencil, Trash2, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -23,7 +24,6 @@ import {
   RED,
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
-  PINK_GRADIENT,
   ACCENT2,
   ACCENT,
 } from "@/lib/colors";
@@ -82,7 +82,11 @@ const MARKET_VALUE_TYPE_CODES = new Set([
 
 const TYPE_ICON_BY_CODE: Record<
   string,
-  React.ComponentType<{ className?: string; strokeWidth?: number }>
+  React.ComponentType<{
+    className?: string;
+    strokeWidth?: number;
+    style?: CSSProperties;
+  }>
 > = {
   cash: Banknote,
   bank_account: Landmark,

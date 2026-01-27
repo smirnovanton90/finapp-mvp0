@@ -15,12 +15,12 @@ export function IconButton({
   children,
   ...rest
 }: IconButtonProps & { appearance?: "default" | "inactive" }) {
-  const mergedStyle: React.CSSProperties = {
+  const mergedStyle = {
     // Базовые цвета подложки по дизайн-токенам
     "--icon-button-bg": ACCENT_FILL_LIGHT,
     "--icon-button-bg-hover": ACCENT_FILL_MEDIUM,
     ...(style as React.CSSProperties),
-  };
+  } as React.CSSProperties;
 
   return (
     <Button

@@ -359,7 +359,53 @@ export function AssetCard({
         style={{ backgroundColor: stripeColor }}
       />
 
-      <div className="p-[12px] pl-[19px]">
+      <div className="p-[12px] pl-[19px] pr-[60px]">
+        {/* Кнопка действий фиксированно в правом верхнем углу карточки */}
+        <div className="absolute top-[12px] right-[16px]">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton aria-label="Открыть меню действий">
+                <MoreVertical />
+              </IconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {onEdit && !isArchived && !isClosed && (
+                <DropdownMenuItem onClick={() => onEdit(item)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Редактировать
+                </DropdownMenuItem>
+              )}
+              {onClose && !isArchived && !isClosed && (
+                <DropdownMenuItem onClick={() => onClose(item)}>
+                  <Archive className="mr-2 h-4 w-4" />
+                  Закрыть
+                </DropdownMenuItem>
+              )}
+              {onArchive && !isArchived && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onArchive(item)}>
+                    <Archive className="mr-2 h-4 w-4" />
+                    Архивировать
+                  </DropdownMenuItem>
+                </>
+              )}
+              {onDelete && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => onDelete(item)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Удалить
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           {/* Icon */}
@@ -416,7 +462,7 @@ export function AssetCard({
 
           {/* Info */}
           <div className="flex flex-col items-center justify-center flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1 flex-wrap justify-center">
+            <div className="flex items-center gap-2 mb-1 flex-wrap justify-center max-w-full break-words">
               <span
                 className="text-sm font-normal"
                 style={{ color: PLACEHOLDER_COLOR_DARK }}
@@ -435,7 +481,7 @@ export function AssetCard({
               )}
             </div>
             <h3
-              className="text-2xl font-medium mb-1 text-center"
+              className="text-2xl font-medium mb-1 text-center break-words max-w-full"
               style={{ color: textColor }}
             >
               {item.name}
@@ -482,53 +528,6 @@ export function AssetCard({
             )}
           </div>
 
-          {/* Menu */}
-          <div className="shrink-0">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton
-                  aria-label="Открыть меню действий"
-                >
-                  <MoreVertical />
-                </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                {onEdit && !isArchived && !isClosed && (
-                  <DropdownMenuItem onClick={() => onEdit(item)}>
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Редактировать
-                  </DropdownMenuItem>
-                )}
-                {onClose && !isArchived && !isClosed && (
-                  <DropdownMenuItem onClick={() => onClose(item)}>
-                    <Archive className="mr-2 h-4 w-4" />
-                    Закрыть
-                  </DropdownMenuItem>
-                )}
-                {onArchive && !isArchived && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => onArchive(item)}>
-                      <Archive className="mr-2 h-4 w-4" />
-                      Архивировать
-                    </DropdownMenuItem>
-                  </>
-                )}
-                {onDelete && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onClick={() => onDelete(item)}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Удалить
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
         </div>
 
         {/* Deposit details */}

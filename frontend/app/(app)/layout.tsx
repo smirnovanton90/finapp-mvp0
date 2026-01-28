@@ -23,7 +23,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isDark = theme === "dark";
   const isTransactionsPage = pathname === "/transactions" || pathname?.startsWith("/transactions/");
   const isAssetsPage = pathname === "/assets" || pathname?.startsWith("/assets/");
-  const isSpecialPage = isTransactionsPage || isAssetsPage;
+  const isFinancialPlanningPage = pathname === "/financial-planning" || pathname?.startsWith("/financial-planning/");
+  const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage;
 
   useEffect(() => {
     if (status !== "loading" && !session) {

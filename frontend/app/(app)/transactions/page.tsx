@@ -4331,7 +4331,7 @@ function TransactionsView({
           )}
 
           <FilterSection
-            label="Статус транзакции"
+            label="Статус"
             onReset={() => {
               setShowActive(true);
               setShowDeleted(false);
@@ -4341,8 +4341,8 @@ function TransactionsView({
               <div className="space-y-3">
                 <SegmentedSelector
                   options={[
-                    { value: "active", label: "Активные" },
-                    { value: "deleted", label: "Удаленные" },
+                    { value: "active", label: "Активные", colorScheme: "purple" },
+                    { value: "deleted", label: "Удаленные", colorScheme: "red" },
                   ]}
                   value={[
                     ...(showActive ? ["active"] : []),

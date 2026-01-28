@@ -8,6 +8,8 @@ import {
   HeartPulse,
   Home,
   Landmark,
+  MessageSquare,
+  MoreVertical,
   Plus,
   Shield,
   ShoppingCart,
@@ -48,12 +50,19 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CategorySelector } from "@/components/category-selector";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
+import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { SegmentedSelector } from "@/components/ui/segmented-selector";
+import { IconButton } from "@/components/ui/icon-button";
+import { useSidebar } from "@/components/ui/sidebar-context";
+import { AuthInput } from "@/components/ui/auth-input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -61,6 +70,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   buildCategoryLookup,
   buildCategoryMaps,
@@ -71,6 +86,7 @@ import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
+import { useCategoryIcon } from "@/hooks/use-category-icon";
 import {
   createTransactionChain,
   deleteTransactionChain,
@@ -83,6 +99,7 @@ import {
   fetchDeletedTransactions,
   fetchTransactionChains,
   BankOut,
+  API_BASE,
   CounterpartyOut,
   CounterpartyIndustryOut,
   ItemOut,
@@ -91,6 +108,19 @@ import {
   TransactionChainOut,
   TransactionOut,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import {
+  ACCENT,
+  SIDEBAR_TEXT_ACTIVE,
+  SIDEBAR_TEXT_INACTIVE,
+  MODAL_BG,
+  BACKGROUND_DT,
+  GREEN_TRANSACTION,
+  RED,
+  PLACEHOLDER_COLOR_DARK,
+  ACTIVE_TEXT_DARK,
+} from "@/lib/colors";
+import { PINK_GRADIENT as PINK_GRADIENT_CONST } from "@/lib/gradients";
 import { useOnboarding } from "@/components/onboarding-context";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
@@ -259,6 +289,7 @@ export default function FinancialPlanningPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
+  const { isCollapsed } = useSidebar();
 
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [items, setItems] = useState<ItemOut[]>([]);
@@ -877,324 +908,468 @@ export default function FinancialPlanningPage() {
     return map;
   }, [txs, deletedTxs]);
 
-  const activeChains = useMemo(
-    () => chains.filter((chain) => !chain.deleted_at),
-    [chains]
+  const [selectedDirections, setSelectedDirections] = useState<
+    Set<TransactionChainOut["direction"]>
+  >(new Set());
+  const [showActiveChains, setShowActiveChains] = useState(true);
+  const [showDeletedChains, setShowDeletedChains] = useState(false);
+  const [filterAmountFrom, setFilterAmountFrom] = useState("");
+  const [filterAmountTo, setFilterAmountTo] = useState("");
+  const [selectedItemFilterIds, setSelectedItemFilterIds] = useState<Set<number>>(
+    () => new Set()
   );
-  const deletedChains = useMemo(
-    () => chains.filter((chain) => chain.deleted_at),
-    [chains]
+  const [selectedCategoryFilterKeys, setSelectedCategoryFilterKeys] = useState<
+    Set<string>
+  >(() => new Set());
+  const [selectedCounterpartyFilterIds, setSelectedCounterpartyFilterIds] =
+    useState<Set<number>>(() => new Set());
+  const [commentFilter, setCommentFilter] = useState("");
+  const [onlyWithOverdue, setOnlyWithOverdue] = useState(false);
+
+  const commentQuery = useMemo(
+    () => commentFilter.trim().toLocaleLowerCase("ru"),
+    [commentFilter]
   );
 
-  return (
-    <main className="flex min-h-screen flex-col gap-6 bg-slate-50 px-4 py-6 lg:px-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Планирование</h1>
-          <p className="text-sm text-muted-foreground">
-            Цепочки плановых транзакций и расписание будущих операций.
-          </p>
-        </div>
-        <Button
-          type="button"
-          className="bg-violet-600 text-white hover:bg-violet-700"
-          onClick={() => setIsDialogOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          Добавить
-        </Button>
-      </div>
+  const minAmountFilter = useMemo(() => parseRubToCents(filterAmountFrom), [filterAmountFrom]);
+  const maxAmountFilter = useMemo(() => parseRubToCents(filterAmountTo), [filterAmountTo]);
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600">
-          {error}
-        </div>
-      )}
+  const categoryFilterIds = useMemo(() => {
+    if (selectedCategoryFilterKeys.size === 0) return null;
+    const ids: number[] = [];
+    selectedCategoryFilterKeys.forEach((key) => {
+      const id = categoryLookup.pathToId.get(key);
+      if (id) ids.push(id);
+    });
+    return ids;
+  }, [selectedCategoryFilterKeys, categoryLookup.pathToId]);
 
-      {loading ? (
-        <div className="text-sm text-muted-foreground">Загрузка...</div>
-      ) : activeChains.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
-          Пока нет цепочек плановых транзакций.
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {activeChains.map((chain) => {
-            const amountLabel = formatChainAmount(chain);
-            const currency = itemsById.get(chain.primary_item_id)?.currency_code ?? "";
-            const stats = chainStatsById.get(chain.id) ?? {
-              total: 0,
-              realized: 0,
-              overdue: 0,
-              upcoming: 0,
-              deleted: 0,
-            };
-            const directionBadge =
-              chain.direction === "INCOME"
-                ? "bg-emerald-50 text-emerald-700"
-                : chain.direction === "EXPENSE"
-                  ? "bg-rose-50 text-rose-700"
-                  : "bg-violet-50 text-violet-700";
-            const chainDirectionLabel =
-              chain.direction === "INCOME"
-                ? "Доход"
-                : chain.direction === "EXPENSE"
-                  ? "Расход"
-                  : "Перевод";
-            const categoryLabel = formatCategoryLabel(
-              chain.category_id,
-              chain.direction
-            );
-            const counterparty = chain.counterparty_id
-              ? counterpartiesById.get(chain.counterparty_id) ?? null
-              : null;
-            const counterpartyName = counterparty
-              ? buildCounterpartyName(counterparty)
-              : null;
-            const CounterpartyIcon =
-              counterparty?.entity_type === "PERSON"
-                ? User
-                : getLegalDefaultIcon(counterparty?.industry_id ?? null);
+  const visibleChains = useMemo(() => {
+    return chains
+      .filter((chain) => {
+        if (!showActiveChains && !showDeletedChains) return false;
+        if (!showActiveChains && !chain.deleted_at) return false;
+        if (!showDeletedChains && chain.deleted_at) return false;
+        return true;
+      })
+      .filter((chain) => {
+        if (selectedDirections.size === 0) return true;
+        return selectedDirections.has(chain.direction);
+      })
+      .filter((chain) => {
+        if (minAmountFilter <= 0 && maxAmountFilter <= 0) return true;
+        const minChainAmount =
+          chain.amount_is_variable && chain.amount_min_rub != null
+            ? chain.amount_min_rub
+            : chain.amount_rub;
+        const maxChainAmount =
+          chain.amount_is_variable && chain.amount_max_rub != null
+            ? chain.amount_max_rub
+            : chain.amount_rub;
+        if (Number.isFinite(minAmountFilter) && minAmountFilter > 0 && maxChainAmount < minAmountFilter) {
+          return false;
+        }
+        if (Number.isFinite(maxAmountFilter) && maxAmountFilter > 0 && minChainAmount > maxAmountFilter) {
+          return false;
+        }
+        return true;
+      })
+      .filter((chain) => {
+        if (selectedItemFilterIds.size === 0) return true;
+        return selectedItemFilterIds.has(chain.primary_item_id);
+      })
+      .filter((chain) => {
+        if (!categoryFilterIds || categoryFilterIds.length === 0) return true;
+        if (chain.category_id == null) return false;
+        return categoryFilterIds.includes(chain.category_id);
+      })
+      .filter((chain) => {
+        if (selectedCounterpartyFilterIds.size === 0) return true;
+        if (!chain.counterparty_id) return false;
+        return selectedCounterpartyFilterIds.has(chain.counterparty_id);
+      })
+      .filter((chain) => {
+        if (!commentQuery) return true;
+        const text = (chain.comment ?? "").toLocaleLowerCase("ru");
+        return text.includes(commentQuery);
+      })
+      .filter((chain) => {
+        if (!onlyWithOverdue) return true;
+        const stats = chainStatsById.get(chain.id);
+        return !!stats && stats.overdue > 0;
+      })
+      .sort((a, b) => a.start_date.localeCompare(b.start_date));
+  }, [
+    chains,
+    selectedDirections,
+    showActiveChains,
+    showDeletedChains,
+    minAmountFilter,
+    maxAmountFilter,
+    selectedItemFilterIds,
+    categoryFilterIds,
+    selectedCounterpartyFilterIds,
+    commentQuery,
+    onlyWithOverdue,
+    chainStatsById,
+  ]);
 
-            return (
-              <Card key={chain.id} className="bg-card">
-                <CardHeader className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CardTitle className="text-lg">{chain.name}</CardTitle>
-                      <Badge className={directionBadge}>{chainDirectionLabel}</Badge>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="border-rose-200 text-rose-600 hover:bg-rose-50"
-                      onClick={() => setDeleteTarget(chain)}
+  const ChainCard = ({ chain }: { chain: TransactionChainOut }) => {
+    const amountLabel = formatChainAmount(chain);
+    const currency = itemsById.get(chain.primary_item_id)?.currency_code ?? "";
+    const primaryItem = itemsById.get(chain.primary_item_id) ?? null;
+    const stats = chainStatsById.get(chain.id) ?? {
+      total: 0,
+      realized: 0,
+      overdue: 0,
+      upcoming: 0,
+      deleted: 0,
+    };
+    const directionBadge =
+      chain.direction === "INCOME"
+        ? "bg-emerald-50 text-emerald-700"
+        : chain.direction === "EXPENSE"
+          ? "bg-rose-50 text-rose-700"
+          : "bg-violet-50 text-violet-700";
+    const chainDirectionLabel =
+      chain.direction === "INCOME"
+        ? "Доход"
+        : chain.direction === "EXPENSE"
+          ? "Расход"
+          : "Перевод";
+    const categoryLabel = formatCategoryLabel(chain.category_id, chain.direction);
+    const counterparty = chain.counterparty_id
+      ? counterpartiesById.get(chain.counterparty_id) ?? null
+      : null;
+    const counterpartyName = counterparty ? buildCounterpartyName(counterparty) : null;
+    const counterpartyLogo =
+      counterparty?.entity_type === "PERSON"
+        ? counterparty?.photo_url
+        : counterparty?.logo_url;
+
+    // Банк/контрагент по активу, как в карточке актива
+    const primaryCounterparty =
+      primaryItem?.counterparty_id != null
+        ? counterpartiesById.get(primaryItem.counterparty_id) ?? null
+        : null;
+    const rawPrimaryLogoUrl =
+      primaryCounterparty?.entity_type === "PERSON"
+        ? primaryCounterparty?.photo_url
+        : primaryCounterparty?.logo_url;
+    const primaryLogoUrlFull = rawPrimaryLogoUrl
+      ? rawPrimaryLogoUrl.startsWith("http")
+        ? rawPrimaryLogoUrl
+        : rawPrimaryLogoUrl.startsWith("/")
+          ? `${API_BASE}${rawPrimaryLogoUrl}`
+          : `${API_BASE}/${rawPrimaryLogoUrl}`
+      : null;
+    const CounterpartyIcon =
+      counterparty?.entity_type === "PERSON"
+        ? User
+        : getLegalDefaultIcon(counterparty?.industry_id ?? null);
+    const isDeleted = Boolean(chain.deleted_at);
+    const stripeColor =
+      chain.direction === "INCOME"
+        ? GREEN_TRANSACTION
+        : chain.direction === "EXPENSE"
+          ? RED
+          : ACCENT;
+    const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
+    const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
+
+    // Используем хук для получения иконки категории (та же логика, что и в транзакции)
+    const { categoryIcon3dPath, CategoryIcon: CategoryIconComponent, setCategoryIconFormat } =
+      useCategoryIcon(chain.category_id, categoryLookup);
+
+    return (
+      <div
+        className="relative w-full rounded-lg overflow-hidden"
+        style={{ backgroundColor: cardBg }}
+      >
+        <div
+          className="absolute left-0 top-0 bottom-0 w-[7px] rounded-l-md"
+          style={{ backgroundColor: stripeColor }}
+        />
+
+        <div className="p-[12px] pl-[19px] pr-[60px]">
+          {/* Кнопка действий фиксированно в правом верхнем углу карточки */}
+          {!isDeleted && (
+            <div className="absolute top-[12px] right-[16px]">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton aria-label="Открыть меню действий">
+                    <MoreVertical />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setDeleteTarget(chain)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Удалить цепочку
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+
+          <div className="flex items-start justify-between gap-4">
+            {/* Иконка категории 100x100 */}
+            <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
+              {categoryIcon3dPath ? (
+                <img
+                  src={categoryIcon3dPath}
+                  alt=""
+                  className="w-[100px] h-[100px] object-contain"
+                  style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
+                  onError={() => {
+                    // Fallback PNG -> WebP -> 2D иконка
+                    if (categoryIcon3dPath.endsWith(".png")) {
+                      setCategoryIconFormat("webp");
+                    } else {
+                      setCategoryIconFormat(null);
+                    }
+                  }}
+                />
+              ) : (
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
+                >
+                  <CategoryIconComponent
+                    className="w-16 h-16"
+                    style={{ color: ACCENT }}
+                    strokeWidth={1.5}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Текстовый контент */}
+            <div className="flex-1 min-w-0 flex flex-col gap-3 items-center">
+              {/* Верхняя строка и заголовок */}
+              <div className="flex flex-col gap-1 max-w-full break-words">
+                <div
+                  className="text-sm font-normal text-center break-words max-w-full"
+                  style={{ color: PLACEHOLDER_COLOR_DARK }}
+                >
+                  {categoryLabel}
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <h3
+                      className={cn(
+                        "text-2xl font-medium text-center break-words max-w-full",
+                        isDeleted && "opacity-70"
+                      )}
+                      style={{ color: textColor }}
                     >
-                      <Trash2 className="h-4 w-4" />
-                      Удалить
-                    </Button>
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {getFrequencyLabel(chain)}
-                  </div>
-                </CardHeader>
-                <CardContent className="text-sm text-foreground">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6 sm:flex-nowrap">
-                    <div className="min-w-0 space-y-2">
-                      <div>
-                        С {formatDate(chain.start_date)} по{" "}
-                        {formatDate(chain.end_date)}
-                      </div>
-                      <div className="font-semibold text-foreground">
-                        {chain.direction === "EXPENSE" ? "-" : "+"}
-                        {amountLabel} {currency}
-                      </div>
-                      <div>{categoryLabel || "-"}</div>
-                    </div>
-                    <div className="shrink-0 space-y-1 text-xs text-muted-foreground text-right">
-                      <div>Всего: {stats.total}</div>
-                      <div>Реализовано: {stats.realized}</div>
-                      <div>Просрочено: {stats.overdue}</div>
-                      <div>Не наступило: {stats.upcoming}</div>
-                      <div>Удалено: {stats.deleted}</div>
+                      {chain.name}
+                    </h3>
+                    <div
+                      className="mt-1 text-sm font-normal text-center"
+                      style={{ color: PLACEHOLDER_COLOR_DARK }}
+                    >
+                      {getFrequencyLabel(chain)}
+                      <br />
+                      с {formatDate(chain.start_date)} по {formatDate(chain.end_date)}
                     </div>
                   </div>
-                  <div className="mt-2 space-y-2">
-                    <div>
-                      Основной счет:{" "}
-                      <span className="font-medium text-foreground">
-                        {getItemName(chain.primary_item_id)}
-                      </span>
-                    </div>
-                    {chain.direction === "TRANSFER" && (
-                      <div>
-                        Контрагент:{" "}
-                        <span className="font-medium text-foreground">
-                          {getItemName(chain.counterparty_item_id)}
-                        </span>
-                      </div>
-                    )}
-                    {counterpartyName && (
-                      <div className="flex items-center gap-2">
-                        {(counterparty?.entity_type === "PERSON"
-                          ? counterparty?.photo_url
-                          : counterparty?.logo_url) ? (
-                          <img
-                            src={
-                              (counterparty?.entity_type === "PERSON"
-                                ? counterparty?.photo_url
-                                : counterparty?.logo_url) ?? ""
-                            }
-                            alt=""
-                            className="h-5 w-5 rounded border border-border/60 bg-card object-contain"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-card text-muted-foreground">
-                            <CounterpartyIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                          </div>
-                        )}
-                        <span>
-                          Контрагент:{" "}
-                          <span className="font-medium text-foreground">
-                            {counterpartyName}
-                          </span>
-                        </span>
-                      </div>
-                    )}
-                    {chain.comment && (
-                      <div className="text-xs text-muted-foreground">
-                        {chain.comment}
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      {deletedChains.length > 0 && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Удаленные</h2>
-            <Badge className="bg-muted text-muted-foreground">Удаленные</Badge>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {deletedChains.map((chain) => {
-              const amountLabel = formatChainAmount(chain);
-              const currency =
-                itemsById.get(chain.primary_item_id)?.currency_code ?? "";
-              const stats = chainStatsById.get(chain.id) ?? {
-                total: 0,
-                realized: 0,
-                overdue: 0,
-                upcoming: 0,
-                deleted: 0,
-              };
-              const directionBadge =
-                chain.direction === "INCOME"
-                  ? "bg-emerald-50 text-emerald-700"
-                  : chain.direction === "EXPENSE"
-                    ? "bg-rose-50 text-rose-700"
-                    : "bg-violet-50 text-violet-700";
-              const categoryLabel = formatCategoryLabel(
-                chain.category_id,
-                chain.direction
-              );
-              const counterparty = chain.counterparty_id
-                ? counterpartiesById.get(chain.counterparty_id) ?? null
-                : null;
-              const counterpartyName = counterparty
-                ? buildCounterpartyName(counterparty)
-                : null;
-              const CounterpartyIcon =
-                counterparty?.entity_type === "PERSON"
-                  ? User
-                  : getLegalDefaultIcon(counterparty?.industry_id ?? null);
-              const chainDirectionLabel =
-                chain.direction === "INCOME"
-                  ? "Доход"
-                  : chain.direction === "EXPENSE"
-                    ? "Расход"
-                    : "Перевод";
-              return (
-                <Card key={chain.id} className="bg-card/70">
-                  <CardHeader className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CardTitle className="text-lg text-slate-600">
-                        {chain.name}
-                      </CardTitle>
-                      <Badge className={directionBadge}>{chainDirectionLabel}</Badge>
-                      <Badge className="bg-muted text-muted-foreground">
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    {isDeleted && (
+                      <Badge
+                        className="bg-muted/10 text-xs"
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                      >
                         Удаленная
                       </Badge>
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {getFrequencyLabel(chain)}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="text-sm text-slate-600">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6 sm:flex-nowrap">
-                      <div className="min-w-0 space-y-2">
-                        <div>
-                          С {formatDate(chain.start_date)} по{" "}
-                          {formatDate(chain.end_date)}
-                        </div>
-                        <div className="font-semibold text-foreground">
-                          {chain.direction === "EXPENSE" ? "-" : "+"}
-                          {amountLabel} {currency}
-                        </div>
-                        <div>{categoryLabel || "-"}</div>
-                      </div>
-                      <div className="shrink-0 space-y-1 text-xs text-muted-foreground text-right">
-                        <div>Всего: {stats.total}</div>
-                        <div>Реализовано: {stats.realized}</div>
-                        <div>Просрочено: {stats.overdue}</div>
-                        <div>Не наступило: {stats.upcoming}</div>
-                        <div>Удалено: {stats.deleted}</div>
-                      </div>
-                    </div>
-                    <div className="mt-2 space-y-2">
-                      <div>
-                        Основной счет:{" "}
-                        <span className="font-medium text-foreground">
-                          {getItemName(chain.primary_item_id)}
-                        </span>
-                      </div>
-                      {chain.direction === "TRANSFER" && (
-                        <div>
-                          Контрагент:{" "}
-                        <span className="font-medium text-foreground">
-                          {getItemName(chain.counterparty_item_id)}
-                        </span>
-                      </div>
-                    )}
-                    {counterpartyName && (
-                      <div className="flex items-center gap-2">
-                        {(counterparty?.entity_type === "PERSON"
-                          ? counterparty?.photo_url
-                          : counterparty?.logo_url) ? (
-                          <img
-                            src={
-                              (counterparty?.entity_type === "PERSON"
-                                ? counterparty?.photo_url
-                                : counterparty?.logo_url) ?? ""
-                            }
-                            alt=""
-                            className="h-5 w-5 rounded border border-border/60 bg-card object-contain"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="flex h-5 w-5 items-center justify-center rounded border border-border/60 bg-card text-muted-foreground">
-                            <CounterpartyIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                          </div>
-                        )}
-                        <span>
-                          Контрагент:{" "}
-                          <span className="font-medium text-foreground">
-                            {counterpartyName}
-                          </span>
-                        </span>
-                      </div>
                     )}
                   </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </section>
-      )}
+                </div>
+              </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Новая цепочка транзакций</DialogTitle>
-          </DialogHeader>
-          <form className="grid gap-4" onSubmit={handleCreate}>
+            </div>
+          </div>
+
+          {/* Блок Актив / Контрагент / Сумма — на всю ширину карточки */}
+          <div className="mt-3 grid grid-cols-3 gap-x-4 gap-y-1 justify-items-center">
+            {/* Заголовки */}
+            <div
+              className="flex min-h-0 w-full flex-col items-center justify-center text-center"
+              style={{ color: PLACEHOLDER_COLOR_DARK }}
+            >
+              <span className="text-sm font-normal">Актив</span>
+            </div>
+            <div
+              className="flex min-h-0 w-full flex-col items-center justify-center text-center"
+              style={{ color: PLACEHOLDER_COLOR_DARK }}
+            >
+              <span className="text-sm font-normal">Контрагент</span>
+            </div>
+            <div
+              className="flex min-h-0 w-full flex-col items-center justify-center text-center"
+              style={{ color: PLACEHOLDER_COLOR_DARK }}
+            >
+              <span className="text-sm font-normal">Сумма</span>
+            </div>
+
+            {/* Значения */}
+            <div className="flex h-9 w-full items-center justify-center text-sm font-normal">
+              <div className="flex items-center gap-2">
+                {primaryItem && (
+                  <div className="h-5 w-5 rounded flex items-center justify-center overflow-hidden"
+                    style={{
+                      border: `1px solid ${PLACEHOLDER_COLOR_DARK}40`,
+                      backgroundColor: `${PLACEHOLDER_COLOR_DARK}10`,
+                    }}
+                  >
+                    {primaryLogoUrlFull ? (
+                      <img
+                        src={primaryLogoUrlFull}
+                        alt=""
+                        className="h-5 w-5 rounded object-contain"
+                      />
+                    ) : (
+                      <>
+                        {primaryCounterparty && (
+                          (primaryCounterparty.entity_type === "PERSON" ? (
+                            <User
+                              className="h-3.5 w-3.5"
+                              style={{ color: PLACEHOLDER_COLOR_DARK }}
+                              strokeWidth={1.5}
+                            />
+                          ) : (
+                            <>
+                              {(() => {
+                                const Icon = getLegalDefaultIcon(
+                                  primaryCounterparty.industry_id ?? null
+                                );
+                                return (
+                                  <Icon
+                                    className="h-3.5 w-3.5"
+                                    style={{ color: PLACEHOLDER_COLOR_DARK }}
+                                    strokeWidth={1.5}
+                                  />
+                                );
+                              })()}
+                            </>
+                          ))
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+                <span style={{ color: textColor }}>
+                  {getItemName(chain.primary_item_id)}
+                </span>
+              </div>
+            </div>
+            <div className="flex h-9 w-full items-center justify-center text-sm font-normal">
+              {counterpartyName ? (
+                <div className="flex items-center gap-2">
+                  <div
+                    className="h-5 w-5 rounded flex items-center justify-center overflow-hidden"
+                    style={{
+                      border: `1px solid ${PLACEHOLDER_COLOR_DARK}40`,
+                      backgroundColor: `${PLACEHOLDER_COLOR_DARK}10`,
+                    }}
+                  >
+                    {counterpartyLogo ? (
+                      <img
+                        src={counterpartyLogo}
+                        alt=""
+                        className="h-5 w-5 rounded object-contain"
+                      />
+                    ) : (
+                      <CounterpartyIcon
+                        className="h-3.5 w-3.5"
+                        aria-hidden="true"
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                      />
+                    )}
+                  </div>
+                  <span style={{ color: textColor }}>{counterpartyName}</span>
+                </div>
+              ) : (
+                <span style={{ color: textColor }}>—</span>
+              )}
+            </div>
+            <div className="flex h-9 w-full items-center justify-center">
+              <span
+                className="text-2xl font-medium"
+                style={{
+                  background: isDeleted ? undefined : PINK_GRADIENT_CONST,
+                  WebkitBackgroundClip: isDeleted ? undefined : "text",
+                  WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
+                  backgroundClip: isDeleted ? undefined : "text",
+                }}
+              >
+                {amountLabel}
+              </span>
+            </div>
+          </div>
+
+          {/* Комментарий внизу карточки на всю ширину */}
+          {chain.comment && chain.comment.trim() && (
+            <div className="mt-3 flex items-center gap-2">
+              <MessageSquare
+                style={{
+                  width: 20,
+                  height: 20,
+                  color: PLACEHOLDER_COLOR_DARK,
+                  flexShrink: 0,
+                }}
+              />
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 400,
+                  color: PLACEHOLDER_COLOR_DARK,
+                }}
+              >
+                {chain.comment}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <main
+      className={cn(
+        "min-h-screen pb-8",
+        isCollapsed ? "pl-0" : "pl-0"
+      )}
+    >
+      {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <FilterPanel
+          addButton={(collapsed) => (
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                  style={{ backgroundColor: ACCENT }}
+                  aria-label={collapsed ? "Добавить цепочку" : undefined}
+                >
+                  <Plus
+                    className={cn("h-5 w-5", !collapsed && "mr-2")}
+                    style={{ color: "white", opacity: 0.85 }}
+                  />
+                  {!collapsed && (
+                    <span style={{ color: "white", opacity: 0.85 }}>Добавить цепочку</span>
+                  )}
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Новая цепочка транзакций</DialogTitle>
+                </DialogHeader>
+                <form className="grid gap-4" onSubmit={handleCreate}>
             {formError && (
               <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
                 {formError}
@@ -1519,6 +1694,225 @@ export default function FinancialPlanningPage() {
           </form>
         </DialogContent>
       </Dialog>
+          )}
+          additionalActions={[]}
+        >
+          <FilterSection
+            label="Вид цепочки"
+            onReset={() => setSelectedDirections(new Set())}
+            showReset={selectedDirections.size > 0}
+          >
+            <SegmentedSelector
+              options={[
+                { value: "INCOME", label: "Доход", colorScheme: "green" },
+                { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
+              ]}
+              value={selectedDirections}
+              onChange={(value) => {
+                if (value instanceof Set) {
+                  setSelectedDirections(value as Set<TransactionChainOut["direction"]>);
+                } else if (Array.isArray(value)) {
+                  setSelectedDirections(
+                    new Set(value as TransactionChainOut["direction"][])
+                  );
+                }
+              }}
+              multiple={true}
+            />
+          </FilterSection>
+
+          <FilterSection
+            label="Сумма цепочки"
+            onReset={() => {
+              setFilterAmountFrom("");
+              setFilterAmountTo("");
+            }}
+            showReset={!!filterAmountFrom || !!filterAmountTo}
+          >
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                <div className="flex-1 min-w-0 basis-0">
+                  <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white min-w-0">
+                    <AuthInput
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="От"
+                      value={filterAmountFrom}
+                      onChange={(e) =>
+                        setFilterAmountFrom(formatRubInput(e.target.value))
+                      }
+                      onBlur={() =>
+                        setFilterAmountFrom((prev) => normalizeRubOnBlur(prev))
+                      }
+                    />
+                  </div>
+                </div>
+                <span className="text-sm shrink-0" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+                  —
+                </span>
+                <div className="flex-1 min-w-0 basis-0">
+                  <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white min-w-0">
+                    <AuthInput
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="До"
+                      value={filterAmountTo}
+                      onChange={(e) => setFilterAmountTo(formatRubInput(e.target.value))}
+                      onBlur={() =>
+                        setFilterAmountTo((prev) => normalizeRubOnBlur(prev))
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Активы/обязательства"
+            onReset={() => setSelectedItemFilterIds(new Set())}
+            showReset={selectedItemFilterIds.size > 0}
+          >
+            <div className="space-y-3">
+              <ItemSelector
+                items={items}
+                selectedIds={Array.from(selectedItemFilterIds)}
+                onChange={(ids) => setSelectedItemFilterIds(new Set(ids))}
+                selectionMode="multi"
+                placeholder="Начните вводить название"
+                getItemTypeLabel={getItemTypeLabel}
+                getItemKind={resolveItemEffectiveKind}
+                getBankLogoUrl={itemBankLogoUrl}
+                getBankName={itemBankName}
+                getItemBalance={getItemDisplayBalanceCents}
+                itemCounts={itemTxCounts}
+              />
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Категории"
+            onReset={() => setSelectedCategoryFilterKeys(new Set())}
+            showReset={selectedCategoryFilterKeys.size > 0}
+          >
+            <div className="space-y-3">
+              <CategorySelector
+                categoryNodes={categoryNodes}
+                selectedPathKeys={selectedCategoryFilterKeys}
+                onTogglePath={(path) => {
+                  const key = makeCategoryPathKey(
+                    normalizeCategoryValue(path.l1),
+                    normalizeCategoryValue(path.l2),
+                    normalizeCategoryValue(path.l3)
+                  );
+                  setSelectedCategoryFilterKeys((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(key)) {
+                      next.delete(key);
+                    } else {
+                      next.add(key);
+                    }
+                    return next;
+                  });
+                }}
+                selectionMode="multi"
+                placeholder="Поиск категории"
+                showChips={true}
+              />
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Контрагенты"
+            onReset={() => setSelectedCounterpartyFilterIds(new Set())}
+            showReset={selectedCounterpartyFilterIds.size > 0}
+          >
+            <div className="space-y-3">
+              <CounterpartySelector
+                counterparties={selectableCounterparties}
+                selectedIds={Array.from(selectedCounterpartyFilterIds)}
+                onChange={(ids) => setSelectedCounterpartyFilterIds(new Set(ids))}
+                selectionMode="multi"
+                placeholder="Начните вводить название"
+                industries={industries}
+                counterpartyCounts={counterpartyTxCounts}
+                showChips={true}
+              />
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Комментарий"
+            onReset={() => setCommentFilter("")}
+            showReset={!!commentFilter}
+          >
+            <div className="space-y-3">
+              <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                <AuthInput
+                  type="text"
+                  placeholder="Начните вводить текст"
+                  value={commentFilter}
+                  onChange={(e) => setCommentFilter(e.target.value)}
+                />
+              </div>
+            </div>
+          </FilterSection>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                Только цепочки с просроченными транзакциями
+              </span>
+              <Switch checked={onlyWithOverdue} onCheckedChange={setOnlyWithOverdue} />
+            </div>
+          </div>
+
+          <FilterSection
+            label="Статус"
+            onReset={() => {
+              setShowActiveChains(true);
+              setShowDeletedChains(false);
+            }}
+            showReset={!showActiveChains || !showDeletedChains}
+          >
+            <SegmentedSelector
+              options={[
+                { value: "active", label: "Активные", colorScheme: "purple" },
+                { value: "deleted", label: "Удаленные", colorScheme: "red" },
+              ]}
+              value={[
+                ...(showActiveChains ? ["active"] : []),
+                ...(showDeletedChains ? ["deleted"] : []),
+              ]}
+              onChange={(value) => {
+                const values = Array.isArray(value) ? value : [];
+                setShowActiveChains(values.includes("active"));
+                setShowDeletedChains(values.includes("deleted"));
+              }}
+              multiple={true}
+            />
+          </FilterSection>
+        </FilterPanel>
+
+        <div className="flex-1 min-w-0 pt-[30px]">
+          <div className="w-[900px] mx-auto">
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Загрузка...</div>
+            ) : visibleChains.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
+                Пока нет цепочек плановых транзакций.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {visibleChains.map((chain) => (
+                  <ChainCard key={chain.id} chain={chain} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       <AlertDialog
         open={deleteTarget !== null}

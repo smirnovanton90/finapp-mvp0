@@ -44,6 +44,12 @@ function toDateKey(date: Date) {
   return `${y}-${m}-${d}`;
 }
 
+/** Форматирует ключ даты YYYY-MM-DD в "ДД.ММ.ГГГГ" */
+function formatDateKeyToDisplay(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-");
+  return `${d}.${m}.${y}`;
+}
+
 function getWeekStart(date: Date) {
   const day = date.getDay();
   const diff = (day + 6) % 7;
@@ -334,12 +340,12 @@ export function LimitCard({
           </div>
         </div>
 
-        {/* Current period — от левого до правого края карточки */}
+        {/* Текущий период: "До" и дата окончания лимита */}
         {currentRange && (
           <div className="space-y-2 mb-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-normal" style={{ color: ACTIVE_TEXT_DARK }}>
-                Текущий период
+                До {formatDateKeyToDisplay(currentRange.endKey)}
               </span>
               <span className="text-2xl font-medium flex items-baseline gap-1">
                 <span style={{ color: GREEN }}>{formatAmount(currentSpent)}</span>

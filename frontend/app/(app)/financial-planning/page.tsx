@@ -8,6 +8,7 @@ import {
   HeartPulse,
   Home,
   Landmark,
+  Link2,
   MessageSquare,
   MoreVertical,
   Plus,
@@ -31,6 +32,7 @@ import {
 } from "react";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
+import { useRouter } from "next/navigation";
 
 import {
   AlertDialog,
@@ -45,14 +47,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { FormModal } from "@/components/form-modal";
+import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
 import { CategorySelector } from "@/components/category-selector";
 import { ItemSelector } from "@/components/item-selector";
@@ -63,13 +59,6 @@ import { IconButton } from "@/components/ui/icon-button";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { AuthInput } from "@/components/ui/auth-input";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -111,12 +100,16 @@ import {
 import { cn } from "@/lib/utils";
 import {
   ACCENT,
+  ACCENT_FILL_LIGHT,
+  ACCENT_FILL_MEDIUM,
   SIDEBAR_TEXT_ACTIVE,
   SIDEBAR_TEXT_INACTIVE,
   MODAL_BG,
   BACKGROUND_DT,
   GREEN_TRANSACTION,
+  GREEN_FILL,
   RED,
+  RED_FILL,
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
 } from "@/lib/colors";
@@ -288,6 +281,7 @@ function getTodayKey() {
 export default function FinancialPlanningPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
+  const router = useRouter();
   const { activeStep, isWizardOpen } = useOnboarding();
   const { isCollapsed } = useSidebar();
 
@@ -585,9 +579,6 @@ export default function FinancialPlanningPage() {
     };
     loadAll();
   }, [session]);
-
-  const segmentedButtonBase =
-    "flex-1 min-w-0 rounded-full px-3 py-2 text-sm font-medium text-center whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
 
   const applyCategorySelection = (l1: string, l2: string, l3: string) => {
     if (!l1 || (l1 === CATEGORY_PLACEHOLDER && !l2 && !l3)) {
@@ -1014,6 +1005,18 @@ export default function FinancialPlanningPage() {
     chainStatsById,
   ]);
 
+  const openChainTransactions = useCallback(
+    (chainId: number, filter: "total" | "realized" | "overdue" | "upcoming" | "deleted") => {
+      const qs = new URLSearchParams({
+        preset: "chain",
+        chain_id: String(chainId),
+        chain_filter: filter,
+      });
+      router.push(`/transactions?${qs.toString()}`);
+    },
+    [router]
+  );
+
   const ChainCard = ({ chain }: { chain: TransactionChainOut }) => {
     const amountLabel = formatChainAmount(chain);
     const currency = itemsById.get(chain.primary_item_id)?.currency_code ?? "";
@@ -1349,351 +1352,256 @@ export default function FinancialPlanningPage() {
       <div className="flex flex-col gap-6 lg:flex-row">
         <FilterPanel
           addButton={(collapsed) => (
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button
-                  className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-                  style={{ backgroundColor: ACCENT }}
-                  aria-label={collapsed ? "Добавить цепочку" : undefined}
-                >
-                  <Plus
-                    className={cn("h-5 w-5", !collapsed && "mr-2")}
-                    style={{ color: "white", opacity: 0.85 }}
+            <>
+              <Button
+                className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                style={{ backgroundColor: ACCENT }}
+                aria-label={collapsed ? "Добавить цепочку" : undefined}
+                onClick={() => setIsDialogOpen(true)}
+              >
+                <Plus
+                  className={cn("h-5 w-5", !collapsed && "mr-2")}
+                  style={{ color: "white", opacity: 0.85 }}
+                />
+                {!collapsed && (
+                  <span style={{ color: "white", opacity: 0.85 }}>Добавить цепочку</span>
+                )}
+              </Button>
+              <FormModal
+                open={isDialogOpen}
+                onOpenChange={(open) => {
+                  setIsDialogOpen(open);
+                  if (!open) resetForm();
+                }}
+                title="Добавить цепочку транзакций"
+                icon={<Link2 className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+                formError={formError}
+                onSubmit={handleCreate}
+                onCancel={() => {
+                  setIsDialogOpen(false);
+                  resetForm();
+                }}
+                submitLabel={isSubmitting ? "Добавляем..." : "Добавить"}
+                loading={isSubmitting}
+                size="medium"
+              >
+                <TextField
+                  label="Название цепочки"
+                  value={chainName}
+                  onChange={(e) => setChainName(e.target.value)}
+                  placeholder="Например, аренда офиса"
+                />
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <DateField
+                    label="Дата начала"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
                   />
-                  {!collapsed && (
-                    <span style={{ color: "white", opacity: 0.85 }}>Добавить цепочку</span>
-                  )}
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl">
-                <DialogHeader>
-                  <DialogTitle>Новая цепочка транзакций</DialogTitle>
-                </DialogHeader>
-                <form className="grid gap-4" onSubmit={handleCreate}>
-            {formError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                {formError}
-              </div>
-            )}
-
-            <div className="grid gap-2">
-              <Label>Название цепочки</Label>
-              <Input
-                className="border-2 border-border/70 bg-card shadow-none"
-                value={chainName}
-                onChange={(e) => setChainName(e.target.value)}
-                placeholder="Например, аренда офиса"
-              />
-            </div>
-
-            <div className="grid gap-2 md:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Дата начала</Label>
-                <Input
-                  type="date"
-                  className="border-2 border-border/70 bg-card shadow-none"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Дата окончания</Label>
-                <Input
-                  type="date"
-                  className="border-2 border-border/70 bg-card shadow-none"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-2 md:grid-cols-2">
-              <div className="grid gap-2">
-                <Label>Частота</Label>
-                <Select
-                  value={frequency}
-                  onValueChange={(value) =>
-                    setFrequency(value as TransactionChainFrequency)
-                  }
-                >
-                  <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                    <SelectValue placeholder="Выберите частоту" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="DAILY">Ежедневно</SelectItem>
-                    <SelectItem value="WEEKLY">Еженедельно</SelectItem>
-                    <SelectItem value="MONTHLY">Ежемесячно</SelectItem>
-                    <SelectItem value="REGULAR">Регулярно</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {frequency === "WEEKLY" && (
-                <div className="grid gap-2">
-                  <Label>День недели</Label>
-                  <Select
-                    value={String(weeklyDay)}
-                    onValueChange={(value) => setWeeklyDay(Number(value))}
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                      <SelectValue placeholder="Выберите день недели" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {WEEKDAY_LABELS.map((label, index) => (
-                        <SelectItem key={label} value={String(index)}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <DateField
+                    label="Дата окончания"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                  />
                 </div>
-              )}
-              {frequency === "MONTHLY" && (
-                <div className="grid gap-2">
-                  <Label>Правило месяца</Label>
-                  <Select
-                    value={monthlyMode}
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <SelectField
+                    label="Частота"
+                    value={frequency}
                     onValueChange={(value) =>
-                      setMonthlyMode(
-                        value as "DAY_OF_MONTH" | TransactionChainMonthlyRule
-                      )
+                      setFrequency(value as TransactionChainFrequency)
                     }
-                  >
-                    <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                      <SelectValue placeholder="Выберите правило" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="DAY_OF_MONTH">Число месяца</SelectItem>
-                      <SelectItem value="FIRST_DAY">Первый день</SelectItem>
-                      <SelectItem value="LAST_DAY">Последний день</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    options={[
+                      { value: "DAILY", label: "Ежедневно" },
+                      { value: "WEEKLY", label: "Еженедельно" },
+                      { value: "MONTHLY", label: "Ежемесячно" },
+                      { value: "REGULAR", label: "Регулярно" },
+                    ]}
+                    placeholder="Выберите частоту"
+                  />
+                  {frequency === "WEEKLY" && (
+                    <SelectField
+                      label="День недели"
+                      value={String(weeklyDay)}
+                      onValueChange={(value) => setWeeklyDay(Number(value))}
+                      options={WEEKDAY_LABELS.map((label, index) => ({
+                        value: String(index),
+                        label,
+                      }))}
+                      placeholder="Выберите день недели"
+                    />
+                  )}
+                  {frequency === "MONTHLY" && (
+                    <SelectField
+                      label="Правило месяца"
+                      value={monthlyMode}
+                      onValueChange={(value) =>
+                        setMonthlyMode(
+                          value as "DAY_OF_MONTH" | TransactionChainMonthlyRule
+                        )
+                      }
+                      options={[
+                        { value: "DAY_OF_MONTH", label: "Число месяца" },
+                        { value: "FIRST_DAY", label: "Первый день" },
+                        { value: "LAST_DAY", label: "Последний день" },
+                      ]}
+                      placeholder="Выберите правило"
+                    />
+                  )}
+                  {frequency === "MONTHLY" && monthlyMode === "DAY_OF_MONTH" && (
+                    <TextField
+                      label="Число месяца"
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={monthlyDay}
+                      onChange={(e) => setMonthlyDay(e.target.value)}
+                    />
+                  )}
+                  {frequency === "REGULAR" && (
+                    <TextField
+                      label="Интервал (дней)"
+                      type="number"
+                      min={1}
+                      value={intervalDays}
+                      onChange={(e) => setIntervalDays(e.target.value)}
+                    />
+                  )}
                 </div>
-              )}
-              {frequency === "MONTHLY" && monthlyMode === "DAY_OF_MONTH" && (
+
                 <div className="grid gap-2">
-                  <Label>Число месяца</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={31}
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    value={monthlyDay}
-                    onChange={(e) => setMonthlyDay(e.target.value)}
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Направление</Label>
+                  <SegmentedSelector
+                    options={[
+                      { value: "INCOME", label: "Доход", colorScheme: "green" },
+                      { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                      { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
+                    ]}
+                    value={direction}
+                    onChange={(value) => {
+                      setDirection(value as "INCOME" | "EXPENSE" | "TRANSFER");
+                      setCounterpartyItemId(null);
+                    }}
                   />
                 </div>
-              )}
-              {frequency === "REGULAR" && (
+
                 <div className="grid gap-2">
-                  <Label>Интервал (дней)</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    value={intervalDays}
-                    onChange={(e) => setIntervalDays(e.target.value)}
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Актив/обязательство</Label>
+                  <ItemSelector
+                    items={items}
+                    selectedIds={primaryItemId ? [primaryItemId] : []}
+                    onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                    selectionMode="single"
+                    placeholder="Выберите счет"
+                    getItemTypeLabel={getItemTypeLabel}
+                    getItemKind={resolveItemEffectiveKind}
+                    getBankLogoUrl={itemBankLogoUrl}
+                    getBankName={itemBankName}
+                    getItemBalance={getItemDisplayBalanceCents}
+                    itemCounts={itemTxCounts}
                   />
                 </div>
-              )}
-            </div>
+                {isTransfer && (
+                  <div className="grid gap-2">
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Контрагент (счёт)</Label>
+                    <ItemSelector
+                      items={items.filter((item) => item.id !== primaryItemId)}
+                      selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
+                      onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
+                      selectionMode="single"
+                      placeholder="Выберите счет"
+                      getItemTypeLabel={getItemTypeLabel}
+                      getItemKind={resolveItemEffectiveKind}
+                      getBankLogoUrl={itemBankLogoUrl}
+                      getBankName={itemBankName}
+                      getItemBalance={getItemDisplayBalanceCents}
+                      itemCounts={itemTxCounts}
+                    />
+                  </div>
+                )}
 
-            <div className="grid gap-2" role="group" aria-label="Направление">
-              <div className="inline-flex w-full items-stretch overflow-hidden rounded-full border border-input bg-muted/60 p-0.5">
-                <button
-                  type="button"
-                  aria-pressed={isIncome}
-                  onClick={() => {
-                    setDirection("INCOME");
-                    setCounterpartyItemId(null);
-                  }}
-                  className={`${segmentedButtonBase} ${
-                    isIncome
-                      ? "bg-green-50 text-green-700"
-                      : "bg-card text-muted-foreground hover:bg-accent"
-                  }`}
-                >
-                  Доход
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={isExpense}
-                  onClick={() => {
-                    setDirection("EXPENSE");
-                    setCounterpartyItemId(null);
-                  }}
-                  className={`${segmentedButtonBase} ${
-                    isExpense
-                      ? "bg-red-50 text-red-700"
-                      : "bg-card text-muted-foreground hover:bg-accent"
-                  }`}
-                >
-                  Расход
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={isTransfer}
-                  onClick={() => {
-                    setDirection("TRANSFER");
-                    setCounterpartyItemId(null);
-                  }}
-                  className={`${segmentedButtonBase} ${
-                    isTransfer
-                      ? "bg-violet-50 text-violet-700"
-                      : "bg-card text-muted-foreground hover:bg-accent"
-                  }`}
-                >
-                  Перевод
-                </button>
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Актив/обязательство</Label>
-              <ItemSelector
-                items={items}
-                selectedIds={primaryItemId ? [primaryItemId] : []}
-                onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
-                selectionMode="single"
-                placeholder="Выберите счет"
-                getItemTypeLabel={getItemTypeLabel}
-                getItemKind={resolveItemEffectiveKind}
-                getBankLogoUrl={itemBankLogoUrl}
-                getBankName={itemBankName}
-                getItemBalance={getItemDisplayBalanceCents}
-                itemCounts={itemTxCounts}
-              />
-            </div>
-            {isTransfer && (
-              <div className="grid gap-2">
-                <Label>Контрагент</Label>
-                <ItemSelector
-                  items={items.filter((item) => item.id !== primaryItemId)}
-                  selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
-                  onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
-                  selectionMode="single"
-                  placeholder="Выберите счет"
-                  getItemTypeLabel={getItemTypeLabel}
-                  getItemKind={resolveItemEffectiveKind}
-                  getBankLogoUrl={itemBankLogoUrl}
-                  getBankName={itemBankName}
-                  getItemBalance={getItemDisplayBalanceCents}
-                  itemCounts={itemTxCounts}
-                />
-              </div>
-            )}
-
-            <div className="grid gap-2">
-              <Label>Контрагент</Label>
-              <CounterpartySelector
-                counterparties={selectableCounterparties}
-                selectedIds={counterpartyId ? [counterpartyId] : []}
-                onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
-                selectionMode="single"
-                placeholder="Начните вводить название"
-                industries={industries}
-                disabled={counterpartyLoading}
-                counterpartyCounts={counterpartyTxCounts}
-              />
-              {counterpartyError && (
-                <p className="text-xs text-red-600">{counterpartyError}</p>
-              )}
-            </div>
-
-            {isTransfer && isCrossCurrencyTransfer ? (
-              <>
                 <div className="grid gap-2">
-                  <Label>{`Сумма списания (${primaryCurrency ?? "-"})`}</Label>
-                  <Input
-                    className="border-2 border-border/70 bg-card shadow-none"
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Контрагент</Label>
+                  <CounterpartySelector
+                    counterparties={selectableCounterparties}
+                    selectedIds={counterpartyId ? [counterpartyId] : []}
+                    onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                    selectionMode="single"
+                    placeholder="Начните вводить название"
+                    industries={industries}
+                    disabled={counterpartyLoading}
+                    counterpartyCounts={counterpartyTxCounts}
+                  />
+                  {counterpartyError && (
+                    <p className="text-xs" style={{ color: "#FB4C4F" }}>
+                      {counterpartyError}
+                    </p>
+                  )}
+                </div>
+
+                {isTransfer && isCrossCurrencyTransfer ? (
+                  <>
+                    <TextField
+                      label={`Сумма списания (${primaryCurrency ?? "-"})`}
+                      value={amountStr}
+                      onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+                      onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                      inputMode="decimal"
+                      placeholder="Например: 1 234,56"
+                    />
+                    <TextField
+                      label={`Сумма поступления (${counterpartyCurrency ?? "-"})`}
+                      value={amountCounterpartyStr}
+                      onChange={(e) =>
+                        setAmountCounterpartyStr(formatRubInput(e.target.value))
+                      }
+                      onBlur={() =>
+                        setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev))
+                      }
+                      inputMode="decimal"
+                      placeholder="Например: 1 234,56"
+                    />
+                  </>
+                ) : (
+                  <TextField
+                    label={primaryCurrency ? `Сумма (${primaryCurrency})` : "Сумма"}
                     value={amountStr}
                     onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                     onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
                     inputMode="decimal"
                     placeholder="Например: 1 234,56"
                   />
-                </div>
-                <div className="grid gap-2">
-                  <Label>{`Сумма поступления (${counterpartyCurrency ?? "-"})`}</Label>
-                  <Input
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    value={amountCounterpartyStr}
-                    onChange={(e) =>
-                      setAmountCounterpartyStr(formatRubInput(e.target.value))
-                    }
-                    onBlur={() =>
-                      setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev))
-                    }
-                    inputMode="decimal"
-                    placeholder="Например: 1 234,56"
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="grid gap-2">
-                <Label>
-                  {primaryCurrency ? `Сумма (${primaryCurrency})` : "Сумма"}
-                </Label>
-                <Input
-                  className="border-2 border-border/70 bg-card shadow-none"
-                  value={amountStr}
-                  onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                  inputMode="decimal"
-                  placeholder="Например: 1 234,56"
+                )}
+
+                {!isTransfer && (
+                  <div className="grid gap-2">
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Категория</Label>
+                    <CategorySelector
+                      categoryNodes={categoryNodes}
+                      selectedPath={selectedCategoryPath}
+                      onChange={(path) => {
+                        if (path) {
+                          applyCategorySelection(path.l1, path.l2, path.l3);
+                        } else {
+                          applyCategorySelection("", "", "");
+                        }
+                      }}
+                      placeholder="Начните вводить категорию"
+                      direction={direction}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                )}
+
+                <TextField
+                  label="Комментарий"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="Комментарий"
                 />
-              </div>
-            )}
-
-            {!isTransfer && (
-              <div className="grid gap-2">
-                <Label>Категория</Label>
-                <CategorySelector
-                  categoryNodes={categoryNodes}
-                  selectedPath={selectedCategoryPath}
-                  onChange={(path) => {
-                    if (path) {
-                      applyCategorySelection(path.l1, path.l2, path.l3);
-                    } else {
-                      applyCategorySelection("", "", "");
-                    }
-                  }}
-                  placeholder="Начните вводить категорию"
-                  direction={direction}
-                  disabled={isSubmitting}
-                />
-              </div>
-            )}
-
-            <div className="grid gap-2">
-              <Label>Комментарий</Label>
-              <Input
-                className="border-2 border-border/70 bg-card shadow-none"
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="Комментарий"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-2 border-border/70 bg-card shadow-none"
-                onClick={() => setIsDialogOpen(false)}
-                disabled={isSubmitting}
-              >
-                Отмена
-              </Button>
-              <Button
-                type="submit"
-                className="bg-violet-600 text-white hover:bg-violet-700"
-                disabled={isSubmitting}
-              >
-                Создать цепочку
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+              </FormModal>
+            </>
           )}
           additionalActions={[]}
         >
@@ -1905,9 +1813,90 @@ export default function FinancialPlanningPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {visibleChains.map((chain) => (
-                  <ChainCard key={chain.id} chain={chain} />
-                ))}
+                {visibleChains.map((chain) => {
+                  const stats = chainStatsById.get(chain.id) ?? {
+                    total: 0,
+                    realized: 0,
+                    overdue: 0,
+                    upcoming: 0,
+                    deleted: 0,
+                  };
+
+                  return (
+                    <div key={chain.id} className="flex items-stretch gap-3">
+                      <div className="flex-1 min-w-0">
+                        <ChainCard chain={chain} />
+                      </div>
+
+                      <div className="shrink-0 flex flex-col gap-2 justify-center">
+                        <IconButton
+                          aria-label="Открыть все транзакции цепочки"
+                          className="text-sm font-medium"
+                          style={{
+                            "--icon-button-bg": ACCENT_FILL_LIGHT,
+                            "--icon-button-bg-hover": ACCENT_FILL_MEDIUM,
+                            color: ACTIVE_TEXT_DARK,
+                          }}
+                          onClick={() => openChainTransactions(chain.id, "total")}
+                        >
+                          {stats.total}
+                        </IconButton>
+
+                        <IconButton
+                          aria-label="Открыть реализованные транзакции цепочки"
+                          className="text-sm font-medium"
+                          style={{
+                            "--icon-button-bg": GREEN_FILL,
+                            "--icon-button-bg-hover": GREEN_TRANSACTION,
+                            color: ACTIVE_TEXT_DARK,
+                          }}
+                          onClick={() => openChainTransactions(chain.id, "realized")}
+                        >
+                          {stats.realized}
+                        </IconButton>
+
+                        <IconButton
+                          aria-label="Открыть просроченные нереализованные транзакции цепочки"
+                          className="text-sm font-medium"
+                          style={{
+                            "--icon-button-bg": RED_FILL,
+                            "--icon-button-bg-hover": RED,
+                            color: ACTIVE_TEXT_DARK,
+                          }}
+                          onClick={() => openChainTransactions(chain.id, "overdue")}
+                        >
+                          {stats.overdue}
+                        </IconButton>
+
+                        <IconButton
+                          aria-label="Открыть непросроченные нереализованные транзакции цепочки"
+                          className="text-sm font-medium"
+                          style={{
+                            "--icon-button-bg": ACCENT_FILL_MEDIUM,
+                            "--icon-button-bg-hover": ACCENT,
+                            color: ACTIVE_TEXT_DARK,
+                          }}
+                          onClick={() => openChainTransactions(chain.id, "upcoming")}
+                        >
+                          {stats.upcoming}
+                        </IconButton>
+
+                        <IconButton
+                          aria-label="Открыть удалённые транзакции цепочки"
+                          className="text-sm font-medium"
+                          style={{
+                            "--icon-button-bg": BACKGROUND_DT,
+                            "--icon-button-bg-hover": MODAL_BG,
+                            color: PLACEHOLDER_COLOR_DARK,
+                          }}
+                          onClick={() => openChainTransactions(chain.id, "deleted")}
+                        >
+                          {stats.deleted}
+                        </IconButton>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

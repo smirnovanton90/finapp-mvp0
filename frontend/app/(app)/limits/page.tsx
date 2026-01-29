@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import {
   AlertDialog,
@@ -17,12 +17,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CategorySelector } from "@/components/category-selector";
+import { CounterpartySelector } from "@/components/counterparty-selector";
 import {
   Select,
   SelectContent,
@@ -38,23 +37,27 @@ import {
   makeCategoryPathKey,
 } from "@/lib/categories";
 import {
-  CATEGORY_ICON_BY_NAME,
-  CATEGORY_ICON_FALLBACK,
-} from "@/lib/category-icons";
-import {
   createLimit,
   deleteLimit,
   fetchCategories,
   fetchLimits,
   fetchTransactions,
+  fetchCounterparties,
   LimitCreate,
   LimitOut,
   LimitPeriod,
   TransactionOut,
   updateLimit,
 } from "@/lib/api";
-import { formatAmount } from "@/lib/item-utils";
 import { useOnboarding } from "@/components/onboarding-context";
+import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { LimitCard } from "@/components/limit-card";
+import { useSidebar } from "@/components/ui/sidebar-context";
+import { AuthInput } from "@/components/ui/auth-input";
+import { SegmentedSelector } from "@/components/ui/segmented-selector";
+import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
+import { PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, ACCENT } from "@/lib/colors";
+import { cn } from "@/lib/utils";
 
 const CATEGORY_PLACEHOLDER = "-";
 const CATEGORY_PATH_SEPARATOR = " / ";
@@ -74,33 +77,9 @@ type CategoryPathOption = {
   searchKey: string;
 };
 
-function formatRub(valueInCents: number) {
-  return `${formatAmount(valueInCents)} RUB`;
-}
-
-function formatAmountInput(valueInCents: number) {
-  const formatted = new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(valueInCents / 100);
-  return formatted.replace(/\u00a0/g, " ");
-}
-
 function formatDateLabel(dateKey: string) {
   const [year, month, day] = dateKey.split("-");
   return `${day}.${month}.${year}`;
-}
-
-function getLimitProgressTone(ratio: number) {
-  if (ratio >= 1) return "over";
-  if (ratio >= 0.75) return "warn";
-  return "ok";
-}
-
-function getLimitProgressColorClass(tone: "over" | "warn" | "ok") {
-  if (tone === "over") return "bg-rose-500";
-  if (tone === "warn") return "bg-orange-500";
-  return "bg-emerald-500";
 }
 
 function toDateKey(date: Date) {
@@ -127,61 +106,6 @@ function formatCategoryPath(l1: string, l2: string, l3: string) {
     .map((value) => value?.trim())
     .filter((value) => value && value !== CATEGORY_PLACEHOLDER);
   return parts.join(CATEGORY_PATH_SEPARATOR);
-}
-
-function parseRubToCents(input: string): number {
-  const normalized = input.trim().replace(/\s/g, "").replace(",", ".");
-  const value = Number(normalized);
-  if (!Number.isFinite(value)) return NaN;
-  return Math.round(value * 100);
-}
-
-function formatRubInput(raw: string): string {
-  if (!raw) return "";
-
-  const cleaned = raw.replace(/[^\d.,]/g, "");
-  const endsWithSep = /[.,]$/.test(cleaned);
-  const sepIndex = cleaned.search(/[.,]/);
-
-  let intPart = "";
-  let decPart = "";
-
-  if (sepIndex === -1) {
-    intPart = cleaned;
-  } else {
-    intPart = cleaned.slice(0, sepIndex);
-    decPart = cleaned.slice(sepIndex + 1).replace(/[.,]/g, "");
-  }
-
-  if (sepIndex === 0) intPart = "0";
-
-  intPart = intPart.replace(/^0+(?=\d)/, "");
-  if (!intPart) intPart = "0";
-
-  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  const formattedDec = decPart.slice(0, 2);
-
-  if (endsWithSep && formattedDec.length === 0) {
-    return `${formattedInt},`;
-  }
-
-  return formattedDec.length > 0 ? `${formattedInt},${formattedDec}` : formattedInt;
-}
-
-function normalizeRubOnBlur(value: string): string {
-  const v = value.trim();
-  if (!v) return "";
-
-  if (v.endsWith(",")) return `${v}00`;
-
-  const parts = v.split(",");
-  const intPart = parts[0] || "0";
-  const decPart = parts[1] ?? "";
-
-  if (decPart.length === 0) return `${intPart},00`;
-  if (decPart.length === 1) return `${intPart},${decPart}0`;
-
-  return `${intPart},${decPart.slice(0, 2)}`;
 }
 
 function isRealizedTransaction(tx: TransactionOut) {
@@ -252,8 +176,18 @@ export default function LimitsPage() {
   const [limits, setLimits] = useState<LimitOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
+  const [counterparties, setCounterparties] = useState<import("@/lib/api").CounterpartyOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [filterName, setFilterName] = useState("");
+  const [filterAmountFrom, setFilterAmountFrom] = useState("");
+  const [filterAmountTo, setFilterAmountTo] = useState("");
+  const [filterPeriod, setFilterPeriod] = useState<Set<LimitPeriod>>(new Set());
+  const [filterCategoryIds, setFilterCategoryIds] = useState<number[]>([]);
+  const [filterCounterpartyIds, setFilterCounterpartyIds] = useState<number[]>([]);
+  const [filterComment, setFilterComment] = useState("");
+  const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set(["active"]));
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -332,6 +266,51 @@ export default function LimitsPage() {
     [limits]
   );
 
+  const visibleLimits = useMemo(() => {
+    const nameNorm = filterName.trim().toLowerCase();
+    const amountFromCents = filterAmountFrom.trim() ? parseRubToCents(filterAmountFrom) : NaN;
+    const amountToCents = filterAmountTo.trim() ? parseRubToCents(filterAmountTo) : NaN;
+    const showActive = filterStatus.has("active");
+    const showDeleted = filterStatus.has("deleted");
+
+    return limits.filter((limit) => {
+      if (nameNorm && !limit.name.toLowerCase().includes(nameNorm)) return false;
+      if (Number.isFinite(amountFromCents) && limit.amount_rub < amountFromCents) return false;
+      if (Number.isFinite(amountToCents) && limit.amount_rub > amountToCents) return false;
+      if (filterPeriod.size > 0 && !filterPeriod.has(limit.period)) return false;
+      if (filterCategoryIds.length > 0 && !filterCategoryIds.includes(limit.category_id)) return false;
+      const isDeleted = Boolean(limit.deleted_at);
+      if (isDeleted && !showDeleted) return false;
+      if (!isDeleted && !showActive) return false;
+
+      if (filterCounterpartyIds.length > 0) {
+        const categoryIds = categoryDescendants.get(limit.category_id) ?? new Set([limit.category_id]);
+        const hasMatch = txs.some(
+          (tx) =>
+            tx.direction === "EXPENSE" &&
+            isRealizedTransaction(tx) &&
+            tx.category_id != null &&
+            categoryIds.has(tx.category_id) &&
+            tx.counterparty_id != null &&
+            filterCounterpartyIds.includes(tx.counterparty_id)
+        );
+        if (!hasMatch) return false;
+      }
+      return true;
+    });
+  }, [
+    limits,
+    filterName,
+    filterAmountFrom,
+    filterAmountTo,
+    filterPeriod,
+    filterCategoryIds,
+    filterCounterpartyIds,
+    filterStatus,
+    categoryDescendants,
+    txs,
+  ]);
+
   const limitSummaryById = useMemo(() => {
     const now = new Date();
     const map = new Map<
@@ -370,14 +349,16 @@ export default function LimitsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [limitsData, txData, categoriesData] = await Promise.all([
+      const [limitsData, txData, categoriesData, counterpartiesData] = await Promise.all([
         fetchLimits({ include_deleted: true }),
         fetchTransactions(),
         fetchCategories(),
+        fetchCounterparties(),
       ]);
       setLimits(limitsData);
       setTxs(txData);
       setCategoryNodes(categoriesData);
+      setCounterparties(counterpartiesData);
     } catch (e: any) {
       setError(
         e?.message ??
@@ -414,35 +395,6 @@ export default function LimitsPage() {
     );
     return categoryLookup.pathToId.get(key) ?? null;
   };
-
-  const resolveCategoryIcon = useCallback(
-    (categoryId: number | null) => {
-      if (!categoryId) return CATEGORY_ICON_FALLBACK;
-      const path = categoryLookup.idToPath.get(categoryId);
-      if (!path || path.length === 0) return CATEGORY_ICON_FALLBACK;
-      for (let depth = path.length; depth >= 1; depth -= 1) {
-        const key = makeCategoryPathKey(...path.slice(0, depth));
-        const targetId = categoryLookup.pathToId.get(key);
-        if (!targetId) continue;
-        const iconName = categoryLookup.idToIcon.get(targetId);
-        if (!iconName) continue;
-        const normalizedIconName = iconName.trim();
-        if (!normalizedIconName) continue;
-        const Icon = CATEGORY_ICON_BY_NAME[normalizedIconName];
-        if (Icon) return Icon;
-      }
-      return CATEGORY_ICON_FALLBACK;
-    },
-    [categoryLookup.idToIcon, categoryLookup.idToPath, categoryLookup.pathToId]
-  );
-
-  const getCategoryIconByPath = useCallback(
-    (l1: string, l2: string, l3: string) => {
-      const categoryId = resolveCategoryId(l1, l2, l3);
-      return resolveCategoryIcon(categoryId);
-    },
-    [categoryLookup.pathToId, resolveCategoryIcon]
-  );
 
   const formatCategoryLabel = (categoryId: number | null) => {
     if (!categoryId) return "-";
@@ -487,7 +439,7 @@ export default function LimitsPage() {
     setPeriod(editingLimit.period);
     setCustomStartDate(editingLimit.custom_start_date ?? "");
     setCustomEndDate(editingLimit.custom_end_date ?? "");
-    setAmountStr(formatAmountInput(editingLimit.amount_rub));
+    setAmountStr(formatCentsForInput(editingLimit.amount_rub));
     const path = categoryLookup.idToPath.get(editingLimit.category_id) ?? [];
     const nextL1 = path[0] ?? "";
     const nextL2 = path[1] ?? CATEGORY_PLACEHOLDER;
@@ -609,8 +561,10 @@ export default function LimitsPage() {
     }
   };
 
+  const { isCollapsed } = useSidebar();
+
   return (
-    <main className="min-h-screen px-8 py-8">
+    <main className={cn("min-h-screen pb-8", isCollapsed ? "pl-0" : "pl-0")}>
       <Dialog
         open={isDialogOpen}
         onOpenChange={(open) => {
@@ -621,7 +575,7 @@ export default function LimitsPage() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>
               {editingLimit ? "Изменить лимит" : "Добавить лимит"}
@@ -762,166 +716,221 @@ export default function LimitsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Лимиты</h1>
-            <p className="text-sm text-muted-foreground">
-              Настраивайте лимиты расходов и контролируйте траты по категориям.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              className="bg-violet-600 text-white hover:bg-violet-700"
-              onClick={openCreateDialog}
-            >
-              <Plus className="h-4 w-4" />
-              Добавить лимит
-            </Button>
-          </div>
-        </div>
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <FilterPanel onAddClick={openCreateDialog} addButtonLabel="Добавить">
+          <FilterSection
+            label="Название"
+            onReset={() => setFilterName("")}
+            showReset={!!filterName}
+          >
+            <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+              <AuthInput
+                type="text"
+                placeholder="Начните вводить текст"
+                value={filterName}
+                onChange={(e) => setFilterName(e.target.value)}
+              />
+            </div>
+          </FilterSection>
 
-        {loading ? (
-          <div className="text-sm text-muted-foreground">Загрузка лимитов...</div>
-        ) : (
-          <div className="space-y-4">
+          <FilterSection
+            label="Сумма лимита"
+            onReset={() => {
+              setFilterAmountFrom("");
+              setFilterAmountTo("");
+            }}
+            showReset={!!filterAmountFrom || !!filterAmountTo}
+          >
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <div className="flex-1 min-w-0 basis-0">
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white min-w-0">
+                  <AuthInput
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="От"
+                    value={filterAmountFrom}
+                    onChange={(e) => setFilterAmountFrom(formatRubInput(e.target.value))}
+                    onBlur={() => setFilterAmountFrom((prev) => normalizeRubOnBlur(prev))}
+                  />
+                </div>
+              </div>
+              <span className="text-sm shrink-0" style={{ color: SIDEBAR_TEXT_ACTIVE }}>—</span>
+              <div className="flex-1 min-w-0 basis-0">
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white min-w-0">
+                  <AuthInput
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="До"
+                    value={filterAmountTo}
+                    onChange={(e) => setFilterAmountTo(formatRubInput(e.target.value))}
+                    onBlur={() => setFilterAmountTo((prev) => normalizeRubOnBlur(prev))}
+                  />
+                </div>
+              </div>
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Период"
+            onReset={() => setFilterPeriod(new Set())}
+            showReset={filterPeriod.size > 0}
+          >
+            <div className="space-y-2">
+              {(["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"] as const).map((p) => (
+                <label
+                  key={p}
+                  className="flex items-center gap-2 cursor-pointer text-sm"
+                  style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    style={{ accentColor: ACCENT }}
+                    checked={filterPeriod.has(p)}
+                    onChange={() => {
+                      const next = new Set(filterPeriod);
+                      if (filterPeriod.has(p)) next.delete(p);
+                      else next.add(p);
+                      setFilterPeriod(next);
+                    }}
+                  />
+                  {PERIOD_LABELS[p]}
+                </label>
+              ))}
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Категории"
+            onReset={() => setFilterCategoryIds([])}
+            showReset={filterCategoryIds.length > 0}
+          >
+            <CategorySelector
+              categoryNodes={categoryNodes}
+              selectedPath={filterCategoryIds.length > 0 ? null : null}
+              onChange={(path) => {
+                if (path) {
+                  const id = categoryLookup.pathToId.get(
+                    makeCategoryPathKey(
+                      path.l1?.trim() ?? "",
+                      path.l2?.trim() ?? "",
+                      path.l3?.trim() ?? ""
+                    )
+                  );
+                  setFilterCategoryIds(id != null ? [id] : []);
+                } else {
+                  setFilterCategoryIds([]);
+                }
+              }}
+              placeholder="Начните вводить название"
+              direction="EXPENSE"
+            />
+          </FilterSection>
+
+          <FilterSection
+            label="Контрагенты"
+            onReset={() => setFilterCounterpartyIds([])}
+            showReset={filterCounterpartyIds.length > 0}
+          >
+            <CounterpartySelector
+              counterparties={counterparties}
+              selectedIds={filterCounterpartyIds}
+              onChange={setFilterCounterpartyIds}
+              selectionMode="multi"
+              placeholder="Начните вводить название"
+              emptyMessage="Нет контрагентов"
+              noResultsMessage="Ничего не найдено"
+            />
+          </FilterSection>
+
+          <FilterSection
+            label="Комментарий"
+            onReset={() => setFilterComment("")}
+            showReset={!!filterComment}
+          >
+            <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+              <AuthInput
+                type="text"
+                placeholder="Начните вводить текст"
+                value={filterComment}
+                onChange={(e) => setFilterComment(e.target.value)}
+              />
+            </div>
+          </FilterSection>
+
+          <FilterSection
+            label="Статус"
+            onReset={() => setFilterStatus(new Set(["active"]))}
+            showReset={!filterStatus.has("active") || filterStatus.size > 1}
+          >
+            <SegmentedSelector
+              options={[
+                { value: "active", label: "Действующий", colorScheme: "green" },
+                { value: "deleted", label: "Удаленный" },
+              ]}
+              value={Array.from(filterStatus)}
+              onChange={(value) => {
+                const values = Array.isArray(value) ? value : [];
+                setFilterStatus(new Set(values));
+              }}
+              multiple={true}
+            />
+          </FilterSection>
+        </FilterPanel>
+
+        <div className="flex-1 min-w-0">
+          <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto pt-[30px]">
             {error && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
                 {error}
               </div>
             )}
-            {activeLimits.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-card p-6 text-center text-sm text-muted-foreground">
-                Пока нет активных лимитов.
+
+            {loading ? (
+              <div className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                Загрузка лимитов...
+              </div>
+            ) : visibleLimits.length === 0 ? (
+              <div
+                className="rounded-lg border border-dashed p-6 text-center text-sm"
+                style={{ borderColor: PLACEHOLDER_COLOR_DARK, color: PLACEHOLDER_COLOR_DARK }}
+              >
+                Нет лимитов по заданным фильтрам.
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
-                {activeLimits.map((limit) => {
+              <div
+                className="columns-2 xl:columns-3 gap-4"
+                style={{ position: "relative", zIndex: 2 }}
+              >
+                {visibleLimits.map((limit) => {
                   const summary = limitSummaryById.get(limit.id) ?? {
                     spent: 0,
                     progress: 0,
                     rangeLabel: null,
                   };
-                  const ratio =
-                    limit.amount_rub > 0 ? summary.spent / limit.amount_rub : 0;
-                  const tone = getLimitProgressTone(ratio);
-                  const progressColorClass = getLimitProgressColorClass(tone);
-                  const periodLabel = PERIOD_LABELS[limit.period];
-                  const rangeLabel = summary.rangeLabel;
                   return (
-                    <Card key={limit.id} className="bg-card">
-                      <CardHeader className="space-y-2">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1">
-                            <CardTitle className="text-lg">{limit.name}</CardTitle>
-                            <div className="text-xs text-muted-foreground">
-                              {periodLabel}
-                              {rangeLabel ? ` | ${rangeLabel}` : ""}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatCategoryLabel(limit.category_id)}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-sm font-semibold text-foreground">
-                              {formatRub(limit.amount_rub)}
-                            </div>
-                            <IconButton
-                              aria-label="Изменить лимит"
-                              onClick={() => openEditDialog(limit)}
-                            >
-                              <Pencil />
-                            </IconButton>
-                            <IconButton
-                              aria-label="Удалить лимит"
-                              onClick={() => setDeleteTarget(limit)}
-                            >
-                              <Trash2 />
-                            </IconButton>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-3 text-sm text-slate-700">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>
-                            Потрачено:{" "}
-                            <span
-                              className={
-                                tone === "over" ? "text-rose-500 font-medium" : "font-medium"
-                              }
-                            >
-                              {formatRub(summary.spent)}
-                            </span>
-                          </span>
-                          <span>Лимит: {formatRub(limit.amount_rub)}</span>
-                        </div>
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                          <div
-                            className={`h-full ${progressColorClass}`}
-                            style={{ width: `${summary.progress * 100}%` }}
-                          />
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <div
+                      key={limit.id}
+                      style={{ breakInside: "avoid", marginBottom: "1rem" }}
+                    >
+                      <LimitCard
+                        limit={limit}
+                        categoryLookup={categoryLookup}
+                        categoryPathLabel={formatCategoryLabel(limit.category_id)}
+                        categoryDescendants={categoryDescendants}
+                        txs={txs}
+                        currentSpent={summary.spent}
+                        currentProgress={summary.progress}
+                        onEdit={limit.deleted_at ? undefined : openEditDialog}
+                        onDelete={(l) => setDeleteTarget(l)}
+                      />
+                    </div>
                   );
                 })}
               </div>
             )}
           </div>
-        )}
-
-        {deletedLimits.length > 0 && (
-          <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-foreground">Удаленные</h2>
-              <Badge className="bg-slate-100 text-slate-500">Удаленные</Badge>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
-              {deletedLimits.map((limit) => {
-                const summary = limitSummaryById.get(limit.id) ?? {
-                  spent: 0,
-                  progress: 0,
-                  rangeLabel: null,
-                };
-                const periodLabel = PERIOD_LABELS[limit.period];
-                const rangeLabel = summary.rangeLabel;
-                return (
-                  <Card key={limit.id} className="bg-card/70">
-                    <CardHeader className="space-y-2">
-                      <div className="flex flex-wrap items-start gap-2">
-                        <CardTitle className="text-lg text-slate-600">
-                          {limit.name}
-                        </CardTitle>
-                        <Badge className="bg-slate-100 text-slate-500">
-                          Удалено
-                        </Badge>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {periodLabel}
-                        {rangeLabel ? ` | ${rangeLabel}` : ""}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatCategoryLabel(limit.category_id)}
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3 text-sm text-slate-600">
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>Потрачено: {formatRub(summary.spent)}</span>
-                        <span>Лимит: {formatRub(limit.amount_rub)}</span>
-                      </div>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full bg-slate-300"
-                          style={{ width: `${summary.progress * 100}%` }}
-                        />
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          </section>
-        )}
+        </div>
       </div>
     </main>
   );

@@ -603,7 +603,7 @@ export default function CounterpartiesPage() {
                   Добавить
                 </Button>
               </DialogTrigger>
-                <DialogContent className="sm:max-w-[560px]">
+                <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>
               {editing ? "Изменить контрагента" : "Добавить контрагента"}

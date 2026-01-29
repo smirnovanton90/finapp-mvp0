@@ -120,7 +120,7 @@ export function OnboardingWizard() {
   return (
     <>
       <Dialog open={shouldShowInvite} onOpenChange={() => {}}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>Познакомиться с приложением?</DialogTitle>
           </DialogHeader>

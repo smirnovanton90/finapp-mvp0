@@ -434,7 +434,7 @@ export default function CategoriesPage() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>Добавить категорию</DialogTitle>
           </DialogHeader>
@@ -526,7 +526,7 @@ export default function CategoriesPage() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>Изменение категории</DialogTitle>
           </DialogHeader>

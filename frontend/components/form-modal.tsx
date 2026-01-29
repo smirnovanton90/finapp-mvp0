@@ -38,7 +38,7 @@ export interface FormModalProps {
 
 const sizeStyles: Record<FormModalSize, string> = {
   wide: "max-w-[none] w-auto",
-  medium: "sm:max-w-[560px]",
+  medium: "sm:max-w-[600px]",
 };
 
 export function FormModal({

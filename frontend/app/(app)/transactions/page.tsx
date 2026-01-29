@@ -87,6 +87,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
+import { ChainSelector } from "@/components/chain-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { FilterPanel, FilterSection } from "@/components/filter-panel";
 import { FormModal } from "@/components/form-modal";
@@ -133,12 +134,14 @@ import {
   fetchFxRatesBatch,
   fetchTransactions,
   fetchTransactionsPage,
+  fetchTransactionChains,
   BankOut,
   CounterpartyOut,
   CounterpartyIndustryOut,
   FxRateOut,
   ItemOut,
   TransactionCreate,
+  TransactionChainOut,
   TransactionOut,
   updateTransaction,
   updateTransactionStatus,
@@ -1873,18 +1876,51 @@ function TransactionsView({
   const defaultShowPlannedRealized = isPlanningView;
   const defaultShowPlannedUnrealized = isPlanningView;
   const isOverduePreset = searchParams.get("preset") === "overdue-planned";
-  const initialShowActual = isOverduePreset ? false : defaultShowActual;
-  const initialShowPlannedRealized = isOverduePreset
-    ? false
-    : defaultShowPlannedRealized;
-  const initialShowPlannedUnrealized = isOverduePreset
-    ? true
-    : defaultShowPlannedUnrealized;
-  const initialFormTransactionType = isOverduePreset
+  const chainPreset = searchParams.get("preset") === "chain";
+  const chainIdParamRaw = searchParams.get("chain_id");
+  const chainIdParam = chainIdParamRaw ? Number(chainIdParamRaw) : NaN;
+  const chainFilterParam = (searchParams.get("chain_filter") ?? "").toLowerCase();
+  const isChainPreset =
+    chainPreset && Number.isFinite(chainIdParam) && chainIdParam > 0;
+  const chainFilterPreset = ((): "total" | "realized" | "overdue" | "upcoming" | "deleted" | null => {
+    if (!isChainPreset) return null;
+    if (chainFilterParam === "realized") return "realized";
+    if (chainFilterParam === "overdue") return "overdue";
+    if (chainFilterParam === "upcoming") return "upcoming";
+    if (chainFilterParam === "deleted") return "deleted";
+    return "total";
+  })();
+
+  const initialShowActive = isChainPreset
+    ? chainFilterPreset === "deleted"
+      ? false
+      : true
+    : true;
+  const initialShowDeleted = isChainPreset
+    ? chainFilterPreset === "total"
+      ? true
+      : chainFilterPreset === "deleted"
+        ? true
+        : false
+    : false;
+  const initialShowActual = isChainPreset ? false : isOverduePreset ? false : defaultShowActual;
+  const initialShowPlannedRealized = isChainPreset
+    ? chainFilterPreset === "realized" || chainFilterPreset === "total"
+    : isOverduePreset
+      ? false
+      : defaultShowPlannedRealized;
+  const initialShowPlannedUnrealized = isChainPreset
+    ? chainFilterPreset === "overdue" || chainFilterPreset === "upcoming" || chainFilterPreset === "total"
+    : isOverduePreset
+      ? true
+      : defaultShowPlannedUnrealized;
+  const initialFormTransactionType = isChainPreset
     ? "PLANNED"
-    : defaultShowActual
-      ? "ACTUAL"
-      : "PLANNED";
+    : isOverduePreset
+      ? "PLANNED"
+      : defaultShowActual
+        ? "ACTUAL"
+        : "PLANNED";
   const initialDateTo = isOverduePreset ? getYesterdayDateKey() : "";
 
   const [items, setItems] = useState<ItemOut[]>([]);
@@ -1915,8 +1951,8 @@ function TransactionsView({
   );
   const [isBulkEditConfirmOpen, setIsBulkEditConfirmOpen] = useState(false);
   const [isBulkEditing, setIsBulkEditing] = useState(false);
-  const [showActive, setShowActive] = useState(true);
-  const [showDeleted, setShowDeleted] = useState(false);
+  const [showActive, setShowActive] = useState(initialShowActive);
+  const [showDeleted, setShowDeleted] = useState(initialShowDeleted);
   const [showConfirmed, setShowConfirmed] = useState(true);
   const [showUnconfirmed, setShowUnconfirmed] = useState(true);
   const [formTransactionType, setFormTransactionType] = useState<
@@ -1934,6 +1970,15 @@ function TransactionsView({
   );
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState(initialDateTo);
+
+  // preset=chain: дополнительный фильтр по chain_id + подтип (total/realized/overdue/upcoming/deleted)
+  const [chainIdFilter, setChainIdFilter] = useState<number | null>(() =>
+    isChainPreset ? chainIdParam : null
+  );
+  const [chainPresetFilter, setChainPresetFilter] = useState<
+    "total" | "realized" | "overdue" | "upcoming" | "deleted" | null
+  >(() => chainFilterPreset);
+  const [chainFilterResetKey, setChainFilterResetKey] = useState(0);
   const [commentFilter, setCommentFilter] = useState("");
   const [itemFilterResetKey, setItemFilterResetKey] = useState(0);
   const [selectedCounterpartyIds, setSelectedCounterpartyIds] = useState<Set<number>>(
@@ -1975,6 +2020,7 @@ function TransactionsView({
     l3: string;
   } | null>(null);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
+  const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [comment, setComment] = useState("");
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importBankId, setImportBankId] = useState<number | null>(null);
@@ -2018,6 +2064,20 @@ function TransactionsView({
       cancelled = true;
     };
   }, [setError]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTransactionChains()
+      .then((data) => {
+        if (!cancelled) setChains(data);
+      })
+      .catch(() => {
+        if (!cancelled) setChains([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
 
   const normalizeCategoryValue = useCallback((value: string) => {
@@ -3782,10 +3842,32 @@ function TransactionsView({
     });
   }, [txs]);
 
-  const filteredTxs = useMemo(
-    () => txs.map((tx) => ({ ...tx, isDeleted: Boolean(tx.deleted_at) })),
-    [txs]
-  );
+  const filteredTxs = useMemo(() => {
+    const enriched = txs.map((tx) => ({ ...tx, isDeleted: Boolean(tx.deleted_at) }));
+    if (!chainIdFilter) return enriched;
+
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const mode = chainPresetFilter ?? "total";
+
+    return enriched
+      // Для цепочек показываем только плановые транзакции, привязанные к цепочке
+      .filter((tx) => tx.transaction_type === "PLANNED")
+      .filter((tx) => tx.chain_id === chainIdFilter)
+      .filter((tx) => {
+        if (mode === "deleted") return tx.isDeleted;
+        if (tx.isDeleted) return false;
+        if (mode === "realized") return tx.status === "REALIZED";
+        if (mode === "total") return true;
+
+        // overdue/upcoming: нереализованные
+        if (tx.status === "REALIZED") return false;
+        const dateKey = getDateKey(tx.transaction_date);
+        if (!dateKey) return false;
+        if (mode === "overdue") return dateKey < todayKey;
+        if (mode === "upcoming") return dateKey >= todayKey;
+        return true;
+      });
+  }, [txs, chainIdFilter, chainPresetFilter]);
 
   const sortedTxs = useMemo(() => filteredTxs, [filteredTxs]);
   const selectableIds = useMemo(
@@ -4182,6 +4264,33 @@ function TransactionsView({
               </div>
           </FilterSection>
           <FilterSection
+            label="Цепочка транзакций"
+            onReset={() => {
+              setChainIdFilter(null);
+              setChainPresetFilter(null);
+              setChainFilterResetKey((k) => k + 1);
+            }}
+            showReset={chainIdFilter != null}
+          >
+              <div className="space-y-3">
+                <ChainSelector
+                  chains={chains}
+                  categoryNodes={categoryNodes}
+                  selectedChainId={chainIdFilter}
+                  onChange={(id) => {
+                    setChainIdFilter(id);
+                    setChainPresetFilter(id != null ? "total" : null);
+                  }}
+                  placeholder="Название цепочки или категория"
+                  emptyMessage="Нет цепочек транзакций."
+                  noResultsMessage="Ничего не найдено"
+                  resetSignal={chainFilterResetKey}
+                  ariaLabel="Цепочка транзакций"
+                  includeDeleted={false}
+                />
+              </div>
+          </FilterSection>
+          <FilterSection
             label="Контрагенты"
             onReset={resetCounterpartyFilters}
             showReset={selectedCounterpartyIds.size > 0}
@@ -4376,7 +4485,7 @@ function TransactionsView({
             
             {/* Dialog for importing statements - shared between collapsed and expanded states */}
             <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
-              <DialogContent className="sm:max-w-[520px]">
+              <DialogContent className="sm:max-w-[600px]">
                 <DialogHeader>
                   <DialogTitle>Импорт</DialogTitle>
                 </DialogHeader>
@@ -4910,9 +5019,7 @@ function TransactionsView({
                   submitLabel={
                     isEditMode || isBulkEdit
                       ? "Сохранить изменения"
-                      : isLoanRepayment
-                        ? "Добавить транзакции"
-                        : "Добавить транзакцию"
+                      : "Добавить"
                   }
                   loading={loading}
                   disabled={isBulkEditing}
@@ -5307,15 +5414,14 @@ function TransactionsView({
             )}
             {hasMoreTxs && (
               <div className="flex justify-center pt-2">
-                <Button
+                <IconButton
                   type="button"
-                  variant="outline"
-                  className="border-2 border-slate-200 bg-card shadow-none"
+                  aria-label={isLoadingMore ? "Загрузка..." : "Загрузить ещё"}
                   onClick={handleLoadMore}
                   disabled={isLoadingMore || loading}
                 >
-                  {isLoadingMore ? "Loading..." : "Load more"}
-                </Button>
+                  <ChevronDown className="h-4 w-4" />
+                </IconButton>
               </div>
             )}
             </div>

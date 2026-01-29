@@ -61,7 +61,7 @@ export function AccountingStartGate({ children }: { children: React.ReactNode })
     <>
       {children}
       <Dialog open={showGate} onOpenChange={() => {}}>
-        <DialogContent className="sm:max-w-[420px]">
+        <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>Дата начала учета</DialogTitle>
           </DialogHeader>

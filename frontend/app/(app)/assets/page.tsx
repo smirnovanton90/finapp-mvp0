@@ -3857,8 +3857,8 @@ export default function Page() {
         }}
         title={
           isEditing
-            ? "Редактирование актива/обязательства"
-            : "Добавление актива/обязательства"
+            ? "Редактировать актив/обязательство"
+            : "Добавить актив/обязательство"
         }
         icon={<Wallet className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
         formError={formError}
@@ -3869,15 +3869,15 @@ export default function Page() {
           setEditingItem(null);
         }}
         submitLabel={
-          loading ? "Сохраняем..." : isEditing ? "Сохранить" : "Добавить"
+          loading ? (isEditing ? "Сохраняем..." : "Добавляем...") : isEditing ? "Сохранить" : "Добавить"
         }
         loading={loading}
         size="wide"
         contentRef={dialogContentRef}
       >
-        <div className="flex items-start gap-0 transition-all duration-300">
-              {/* Left part - fixed 700px width */}
-              <div className="w-[700px] grid content-start gap-4 flex-shrink-0">
+        <div className="flex items-start gap-0 transition-all duration-300 min-w-[600px]">
+              {/* Left part - fixed 600px so toggle button and right panel have space */}
+              <div className="w-[600px] grid content-start gap-4 flex-shrink-0 min-w-0">
             {/* Item Photo Upload and Type Selection in one row */}
             <div className="grid grid-cols-[200px_1fr] gap-4 items-start">
               {/* Item Photo Upload */}

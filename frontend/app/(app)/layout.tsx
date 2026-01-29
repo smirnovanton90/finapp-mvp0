@@ -25,7 +25,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isAssetsPage = pathname === "/assets" || pathname?.startsWith("/assets/");
   const isFinancialPlanningPage = pathname === "/financial-planning" || pathname?.startsWith("/financial-planning/");
   const isLimitsPage = pathname === "/limits" || pathname?.startsWith("/limits/");
-  const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage || isLimitsPage;
+  const isCounterpartiesPage = pathname === "/counterparties" || pathname?.startsWith("/counterparties/");
+  const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage || isLimitsPage || isCounterpartiesPage;
 
   useEffect(() => {
     if (status !== "loading" && !session) {

@@ -359,55 +359,9 @@ export function AssetCard({
         style={{ backgroundColor: stripeColor }}
       />
 
-      <div className="p-[12px] pl-[19px] pr-[60px]">
-        {/* Кнопка действий фиксированно в правом верхнем углу карточки */}
-        <div className="absolute top-[12px] right-[16px]">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton aria-label="Открыть меню действий">
-                <MoreVertical />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              {onEdit && !isArchived && !isClosed && (
-                <DropdownMenuItem onClick={() => onEdit(item)}>
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Редактировать
-                </DropdownMenuItem>
-              )}
-              {onClose && !isArchived && !isClosed && (
-                <DropdownMenuItem onClick={() => onClose(item)}>
-                  <Archive className="mr-2 h-4 w-4" />
-                  Закрыть
-                </DropdownMenuItem>
-              )}
-              {onArchive && !isArchived && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => onArchive(item)}>
-                    <Archive className="mr-2 h-4 w-4" />
-                    Архивировать
-                  </DropdownMenuItem>
-                </>
-              )}
-              {onDelete && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => onDelete(item)}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Удалить
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Header */}
-        <div className="flex items-center justify-between mb-3">
+      <div className="pt-[12px] pr-[12px] pb-[12px] pl-[19px]">
+        {/* Header: иконка + основная информация + кнопка меню */}
+        <div className="flex items-start justify-between mb-3 gap-3">
           {/* Icon */}
           <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
             {hasPhoto ? (
@@ -528,6 +482,51 @@ export function AssetCard({
             )}
           </div>
 
+          {/* Кнопка меню — отдельный блок после картинки и информации */}
+          <div className="shrink-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton aria-label="Открыть меню действий">
+                  <MoreVertical />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {onEdit && !isArchived && !isClosed && (
+                  <DropdownMenuItem onClick={() => onEdit(item)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Редактировать
+                  </DropdownMenuItem>
+                )}
+                {onClose && !isArchived && !isClosed && (
+                  <DropdownMenuItem onClick={() => onClose(item)}>
+                    <Archive className="mr-2 h-4 w-4" />
+                    Закрыть
+                  </DropdownMenuItem>
+                )}
+                {onArchive && !isArchived && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => onArchive(item)}>
+                      <Archive className="mr-2 h-4 w-4" />
+                      Архивировать
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {onDelete && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => onDelete(item)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Удалить
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
         {/* Deposit details */}

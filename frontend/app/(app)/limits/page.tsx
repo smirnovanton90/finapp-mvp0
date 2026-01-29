@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
-import { Plus } from "lucide-react";
+import { Gauge, Plus } from "lucide-react";
 
 import {
   AlertDialog,
@@ -17,18 +17,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { CategorySelector } from "@/components/category-selector";
+import { FormModal } from "@/components/form-modal";
+import { TextField, DateField, SelectField } from "@/components/ui/form-field";
+import { Label } from "@/components/ui/label";
 import { CounterpartySelector } from "@/components/counterparty-selector";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   buildCategoryDescendants,
   buildCategoryLookup,
@@ -565,7 +558,7 @@ export default function LimitsPage() {
 
   return (
     <main className={cn("min-h-screen pb-8", isCollapsed ? "pl-0" : "pl-0")}>
-      <Dialog
+      <FormModal
         open={isDialogOpen}
         onOpenChange={(open) => {
           setIsDialogOpen(open);
@@ -574,121 +567,91 @@ export default function LimitsPage() {
             setFormError(null);
           }
         }}
+        title={editingLimit ? "Изменить лимит" : "Добавить лимит"}
+        icon={<Gauge className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+        formError={formError}
+        onSubmit={handleSubmit}
+        onCancel={() => {
+          setIsDialogOpen(false);
+          setEditingLimit(null);
+          setFormError(null);
+        }}
+        submitLabel={
+          isSubmitting
+            ? editingLimit
+              ? "Сохраняем..."
+              : "Добавляем..."
+            : editingLimit
+              ? "Сохранить"
+              : "Добавить"
+        }
+        loading={isSubmitting}
+        size="medium"
       >
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>
-              {editingLimit ? "Изменить лимит" : "Добавить лимит"}
-            </DialogTitle>
-          </DialogHeader>
-          <form className="grid gap-4" onSubmit={handleSubmit}>
-            {formError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                {formError}
-              </div>
-            )}
+        <TextField
+          label="Название лимита"
+          value={limitName}
+          onChange={(e) => setLimitName(e.target.value)}
+          placeholder="Например, Рестораны"
+        />
 
-            <div className="grid gap-2">
-              <Label>Название лимита</Label>
-              <Input
-                className="border-2 border-border/70 bg-card shadow-none"
-                value={limitName}
-                onChange={(e) => setLimitName(e.target.value)}
-                placeholder="Например, Рестораны"
-              />
-            </div>
+        <SelectField
+          label="Период лимита"
+          value={period}
+          onValueChange={(value) => setPeriod(value as LimitPeriod)}
+          options={[
+            { value: "MONTHLY", label: "Ежемесячный" },
+            { value: "WEEKLY", label: "Еженедельный" },
+            { value: "YEARLY", label: "Ежегодный" },
+            { value: "CUSTOM", label: "Произвольный период" },
+          ]}
+          placeholder="Выберите период"
+        />
 
-            <div className="grid gap-2">
-              <Label>Период лимита</Label>
-              <Select value={period} onValueChange={(value) => setPeriod(value as LimitPeriod)}>
-                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                  <SelectValue placeholder="Выберите период" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="MONTHLY">Ежемесячный</SelectItem>
-                  <SelectItem value="WEEKLY">Еженедельный</SelectItem>
-                  <SelectItem value="YEARLY">Ежегодный</SelectItem>
-                  <SelectItem value="CUSTOM">Произвольный период</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        {period === "CUSTOM" && (
+          <div className="grid gap-4 md:grid-cols-2">
+            <DateField
+              label="Дата начала"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              min={accountingStartDate ?? undefined}
+            />
+            <DateField
+              label="Дата окончания"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              min={accountingStartDate ?? undefined}
+            />
+          </div>
+        )}
 
-            {period === "CUSTOM" && (
-              <div className="grid gap-2 md:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>Дата начала</Label>
-                  <Input
-                    type="date"
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    value={customStartDate}
-                    onChange={(e) => setCustomStartDate(e.target.value)}
-                    min={accountingStartDate ?? undefined}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Дата окончания</Label>
-                  <Input
-                    type="date"
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    value={customEndDate}
-                    onChange={(e) => setCustomEndDate(e.target.value)}
-                    min={accountingStartDate ?? undefined}
-                  />
-                </div>
-              </div>
-            )}
+        <div className="grid gap-2">
+          <Label style={{ color: ACTIVE_TEXT_DARK }}>Категория расхода</Label>
+          <CategorySelector
+            categoryNodes={categoryNodes}
+            selectedPath={selectedCategoryPath}
+            onChange={(path) => {
+              if (path) {
+                applyCategorySelection(path.l1, path.l2, path.l3);
+              } else {
+                applyCategorySelection("", "", "");
+              }
+            }}
+            placeholder="Выберите категорию"
+            direction="EXPENSE"
+            disabled={isSubmitting}
+          />
+        </div>
 
-            <div className="grid gap-2">
-              <Label>Категория расхода</Label>
-              <CategorySelector
-                categoryNodes={categoryNodes}
-                selectedPath={selectedCategoryPath}
-                onChange={(path) => {
-                  if (path) {
-                    applyCategorySelection(path.l1, path.l2, path.l3);
-                  } else {
-                    applyCategorySelection("", "", "");
-                  }
-                }}
-                placeholder="Выберите категорию"
-                direction="EXPENSE"
-                disabled={isSubmitting}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Сумма лимита</Label>
-              <Input
-                className="border-2 border-border/70 bg-card shadow-none"
-                value={amountStr}
-                onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                inputMode="decimal"
-                placeholder="Например, 10 000,00"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-2 border-border/70 bg-card shadow-none"
-                onClick={() => setIsDialogOpen(false)}
-                disabled={isSubmitting}
-              >
-                Отмена
-              </Button>
-              <Button
-                type="submit"
-                className="bg-violet-600 text-white hover:bg-violet-700"
-                disabled={isSubmitting}
-              >
-                {editingLimit ? "Сохранить" : "Добавить"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+        <TextField
+          label="Сумма лимита"
+          value={amountStr}
+          onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+          onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+          inputMode="decimal"
+          placeholder="Например, 10 000,00"
+        />
+      </FormModal>
 
       <AlertDialog
         open={deleteTarget !== null}
@@ -865,8 +828,8 @@ export default function LimitsPage() {
           >
             <SegmentedSelector
               options={[
-                { value: "active", label: "Действующий", colorScheme: "green" },
-                { value: "deleted", label: "Удаленный" },
+                { value: "active", label: "Активный", colorScheme: "green" },
+                { value: "deleted", label: "Удалено", colorScheme: "red" },
               ]}
               value={Array.from(filterStatus)}
               onChange={(value) => {

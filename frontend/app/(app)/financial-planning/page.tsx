@@ -8,7 +8,7 @@ import {
   HeartPulse,
   Home,
   Landmark,
-  Link2,
+  LineChart,
   MessageSquare,
   MoreVertical,
   Plus,
@@ -1094,30 +1094,9 @@ export default function FinancialPlanningPage() {
           style={{ backgroundColor: stripeColor }}
         />
 
-        <div className="p-[12px] pl-[19px] pr-[60px]">
-          {/* Кнопка действий фиксированно в правом верхнем углу карточки */}
-          {!isDeleted && (
-            <div className="absolute top-[12px] right-[16px]">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton aria-label="Открыть меню действий">
-                    <MoreVertical />
-                  </IconButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setDeleteTarget(chain)}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Удалить цепочку
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
-
-          <div className="flex items-start justify-between gap-4">
+        <div className="pt-[12px] pr-[12px] pb-[12px] pl-[19px]">
+          {/* Header: иконка + основная информация + кнопка меню */}
+          <div className="flex items-start justify-between gap-4 mb-3">
             {/* Иконка категории 100x100 */}
             <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
               {categoryIcon3dPath ? (
@@ -1193,9 +1172,31 @@ export default function FinancialPlanningPage() {
               </div>
 
             </div>
+
+            {/* Кнопка меню — отдельный блок после картинки и информации */}
+            {!isDeleted && (
+              <div className="shrink-0">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton aria-label="Открыть меню действий">
+                      <MoreVertical />
+                    </IconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => setDeleteTarget(chain)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Удалить цепочку
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
           </div>
 
-          {/* Блок Актив / Контрагент / Сумма — на всю ширину карточки */}
+          {/* Блок Актив / Контрагент / Сумма — от левого до правого края карточки */}
           <div className="mt-3 grid grid-cols-3 gap-x-4 gap-y-1 justify-items-center">
             {/* Заголовки */}
             <div
@@ -1374,7 +1375,7 @@ export default function FinancialPlanningPage() {
                   if (!open) resetForm();
                 }}
                 title="Добавить цепочку транзакций"
-                icon={<Link2 className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+                icon={<LineChart className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
                 formError={formError}
                 onSubmit={handleCreate}
                 onCancel={() => {
@@ -1786,8 +1787,8 @@ export default function FinancialPlanningPage() {
           >
             <SegmentedSelector
               options={[
-                { value: "active", label: "Активные", colorScheme: "purple" },
-                { value: "deleted", label: "Удаленные", colorScheme: "red" },
+                { value: "active", label: "Активный", colorScheme: "green" },
+                { value: "deleted", label: "Удалено", colorScheme: "red" },
               ]}
               value={[
                 ...(showActiveChains ? ["active"] : []),

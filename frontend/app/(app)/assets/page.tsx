@@ -5107,9 +5107,9 @@ export default function Page() {
           >
             <SegmentedSelector
               options={[
-                { value: "active", label: "Активный" },
+                { value: "active", label: "Активный", colorScheme: "green" },
                 { value: "closed", label: "Закрытый" },
-                { value: "deleted", label: "Удаленный" },
+                { value: "deleted", label: "Удалено", colorScheme: "red" },
               ]}
               value={Array.from(filterStatus)}
               onChange={(value) => {

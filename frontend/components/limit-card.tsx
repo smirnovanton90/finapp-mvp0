@@ -242,7 +242,6 @@ export function LimitCard({
   const currentBarColor = getProgressBarColor(currentTone);
 
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
-  const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
 
   return (
     <div
@@ -253,36 +252,9 @@ export function LimitCard({
         transition: "opacity 0.2s ease-in-out",
       }}
     >
-      <div className="p-[12px] pr-[60px]">
-        <div className="absolute top-[12px] right-[16px]">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton aria-label="Меню лимита">
-                <MoreVertical />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              {onEdit && !isDeleted && (
-                <DropdownMenuItem onClick={() => onEdit(limit)}>
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Редактировать
-                </DropdownMenuItem>
-              )}
-              {onDelete && (
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => onDelete(limit)}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Удалить
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Header: category image + path, title, frequency (as in asset card) */}
-        <div className="flex items-center justify-between mb-3">
+      <div className="p-[12px]">
+        {/* Header: картинка + основная информация + кнопка меню */}
+        <div className="flex items-start justify-between mb-3 gap-3">
           <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
             {categoryIcon3dPath ? (
               <img
@@ -333,13 +305,40 @@ export function LimitCard({
               {periodLabel}
             </div>
           </div>
+          {/* Кнопка меню — отдельный блок после картинки и информации */}
+          <div className="shrink-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton aria-label="Меню лимита">
+                  <MoreVertical />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {onEdit && !isDeleted && (
+                  <DropdownMenuItem onClick={() => onEdit(limit)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Редактировать
+                  </DropdownMenuItem>
+                )}
+                {onDelete && (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => onDelete(limit)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Удалить
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
-        {/* Current period — блок до правого края карточки */}
+        {/* Current period — от левого до правого края карточки */}
         {currentRange && (
-          <div className="space-y-2 mb-3 -mr-[60px] pr-[60px]">
+          <div className="space-y-2 mb-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-normal" style={{ color: textColor }}>
+              <span className="text-sm font-normal" style={{ color: ACTIVE_TEXT_DARK }}>
                 Текущий период
               </span>
               <span className="text-2xl font-medium flex items-baseline gap-1">
@@ -386,7 +385,7 @@ export function LimitCard({
             <button
               type="button"
               className="flex items-center justify-between w-full text-sm font-normal py-1 rounded hover:bg-white/5 transition-colors"
-              style={{ color: textColor }}
+              style={{ color: ACTIVE_TEXT_DARK }}
               onClick={() => setExpanded((e) => !e)}
               aria-expanded={expanded}
             >
@@ -412,11 +411,11 @@ export function LimitCard({
                   const barColor = getProgressBarColor(tone);
                   return (
                     <div key={range.startKey} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center justify-between text-sm font-normal">
                         <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
                           {range.label}
                         </span>
-                        <span style={{ color: textColor }}>
+                        <span style={{ color: ACTIVE_TEXT_DARK }}>
                           {formatAmount(spent)} / {formatAmount(limit.amount_rub)}
                         </span>
                       </div>

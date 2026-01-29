@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
 from PIL import Image
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
@@ -318,7 +319,19 @@ def create_counterparty(
         **normalized,
     )
     db.add(counterparty)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        err_msg = str(e.orig) if getattr(e, "orig", None) else str(e)
+        constraint = ""
+        if getattr(e, "orig", None) and getattr(e.orig, "diag", None):
+            constraint = (e.orig.diag.constraint_name or "") if hasattr(e.orig.diag, "constraint_name") else ""
+        if "ogrn" in constraint.lower() or "ogrn" in err_msg.lower():
+            raise HTTPException(status_code=400, detail="Контрагент с таким ОГРН уже существует.")
+        if "inn" in constraint.lower() or "inn" in err_msg.lower():
+            raise HTTPException(status_code=400, detail="Контрагент с таким ИНН уже существует.")
+        raise HTTPException(status_code=400, detail="Контрагент с такими реквизитами уже существует.")
     db.refresh(counterparty)
     apply_logo_url(counterparty)
     apply_photo_url(counterparty)
@@ -369,7 +382,19 @@ def update_counterparty(
     counterparty.middle_name = normalized["middle_name"]
     counterparty.industry_id = normalized["industry_id"]
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        err_msg = str(e.orig) if getattr(e, "orig", None) else str(e)
+        constraint = ""
+        if getattr(e, "orig", None) and getattr(e.orig, "diag", None):
+            constraint = (e.orig.diag.constraint_name or "") if hasattr(e.orig.diag, "constraint_name") else ""
+        if "ogrn" in constraint.lower() or "ogrn" in err_msg.lower():
+            raise HTTPException(status_code=400, detail="Контрагент с таким ОГРН уже существует.")
+        if "inn" in constraint.lower() or "inn" in err_msg.lower():
+            raise HTTPException(status_code=400, detail="Контрагент с таким ИНН уже существует.")
+        raise HTTPException(status_code=400, detail="Контрагент с такими реквизитами уже существует.")
     db.refresh(counterparty)
     apply_logo_url(counterparty)
     apply_photo_url(counterparty)

@@ -13,6 +13,8 @@ from sqlalchemy import (
     LargeBinary,
     Numeric,
     UniqueConstraint,
+    Index,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db import Base
@@ -208,7 +210,7 @@ class Counterparty(Base):
     full_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     legal_form: Mapped[str | None] = mapped_column(String(200), nullable=True)
     inn: Mapped[str | None] = mapped_column(String(12), nullable=True)
-    ogrn: Mapped[str | None] = mapped_column(String(15), unique=True, nullable=True)
+    ogrn: Mapped[str | None] = mapped_column(String(15), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     middle_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -241,6 +243,13 @@ class Counterparty(Base):
         CheckConstraint(
             "entity_type in ('LEGAL','PERSON')",
             name="ck_counterparties_entity_type",
+        ),
+        Index(
+            "ux_counterparties_owner_ogrn",
+            "owner_user_id",
+            "ogrn",
+            unique=True,
+            postgresql_where=text("ogrn IS NOT NULL"),
         ),
     )
 

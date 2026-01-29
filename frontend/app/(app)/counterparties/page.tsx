@@ -2,27 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
-import {
-  Briefcase,
-  Building2,
-  Factory,
-  GraduationCap,
-  HeartPulse,
-  Home,
-  Landmark,
-  Pencil,
-  Plus,
-  Shield,
-  ShoppingCart,
-  Trash2,
-  Truck,
-  Trophy,
-  User,
-  Users,
-  Wifi,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { Camera, ChevronDown, Plus, Upload, Users } from "lucide-react";
 
 import {
   AlertDialog,
@@ -34,22 +14,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Tooltip } from "@/components/ui/tooltip";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { FormModal } from "@/components/form-modal";
+import { TextField, SelectField } from "@/components/ui/form-field";
 import {
   CounterpartyCreate,
   CounterpartyIndustryOut,
@@ -68,34 +35,15 @@ import {
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterPanel, FilterSection } from "@/components/filter-panel";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
+import { AuthInput } from "@/components/ui/auth-input";
+import { CounterpartyCard } from "@/components/counterparty-card";
+import { useSidebar } from "@/components/ui/sidebar-context";
+import { cn } from "@/lib/utils";
+import { ACCENT, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const MAX_LOGO_DIM = 1024;
 const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
-
-const ENTITY_LABELS: Record<CounterpartyType, string> = {
-  LEGAL: "ЮЛ/ИП",
-  PERSON: "Физическое лицо",
-};
-const INDUSTRY_ICON_BY_ID: Record<number, LucideIcon> = {
-  1: Zap,
-  2: Truck,
-  3: ShoppingCart,
-  4: Shield,
-  5: Landmark,
-  6: Wifi,
-  7: Building2,
-  8: GraduationCap,
-  9: HeartPulse,
-  10: Briefcase,
-  11: Trophy,
-  12: Home,
-};
-
-function getLegalDefaultIcon(industryId: number | null): LucideIcon {
-  if (!industryId) return Factory;
-  return INDUSTRY_ICON_BY_ID[industryId] ?? Factory;
-}
 
 function formatSize(bytes: number) {
   return `${Math.round(bytes / (1024 * 1024))} МБ`;
@@ -159,12 +107,15 @@ export default function CounterpartiesPage() {
   const [selectedIndustryIds, setSelectedIndustryIds] = useState<Set<number>>(
     () => new Set()
   );
-  const [showUserCreated, setShowUserCreated] = useState(true);
+  const [sourceFilter, setSourceFilter] = useState<Set<string>>(() => new Set(["added"]));
   const [showLegalEntities, setShowLegalEntities] = useState(true);
   const [showPersonEntities, setShowPersonEntities] = useState(true);
   const [showActiveStatus, setShowActiveStatus] = useState(true);
   const [showDeletedStatus, setShowDeletedStatus] = useState(false);
+  const [isIndustryFilterOpen, setIsIndustryFilterOpen] = useState(false);
   const onboardingAppliedRef = useRef<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isWizardOpen) {
@@ -173,7 +124,18 @@ export default function CounterpartiesPage() {
   }, [isWizardOpen]);
 
   const legalFormLabel = useMemo(() => {
-    const map = new Map(legalForms.map((form) => [form.code, form.label]));
+    const map = new Map(
+      legalForms.map((form) => {
+        const label = form.label;
+        const abbreviated =
+          label.includes(" — ")
+            ? label.split(" — ")[0].trim()
+            : label.includes(" - ")
+              ? label.split(" - ")[0].trim()
+              : label;
+        return [form.code, abbreviated];
+      })
+    );
     return (code: string | null) => map.get(code ?? "") ?? code ?? "";
   }, [legalForms]);
   const industryLabel = useMemo(() => {
@@ -191,9 +153,10 @@ export default function CounterpartiesPage() {
       if (isDeleted && !showDeletedStatus) return false;
       if (!isDeleted && !showActiveStatus) return false;
       const isUser = item.owner_user_id != null;
-      // Если фильтр включен - показываем только созданные самостоятельно
-      // Если фильтр выключен - показываем все (и созданные самостоятельно, и по умолчанию)
-      if (showUserCreated && !isUser) return false;
+      const showDefault = sourceFilter.has("default");
+      const showAdded = sourceFilter.has("added");
+      const matchesSource = (showDefault && !isUser) || (showAdded && isUser);
+      if (!matchesSource) return false;
       if (item.entity_type === "LEGAL" && !showLegalEntities) return false;
       if (item.entity_type === "PERSON" && !showPersonEntities) return false;
       if (selectedIndustryIds.size > 0) {
@@ -210,12 +173,11 @@ export default function CounterpartiesPage() {
     counterparties,
     normalizedNameFilter,
     selectedIndustryIds,
-    showUserCreated,
+    sourceFilter,
     showDeletedStatus,
     showLegalEntities,
     showPersonEntities,
     showActiveStatus,
-    showUserCreated,
   ]);
 
   useEffect(() => {
@@ -504,9 +466,15 @@ export default function CounterpartiesPage() {
         setEditing(null);
       }
     } catch (e: any) {
+      const msg = e?.message ?? "";
+      const isNetworkError =
+        msg === "Failed to fetch" ||
+        msg === "NetworkError when attempting to fetch resource" ||
+        msg === "Load failed";
       setFormError(
-        e?.message ??
-          "Не удалось сохранить контрагента. Проверьте данные и попробуйте снова."
+        isNetworkError
+          ? "Не удалось связаться с сервером. Убедитесь, что бэкенд запущен (например, uvicorn в папке backend)."
+          : msg || "Не удалось сохранить контрагента. Проверьте данные и попробуйте снова."
       );
     } finally {
       setIsSubmitting(false);
@@ -572,300 +540,275 @@ export default function CounterpartiesPage() {
       value instanceof Set
         ? value
         : new Set(Array.isArray(value) ? value : [value]);
-
     setShowLegalEntities(valueSet.has("LEGAL"));
     setShowPersonEntities(valueSet.has("PERSON"));
   };
 
+  const openCreateDialog = () => {
+    setEditing(null);
+    setIsDialogOpen(true);
+  };
+
+  const { isCollapsed } = useSidebar();
+
   return (
-    <main className="min-h-screen px-8 py-8">
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <FilterPanel
-          addButton={
-            <Dialog
-              open={isDialogOpen}
-              onOpenChange={(open) => {
-                setIsDialogOpen(open);
-                if (!open) {
-                  setEditing(null);
-                  setFormError(null);
-                }
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button
-                  className="w-full bg-violet-600 text-white hover:bg-violet-700"
-                  onClick={() => {
-                    setEditing(null);
-                  }}
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Добавить
-                </Button>
-              </DialogTrigger>
-                <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? "Изменить контрагента" : "Добавить контрагента"}
-            </DialogTitle>
-          </DialogHeader>
-          <form className="grid gap-4" onSubmit={handleSubmit}>
-            {formError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                {formError}
-              </div>
-            )}
+    <main className={cn("min-h-screen pb-8", isCollapsed ? "pl-0" : "pl-0")}>
+      {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-            <div className="grid gap-2">
-              <Label>Тип контрагента</Label>
-              <Select
-                value={entityType}
-                onValueChange={(value) => setEntityType(value as CounterpartyType)}
-              >
-                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                  <SelectValue placeholder="Выберите тип" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="LEGAL">ЮЛ/ИП</SelectItem>
-                  <SelectItem value="PERSON">Физическое лицо</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {entityType === "LEGAL" ? (
-              <>
-                <div className="grid gap-2">
-                  <Label>Отрасль</Label>
-                  <Select value={industryId} onValueChange={setIndustryId}>
-                    <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                      <SelectValue placeholder="Выберите отрасль" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {industries.length === 0 ? (
-                        <SelectItem value="__none" disabled>
-                          Нет отраслей
-                        </SelectItem>
-                      ) : (
-                        industries.map((industry) => (
-                          <SelectItem key={industry.id} value={String(industry.id)}>
-                            {industry.name}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Название</Label>
-                  <Input
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Например, Пятерочка"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Полное юридическое наименование</Label>
-                  <Input
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Например, АГРОТОРГ"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Организационно-правовая форма</Label>
-                  <Select
-                    value={legalForm}
-                    onValueChange={(value) =>
-                      setLegalForm(value === "__none" ? "" : value)
-                    }
+      <FormModal
+        open={isDialogOpen}
+        onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) {
+            setEditing(null);
+            setFormError(null);
+          }
+        }}
+        title={editing ? "Изменить контрагента" : "Добавить контрагента"}
+        icon={<Users className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+        formError={formError}
+        onSubmit={handleSubmit}
+        onCancel={() => {
+          setIsDialogOpen(false);
+          setEditing(null);
+          setFormError(null);
+        }}
+        submitLabel={
+          isSubmitting
+            ? editing
+              ? "Сохраняем..."
+              : "Добавляем..."
+            : editing
+              ? "Сохранить"
+              : "Добавить"
+        }
+        loading={isSubmitting}
+        size="medium"
+      >
+        <div className="grid gap-4">
+          {/* Image upload and first fields in one row (like assets modal) */}
+          <div className="grid grid-cols-[200px_1fr] gap-4 items-center">
+            {/* Logo (LEGAL) or Photo (PERSON) upload */}
+            <div className="relative">
+              {entityType === "LEGAL" ? (
+                <>
+                  <div
+                    className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
+                    onClick={() => logoInputRef.current?.click()}
                   >
-                    <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                      <SelectValue placeholder="Выберите ОПФ" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">Не выбрано</SelectItem>
-                      {legalForms.map((form) => (
-                        <SelectItem key={form.code} value={form.code}>
-                          {form.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label>ИНН</Label>
-                    <Input
-                      className="border-2 border-border/70 bg-card shadow-none"
-                      value={inn}
-                      onChange={(e) =>
-                        setInn(e.target.value.replace(/\D/g, "").slice(0, 12))
-                      }
-                      placeholder="10 или 12 цифр"
-                      inputMode="numeric"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label>ОГРН</Label>
-                    <Input
-                      className="border-2 border-border/70 bg-card shadow-none"
-                      value={ogrn}
-                      onChange={(e) =>
-                        setOgrn(e.target.value.replace(/\D/g, "").slice(0, 15))
-                      }
-                      placeholder="13 или 15 цифр"
-                      inputMode="numeric"
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Логотип</Label>
-                  <Input
-                    type="file"
-                    accept={ALLOWED_LOGO_TYPES.join(",")}
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    onChange={(event) =>
-                      handleLogoChange(event.target.files?.[0] ?? null)
-                    }
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    До {formatSize(MAX_LOGO_BYTES)}, не больше {MAX_LOGO_DIM}px, PNG/JPG/WEBP.
-                  </div>
-                  {logoError && (
-                    <div className="text-xs text-red-600">{logoError}</div>
-                  )}
-                  {logoPreview && (
-                    <div className="flex items-center gap-3 rounded-md border border-border/70 bg-white p-2">
+                    {logoPreview ? (
                       <img
                         src={logoPreview}
                         alt=""
-                        className="h-12 w-12 rounded border border-border/60 object-contain bg-white"
+                        className="w-full h-full object-cover"
                       />
-                      <span className="text-xs text-muted-foreground">
-                        Предпросмотр логотипа
-                      </span>
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
+                        <Camera className="w-12 h-12" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                      <Upload className="w-8 h-8 text-white" />
                     </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label>Фамилия</Label>
-                    <Input
-                      className="border-2 border-border/70 bg-card shadow-none"
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                    />
                   </div>
-                  <div className="grid gap-2">
-                    <Label>Имя</Label>
-                    <Input
-                      className="border-2 border-border/70 bg-card shadow-none"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Отчество</Label>
-                  <Input
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    value={middleName}
-                    onChange={(e) => setMiddleName(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Фотография</Label>
-                  <Input
+                  <input
+                    ref={logoInputRef}
                     type="file"
                     accept={ALLOWED_LOGO_TYPES.join(",")}
-                    className="border-2 border-border/70 bg-card shadow-none"
-                    onChange={(event) =>
-                      handlePhotoChange(event.target.files?.[0] ?? null)
-                    }
+                    className="hidden"
+                    onChange={(e) => handleLogoChange(e.target.files?.[0] ?? null)}
                   />
-                  <div className="text-xs text-muted-foreground">
-                    До {formatSize(MAX_LOGO_BYTES)}, не больше {MAX_LOGO_DIM}px, PNG/JPG/WEBP.
-                  </div>
-                  {photoError && (
-                    <div className="text-xs text-red-600">{photoError}</div>
-                  )}
-                  {photoPreview && (
-                    <div className="flex items-center gap-3 rounded-md border border-border/70 bg-white p-2">
+                </>
+              ) : (
+                <>
+                  <div
+                    className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
+                    onClick={() => photoInputRef.current?.click()}
+                  >
+                    {photoPreview ? (
                       <img
                         src={photoPreview}
                         alt=""
-                        className="h-12 w-12 rounded border border-border/60 object-contain bg-white"
+                        className="w-full h-full object-cover"
                       />
-                      <span className="text-xs text-muted-foreground">
-                        Предпросмотр фотографии
-                      </span>
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
+                        <Camera className="w-12 h-12" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                      <Upload className="w-8 h-8 text-white" />
                     </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-2 border-border/70 bg-card shadow-none"
-                onClick={() => setIsDialogOpen(false)}
-                disabled={isSubmitting}
-              >
-                Отмена
-              </Button>
-              <Button
-                type="submit"
-                className="bg-violet-600 text-white hover:bg-violet-700"
-                disabled={isSubmitting}
-              >
-                {editing ? "Сохранить" : "Добавить"}
-              </Button>
+                  </div>
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept={ALLOWED_LOGO_TYPES.join(",")}
+                    className="hidden"
+                    onChange={(e) => handlePhotoChange(e.target.files?.[0] ?? null)}
+                  />
+                </>
+              )}
+              {(entityType === "LEGAL" ? logoError : photoError) && (
+                <p className="text-xs mt-1" style={{ color: "#FB4C4F" }}>
+                  {entityType === "LEGAL" ? logoError : photoError}
+                </p>
+              )}
             </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-          }
-        >
+
+            {/* Type selector (no label) + Отрасль only for LEGAL */}
+            <div className="grid content-start gap-4 min-w-0">
+              <div className="grid gap-2" role="group" aria-label="Тип контрагента">
+                <SegmentedSelector
+                  options={[
+                    { value: "LEGAL", label: "ЮЛ/ИП", colorScheme: "purple" },
+                    { value: "PERSON", label: "ФЛ", colorScheme: "purple" },
+                  ]}
+                  value={entityType}
+                  onChange={(value) => setEntityType(value as CounterpartyType)}
+                />
+              </div>
+              {entityType === "LEGAL" && (
+                <SelectField
+                  label="Отрасль"
+                  value={industryId}
+                  onValueChange={setIndustryId}
+                  options={
+                    industries.length === 0
+                      ? [{ value: "", label: "Нет отраслей" }]
+                      : industries.map((industry) => ({
+                          value: String(industry.id),
+                          label: industry.name,
+                        }))
+                  }
+                  placeholder="Выберите отрасль"
+                  required
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Name and rest of fields (full width) */}
+          {entityType === "LEGAL" ? (
+            <>
+              <TextField
+                label="Название"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Например, Пятерочка"
+                required
+              />
+              <TextField
+                label="Полное юридическое наименование"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Например, АГРОТОРГ"
+              />
+              <SelectField
+                label="Организационно-правовая форма"
+                value={legalForm || "__none"}
+                onValueChange={(value) => setLegalForm(value === "__none" ? "" : value)}
+                options={[
+                  { value: "__none", label: "Не выбрано" },
+                  ...legalForms.map((form) => ({ value: form.code, label: form.label })),
+                ]}
+                placeholder="Выберите ОПФ"
+              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextField
+                  label="ИНН"
+                  value={inn}
+                  onChange={(e) =>
+                    setInn(e.target.value.replace(/\D/g, "").slice(0, 12))
+                  }
+                  placeholder="10 или 12 цифр"
+                  inputMode="numeric"
+                />
+                <TextField
+                  label="ОГРН"
+                  value={ogrn}
+                  onChange={(e) =>
+                    setOgrn(e.target.value.replace(/\D/g, "").slice(0, 15))
+                  }
+                  placeholder="13 или 15 цифр"
+                  inputMode="numeric"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextField
+                  label="Фамилия"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  required
+                />
+                <TextField
+                  label="Имя"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  required
+                />
+              </div>
+              <TextField
+                label="Отчество"
+                value={middleName}
+                onChange={(e) => setMiddleName(e.target.value)}
+              />
+            </>
+          )}
+        </div>
+      </FormModal>
+
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <FilterPanel onAddClick={openCreateDialog} addButtonLabel="Добавить">
               <FilterSection
                 label="Название"
                 onReset={() => setNameFilter("")}
                 showReset={!!nameFilter}
               >
-                <Input
-                  type="text"
-                  className="h-10 w-full border-2 border-border/70 bg-card shadow-none"
-                  placeholder="Поиск по названию"
-                  value={nameFilter}
-                  onChange={(e) => setNameFilter(e.target.value)}
-                />
+                <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                  <AuthInput
+                    type="text"
+                    placeholder="Начните вводить текст"
+                    value={nameFilter}
+                    onChange={(e) => setNameFilter(e.target.value)}
+                  />
+                </div>
               </FilterSection>
 
-              <FilterSection label="Созданные самостоятельно">
-                <Switch
-                  checked={showUserCreated}
-                  onCheckedChange={setShowUserCreated}
+              <FilterSection
+                label="Источник"
+                onReset={() => setSourceFilter(new Set(["added"]))}
+                showReset={sourceFilter.size !== 1 || !sourceFilter.has("added")}
+              >
+                <SegmentedSelector
+                  options={[
+                    { value: "added", label: "Добавленные", colorScheme: "purple" },
+                    { value: "default", label: "По умолчанию", colorScheme: "purple" },
+                  ]}
+                  value={sourceFilter}
+                  onChange={(value) => {
+                    const next = value instanceof Set ? value : new Set(Array.isArray(value) ? value : [value]);
+                    setSourceFilter(next);
+                  }}
+                  multiple={true}
                 />
               </FilterSection>
 
               <FilterSection
-                label="Статус контрагента"
+                label="Статус"
                 onReset={() => {
                   setShowActiveStatus(true);
-                  setShowDeletedStatus(true);
+                  setShowDeletedStatus(false);
                 }}
-                showReset={!(showActiveStatus && showDeletedStatus)}
+                showReset={!showActiveStatus || showDeletedStatus}
               >
                 <SegmentedSelector
                   options={[
-                    { value: "ACTIVE", label: "Активные", colorScheme: "purple" },
-                    { value: "DELETED", label: "Удаленные", colorScheme: "orange" },
+                    { value: "ACTIVE", label: "Активный", colorScheme: "green" },
+                    { value: "DELETED", label: "Удалено", colorScheme: "red" },
                   ]}
                   value={statusFilter}
                   onChange={handleStatusFilterChange}
@@ -884,7 +827,7 @@ export default function CounterpartiesPage() {
                 <SegmentedSelector
                   options={[
                     { value: "LEGAL", label: "ЮЛ/ИП", colorScheme: "purple" },
-                    { value: "PERSON", label: "ФЛ", colorScheme: "orange" },
+                    { value: "PERSON", label: "ФЛ", colorScheme: "purple" },
                   ]}
                   value={entityTypeFilter}
                   onChange={handleEntityTypeFilterChange}
@@ -892,177 +835,103 @@ export default function CounterpartiesPage() {
                 />
               </FilterSection>
 
-              <FilterSection
-                label="Отрасль"
-                onReset={() => setSelectedIndustryIds(new Set())}
-                showReset={selectedIndustryIds.size > 0}
-              >
-                {industries.length === 0 ? (
-                  <div className="text-xs text-muted-foreground">
-                    Список отраслей пока пуст.
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-1">
+                    <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                      Отрасль
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Свернуть/развернуть"
+                      className="rounded-md p-1 hover:bg-[rgba(108,93,215,0.22)] transition-colors"
+                      onClick={() => setIsIndustryFilterOpen((prev) => !prev)}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isIndustryFilterOpen ? "rotate-0" : "-rotate-90"
+                        }`}
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                      />
+                    </button>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {industries.map((industry) => (
-                      <label
-                        key={industry.id}
-                        className="flex items-center gap-2 text-sm text-foreground"
-                      >
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4"
-                          checked={selectedIndustryIds.has(industry.id)}
-                          onChange={() => toggleIndustrySelection(industry.id)}
-                        />
-                        {industry.name}
-                      </label>
-                    ))}
-                  </div>
+                  {selectedIndustryIds.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline disabled:opacity-50"
+                      style={{ color: ACCENT }}
+                      onClick={() => setSelectedIndustryIds(new Set())}
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+                {isIndustryFilterOpen && (
+                  industries.length === 0 ? (
+                    <div className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      Список отраслей пока пуст.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                      {industries.map((industry) => (
+                        <label
+                          key={industry.id}
+                          className="flex items-center gap-2 cursor-pointer text-sm"
+                          style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            style={{ accentColor: ACCENT }}
+                            checked={selectedIndustryIds.has(industry.id)}
+                            onChange={() => toggleIndustrySelection(industry.id)}
+                          />
+                          {industry.name}
+                        </label>
+                      ))}
+                    </div>
+                  )
                 )}
-              </FilterSection>
+              </div>
         </FilterPanel>
 
-        <div className="flex-1">
-          <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-
-        {loading ? (
-          <div className="text-sm text-muted-foreground">Загрузка контрагентов...</div>
-        ) : (
-          <div className="space-y-4">
-            {error && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                {error}
+        <div className="flex-1 min-w-0">
+          <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
+            {loading ? (
+              <div className="text-center py-12 text-muted-foreground">
+                Загрузка контрагентов…
               </div>
-            )}
-            {filteredCounterparties.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-muted-foreground">
+            ) : filteredCounterparties.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
                 По выбранным фильтрам контрагентов нет.
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
-                {filteredCounterparties.map((item) => {
-                  const title =
-                    item.entity_type === "PERSON" ? buildPersonName(item) : item.name;
-                  const isUser = Boolean(item.owner_user_id);
-                  const entityLabel = ENTITY_LABELS[item.entity_type];
-                  const legalFormText =
-                    item.entity_type === "LEGAL" && item.legal_form
-                      ? legalFormLabel(item.legal_form)
-                      : null;
-                  const industryText = industryLabel(item.industry_id);
-                  const isDeleted = Boolean(item.deleted_at);
-                  return (
-                    <Card
-                      key={item.id}
-                      className={isDeleted ? "bg-white/70" : "bg-white"}
-                    >
-                      <CardHeader className="space-y-2">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex min-w-0 items-start gap-3">
-                            {(item.entity_type === "PERSON" ? item.photo_url : item.logo_url) ? (
-                              <img
-                                src={(item.entity_type === "PERSON" ? item.photo_url : item.logo_url) ?? ""}
-                                alt=""
-                                className={`rounded object-contain bg-white ${
-                                  isDeleted ? "h-10 w-10" : "h-12 w-12"
-                                }`}
-                              />
-                            ) : (
-                              <div
-                                className={`flex items-center justify-center rounded bg-slate-100 text-slate-400 ${
-                                  isDeleted ? "h-10 w-10" : "h-12 w-12"
-                                }`}
-                              >
-                                {item.entity_type === "PERSON" ? (
-                                  <User
-                                    className={isDeleted ? "h-5 w-5" : "h-6 w-6"}
-                                    aria-hidden="true"
-                                  />
-                                ) : (
-                                  (() => {
-                                    const Icon = getLegalDefaultIcon(item.industry_id);
-                                    return (
-                                      <Icon
-                                        className={isDeleted ? "h-5 w-5" : "h-6 w-6"}
-                                        aria-hidden="true"
-                                      />
-                                    );
-                                  })()
-                                )}
-                              </div>
-                            )}
-                            <div className="flex min-w-0 items-start gap-2">
-                              <CardTitle
-                                className={`min-w-0 break-words leading-snug ${
-                                  isDeleted ? "text-lg text-slate-600" : "text-lg"
-                                }`}
-                              >
-                                {title}
-                              </CardTitle>
-                              {isUser && (
-                                <Tooltip content="Пользовательский контрагент">
-                                  <User
-                                    className="h-3.5 w-3.5 shrink-0 text-slate-400"
-                                    aria-label="Пользовательский контрагент"
-                                  />
-                                </Tooltip>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {isDeleted && (
-                              <Badge className="bg-slate-100 text-slate-500">
-                                Удалено
-                              </Badge>
-                            )}
-                            {isUser && !isDeleted && (
-                              <>
-                                <IconButton
-                                  aria-label="Изменить контрагента"
-                                  onClick={() => {
-                                    setEditing(item);
-                                    setIsDialogOpen(true);
-                                  }}
-                                >
-                                  <Pencil />
-                                </IconButton>
-                                <IconButton
-                                  aria-label="Удалить контрагента"
-                                  onClick={() => setDeleteTarget(item)}
-                                >
-                                  <Trash2 />
-                                </IconButton>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="space-y-1 text-xs text-muted-foreground">
-                          <div className="truncate">
-                            {entityLabel}
-                            {legalFormText ? ` · ${legalFormText}` : ""}
-                          </div>
-                          {item.full_name && <div className="truncate">{item.full_name}</div>}
-                          {item.entity_type === "LEGAL" && (
-                            <div className="truncate">Отрасль: {industryText || "-"}</div>
-                          )}
-                          {item.license_status && (
-                            <div className="truncate">{item.license_status}</div>
-                          )}
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-2 text-xs text-muted-foreground">
-                        {item.entity_type === "LEGAL" && item.inn && (
-                          <div>ИНН: {item.inn}</div>
-                        )}
-                        {item.ogrn && <div>ОГРН: {item.ogrn}</div>}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+              <div
+                className="columns-2 xl:columns-3 gap-4"
+                style={{ position: "relative", zIndex: 2 }}
+              >
+                {filteredCounterparties.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      breakInside: "avoid",
+                      marginBottom: "1rem",
+                    }}
+                  >
+                    <CounterpartyCard
+                      counterparty={item}
+                      industryLabel={industryLabel(item.industry_id) || undefined}
+                      legalFormLabel={item.entity_type === "LEGAL" && item.legal_form ? legalFormLabel(item.legal_form) : undefined}
+                      onEdit={(c) => {
+                        setEditing(c);
+                        setIsDialogOpen(true);
+                      }}
+                      onDelete={(c) => setDeleteTarget(c)}
+                    />
+                  </div>
+                ))}
               </div>
             )}
-          </div>
-        )}
           </div>
         </div>
       </div>

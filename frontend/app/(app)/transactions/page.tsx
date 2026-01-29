@@ -4450,8 +4450,8 @@ function TransactionsView({
               <div className="space-y-3">
                 <SegmentedSelector
                   options={[
-                    { value: "active", label: "Активные", colorScheme: "purple" },
-                    { value: "deleted", label: "Удаленные", colorScheme: "red" },
+                    { value: "active", label: "Активный", colorScheme: "green" },
+                    { value: "deleted", label: "Удалено", colorScheme: "red" },
                   ]}
                   value={[
                     ...(showActive ? ["active"] : []),

@@ -243,7 +243,7 @@ export const CATEGORY_ICON_BY_L1: Record<string, CategoryIcon> = {
   "Одежда и обувь": Shirt,
   "Отдых и развлечения": Popcorn,
   "Отпуска": Plane,
-  "Вредные привычки": Ban,
+  "Вредные привычки": Cigarette,
   "Питание": Utensils,
   "Подписки": CalendarSync,
   "Подарки": Gift,

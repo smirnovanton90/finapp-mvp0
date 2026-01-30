@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,19 +13,20 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { FormModal } from "@/components/form-modal";
+import { TextField, SelectField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
-import { Tooltip } from "@/components/ui/tooltip";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { CategoryNode, CategoryScope } from "@/lib/categories";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { FilterSection } from "@/components/filter-panel";
+import { SegmentedSelector } from "@/components/ui/segmented-selector";
+import { AuthInput } from "@/components/ui/auth-input";
+import { IconButton } from "@/components/ui/icon-button";
+import { CategoryNode, CategoryScope, buildCategoryLookup } from "@/lib/categories";
 import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_OPTIONS,
@@ -39,8 +41,23 @@ import {
   updateCategoryVisibility,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
-import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, User } from "lucide-react";
-import { IconButton } from "@/components/ui/icon-button";
+import { useCategoryIcon } from "@/hooks/use-category-icon";
+import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
+import {
+  ACCENT,
+  ACTIVE_TEXT_DARK,
+  PLACEHOLDER_COLOR_DARK,
+  SIDEBAR_TEXT_ACTIVE,
+  MODAL_BG,
+  BACKGROUND_DT,
+  GREEN,
+  GREEN_TRANSACTION,
+  RED,
+} from "@/lib/colors";
+
+const ALLOWED_ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_ICON_BYTES = 2 * 1024 * 1024;
+import { Camera, ChevronDown, ChevronRight, Folder, Pencil, Plus, MoreVertical, Trash2, Upload } from "lucide-react";
 
 type DeleteTarget = {
   id: number;
@@ -58,6 +75,8 @@ type EditTarget = {
 };
 
 const MAX_DEPTH = 3;
+/** Отступ вложенности: левый край карточки сдвигается на depth * INDENT_PX, ширина уменьшается, чтобы правый край совпадал у всех уровней. */
+const INDENT_PX = 32;
 
 const SCOPE_OPTIONS: Array<{
   value: CategoryScope;
@@ -69,163 +88,301 @@ const SCOPE_OPTIONS: Array<{
   { value: "BOTH", label: "Доходы и расходы", dotClass: "bg-violet-500" },
 ];
 
-function filterCategories(nodes: CategoryNode[]): CategoryNode[] {
-  const scopeOrder: Record<CategoryScope, number> = {
-    INCOME: 0,
-    EXPENSE: 1,
-    BOTH: 2,
-  };
-
-  return nodes
-    .filter((node) => node.enabled !== false && !node.archived_at)
-    .map((node, index) => ({
-      node: {
-        ...node,
-        children: node.children ? filterCategories(node.children) : undefined,
-      },
-      index,
-    }))
-    .sort((a, b) => {
-      const scopeDiff = scopeOrder[a.node.scope] - scopeOrder[b.node.scope];
-      if (scopeDiff !== 0) return scopeDiff;
-      return a.index - b.index;
-    })
-    .map(({ node }) => node);
-}
-
-function countNodes(nodes: CategoryNode[]): number {
-  return nodes.reduce(
-    (total, node) => total + 1 + countNodes(node.children ?? []),
+function countDescendants(node: CategoryNode): number {
+  return (node.children ?? []).reduce(
+    (total, child) => total + 1 + countDescendants(child),
     0
   );
 }
 
-function countDescendants(node: CategoryNode): number {
-  return countNodes(node.children ?? []);
+function filterTreeByFilters(
+  nodes: CategoryNode[],
+  filters: {
+    nameFilter: string;
+    scopeFilter: Set<string>;
+    sourceFilter: Set<string>;
+    statusActive: boolean;
+    statusDeleted: boolean;
+  }
+): CategoryNode[] {
+  const nameNorm = filters.nameFilter.trim().toLocaleLowerCase("ru");
+  /** Совпадение по имени: пустой фильтр — подходит всё; иначе ищем в названии категории или в названиях родителей. */
+  const matchName = (node: CategoryNode, parentNames: string[]) => {
+    if (!nameNorm) return true;
+    const pathNames = [...parentNames, node.name];
+    return pathNames.some((n) => n.toLocaleLowerCase("ru").includes(nameNorm));
+  };
+  const matchScope = (node: CategoryNode) => {
+    if (filters.scopeFilter.size === 0) return true;
+    if (filters.scopeFilter.has("INCOME") && (node.scope === "INCOME" || node.scope === "BOTH"))
+      return true;
+    if (filters.scopeFilter.has("EXPENSE") && (node.scope === "EXPENSE" || node.scope === "BOTH"))
+      return true;
+    return false;
+  };
+  const matchSource = (node: CategoryNode) => {
+    if (filters.sourceFilter.size === 0) return true;
+    const isDefault = node.owner_user_id == null;
+    if (filters.sourceFilter.has("default") && isDefault) return true;
+    if (filters.sourceFilter.has("added") && !isDefault) return true;
+    return false;
+  };
+  const matchStatus = (node: CategoryNode) => {
+    const isActive = node.enabled !== false && !node.archived_at;
+    if (filters.statusActive && isActive) return true;
+    if (filters.statusDeleted && !isActive) return true;
+    return false;
+  };
+
+  const walk = (list: CategoryNode[], parentNames: string[]): CategoryNode[] => {
+    return list
+      .filter(
+        (node) =>
+          matchName(node, parentNames) &&
+          matchScope(node) &&
+          matchSource(node) &&
+          matchStatus(node)
+      )
+      .map((node) => ({
+        ...node,
+        children: node.children?.length
+          ? walk(node.children, [...parentNames, node.name])
+          : undefined,
+      }));
+  };
+  return walk(nodes, []);
 }
 
-function CategoryTree({
+const ICON_SIZE_PX = 64;
+const ICON_2D_SIZE_CLASS = "w-8 h-8"; // размер 2D иконки (в слоте 3D при отсутствии 3D и в отдельном поле 2D)
+
+function CategoryCard({
+  node,
+  depth,
+  parentName,
+  categoryLookup,
+  onAddChild,
+  onEdit,
+  onDelete,
+  hasChildren,
+  isExpanded,
+  onToggleExpand,
+  isFilterActive,
+}: {
+  node: CategoryNode;
+  depth: number;
+  parentName: string | null;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  onAddChild: (node: CategoryNode, depth: number) => void;
+  onEdit: (node: CategoryNode) => void;
+  onDelete: (node: CategoryNode) => void;
+  hasChildren: boolean;
+  isExpanded: boolean;
+  onToggleExpand: (id: number) => void;
+  isFilterActive: boolean;
+}) {
+  const stripeColor =
+    node.scope === "INCOME"
+      ? GREEN_TRANSACTION
+      : node.scope === "EXPENSE"
+        ? RED
+        : ACCENT;
+  const isDeleted = node.enabled === false || Boolean(node.archived_at);
+  const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
+  const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
+
+  const { categoryIcon3dPath, CategoryIcon: CategoryIcon2d, setCategoryIconFormat } =
+    useCategoryIcon(node.id, categoryLookup);
+
+  const iconName =
+    node.icon_name && node.icon_name.trim().length > 0 ? node.icon_name : undefined;
+  const PreviewIcon = iconName ? CATEGORY_ICON_BY_NAME[iconName] : CategoryIcon2d;
+
+  const indent = depth * INDENT_PX;
+  return (
+    <div
+      className="relative h-auto min-h-0 rounded-lg overflow-hidden mb-3"
+      style={{
+        marginLeft: indent,
+        width: indent > 0 ? `calc(100% - ${indent}px)` : "100%",
+        backgroundColor: cardBg,
+      }}
+    >
+      <div
+        className="absolute left-0 top-0 bottom-0 w-[7px] rounded-l-md"
+        style={{ backgroundColor: stripeColor }}
+      />
+      <div className="pt-3 pr-3 pb-3 pl-4 flex items-center gap-4 min-h-0">
+        {hasChildren && !isFilterActive ? (
+          <IconButton
+            aria-label={isExpanded ? "Свернуть" : "Развернуть"}
+            onClick={() => onToggleExpand(node.id)}
+            className="shrink-0"
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-5 w-5" />
+            ) : (
+              <ChevronRight className="h-5 w-5" />
+            )}
+          </IconButton>
+        ) : (
+          <span className="w-8 shrink-0" aria-hidden="true" />
+        )}
+        <div
+          className="flex-shrink-0 flex items-center justify-center"
+          style={{ width: ICON_SIZE_PX, height: ICON_SIZE_PX }}
+        >
+          {categoryIcon3dPath ? (
+            <img
+              src={categoryIcon3dPath}
+              alt=""
+              className="w-[64px] h-[64px] object-contain"
+              style={{ filter: "drop-shadow(0 8px 16px rgba(0,0,0,0.2))" }}
+              onError={() => {
+                if (categoryIcon3dPath.endsWith(".png")) {
+                  setCategoryIconFormat("webp");
+                } else {
+                  setCategoryIconFormat(null);
+                }
+              }}
+            />
+          ) : (
+            <div
+              className="w-full h-full flex items-center justify-center"
+              style={{ filter: "drop-shadow(0 8px 16px rgba(0,0,0,0.2))" }}
+            >
+              <PreviewIcon
+                className={ICON_2D_SIZE_CLASS}
+                style={{ color: ACCENT }}
+                strokeWidth={1.5}
+              />
+            </div>
+          )}
+        </div>
+        <div
+          className="flex-shrink-0 flex items-center justify-center"
+          style={{ width: ICON_SIZE_PX, height: ICON_SIZE_PX }}
+        >
+          <PreviewIcon
+            className={ICON_2D_SIZE_CLASS}
+            style={{ color: ACCENT }}
+            strokeWidth={1.5}
+          />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div
+            className={cn("font-medium text-lg break-words", isDeleted && "opacity-70")}
+            style={{ color: textColor }}
+          >
+            {node.name}
+          </div>
+          {parentName && (
+            <div className="text-sm mt-0.5">
+              <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Родитель </span>
+              <span style={{ color: ACTIVE_TEXT_DARK }}>{parentName}</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {depth < MAX_DEPTH && !isDeleted && (
+            <IconButton
+              aria-label="Добавить подкатегорию"
+              onClick={() => onAddChild(node, depth)}
+            >
+              <Plus />
+            </IconButton>
+          )}
+          {!isDeleted && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton aria-label="Открыть меню действий">
+                  <MoreVertical />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem onClick={() => onEdit(node)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Редактировать
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => onDelete(node)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Удалить
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategoryCardList({
   nodes,
   depth,
+  parentName,
+  categoryLookup,
   onAddChild,
-  onDelete,
   onEdit,
+  onDelete,
   expandedIds,
-  onToggle,
+  onToggleExpand,
+  isFilterActive,
 }: {
   nodes: CategoryNode[];
   depth: number;
+  parentName: string | null;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
   onAddChild: (node: CategoryNode, depth: number) => void;
-  onDelete: (node: CategoryNode) => void;
   onEdit: (node: CategoryNode) => void;
+  onDelete: (node: CategoryNode) => void;
   expandedIds: Set<number>;
-  onToggle: (id: number) => void;
+  onToggleExpand: (id: number) => void;
+  isFilterActive: boolean;
 }) {
   if (nodes.length === 0) return null;
   return (
-    <div>
+    <>
       {nodes.map((node) => {
-        const scopeMeta =
-          SCOPE_OPTIONS.find((option) => option.value === node.scope) ??
-          SCOPE_OPTIONS[2];
-        const iconName =
-          node.icon_name && node.icon_name.trim().length > 0 ? node.icon_name : undefined;
-        const PreviewIcon = iconName ? CATEGORY_ICON_BY_NAME[iconName] : null;
-        const isUserCategory = node.owner_user_id != null;
-        const isDisabled = node.enabled === false;
         const hasChildren = Boolean(node.children && node.children.length > 0);
-        const isExpanded = hasChildren && expandedIds.has(node.id);
-        const indentPx = Math.max(0, depth - 1) * 16;
+        const showChildren =
+          isFilterActive || (hasChildren && expandedIds.has(node.id));
         return (
           <div key={node.id}>
-            <div
-              className={cn(
-                "flex flex-wrap items-center gap-3 px-2 py-1 sm:flex-nowrap",
-                isDisabled && "opacity-50"
-              )}
-            >
-                <div
-                  className="flex min-w-0 flex-1 items-center gap-2"
-                  style={{ paddingLeft: indentPx }}
-                >
-                  {hasChildren ? (
-                    <button
-                      type="button"
-                      onClick={() => onToggle(node.id)}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                      aria-label={
-                        isExpanded ? "Свернуть подкатегории" : "Развернуть подкатегории"
-                      }
-                    >
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </button>
-                  ) : (
-                    <span className="inline-flex h-6 w-6" aria-hidden="true" />
-                  )}
-                  {PreviewIcon ? (
-                    <PreviewIcon className="h-4 w-4 text-violet-600" />
-                  ) : (
-                    <span className="inline-flex h-4 w-4" aria-hidden="true" />
-                  )}
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-medium text-foreground">
-                      {node.name}
-                    </span>
-                    {isUserCategory && (
-                      <Tooltip content="Пользовательская категория">
-                        <User
-                          className="h-3.5 w-3.5 shrink-0 text-slate-400"
-                          aria-label="Пользовательская категория"
-                        />
-                      </Tooltip>
-                    )}
-                  </span>
-                </div>
-                <div className="flex items-center text-xs text-slate-600">
-                  <span className={cn("h-2 w-2 rounded-full", scopeMeta.dotClass)} />
-                </div>
-                <div className="flex items-center gap-1">
-                  <IconButton
-                    aria-label="Изменить категорию"
-                    onClick={() => onEdit(node)}
-                  >
-                    <Pencil />
-                  </IconButton>
-                  {depth < MAX_DEPTH && (
-                    <IconButton
-                      aria-label="Добавить подкатегорию"
-                      onClick={() => onAddChild(node, depth)}
-                    >
-                      <Plus />
-                    </IconButton>
-                  )}
-                  <IconButton
-                    aria-label="Удалить категорию"
-                    onClick={() => onDelete(node)}
-                  >
-                    <Trash2 />
-                  </IconButton>
-                </div>
-            </div>
-            {isExpanded && node.children && node.children.length > 0 && (
-              <CategoryTree
-                nodes={node.children}
+            <CategoryCard
+              node={node}
+              depth={depth}
+              parentName={parentName}
+              categoryLookup={categoryLookup}
+              onAddChild={onAddChild}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              hasChildren={hasChildren}
+              isExpanded={expandedIds.has(node.id)}
+              onToggleExpand={onToggleExpand}
+              isFilterActive={isFilterActive}
+            />
+            {hasChildren && showChildren && (
+              <CategoryCardList
+                nodes={node.children!}
                 depth={depth + 1}
+                parentName={node.name}
+                categoryLookup={categoryLookup}
                 onAddChild={onAddChild}
-                onDelete={onDelete}
                 onEdit={onEdit}
+                onDelete={onDelete}
                 expandedIds={expandedIds}
-                onToggle={onToggle}
+                onToggleExpand={onToggleExpand}
+                isFilterActive={isFilterActive}
               />
             )}
           </div>
         );
       })}
-    </div>
+    </>
   );
 }
 
@@ -235,6 +392,9 @@ export default function CategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addParentId, setAddParentId] = useState<number | null>(null);
   const [addParentName, setAddParentName] = useState<string | null>(null);
@@ -242,14 +402,30 @@ export default function CategoriesPage() {
   const [newName, setNewName] = useState("");
   const [newScope, setNewScope] = useState<CategoryScope>("BOTH");
   const [newIcon, setNewIcon] = useState("");
+  const [newIconImage, setNewIconImage] = useState<File | null>(null);
+  const [newIconImagePreview, setNewIconImagePreview] = useState<string | null>(null);
+  const [newIconImageError, setNewIconImageError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const addIconInputRef = useRef<HTMLInputElement>(null);
+  const addIconPreviewUrlRef = useRef<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [editScope, setEditScope] = useState<CategoryScope>("BOTH");
   const [editIcon, setEditIcon] = useState("");
+  const [editIconImage, setEditIconImage] = useState<File | null>(null);
+  const [editIconImagePreview, setEditIconImagePreview] = useState<string | null>(null);
+  const [editIconImageError, setEditIconImageError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
+  const editIconInputRef = useRef<HTMLInputElement>(null);
+  const editIconPreviewUrlRef = useRef<string | null>(null);
   const onboardingAppliedRef = useRef<string | null>(null);
+
+  const [nameFilter, setNameFilter] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<Set<string>>(() => new Set());
+  const [sourceFilter, setSourceFilter] = useState<Set<string>>(() => new Set());
+  const [showActiveStatus, setShowActiveStatus] = useState(true);
+  const [showDeletedStatus, setShowDeletedStatus] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
 
   useEffect(() => {
     if (!isWizardOpen) {
@@ -262,42 +438,147 @@ export default function CategoriesPage() {
       if (!silent) setLoading(true);
       setError(null);
       try {
-        const data = await fetchCategories({ includeArchived: false, noCache: true });
+        const includeArchived = showDeletedStatus;
+        const data = await fetchCategories({
+          includeArchived: includeArchived ? true : false,
+          noCache: true,
+        });
         setCategories(data);
-      } catch (e: any) {
-        setError(e?.message ?? "Не удалось загрузить категории.");
+      } catch (e: unknown) {
+        const message = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Не удалось загрузить категории.";
+        setError(message);
       } finally {
         if (!silent) setLoading(false);
       }
     },
-    [setCategories]
+    [showDeletedStatus]
   );
 
   useEffect(() => {
     loadCategories();
   }, [loadCategories]);
 
-  const visibleCategories = useMemo(
-    () => filterCategories(categories),
-    [categories]
-  );
-  const openAddDialog = (
-    parentId: number | null,
-    parentName: string | null,
-    parentDepth: number,
-    parentScope?: CategoryScope | null
-  ) => {
-    setAddParentId(parentId);
-    setAddParentName(parentName);
-    setAddParentDepth(parentDepth);
-    setNewName("");
-    setNewScope(parentScope ?? "BOTH");
-    setNewIcon("");
-    setFormError(null);
-    setIsAddOpen(true);
-  };
+  const categoryLookup = useMemo(() => buildCategoryLookup(categories), [categories]);
 
-  const openEditDialog = (node: CategoryNode) => {
+  const visibleCategories = useMemo(() => {
+    const filtered = filterTreeByFilters(categories, {
+      nameFilter,
+      scopeFilter,
+      sourceFilter,
+      statusActive: showActiveStatus,
+      statusDeleted: showDeletedStatus,
+    });
+    const scopeOrder: Record<CategoryScope, number> = {
+      INCOME: 0,
+      EXPENSE: 1,
+      BOTH: 2,
+    };
+    return [...filtered].sort(
+      (a, b) => scopeOrder[a.scope] - scopeOrder[b.scope]
+    );
+  }, [
+    categories,
+    nameFilter,
+    scopeFilter,
+    sourceFilter,
+    showActiveStatus,
+    showDeletedStatus,
+  ]);
+
+  /** При активных фильтрах показываем все найденные уровни развёрнутыми; без фильтров — только первый уровень, остальное по клику. */
+  const isFilterActive =
+    nameFilter.trim() !== "" ||
+    scopeFilter.size > 0 ||
+    sourceFilter.size > 0 ||
+    !showActiveStatus ||
+    showDeletedStatus;
+
+  const toggleExpand = useCallback((id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const openAddDialog = useCallback(
+    (
+      parentId: number | null,
+      parentName: string | null,
+      parentDepth: number,
+      parentScope?: CategoryScope | null
+    ) => {
+      setAddParentId(parentId);
+      setAddParentName(parentName);
+      setAddParentDepth(parentDepth);
+      setNewName("");
+      setNewScope(parentScope ?? "BOTH");
+      setNewIcon("");
+      setNewIconImage(null);
+      setNewIconImagePreview(null);
+      setNewIconImageError(null);
+      setFormError(null);
+      setIsAddOpen(true);
+    },
+    []
+  );
+
+  const handleAddIconImageChange = useCallback((file: File | null) => {
+    setNewIconImageError(null);
+    if (addIconPreviewUrlRef.current) {
+      URL.revokeObjectURL(addIconPreviewUrlRef.current);
+      addIconPreviewUrlRef.current = null;
+    }
+    if (!file) {
+      setNewIconImage(null);
+      setNewIconImagePreview(null);
+      return;
+    }
+    if (!ALLOWED_ICON_TYPES.includes(file.type)) {
+      setNewIconImageError("Формат: PNG, JPEG или WebP.");
+      setNewIconImage(null);
+      return;
+    }
+    if (file.size > MAX_ICON_BYTES) {
+      setNewIconImageError("Размер файла не более 2 МБ.");
+      setNewIconImage(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    addIconPreviewUrlRef.current = url;
+    setNewIconImage(file);
+    setNewIconImagePreview(url);
+  }, []);
+
+  const handleEditIconImageChange = useCallback((file: File | null) => {
+    setEditIconImageError(null);
+    if (editIconPreviewUrlRef.current) {
+      URL.revokeObjectURL(editIconPreviewUrlRef.current);
+      editIconPreviewUrlRef.current = null;
+    }
+    if (!file) {
+      setEditIconImage(null);
+      setEditIconImagePreview(null);
+      return;
+    }
+    if (!ALLOWED_ICON_TYPES.includes(file.type)) {
+      setEditIconImageError("Формат: PNG, JPEG или WebP.");
+      setEditIconImage(null);
+      return;
+    }
+    if (file.size > MAX_ICON_BYTES) {
+      setEditIconImageError("Размер файла не более 2 МБ.");
+      setEditIconImage(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    editIconPreviewUrlRef.current = url;
+    setEditIconImage(file);
+    setEditIconImagePreview(url);
+  }, []);
+
+  const openEditDialog = useCallback((node: CategoryNode) => {
     setEditTarget({
       id: node.id,
       name: node.name,
@@ -307,8 +588,11 @@ export default function CategoriesPage() {
     });
     setEditScope(node.scope);
     setEditIcon(node.icon_name ?? "");
+    setEditIconImage(null);
+    setEditIconImagePreview(null);
+    setEditIconImageError(null);
     setEditError(null);
-  };
+  }, []);
 
   useEffect(() => {
     if (!isWizardOpen || activeStep?.key !== "categories") return;
@@ -341,8 +625,9 @@ export default function CategoriesPage() {
       });
       setIsAddOpen(false);
       await loadCategories(true);
-    } catch (e: any) {
-      setFormError(e?.message ?? "Не удалось добавить категорию.");
+    } catch (e: unknown) {
+      const message = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Не удалось добавить категорию.";
+      setFormError(message);
     } finally {
       setSyncing(false);
     }
@@ -360,8 +645,9 @@ export default function CategoriesPage() {
       }
       setDeleteTarget(null);
       await loadCategories(true);
-    } catch (e: any) {
-      setError(e?.message ?? "Не удалось удалить категорию.");
+    } catch (e: unknown) {
+      const message = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Не удалось удалить категорию.";
+      setError(message);
       setDeleteTarget(null);
     } finally {
       setSyncing(false);
@@ -392,37 +678,35 @@ export default function CategoriesPage() {
         await loadCategories(true);
       }
       setEditTarget(null);
-    } catch (e: any) {
-      setEditError(e?.message ?? "Не удалось обновить категорию.");
+    } catch (e: unknown) {
+      const message = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Не удалось обновить категорию.";
+      setEditError(message);
     } finally {
       setSyncing(false);
     }
   };
 
-  const toggleExpanded = useCallback((id: number) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const handleScopeFilterChange = useCallback((value: string | string[] | Set<string>) => {
+    const arr = value instanceof Set ? Array.from(value) : Array.isArray(value) ? value : [value];
+    setScopeFilter(new Set(arr));
   }, []);
 
-  const handleSync = async () => {
-    setSyncing(true);
-    setError(null);
-    try {
-      await loadCategories(true);
-    } catch (e: any) {
-      setError(e?.message ?? "Не удалось обновить категории.");
-    } finally {
-      setSyncing(false);
-    }
-  };
+  const handleSourceFilterChange = useCallback((value: string | string[] | Set<string>) => {
+    const arr = value instanceof Set ? Array.from(value) : Array.isArray(value) ? value : [value];
+    setSourceFilter(new Set(arr));
+  }, []);
+
+  const statusFilterValue = useMemo(
+    () => [
+      ...(showActiveStatus ? ["active"] : []),
+      ...(showDeletedStatus ? ["deleted"] : []),
+    ],
+    [showActiveStatus, showDeletedStatus]
+  );
 
   return (
-    <main className="min-h-screen px-8 py-8">
-      <Dialog
+    <main className="min-h-screen pb-8">
+      <FormModal
         open={isAddOpen}
         onOpenChange={(open) => {
           setIsAddOpen(open);
@@ -431,91 +715,115 @@ export default function CategoriesPage() {
             setNewName("");
             setNewScope("BOTH");
             setNewIcon("");
+            if (addIconPreviewUrlRef.current) {
+              URL.revokeObjectURL(addIconPreviewUrlRef.current);
+              addIconPreviewUrlRef.current = null;
+            }
+            setNewIconImage(null);
+            setNewIconImagePreview(null);
+            setNewIconImageError(null);
           }
         }}
+        title="Добавить категорию"
+        icon={<Folder className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+        formError={formError}
+        onSubmit={handleAddSubmit}
+        onCancel={() => {
+          setIsAddOpen(false);
+          if (addIconPreviewUrlRef.current) {
+            URL.revokeObjectURL(addIconPreviewUrlRef.current);
+            addIconPreviewUrlRef.current = null;
+          }
+          setNewIconImage(null);
+          setNewIconImagePreview(null);
+        }}
+        submitLabel={syncing ? "Добавляем..." : "Добавить"}
+        loading={syncing}
+        size="medium"
       >
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>Добавить категорию</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleAddSubmit} className="grid gap-4">
-            {formError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                {formError}
-              </div>
-            )}
-
-            {addParentName && (
-              <div className="text-sm text-muted-foreground">
-                Родитель: <span className="font-medium text-foreground">{addParentName}</span>
-              </div>
-            )}
-
-            <div className="grid gap-2">
-              <Label>Название</Label>
-              <Input
-                value={newName}
-                onChange={(event) => setNewName(event.target.value)}
-                placeholder="Например, Продукты"
-                className="border-2 border-border/70 bg-card shadow-none"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Тип</Label>
-              <Select
-                value={newScope}
-                onValueChange={(value) => setNewScope(value as CategoryScope)}
+        <div className="grid gap-4">
+          <div className="grid grid-cols-[200px_1fr] gap-4 items-start">
+            <div className="relative">
+              <div
+                className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
+                onClick={() => addIconInputRef.current?.click()}
               >
-                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SCOPE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {newIconImagePreview ? (
+                  <img
+                    src={newIconImagePreview}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
+                    <Camera className="w-12 h-12" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                  <Upload className="w-8 h-8 text-white" />
+                </div>
+              </div>
+              <input
+                ref={addIconInputRef}
+                type="file"
+                accept={ALLOWED_ICON_TYPES.join(",")}
+                className="hidden"
+                onChange={(e) => handleAddIconImageChange(e.target.files?.[0] ?? null)}
+              />
+              {newIconImageError && (
+                <p className="text-xs mt-1" style={{ color: "#FB4C4F" }}>
+                  {newIconImageError}
+                </p>
+              )}
             </div>
-
-            <div className="grid gap-2">
-              <Label>Иконка</Label>
-              <Select
+            <div className="grid content-start gap-4 min-w-0">
+              <div className="grid gap-2" role="group" aria-label="Тип">
+                <Label style={{ color: ACTIVE_TEXT_DARK }}>Тип</Label>
+                <SegmentedSelector
+                  options={[
+                    { value: "INCOME", label: "Доход", colorScheme: "green" },
+                    { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                    { value: "BOTH", label: "Доходы и расходы", colorScheme: "purple" },
+                  ]}
+                  value={newScope}
+                  onChange={(value) => setNewScope(value as CategoryScope)}
+                />
+              </div>
+              <SelectField
+                label="2D иконка"
                 value={newIcon || "none"}
                 onValueChange={(value) => setNewIcon(value === "none" ? "" : value)}
-              >
-                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                  <SelectValue placeholder="Без иконки" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Без иконки</SelectItem>
-                  {CATEGORY_ICON_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
+                options={[
+                  { value: "none", label: "Без иконки" },
+                  ...CATEGORY_ICON_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: (
                       <span className="flex items-center gap-2">
-                        <option.Icon className="h-4 w-4 text-slate-600" />
+                        <option.Icon className="h-4 w-4" style={{ color: PLACEHOLDER_COLOR_DARK }} />
                         <span>{option.label}</span>
                       </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    ),
+                  }))]}
+                placeholder="Без иконки"
+              />
             </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" className="border-2 border-border/70 bg-card shadow-none" onClick={() => setIsAddOpen(false)}>
-                Отмена
-              </Button>
-              <Button type="submit" className="bg-violet-600 text-white hover:bg-violet-700">
-                Добавить
-              </Button>
+          </div>
+          {addParentName && (
+            <div className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+              Родитель: <span style={{ color: ACTIVE_TEXT_DARK }}>{addParentName}</span>
             </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+          )}
+          <TextField
+            label="Название"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Например, Продукты"
+            required
+          />
+        </div>
+      </FormModal>
 
-      <Dialog
+      <FormModal
         open={Boolean(editTarget)}
         onOpenChange={(open) => {
           if (!open) {
@@ -523,89 +831,112 @@ export default function CategoriesPage() {
             setEditError(null);
             setEditScope("BOTH");
             setEditIcon("");
+            if (editIconPreviewUrlRef.current) {
+              URL.revokeObjectURL(editIconPreviewUrlRef.current);
+              editIconPreviewUrlRef.current = null;
+            }
+            setEditIconImage(null);
+            setEditIconImagePreview(null);
+            setEditIconImageError(null);
           }
         }}
+        title="Изменение категории"
+        icon={<Folder className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+        formError={editError}
+        onSubmit={handleEditSubmit}
+        onCancel={() => {
+          setEditTarget(null);
+          if (editIconPreviewUrlRef.current) {
+            URL.revokeObjectURL(editIconPreviewUrlRef.current);
+            editIconPreviewUrlRef.current = null;
+          }
+          setEditIconImage(null);
+          setEditIconImagePreview(null);
+        }}
+        submitLabel={syncing ? "Сохраняем..." : "Сохранить"}
+        loading={syncing}
+        size="medium"
       >
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>Изменение категории</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleEditSubmit} className="grid gap-4">
-            {editError && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                {editError}
-              </div>
-            )}
-
-            {editTarget && (
-              <div className="text-sm text-muted-foreground">
-                Категория: <span className="font-medium text-foreground">{editTarget.name}</span>
-              </div>
-            )}
-
-            <div className="grid gap-2">
-              <Label>Область</Label>
-              <Select
-                value={editScope}
-                onValueChange={(value) => setEditScope(value as CategoryScope)}
-                disabled={editTarget?.ownerUserId == null}
+        <div className="grid gap-4">
+          <div className="grid grid-cols-[200px_1fr] gap-4 items-start">
+            <div className="relative">
+              <div
+                className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
+                onClick={() => editIconInputRef.current?.click()}
               >
-                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SCOPE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {editIconImagePreview ? (
+                  <img
+                    src={editIconImagePreview}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
+                    <Camera className="w-12 h-12" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                  <Upload className="w-8 h-8 text-white" />
+                </div>
+              </div>
+              <input
+                ref={editIconInputRef}
+                type="file"
+                accept={ALLOWED_ICON_TYPES.join(",")}
+                className="hidden"
+                onChange={(e) => handleEditIconImageChange(e.target.files?.[0] ?? null)}
+              />
+              {editIconImageError && (
+                <p className="text-xs mt-1" style={{ color: "#FB4C4F" }}>
+                  {editIconImageError}
+                </p>
+              )}
+            </div>
+            <div className="grid content-start gap-4 min-w-0">
+              <div className="grid gap-2" role="group" aria-label="Область">
+                <Label style={{ color: ACTIVE_TEXT_DARK }}>Область</Label>
+                <SegmentedSelector
+                  options={[
+                    { value: "INCOME", label: "Доход", colorScheme: "green" },
+                    { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                    { value: "BOTH", label: "Доходы и расходы", colorScheme: "purple" },
+                  ]}
+                  value={editScope}
+                  onChange={(value) => setEditScope(value as CategoryScope)}
+                  className={editTarget?.ownerUserId == null ? "opacity-60 pointer-events-none" : ""}
+                />
+              </div>
               {editTarget?.ownerUserId == null && (
-                <div className="text-xs text-muted-foreground">
+                <div className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                   Для общих категорий область менять нельзя.
                 </div>
               )}
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Иконка</Label>
-              <Select
+              <SelectField
+                label="2D иконка"
                 value={editIcon || "none"}
                 onValueChange={(value) => setEditIcon(value === "none" ? "" : value)}
-              >
-                <SelectTrigger className="border-2 border-border/70 bg-card shadow-none">
-                  <SelectValue placeholder="Без иконки" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Без иконки</SelectItem>
-                  {CATEGORY_ICON_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
+                options={[
+                  { value: "none", label: "Без иконки" },
+                  ...CATEGORY_ICON_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: (
                       <span className="flex items-center gap-2">
-                        <option.Icon className="h-4 w-4 text-slate-600" />
+                        <option.Icon className="h-4 w-4" style={{ color: PLACEHOLDER_COLOR_DARK }} />
                         <span>{option.label}</span>
                       </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    ),
+                  }))]}
+                placeholder="Без иконки"
+              />
             </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" className="border-2 border-border/70 bg-card shadow-none" onClick={() => setEditTarget(null)}>
-                Отмена
-              </Button>
-              <Button
-                type="submit"
-                className="bg-violet-600 text-white hover:bg-violet-700"
-                disabled={syncing}
-              >
-                Сохранить
-              </Button>
+          </div>
+          {editTarget && (
+            <div className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+              Категория: <span style={{ color: ACTIVE_TEXT_DARK }}>{editTarget.name}</span>
             </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+          )}
+        </div>
+      </FormModal>
 
       <AlertDialog
         open={Boolean(deleteTarget)}
@@ -638,66 +969,132 @@ export default function CategoriesPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">Категории</h1>
-            <p className="text-sm text-muted-foreground">
-              Управляйте деревом категорий и задавайте, к каким операциям они относятся.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+      {mounted && typeof document !== "undefined" &&
+        document.getElementById(SIDEBAR_FILTERS_SLOT_ID) &&
+        createPortal(
+          <div className="space-y-4 py-2">
+            <FilterSection
+              label="Название"
+              onReset={() => setNameFilter("")}
+              showReset={!!nameFilter}
+            >
+              <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal [&_input:not(:placeholder-shown)]:text-white">
+                <AuthInput
+                  type="text"
+                  placeholder="Начните вводить текст"
+                  value={nameFilter}
+                  onChange={(e) => setNameFilter(e.target.value)}
+                />
+              </div>
+            </FilterSection>
+
+            <FilterSection
+              label="Вид"
+              onReset={() => setScopeFilter(new Set())}
+              showReset={scopeFilter.size > 0}
+            >
+              <SegmentedSelector
+                options={[
+                  { value: "INCOME", label: "Доход", colorScheme: "green" },
+                  { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                ]}
+                value={scopeFilter}
+                onChange={handleScopeFilterChange}
+                multiple={true}
+              />
+            </FilterSection>
+
+            <FilterSection
+              label="Источник"
+              onReset={() => setSourceFilter(new Set())}
+              showReset={sourceFilter.size > 0}
+            >
+              <SegmentedSelector
+                options={[
+                  { value: "default", label: "По умолчанию", colorScheme: "purple" },
+                  { value: "added", label: "Добавленные", colorScheme: "purple" },
+                ]}
+                value={sourceFilter}
+                onChange={handleSourceFilterChange}
+                multiple={true}
+              />
+            </FilterSection>
+
+            <FilterSection
+              label="Статус"
+              onReset={() => {
+                setShowActiveStatus(true);
+                setShowDeletedStatus(false);
+              }}
+              showReset={!showActiveStatus || showDeletedStatus}
+            >
+              <SegmentedSelector
+                options={[
+                  { value: "active", label: "Действующий", colorScheme: "green" },
+                  { value: "deleted", label: "Удаленный", colorScheme: "red" },
+                ]}
+                value={statusFilterValue}
+                onChange={(value) => {
+                  const values = Array.isArray(value) ? value : value instanceof Set ? Array.from(value) : [value];
+                  setShowActiveStatus(values.includes("active"));
+                  setShowDeletedStatus(values.includes("deleted"));
+                }}
+                multiple={true}
+              />
+            </FilterSection>
+          </div>,
+          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
+        )}
+
+      <div className="flex-1 min-w-0 pt-[30px]">
+        <div className="w-full max-w-[900px] mx-auto px-4">
+          <div className="flex flex-wrap gap-2 mb-4">
             <Button
-              className="bg-violet-600 text-white hover:bg-violet-700"
+              className="rounded-[9px] border-0 flex items-center justify-center gap-2 transition-colors hover:opacity-90 text-sm font-normal"
+              style={{ backgroundColor: ACCENT }}
               onClick={() => openAddDialog(null, null, 0)}
             >
-              <Plus className="h-4 w-4" />
-              Добавить категорию
+              <Plus className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+              <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
             </Button>
           </div>
+          {error && (
+            <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+              {error}
+            </div>
+          )}
+          {loading ? (
+            <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
+              Загрузка категорий...
+            </div>
+          ) : visibleCategories.length === 0 ? (
+            <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
+              По выбранным фильтрам категорий нет.
+            </div>
+          ) : (
+            <CategoryCardList
+              nodes={visibleCategories}
+              depth={0}
+              parentName={null}
+              categoryLookup={categoryLookup}
+              onAddChild={(node, depth) =>
+                openAddDialog(node.id, node.name, depth, node.scope)
+              }
+              onDelete={(node) =>
+                setDeleteTarget({
+                  id: node.id,
+                  name: node.name,
+                  childCount: countDescendants(node),
+                  ownerUserId: node.owner_user_id,
+                })
+              }
+              onEdit={openEditDialog}
+              expandedIds={expandedIds}
+              onToggleExpand={toggleExpand}
+              isFilterActive={isFilterActive}
+            />
+          )}
         </div>
-
-        <Card>
-<CardContent>
-            {loading ? (
-              <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-                Загрузка категорий...
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {error && (
-                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-                    {error}
-                  </div>
-                )}
-                {visibleCategories.length === 0 ? (
-                  <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-                    Категории пока не добавлены.
-                  </div>
-                ) : (
-                  <CategoryTree
-                    nodes={visibleCategories}
-                    depth={1}
-                    onAddChild={(node, depth) =>
-                      openAddDialog(node.id, node.name, depth, node.scope)
-                    }
-                    onDelete={(node) =>
-                      setDeleteTarget({
-                        id: node.id,
-                        name: node.name,
-                        childCount: countDescendants(node),
-                        ownerUserId: node.owner_user_id,
-                      })
-                    }
-                    onEdit={openEditDialog}
-                    expandedIds={expandedIds}
-                    onToggle={toggleExpanded}
-                  />
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
     </main>
   );

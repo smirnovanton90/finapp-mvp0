@@ -89,7 +89,7 @@ function IconFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-const FILTER_PAGES = ["/assets", "/transactions", "/financial-planning", "/limits", "/counterparties"];
+const FILTER_PAGES = ["/assets", "/transactions", "/financial-planning", "/limits", "/categories", "/counterparties"];
 
 export function Sidebar() {
   const pathname = usePathname();

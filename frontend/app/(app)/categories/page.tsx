@@ -238,13 +238,7 @@ function CategoryCard({
               alt=""
               className="w-[64px] h-[64px] object-contain"
               style={{ filter: "drop-shadow(0 8px 16px rgba(0,0,0,0.2))" }}
-              onError={() => {
-                if (categoryIcon3dPath.endsWith(".png")) {
-                  setCategoryIconFormat("webp");
-                } else {
-                  setCategoryIconFormat(null);
-                }
-              }}
+              onError={() => setCategoryIconFormat(null)}
             />
           ) : (
             <div
@@ -1063,15 +1057,17 @@ export default function CategoriesPage() {
               {error}
             </div>
           )}
-          {loading ? (
-            <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-              Загрузка категорий...
-            </div>
-          ) : visibleCategories.length === 0 ? (
+          {visibleCategories.length === 0 && !loading ? (
             <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
               По выбранным фильтрам категорий нет.
             </div>
           ) : (
+            <div
+              style={{
+                opacity: loading ? 0 : 1,
+                transition: "opacity 0.3s ease-in-out",
+              }}
+            >
             <CategoryCardList
               nodes={visibleCategories}
               depth={0}
@@ -1093,6 +1089,7 @@ export default function CategoriesPage() {
               onToggleExpand={toggleExpand}
               isFilterActive={isFilterActive}
             />
+            </div>
           )}
         </div>
       </div>

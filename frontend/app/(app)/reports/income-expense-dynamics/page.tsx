@@ -782,28 +782,21 @@ const expenseMatrix = useMemo(
           </p>
         </div>
 
-        {loading && (
-          <div className="text-sm text-muted-foreground">
-            Загружаем транзакции...
-          </div>
-        )}
+        {error && <div className="text-sm text-red-600">{error}</div>}
 
-        {!loading && error && <div className="text-sm text-red-600">{error}</div>}
-
-        {!loading && !error && ratesLoading && (
-          <div className="text-sm text-muted-foreground">
-            Загружаем валютные курсы...
-          </div>
-        )}
-
-        {!loading && !error && showMissingRates && !ratesLoading && (
+        {showMissingRates && !ratesLoading && !loading && (
           <div className="text-sm text-amber-600">
             Для части транзакций не удалось получить курс валюты на дату операции.
           </div>
         )}
 
-        {!loading && !error && (
-          <div className="space-y-6">
+        <div
+          className="space-y-6"
+          style={{
+            opacity: loading || ratesLoading ? 0 : 1,
+            transition: "opacity 0.3s ease-in-out",
+          }}
+        >
             <CategoryTable
               title="Доходы и расходы"
               monthKeys={allMonthKeys}
@@ -830,8 +823,7 @@ const expenseMatrix = useMemo(
               summaryTotals={saldoTotals}
               l1IconById={l1IconById}
             />
-          </div>
-        )}
+        </div>
       </div>
     </main>
   );

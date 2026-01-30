@@ -281,8 +281,8 @@ export function AssetCard({
     : "";
 
   // Priority: 1. User uploaded photo, 2. 3D icon, 3. 2D icon
-  // Try PNG first, then WebP, then fallback to 2D icon
-  const [iconFormat, setIconFormat] = React.useState<"png" | "webp" | null>("png");
+  // 3D иконка — только PNG; при 404 показываем 2D
+  const [iconFormat, setIconFormat] = React.useState<"png" | null>("png");
   const icon3dPath = iconFormat ? `/icons-3d/${item.type_code}.${iconFormat}` : null;
   const hasPhoto = getItemPhotoUrl(item, API_BASE);
 
@@ -387,13 +387,8 @@ export function AssetCard({
                     style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
                     onLoad={() => handleImageLoad(0)}
                     onError={() => {
-                      // Try WebP if PNG failed, otherwise fallback to 2D icon
-                      if (iconFormat === "png") {
-                        setIconFormat("webp");
-                      } else {
-                        setIconFormat(null);
-                        handleImageError(0); // 2D icon doesn't need loading, mark as "loaded"
-                      }
+                      setIconFormat(null);
+                      handleImageError(0); // 2D иконка не грузится, считаем слот готовым
                     }}
                   />
                 )}

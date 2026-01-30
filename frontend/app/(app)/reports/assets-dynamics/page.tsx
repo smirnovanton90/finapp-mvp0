@@ -1354,32 +1354,32 @@ export default function AssetsDynamicsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="px-0">
-            <div className="relative py-6">
-              {loading && (
-                <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
-                  Загружаем данные...
-                </div>
-              )}
-
-              {!loading && error && (
+            <div
+              className="relative py-6"
+              style={{
+                opacity: loading ? 0 : 1,
+                transition: "opacity 0.3s ease-in-out",
+              }}
+            >
+              {error && (
                 <div className="flex h-80 items-center justify-center text-sm text-red-600">
                   {error}
                 </div>
               )}
 
-              {!loading && !error && selectedItems.length === 0 && (
+              {!error && selectedItems.length === 0 && !loading && (
                 <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Выберите активы или обязательства для построения отчета.
                 </div>
               )}
 
-              {!loading && !error && selectedItems.length > 0 && chartData.length === 0 && (
+              {!error && selectedItems.length > 0 && chartData.length === 0 && !loading && (
                 <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Нет данных для выбранного периода.
                 </div>
               )}
 
-              {!loading && !error && selectedItems.length > 0 && chartData.length > 0 && (
+              {!error && selectedItems.length > 0 && chartData.length > 0 && (
                 <div ref={chartRef} className="relative h-80 w-full">
                   {hoverPoint && hoverData && (
                     <div

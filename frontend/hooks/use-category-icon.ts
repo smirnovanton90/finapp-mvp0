@@ -19,8 +19,7 @@ type CategoryIcon = React.ComponentType<{
 }>;
 
 /**
- * Хук для получения иконки категории с поддержкой 3D (PNG/WebP fallback) и 2D fallback
- * Использует ту же логику, что и карточка транзакции
+ * Хук для получения иконки категории: 3D PNG или 2D fallback при отсутствии/404
  */
 export function useCategoryIcon(
   categoryId: number | null,
@@ -28,7 +27,7 @@ export function useCategoryIcon(
 ): {
   categoryIcon3dPath: string | null;
   CategoryIcon: CategoryIcon;
-  setCategoryIconFormat: (format: "png" | "webp" | null) => void;
+  setCategoryIconFormat: (format: "png" | null) => void;
 } {
   // Получаем путь категории для определения L1
   const categoryPath = useMemo(() => {
@@ -43,8 +42,8 @@ export function useCategoryIcon(
     return categoryL1 ? CATEGORY_ICON_NAME_BY_L1[categoryL1] ?? null : null;
   }, [categoryL1]);
 
-  // State для формата 3D иконки с fallback PNG -> WebP
-  const [categoryIconFormat, setCategoryIconFormat] = useState<"png" | "webp" | null>(
+  // 3D иконка — только PNG; при 404 переключаемся на 2D
+  const [categoryIconFormat, setCategoryIconFormat] = useState<"png" | null>(
     categoryIconName ? "png" : null
   );
 

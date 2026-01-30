@@ -50,8 +50,10 @@ export interface ImagePreloaderResult {
 
 /**
  * Универсальный хук для отслеживания загрузки изображений.
- * Полезен для скрытия контента до полной загрузки всех изображений.
- * 
+ * Карточка считается готовой только после загрузки (или 404) всех картинок.
+ * При 404 слот помечается как «решён по ошибке» и при смене URL не сбрасывается —
+ * переключение готов/не готов не происходит.
+ *
  * @example
  * ```tsx
  * const { isReady, imageRefs, handleImageLoad, handleImageError } = useImagePreloader({
@@ -90,6 +92,9 @@ export function useImagePreloader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrls.join(",")]);
 
+  // Индексы, по которым уже был 404: при смене URL не сбрасываем слот в false, чтобы не было мигания готов/не готов
+  const errorResolvedIndicesRef = useRef<Set<number>>(new Set());
+
   // Состояния загрузки для каждого изображения (по исходным индексам)
   // null/undefined URL считаются сразу загруженными
   const [loadedStates, setLoadedStates] = useState<boolean[]>(() => {
@@ -117,11 +122,12 @@ export function useImagePreloader({
     });
   }, []);
 
-  // Callback для обработки ошибки
+  // Callback для обработки ошибки (404 и т.д.): слот считаем готовым и больше не сбрасываем при смене URL
   const handleImageError = useCallback((index: number) => {
+    errorResolvedIndicesRef.current.add(index);
     setLoadedStates((prev) => {
       const next = [...prev];
-      next[index] = true; // Считаем ошибку как "загружено" (fallback будет показан)
+      next[index] = true; // fallback будет показан
       return next;
     });
   }, []);
@@ -157,13 +163,18 @@ export function useImagePreloader({
     }
   }, [totalCount, cacheCheckDelay, imageRefs, loadedStates, validUrlMap]);
 
-  // Инициализация: сбрасываем состояния при изменении URLs
+  // При изменении URLs не сбрасываем уже загруженные слоты (load/404) — иначе сбрасывался бы лого банка и т.д., мигание
   useEffect(() => {
     if (totalCount === 0) {
       setLoadedStates([]);
     } else {
-      // Сбрасываем состояния: null/undefined = сразу "загружено", остальные = false
-      setLoadedStates(imageUrls.map((url) => !Boolean(url)));
+      setLoadedStates((prev) =>
+        imageUrls.map((url, i) =>
+          Boolean(prev[i]) ||
+            errorResolvedIndicesRef.current.has(i) ||
+            !Boolean(url)
+        )
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalCount, imageUrls.join(",")]);

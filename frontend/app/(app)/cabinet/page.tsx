@@ -213,14 +213,6 @@ export default function CabinetPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-muted-foreground">Загрузка...</div>
-      </div>
-    );
-  }
-
   // Формируем URL для фото: используем photoPreview, который может быть:
   // 1. blob URL из выбранного файла (превью перед загрузкой)
   // 2. blob URL из загруженного фото (через fetchUserPhotoAsBlob)
@@ -228,7 +220,13 @@ export default function CabinetPage() {
   const photoUrl = photoPreview;
 
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
+    <div
+      className="container mx-auto p-6 max-w-4xl"
+      style={{
+        opacity: loading ? 0 : 1,
+        transition: "opacity 0.3s ease-in-out",
+      }}
+    >
       <h1 className="text-3xl font-bold mb-6">Кабинет</h1>
 
       {error && (

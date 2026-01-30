@@ -170,6 +170,7 @@ import {
   CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
 import { useOnboarding } from "@/components/onboarding-context";
+import { useImagePreloader } from "@/hooks/use-image-preloader";
 import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 type TransactionsViewMode = "actual" | "planning";
@@ -1173,6 +1174,7 @@ function TransactionCardRow({
   isDeleting,
   onConfirm,
   isConfirming,
+  onReady,
 }: {
   tx: TransactionCard;
   counterparty: CounterpartyOut | null;
@@ -1200,6 +1202,7 @@ function TransactionCardRow({
   isDeleting: boolean;
   onConfirm: (tx: TransactionCard) => void;
   isConfirming: boolean;
+  onReady?: () => void;
 }) {
   const isTransfer = tx.direction === "TRANSFER";
   const isExpense = tx.direction === "EXPENSE";
@@ -1343,7 +1346,7 @@ function TransactionCardRow({
   const categoryIconName = categoryL1
     ? CATEGORY_ICON_NAME_BY_L1[categoryL1] ?? null
     : null;
-  const [categoryIconFormat, setCategoryIconFormat] = useState<"png" | "webp" | null>(
+  const [categoryIconFormat, setCategoryIconFormat] = useState<"png" | null>(
     categoryIconName ? "png" : null
   );
   const categoryIcon3dPath =
@@ -1351,11 +1354,30 @@ function TransactionCardRow({
       ? `/icons-3d/categories/${categoryIconName}.${categoryIconFormat}`
       : null;
 
-  // 3D иконка стрелки для переводов
-  const [transferIconFormat, setTransferIconFormat] = useState<"png" | "webp" | null>("png");
+  // 3D иконка стрелки для переводов — только PNG, при 404 показываем 2D
+  const [transferIconFormat, setTransferIconFormat] = useState<"png" | null>("png");
   const transferIcon3dPath = transferIconFormat
     ? `/icons-3d/transfer-arrow.${transferIconFormat}`
     : null;
+
+  const imageUrls = [
+    primaryBankLogo,
+    isTransfer ? transferIcon3dPath : categoryIcon3dPath,
+    counterpartyBankLogo,
+    counterpartyLogoUrl,
+  ];
+  const { isReady: rowReady, setImageRef, handleImageLoad, handleImageError } =
+    useImagePreloader({ imageUrls, cacheCheckDelay: 0 });
+  const hasCalledOnReadyRef = useRef(false);
+  useEffect(() => {
+    if (rowReady && onReady && !hasCalledOnReadyRef.current) {
+      hasCalledOnReadyRef.current = true;
+      onReady();
+    }
+  }, [rowReady, onReady]);
+  useEffect(() => {
+    hasCalledOnReadyRef.current = false;
+  }, [tx.id]);
 
   const checkboxDisabled = tx.isDeleted || isDeleting;
 
@@ -1367,6 +1389,8 @@ function TransactionCardRow({
         boxSizing: "border-box",
         backgroundColor: outerBackgroundColor,
         ...outerBorderStyle,
+        opacity: rowReady ? 1 : 0,
+        transition: "opacity 0.2s ease-in-out",
       }}
     >
       {/* Контейнер 1 — подсветка */}
@@ -1503,11 +1527,14 @@ function TransactionCardRow({
               style={{ marginTop: 4 }}
             >
               <img
+                ref={(el) => setImageRef(0, el)}
                 src={primaryBankLogo}
                 alt={primaryBankName || ""}
                 className="rounded bg-white object-contain"
                 style={{ width: 20, height: 20 }}
                 loading="lazy"
+                onLoad={() => handleImageLoad(0)}
+                onError={() => handleImageError(0)}
               />
             </div>
           )}
@@ -1525,6 +1552,7 @@ function TransactionCardRow({
           {isTransfer ? (
             transferIcon3dPath ? (
               <img
+                ref={(el) => setImageRef(1, el)}
                 src={transferIcon3dPath}
                 alt=""
                 style={{
@@ -1533,12 +1561,10 @@ function TransactionCardRow({
                   objectFit: "contain",
                   filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
                 }}
+                onLoad={() => handleImageLoad(1)}
                 onError={() => {
-                  if (transferIconFormat === "png") {
-                    setTransferIconFormat("webp");
-                  } else {
-                    setTransferIconFormat(null);
-                  }
+                  handleImageError(1);
+                  setTransferIconFormat(null);
                 }}
               />
             ) : (
@@ -1553,6 +1579,7 @@ function TransactionCardRow({
             )
           ) : categoryIcon3dPath ? (
             <img
+              ref={(el) => setImageRef(1, el)}
               src={categoryIcon3dPath}
               alt=""
               style={{
@@ -1561,12 +1588,10 @@ function TransactionCardRow({
                 objectFit: "contain",
                 filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
               }}
+              onLoad={() => handleImageLoad(1)}
               onError={() => {
-                if (categoryIconFormat === "png") {
-                  setCategoryIconFormat("webp");
-                } else {
-                  setCategoryIconFormat(null);
-                }
+                handleImageError(1);
+                setCategoryIconFormat(null);
               }}
             />
           ) : (
@@ -1627,11 +1652,14 @@ function TransactionCardRow({
                   style={{ marginTop: 4 }}
                 >
                   <img
+                    ref={(el) => setImageRef(2, el)}
                     src={counterpartyBankLogo}
                     alt={counterpartyBankName || ""}
                     className="rounded bg-white object-contain"
                     style={{ width: 20, height: 20 }}
                     loading="lazy"
+                    onLoad={() => handleImageLoad(2)}
+                    onError={() => handleImageError(2)}
                   />
                 </div>
               )}
@@ -1701,11 +1729,14 @@ function TransactionCardRow({
             >
               {counterpartyLogoUrl ? (
                 <img
+                  ref={(el) => setImageRef(3, el)}
                   src={counterpartyLogoUrl}
                   alt=""
                   className="rounded bg-white object-contain"
                   style={{ width: 20, height: 20 }}
                   loading="lazy"
+                  onLoad={() => handleImageLoad(3)}
+                  onError={() => handleImageError(3)}
                 />
               ) : (
                 <div
@@ -3859,7 +3890,6 @@ function TransactionsView({
     if (!session) return;
     setIsInitialLoading(true);
     const handle = setTimeout(() => {
-      setTxs([]);
       setTxCursor(null);
       setHasMoreTxs(false);
       loadTransactions({ cursor: null, append: false });
@@ -3974,7 +4004,30 @@ function TransactionsView({
   const allSelected =
     selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
   const someSelected = selectedVisibleCount > 0 && !allSelected;
-  const showSkeleton = (loading || isInitialLoading) && sortedTxs.length === 0;
+  const [readyRowCount, setReadyRowCount] = useState(0);
+  const readyRowSetRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    const currentIds = new Set(sortedTxs.map((tx) => tx.id));
+    let hasChanges = false;
+    readyRowSetRef.current.forEach((id) => {
+      if (!currentIds.has(id)) {
+        readyRowSetRef.current.delete(id);
+        hasChanges = true;
+      }
+    });
+    if (hasChanges) {
+      setReadyRowCount(readyRowSetRef.current.size);
+    }
+    if (sortedTxs.length === 0) {
+      readyRowSetRef.current.clear();
+      setReadyRowCount(0);
+    }
+  }, [sortedTxs.map((t) => t.id).join(",")]);
+
+  const contentVisible =
+    sortedTxs.length > 0 && readyRowCount >= sortedTxs.length;
+
   const handleLoadMore = useCallback(() => {
     if (!hasMoreTxs || isLoadingMore || loading) return;
     loadTransactions({ cursor: txCursor, append: true });
@@ -5476,29 +5529,7 @@ function TransactionsView({
                   </div>
                 )}
               </div>
-            {showSkeleton ? (
-              <div className="space-y-3" aria-hidden="true">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <div
-                    key={`tx-skeleton-${index}`}
-                    className="rounded-lg border-2 border-border/70 bg-card p-4"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="h-12 w-12 shrink-0 rounded-full bg-slate-100 animate-pulse" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 w-1/3 rounded bg-slate-100 animate-pulse" />
-                        <div className="h-3 w-2/3 rounded bg-slate-100 animate-pulse" />
-                        <div className="h-3 w-1/2 rounded bg-slate-100 animate-pulse" />
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <div className="h-4 w-20 rounded bg-slate-100 animate-pulse" />
-                        <div className="h-3 w-16 rounded bg-slate-100 animate-pulse" />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : sortedTxs.length === 0 ? (
+            {sortedTxs.length === 0 ? (
               <div
                 className="rounded-lg border border-dashed p-6 text-center text-sm bg-transparent"
                 style={{ borderColor: ACCENT_FILL_MEDIUM, color: ACTIVE_TEXT_DARK }}
@@ -5506,7 +5537,14 @@ function TransactionsView({
                 Нет транзакций.
               </div>
             ) : (
-              sortedTxs.map((tx) => (
+              <div
+                className="space-y-3"
+                style={{
+                  opacity: contentVisible ? 1 : 0,
+                  transition: "opacity 0.3s ease-in-out",
+                }}
+              >
+                {sortedTxs.map((tx) => (
                   <TransactionCardRow
                     key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
                     tx={tx}
@@ -5520,18 +5558,25 @@ function TransactionsView({
                     getRubEquivalentCents={getRubEquivalentCents}
                     isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
                     onToggleSelection={toggleTxSelection}
-                  onCreateFrom={openCreateFromDialog}
-                  onRealize={openRealizeDialog}
-                  onEdit={openEditDialog}
-                  onDelete={(id) => openDeleteDialog([id])}
-                  isDeleting={isDeleting}
-                  onConfirm={handleConfirmStatus}
-                  isConfirming={
-                    confirmingTxId === tx.id ||
-                    (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
-                  }
-                />
-              ))
+                    onCreateFrom={openCreateFromDialog}
+                    onRealize={openRealizeDialog}
+                    onEdit={openEditDialog}
+                    onDelete={(id) => openDeleteDialog([id])}
+                    isDeleting={isDeleting}
+                    onConfirm={handleConfirmStatus}
+                    isConfirming={
+                      confirmingTxId === tx.id ||
+                      (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
+                    }
+                    onReady={() => {
+                      if (!readyRowSetRef.current.has(tx.id)) {
+                        readyRowSetRef.current.add(tx.id);
+                        setReadyRowCount((prev) => prev + 1);
+                      }
+                    }}
+                  />
+                ))}
+              </div>
             )}
             {hasMoreTxs && (
               <div className="flex justify-center pt-2">

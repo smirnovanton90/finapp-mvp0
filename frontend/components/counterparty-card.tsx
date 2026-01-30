@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { MoreVertical, Pencil, Trash2, User, Factory } from "lucide-react";
+import { useImagePreloader } from "@/hooks/use-image-preloader";
 import { IconButton } from "@/components/ui/icon-button";
 import {
   DropdownMenu,
@@ -46,6 +47,7 @@ export interface CounterpartyCardProps {
   legalFormLabel?: string;
   onEdit?: (counterparty: CounterpartyOut) => void;
   onDelete?: (counterparty: CounterpartyOut) => void;
+  onReady?: () => void;
 }
 
 export function CounterpartyCard({
@@ -54,6 +56,7 @@ export function CounterpartyCard({
   legalFormLabel = "",
   onEdit,
   onDelete,
+  onReady,
 }: CounterpartyCardProps) {
   const isDeleted = Boolean(counterparty.deleted_at);
   const isUser = Boolean(counterparty.owner_user_id);
@@ -74,6 +77,17 @@ export function CounterpartyCard({
       ? `${API_BASE}${imageUrl}`
       : `${API_BASE}/${imageUrl}`
     : null;
+
+  const imageUrls = [imageUrlFull ?? null];
+  const { isReady: isCardReady, setImageRef, handleImageLoad, handleImageError } =
+    useImagePreloader({ imageUrls, cacheCheckDelay: 0 });
+  const hasCalledOnReadyRef = useRef(false);
+  useEffect(() => {
+    if (isCardReady && onReady && !hasCalledOnReadyRef.current) {
+      hasCalledOnReadyRef.current = true;
+      onReady();
+    }
+  }, [isCardReady, onReady]);
 
   const FallbackIcon =
     counterparty.entity_type === "PERSON"
@@ -96,6 +110,7 @@ export function CounterpartyCard({
           <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
             {imageUrlFull ? (
               <img
+                ref={(el) => setImageRef(0, el)}
                 src={imageUrlFull}
                 alt=""
                 className="w-[100px] h-[100px] rounded-lg object-contain"
@@ -103,6 +118,8 @@ export function CounterpartyCard({
                   filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
                   backgroundColor: "transparent",
                 }}
+                onLoad={() => handleImageLoad(0)}
+                onError={() => handleImageError(0)}
               />
             ) : (
               <div

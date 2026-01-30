@@ -1110,14 +1110,7 @@ export default function FinancialPlanningPage() {
                   alt=""
                   className="w-[100px] h-[100px] object-contain"
                   style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
-                  onError={() => {
-                    // Fallback PNG -> WebP -> 2D иконка
-                    if (categoryIcon3dPath.endsWith(".png")) {
-                      setCategoryIconFormat("webp");
-                    } else {
-                      setCategoryIconFormat(null);
-                    }
-                  }}
+                  onError={() => setCategoryIconFormat(null)}
                 />
               ) : (
                 <div
@@ -1796,14 +1789,18 @@ export default function FinancialPlanningPage() {
                 <span style={{ color: "white", opacity: 0.85 }}>Добавить цепочку</span>
               </Button>
             </div>
-            {loading ? (
-              <div className="text-sm text-muted-foreground">Загрузка...</div>
-            ) : visibleChains.length === 0 ? (
+            {visibleChains.length === 0 && !loading ? (
               <div className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
                 Пока нет цепочек плановых транзакций.
               </div>
             ) : (
-              <div className="space-y-4">
+              <div
+                className="space-y-4"
+                style={{
+                  opacity: loading ? 0 : 1,
+                  transition: "opacity 0.3s ease-in-out",
+                }}
+              >
                 {visibleChains.map((chain) => {
                   const stats = chainStatsById.get(chain.id) ?? {
                     total: 0,

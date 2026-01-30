@@ -84,6 +84,8 @@ export default function CounterpartiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [readyCardCount, setReadyCardCount] = useState(0);
+  const readyCardSetRef = useRef<Set<number>>(new Set());
   useEffect(() => setMounted(true), []);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -186,6 +188,22 @@ export default function CounterpartiesPage() {
     showPersonEntities,
     showActiveStatus,
   ]);
+
+  useEffect(() => {
+    const currentIds = new Set(filteredCounterparties.map((c) => c.id));
+    readyCardSetRef.current.forEach((id) => {
+      if (!currentIds.has(id)) readyCardSetRef.current.delete(id);
+    });
+    if (filteredCounterparties.length === 0) {
+      readyCardSetRef.current.clear();
+      setReadyCardCount(0);
+    }
+  }, [filteredCounterparties.map((c) => c.id).join(",")]);
+
+  const contentVisible =
+    !loading &&
+    (filteredCounterparties.length === 0 ||
+      readyCardCount >= filteredCounterparties.length);
 
   useEffect(() => {
     return () => {
@@ -933,35 +951,38 @@ export default function CounterpartiesPage() {
               <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
             </Button>
           </div>
-            {loading ? (
-              <div className="text-center py-12 text-muted-foreground">
-                Загрузка контрагентов…
-              </div>
-            ) : filteredCounterparties.length === 0 ? (
+            {filteredCounterparties.length === 0 && !loading ? (
               <div className="text-center py-12 text-muted-foreground">
                 По выбранным фильтрам контрагентов нет.
               </div>
             ) : (
-              <div className="relative">
-                <div
-                  className="grid grid-cols-2 xl:grid-cols-3 gap-4"
-                  style={{ position: "relative", zIndex: 2 }}
-                >
-                  {filteredCounterparties.map((item) => (
-                    <div key={item.id}>
-                        <CounterpartyCard
-                        counterparty={item}
-                        industryLabel={industryLabel(item.industry_id) || undefined}
-                        legalFormLabel={item.entity_type === "LEGAL" && item.legal_form ? legalFormLabel(item.legal_form) : undefined}
-                        onEdit={(c) => {
-                          setEditing(c);
-                          setIsDialogOpen(true);
-                        }}
-                        onDelete={(c) => setDeleteTarget(c)}
-                      />
-                    </div>
-                  ))}
-                </div>
+              <div
+                className="grid grid-cols-2 xl:grid-cols-3 gap-4"
+                style={{
+                  opacity: contentVisible ? 1 : 0,
+                  transition: "opacity 0.3s ease-in-out",
+                }}
+              >
+                {filteredCounterparties.map((item) => (
+                  <div key={item.id}>
+                    <CounterpartyCard
+                      counterparty={item}
+                      industryLabel={industryLabel(item.industry_id) || undefined}
+                      legalFormLabel={item.entity_type === "LEGAL" && item.legal_form ? legalFormLabel(item.legal_form) : undefined}
+                      onEdit={(c) => {
+                        setEditing(c);
+                        setIsDialogOpen(true);
+                      }}
+                      onDelete={(c) => setDeleteTarget(c)}
+                      onReady={() => {
+                        if (!readyCardSetRef.current.has(item.id)) {
+                          readyCardSetRef.current.add(item.id);
+                          setReadyCardCount((prev) => prev + 1);
+                        }
+                      }}
+                    />
+                  </div>
+                ))}
               </div>
             )}
           </div>

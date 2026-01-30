@@ -271,12 +271,8 @@ export function LimitCard({
                 style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
                 onLoad={() => handleImageLoad(0)}
                 onError={() => {
-                  if (categoryIcon3dPath.endsWith(".png")) {
-                    setCategoryIconFormat("webp");
-                  } else {
-                    setCategoryIconFormat(null);
-                    handleImageError(0);
-                  }
+                  setCategoryIconFormat(null);
+                  handleImageError(0);
                 }}
               />
             ) : (

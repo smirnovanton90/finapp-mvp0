@@ -42,7 +42,6 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterSection } from "@/components/filter-panel";
 import { AssetCard } from "@/components/asset-card";
-import { AssetCardSkeleton } from "@/components/asset-card-skeleton";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
@@ -630,9 +629,8 @@ export default function Page() {
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
-  const [loading, setLoading] = useState(true); // Начинаем с true, чтобы сразу показать скелетон
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showSkeletons, setShowSkeletons] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -737,7 +735,7 @@ export default function Page() {
   const [itemPhotoPreview, setItemPhotoPreview] = useState<string | null>(null);
   const [itemPhotoError, setItemPhotoError] = useState<string | null>(null);
   const itemPhotoInputRef = useRef<HTMLInputElement | null>(null);
-  const [icon3dFormat, setIcon3dFormat] = useState<"png" | "webp" | null>("png");
+  const [icon3dFormat, setIcon3dFormat] = useState<"png" | null>("png");
   const [show2dIcon, setShow2dIcon] = useState(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
 
@@ -1533,25 +1531,9 @@ export default function Page() {
     }
   }, [visibleItems.map(item => item.id).join(',')]);
 
-  // Показывать скелетоны во время загрузки или пока не все карточки готовы
-  useEffect(() => {
-    if (loading) {
-      // Показываем скелетоны во время загрузки данных
-      setShowSkeletons(true);
-    } else if (visibleItems.length > 0) {
-      // Показываем скелетоны при появлении элементов
-      setShowSkeletons(true);
-    } else {
-      setShowSkeletons(false);
-    }
-  }, [loading, visibleItems.length]);
-
-  // Скрываем скелетоны, когда все карточки готовы
-  useEffect(() => {
-    if (!loading && visibleItems.length > 0 && readyCardsCount >= visibleItems.length) {
-      setShowSkeletons(false);
-    }
-  }, [loading, visibleItems.length, readyCardsCount]);
+  // Контент виден только когда есть элементы и все карточки вызвали onReady (избегаем мигания: пустая сетка не показывается с opacity 1)
+  const contentVisible =
+    visibleItems.length > 0 && readyCardsCount >= visibleItems.length;
 
   const activeAssetItems = useMemo(
     () =>
@@ -3935,14 +3917,9 @@ export default function Page() {
                           alt=""
                           className="w-full h-full object-contain"
                           onError={() => {
-                            // Try WebP if PNG failed
-                            if (icon3dFormat === "png") {
-                              setIcon3dFormat("webp");
-                            } else {
-                              // Fallback to 2D icon
-                              setIcon3dFormat(null);
-                              setShow2dIcon(true);
-                            }
+                            // При 404 — 2D иконка
+                            setIcon3dFormat(null);
+                            setShow2dIcon(true);
                           }}
                         />
                       )}
@@ -5338,38 +5315,11 @@ export default function Page() {
               </div>
             ) : (
               <div className="relative">
-                {/* Скелетоны для загрузки */}
-                {showSkeletons && (
-                  <div 
-                    className="columns-2 xl:columns-3 gap-4"
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      zIndex: 1,
-                    }}
-                  >
-                    {Array.from({ length: Math.min(visibleItems.length || 6, 6) }).map((_, index) => (
-                      <div
-                        key={`skeleton-${index}`}
-                        style={{
-                          breakInside: "avoid",
-                          marginBottom: "1rem",
-                        }}
-                      >
-                        <AssetCardSkeleton />
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {/* Разделы с карточками активов */}
+                {/* Разделы с карточками активов: opacity до вызова onReady со всех карточек */}
                 <div
                   className="space-y-8"
                   style={{
-                    position: "relative",
-                    zIndex: 2,
-                    opacity: showSkeletons ? 0 : 1,
+                    opacity: contentVisible ? 1 : 0,
                     transition: "opacity 0.3s ease-in-out",
                   }}
                 >

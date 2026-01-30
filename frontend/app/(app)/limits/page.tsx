@@ -866,11 +866,7 @@ export default function LimitsPage() {
               </div>
             )}
 
-            {loading ? (
-              <div className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                Загрузка лимитов...
-              </div>
-            ) : visibleLimits.length === 0 ? (
+            {visibleLimits.length === 0 && !loading ? (
               <div
                 className="rounded-lg border border-dashed p-6 text-center text-sm"
                 style={{ borderColor: PLACEHOLDER_COLOR_DARK, color: PLACEHOLDER_COLOR_DARK }}
@@ -880,7 +876,12 @@ export default function LimitsPage() {
             ) : (
               <div
                 className="columns-2 xl:columns-3 gap-4"
-                style={{ position: "relative", zIndex: 2 }}
+                style={{
+                  position: "relative",
+                  zIndex: 2,
+                  opacity: loading ? 0 : 1,
+                  transition: "opacity 0.3s ease-in-out",
+                }}
               >
                 {visibleLimits.map((limit) => {
                   const summary = limitSummaryById.get(limit.id) ?? {

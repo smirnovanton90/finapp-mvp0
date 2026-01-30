@@ -28,26 +28,9 @@ import {
   ACCENT,
 } from "@/lib/colors";
 import { PINK_GRADIENT as PINK_GRADIENT_CONST } from "@/lib/gradients";
-import {
-  Banknote,
-  Landmark,
-  CreditCard,
-  PiggyBank,
-  Wallet,
-  LineChart,
-  BarChart3,
-  Coins,
-  Users,
-  Home,
-  Car,
-  Package,
-  TrendingUp,
-  Receipt,
-  AlertCircle,
-  User,
-  Building2,
-} from "lucide-react";
+import { User, Building2 } from "lucide-react";
 import { assetIconPath } from "@/lib/image-paths";
+import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { CardIcon } from "@/components/card-icon";
 
@@ -82,77 +65,6 @@ const MARKET_VALUE_TYPE_CODES = new Set([
   "collectibles",
   "other_valuables",
 ]);
-
-const TYPE_ICON_BY_CODE: Record<
-  string,
-  React.ComponentType<{
-    className?: string;
-    strokeWidth?: number;
-    style?: CSSProperties;
-  }>
-> = {
-  cash: Banknote,
-  bank_account: Landmark,
-  bank_card: CreditCard,
-  deposit: PiggyBank,
-  savings_account: Wallet,
-  e_wallet: Wallet,
-  brokerage: LineChart,
-  securities: BarChart3,
-  bonds: BarChart3,
-  etf: BarChart3,
-  bpif: BarChart3,
-  pif: BarChart3,
-  iis: LineChart,
-  precious_metals: Coins,
-  crypto: Coins,
-  loan_to_third_party: Users,
-  third_party_receivables: Users,
-  real_estate: Home,
-  townhouse: Home,
-  land_plot: Home,
-  garage: Home,
-  commercial_real_estate: Home,
-  real_estate_share: Home,
-  car: Car,
-  motorcycle: Car,
-  boat: Car,
-  trailer: Car,
-  special_vehicle: Car,
-  jewelry: Package,
-  electronics: Package,
-  art: Package,
-  collectibles: Package,
-  other_valuables: Package,
-  npf: PiggyBank,
-  investment_life_insurance: PiggyBank,
-  business_share: TrendingUp,
-  sole_proprietor: TrendingUp,
-  other_asset: Package,
-  consumer_loan: Coins,
-  mortgage: Home,
-  car_loan: Car,
-  education_loan: Coins,
-  installment: Receipt,
-  microloan: Coins,
-  private_loan: Users,
-  third_party_payables: Users,
-  tax_debt: Receipt,
-  personal_income_tax_debt: Receipt,
-  property_tax_debt: Receipt,
-  land_tax_debt: Receipt,
-  transport_tax_debt: Receipt,
-  fns_debt: Receipt,
-  utilities_debt: Receipt,
-  telecom_debt: Receipt,
-  traffic_fines_debt: Receipt,
-  enforcement_debt: AlertCircle,
-  alimony_debt: AlertCircle,
-  court_debt: AlertCircle,
-  court_fine_debt: AlertCircle,
-  business_liability: AlertCircle,
-  other_liability: AlertCircle,
-};
 
 function getMoexUnitPriceCents(
   item: ItemOut,
@@ -343,7 +255,7 @@ export function AssetCard({
       <div className="pt-[12px] pr-[12px] pb-[12px] pl-[19px]">
         {/* Header: иконка + основная информация + кнопка меню */}
         <div className="flex items-start justify-between mb-3 gap-3">
-          {/* Icon — единый CardIcon, без фона и обводки, с тенью */}
+          {/* Icon — единый CardIcon, без фона и обводки, с тенью: фото → 3D → 2D */}
           <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
             {hasPhoto ? (
               <CardIcon

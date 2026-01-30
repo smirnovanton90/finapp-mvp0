@@ -10,10 +10,8 @@ import {
   type CSSProperties,
 } from "react";
 
-import { User, Building2 } from "lucide-react";
 import { ItemKind, ItemOut, CounterpartyOut } from "@/lib/api";
-import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
-import { CardIcon } from "@/components/card-icon";
+import { AssetItemIcon } from "@/components/asset-item-icon";
 import {
   formatAmount,
   normalizeItemSearch,
@@ -21,40 +19,6 @@ import {
 } from "@/lib/item-utils";
 import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
-
-/** Иконка контрагента: та же логика, что на карточке актива (useCounterpartyImage + CardIcon). */
-function ItemCounterpartyIcon({
-  counterparty,
-  apiBase,
-  size = 24,
-  className,
-  fallbackIconColor,
-  alt = "",
-}: {
-  counterparty: CounterpartyOut | null;
-  apiBase: string;
-  size?: number;
-  className?: string;
-  fallbackIconColor?: string;
-  alt?: string;
-}) {
-  const { currentSrc, onError, showFallbackIcon } = useCounterpartyImage(counterparty, apiBase);
-  if (!counterparty) return null;
-  const FallbackIcon = counterparty.entity_type === "PERSON" ? User : Building2;
-  return (
-    <CardIcon
-      src={currentSrc && !showFallbackIcon ? currentSrc : null}
-      alt={alt}
-      fallbackIcon={FallbackIcon}
-      size={size}
-      shadow={false}
-      className={className}
-      onError={onError}
-      fallbackIconColor={fallbackIconColor}
-      objectFit="contain"
-    />
-  );
-}
 
 type ItemSelectorProps = {
   items: ItemOut[];
@@ -256,9 +220,10 @@ export function ItemSelector({
           disabled={disabled}
           prefixPlClass="pl-12"
           prefix={
-            !query && selectedCounterparty && apiBase ? (
-              <ItemCounterpartyIcon
-                counterparty={selectedCounterparty}
+            !query && selectedItem && apiBase ? (
+              <AssetItemIcon
+                item={selectedItem}
+                counterparty={selectedCounterparty ?? null}
                 apiBase={apiBase}
                 size={24}
                 className="h-6 w-6 rounded object-contain"
@@ -402,20 +367,17 @@ export function ItemSelector({
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => applySelection(item.id)}
                   >
-                    {counterparty && apiBase ? (
-                      <div className={`h-6 w-6 shrink-0 rounded-sm overflow-hidden ${logoToneClass}`}>
-                        <ItemCounterpartyIcon
-                          counterparty={counterparty}
-                          apiBase={apiBase}
-                          size={24}
-                          className="h-6 w-6 rounded-sm object-contain"
-                          fallbackIconColor={isSelected ? "white" : SIDEBAR_TEXT_ACTIVE}
-                          alt={bankName || ""}
-                        />
-                      </div>
-                    ) : (
-                      <div className="h-6 w-6 rounded-sm" />
-                    )}
+                    <div className={`h-6 w-6 shrink-0 rounded-sm overflow-hidden ${logoToneClass}`}>
+                      <AssetItemIcon
+                        item={item}
+                        counterparty={counterparty ?? null}
+                        apiBase={apiBase ?? ""}
+                        size={24}
+                        className="h-6 w-6 rounded-sm object-contain"
+                        fallbackIconColor={isSelected ? "white" : SIDEBAR_TEXT_ACTIVE}
+                        alt={bankName || item.name || ""}
+                      />
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div
                         className="text-sm font-normal break-words"

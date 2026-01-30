@@ -979,14 +979,20 @@ export default function CounterpartiesPage() {
             ) : (
               <>
                 <div
-                  className="grid grid-cols-2 xl:grid-cols-3 gap-4"
+                  className="columns-2 xl:columns-3 gap-4"
                   style={{
                     opacity: contentVisible ? 1 : 0,
                     transition: "opacity 0.3s ease-in-out",
                   }}
                 >
                   {filteredCounterparties.map((item) => (
-                    <div key={item.id}>
+                    <div
+                      key={item.id}
+                      style={{
+                        breakInside: "avoid",
+                        marginBottom: "1rem",
+                      }}
+                    >
                       <CounterpartyCard
                         counterparty={item}
                         industryLabel={industryLabel(item.industry_id) || undefined}

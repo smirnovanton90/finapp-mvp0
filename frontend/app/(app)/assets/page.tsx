@@ -48,6 +48,7 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
+import { PINK_GRADIENT } from "@/lib/gradients";
 import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 import { cn } from "@/lib/utils";
 
@@ -1477,6 +1478,34 @@ export default function Page() {
     () => sortItemsByTransactionCount(filteredItems, itemTxCounts),
     [filteredItems, itemTxCounts]
   );
+
+  // Разделы для отображения: активы, затем обязательства; внутри — по сумме кол-ва транзакций
+  const orderedSectionsWithItems = useMemo(() => {
+    function itemInSection(item: ItemOut) {
+      const kind = resolveItemEffectiveKind(item);
+      return (section: (typeof ITEM_SECTIONS)[0]) => {
+        if (kind !== section.kind) return false;
+        if (section.id === "credit_liabilities")
+          return CREDIT_LIABILITY_TYPES.includes(item.type_code) || item.type_code === "bank_card";
+        return section.typeCodes.includes(item.type_code);
+      };
+    }
+    const list: { section: (typeof ITEM_SECTIONS)[0]; items: ItemOut[]; totalRubCents: number }[] = [];
+    for (const section of ITEM_SECTIONS) {
+      const items = visibleItems.filter((item) => itemInSection(item)(section));
+      if (items.length === 0) continue;
+      const sortedItems = sortItemsByTransactionCount(items, itemTxCounts);
+      const totalRubCents = sortedItems.reduce((sum, it) => sum + (getRubEquivalentCents(it) ?? 0), 0);
+      list.push({ section, items: sortedItems, totalRubCents });
+    }
+    list.sort((a, b) => {
+      if (a.section.kind !== b.section.kind) return a.section.kind === "ASSET" ? -1 : 1;
+      const sumA = a.items.reduce((s, it) => s + (itemTxCounts.get(it.id) ?? 0), 0);
+      const sumB = b.items.reduce((s, it) => s + (itemTxCounts.get(it.id) ?? 0), 0);
+      return sumB - sumA;
+    });
+    return list;
+  }, [visibleItems, itemTxCounts, resolveItemEffectiveKind, getRubEquivalentCents]);
 
   // Отслеживание готовности карточек для скрытия скелетонов
   const [readyCardsCount, setReadyCardsCount] = useState(0);
@@ -5334,9 +5363,9 @@ export default function Page() {
                     ))}
                   </div>
                 )}
-                {/* Карточки активов */}
-                <div 
-                  className="columns-2 xl:columns-3 gap-4"
+                {/* Разделы с карточками активов */}
+                <div
+                  className="space-y-8"
                   style={{
                     position: "relative",
                     zIndex: 2,
@@ -5344,46 +5373,71 @@ export default function Page() {
                     transition: "opacity 0.3s ease-in-out",
                   }}
                 >
-                  {visibleItems.map((item, index) => {
-                    const rate = rateByCode[item.currency_code];
-                    const rubEquivalent = getRubEquivalentCents(item);
-                    const counterparty = item.counterparty_id
-                      ? counterpartiesById.get(item.counterparty_id) ?? null
-                      : null;
-                    return (
-                      <div
-                        key={item.id}
-                        style={{
-                          breakInside: "avoid",
-                          marginBottom: "1rem",
-                        }}
-                      >
-                        <AssetCard
-                          item={item}
-                          accountingStartDate={accountingStartDate}
-                          rate={rate}
-                          rubEquivalent={rubEquivalent}
-                          counterparty={counterparty}
-                          moexMarketPrice={
-                            MOEX_TYPE_CODES.includes(item.type_code)
-                              ? moexMarketPrices.get(item.id) ?? null
-                              : null
-                          }
-                          onEdit={(item) => openEditModal(item)}
-                          onDelete={(item) => onArchive(item)}
-                          onArchive={(item) => onArchive(item)}
-                          onClose={(item) => onClose(item)}
-                        getItemDisplayBalanceCents={getItemDisplayBalanceCents}
-                        onReady={() => {
-                          if (!readyCardsSet.current.has(item.id)) {
-                            readyCardsSet.current.add(item.id);
-                            setReadyCardsCount((prev) => prev + 1);
-                          }
-                        }}
-                      />
+                  {orderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
+                    <div key={section.id}>
+                      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                        <h2
+                          className="text-2xl font-medium"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          {section.label}
+                        </h2>
+                        <span
+                          className="text-2xl font-medium"
+                          style={{
+                            background: PINK_GRADIENT,
+                            WebkitBackgroundClip: "text",
+                            WebkitTextFillColor: "transparent",
+                            backgroundClip: "text",
+                          }}
+                        >
+                          {formatRub(totalRubCents)}
+                        </span>
                       </div>
-                    );
-                  })}
+                      <div className="columns-2 xl:columns-3 gap-4">
+                        {items.map((item) => {
+                          const rate = rateByCode[item.currency_code];
+                          const rubEquivalent = getRubEquivalentCents(item);
+                          const counterparty = item.counterparty_id
+                            ? counterpartiesById.get(item.counterparty_id) ?? null
+                            : null;
+                          return (
+                            <div
+                              key={item.id}
+                              style={{
+                                breakInside: "avoid",
+                                marginBottom: "1rem",
+                              }}
+                            >
+                              <AssetCard
+                                item={item}
+                                accountingStartDate={accountingStartDate}
+                                rate={rate}
+                                rubEquivalent={rubEquivalent}
+                                counterparty={counterparty}
+                                moexMarketPrice={
+                                  MOEX_TYPE_CODES.includes(item.type_code)
+                                    ? moexMarketPrices.get(item.id) ?? null
+                                    : null
+                                }
+                                onEdit={(item) => openEditModal(item)}
+                                onDelete={(item) => onArchive(item)}
+                                onArchive={(item) => onArchive(item)}
+                                onClose={(item) => onClose(item)}
+                                getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                                onReady={() => {
+                                  if (!readyCardsSet.current.has(item.id)) {
+                                    readyCardsSet.current.add(item.id);
+                                    setReadyCardsCount((prev) => prev + 1);
+                                  }
+                                }}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

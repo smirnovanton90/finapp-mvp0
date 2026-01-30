@@ -733,6 +733,12 @@ class CounterpartyOut(CounterpartyBase):
         from_attributes = True
 
 
+class CounterpartyPageOut(BaseModel):
+    items: list[CounterpartyOut]
+    next_cursor: str | None = None
+    has_more: bool
+
+
 class LegalFormOut(BaseModel):
     code: str
     label: str

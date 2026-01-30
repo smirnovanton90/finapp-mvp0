@@ -5,6 +5,7 @@ import {
   CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
 import { makeCategoryPathKey } from "@/lib/categories";
+import { categoryIconPath } from "@/lib/image-paths";
 
 type CategoryLookup = {
   idToPath: Map<number, string[]>;
@@ -49,9 +50,7 @@ export function useCategoryIcon(
 
   // Путь к 3D иконке
   const categoryIcon3dPath = useMemo(() => {
-    return categoryIconName && categoryIconFormat
-      ? `/icons-3d/categories/${categoryIconName}.${categoryIconFormat}`
-      : null;
+    return categoryIconPath(categoryIconName ?? "", categoryIconFormat);
   }, [categoryIconName, categoryIconFormat]);
 
   // 2D fallback иконка через resolveCategoryIcon (поиск по иерархии)
@@ -65,7 +64,12 @@ export function useCategoryIcon(
       const key = makeCategoryPathKey(...path.slice(0, depth));
       const targetId = categoryLookup.pathToId.get(key);
       if (!targetId) continue;
-      const iconName = categoryLookup.idToIcon.get(targetId);
+      // Для L1 приоритет у маппинга из конфига (актуальная иконка без зависимости от БД)
+      const l1Name = path[0];
+      const iconName =
+        depth === 1 && l1Name && CATEGORY_ICON_NAME_BY_L1[l1Name]
+          ? CATEGORY_ICON_NAME_BY_L1[l1Name]
+          : categoryLookup.idToIcon.get(targetId) ?? null;
       if (!iconName) continue;
       const normalizedIconName = iconName.trim();
       if (!normalizedIconName) continue;

@@ -1,4 +1,47 @@
 import { CounterpartyOut, CounterpartyIndustryOut, TransactionOut } from "@/lib/api";
+import { resolveApiImageUrl } from "@/lib/api-image-url";
+import {
+  counterpartyDefaultIconPath,
+  counterpartyStaticIconPath,
+} from "@/lib/image-paths";
+
+/** Контрагент общий для всех пользователей (дефолтный). Для него иконки грузятся только из статики. */
+export function isDefaultCounterparty(
+  counterparty: Pick<CounterpartyOut, "owner_user_id">
+): boolean {
+  return counterparty.owner_user_id === null;
+}
+
+/**
+ * URL-кандидаты для отображения иконки контрагента.
+ * Дефолтные LEGAL: статика counterparty-<INN>-<OGRN>.png / counterparty-<INN>.png / counterparty-<OGRN>.png → legal.png.
+ * Дефолтные без идентификаторов / PERSON: person.png или legal.png.
+ * Добавленные пользователем: API (logo/photo) → person.png/legal.png.
+ */
+export function getCounterpartyImageUrlCandidates(
+  counterparty: CounterpartyOut,
+  apiBase: string
+): string[] {
+  const candidates: string[] = [];
+  if (isDefaultCounterparty(counterparty)) {
+    if (counterparty.entity_type === "LEGAL") {
+      const staticPath = counterpartyStaticIconPath(
+        counterparty.inn,
+        counterparty.ogrn
+      );
+      if (staticPath) candidates.push(staticPath);
+    }
+  } else {
+    const apiUrl =
+      counterparty.entity_type === "PERSON"
+        ? counterparty.photo_url
+        : counterparty.logo_url;
+    const resolved = resolveApiImageUrl(apiUrl, apiBase);
+    if (resolved) candidates.push(resolved);
+  }
+  candidates.push(counterpartyDefaultIconPath(counterparty.entity_type));
+  return candidates;
+}
 
 export function normalizeCounterpartySearch(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");

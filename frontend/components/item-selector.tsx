@@ -10,7 +10,10 @@ import {
   type CSSProperties,
 } from "react";
 
-import { ItemKind, ItemOut } from "@/lib/api";
+import { User, Building2 } from "lucide-react";
+import { ItemKind, ItemOut, CounterpartyOut } from "@/lib/api";
+import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
+import { CardIcon } from "@/components/card-icon";
 import {
   formatAmount,
   normalizeItemSearch,
@@ -18,6 +21,40 @@ import {
 } from "@/lib/item-utils";
 import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
+
+/** Иконка контрагента: та же логика, что на карточке актива (useCounterpartyImage + CardIcon). */
+function ItemCounterpartyIcon({
+  counterparty,
+  apiBase,
+  size = 24,
+  className,
+  fallbackIconColor,
+  alt = "",
+}: {
+  counterparty: CounterpartyOut | null;
+  apiBase: string;
+  size?: number;
+  className?: string;
+  fallbackIconColor?: string;
+  alt?: string;
+}) {
+  const { currentSrc, onError, showFallbackIcon } = useCounterpartyImage(counterparty, apiBase);
+  if (!counterparty) return null;
+  const FallbackIcon = counterparty.entity_type === "PERSON" ? User : Building2;
+  return (
+    <CardIcon
+      src={currentSrc && !showFallbackIcon ? currentSrc : null}
+      alt={alt}
+      fallbackIcon={FallbackIcon}
+      size={size}
+      shadow={false}
+      className={className}
+      onError={onError}
+      fallbackIconColor={fallbackIconColor}
+      objectFit="contain"
+    />
+  );
+}
 
 type ItemSelectorProps = {
   items: ItemOut[];
@@ -31,6 +68,8 @@ type ItemSelectorProps = {
   getItemTypeLabel: (item: ItemOut) => string;
   getItemKind?: (item: ItemOut) => ItemKind;
   getBankLogoUrl?: (id: number | null | undefined) => string | null;
+  getCounterpartyForItemId?: (id: number) => CounterpartyOut | null;
+  apiBase?: string;
   getBankName?: (id: number | null | undefined) => string;
   getItemBalance?: (item: ItemOut) => number;
   itemCounts?: Map<number, number> | Record<number, number>;
@@ -55,6 +94,8 @@ export function ItemSelector({
   getItemTypeLabel,
   getItemKind,
   getBankLogoUrl,
+  getCounterpartyForItemId,
+  apiBase,
   getBankName,
   getItemBalance,
   itemCounts,
@@ -103,9 +144,10 @@ export function ItemSelector({
   const selectedLabel =
     selectionMode === "single" && selectedItems[0] ? selectedItems[0].name : "";
   const selectedItem = selectionMode === "single" ? selectedItems[0] : null;
-  const selectedBankLogoUrl = selectedItem && getBankLogoUrl
-    ? getBankLogoUrl(selectedItem.id)
-    : null;
+  const selectedCounterparty =
+    selectedItem && getCounterpartyForItemId && apiBase
+      ? getCounterpartyForItemId(selectedItem.id)
+      : null;
   const inputValue = query || selectedLabel;
   const normalizedQuery = useMemo(() => normalizeItemSearch(query), [query]);
   const filteredItems = useMemo(() => {
@@ -214,12 +256,14 @@ export function ItemSelector({
           disabled={disabled}
           prefixPlClass="pl-12"
           prefix={
-            selectedBankLogoUrl && !query ? (
-              <img
-                src={selectedBankLogoUrl}
+            !query && selectedCounterparty && apiBase ? (
+              <ItemCounterpartyIcon
+                counterparty={selectedCounterparty}
+                apiBase={apiBase}
+                size={24}
+                className="h-6 w-6 rounded object-contain"
+                fallbackIconColor={SIDEBAR_TEXT_ACTIVE}
                 alt={selectedLabel}
-                className="h-6 w-6 rounded bg-white object-contain"
-                loading="lazy"
               />
             ) : undefined
           }
@@ -310,7 +354,10 @@ export function ItemSelector({
             ) : (
               filteredItems.map((item) => {
                 const isSelected = selectedSet.has(item.id);
-                const bankLogo = getBankLogoUrl ? getBankLogoUrl(item.id) : null;
+                const counterparty =
+                  getCounterpartyForItemId && apiBase
+                    ? getCounterpartyForItemId(item.id)
+                    : null;
                 const bankName = getBankName ? getBankName(item.id) : "";
                 const typeLabel = getItemTypeLabel(item);
                 const balance = getItemBalance
@@ -355,15 +402,19 @@ export function ItemSelector({
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => applySelection(item.id)}
                   >
-                    {bankLogo ? (
-                      <img
-                        src={bankLogo}
-                        alt={bankName || ""}
-                        className={`h-6 w-6 rounded bg-white object-contain ${logoToneClass}`}
-                        loading="lazy"
-                      />
+                    {counterparty && apiBase ? (
+                      <div className={`h-6 w-6 shrink-0 rounded-sm overflow-hidden ${logoToneClass}`}>
+                        <ItemCounterpartyIcon
+                          counterparty={counterparty}
+                          apiBase={apiBase}
+                          size={24}
+                          className="h-6 w-6 rounded-sm object-contain"
+                          fallbackIconColor={isSelected ? "white" : SIDEBAR_TEXT_ACTIVE}
+                          alt={bankName || ""}
+                        />
+                      </div>
                     ) : (
-                      <div className="h-6 w-6 rounded bg-slate-100" />
+                      <div className="h-6 w-6 rounded-sm" />
                     )}
                     <div className="min-w-0 flex-1">
                       <div

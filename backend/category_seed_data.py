@@ -2,7 +2,7 @@ CATEGORY_ICON_BY_L1: dict[str, str] = {
     "Доход от основного места работы": "Briefcase",
     "Доход от подработок": "Hammer",
     "Пассивный доход": "Percent",
-    "Бонусы и Cash-back": "Percent",
+    "Бонусы и Cash-back": "BanknoteArrowUp",
     "Прочие доходы": "Coins",
     "Автомобиль": "Car",
     "Недвижимость": "Building",
@@ -27,6 +27,11 @@ CATEGORY_ICON_BY_L1: dict[str, str] = {
     "Хозяйственные расходы": "Home",
     "Электроника": "Laptop",
     "Прочие расходы": "MoreVertical",
+    "Дети": "Baby",
+    "Образование": "GraduationCap",
+    "Социальные выплаты": "Landmark",
+    "Алименты полученные": "HandCoins",
+    "Алименты оплаченные": "HandCoins",
 }
 
 CATEGORY_SEED: list[dict] = [
@@ -73,6 +78,13 @@ CATEGORY_SEED: list[dict] = [
                     {"name": "Доход от акций"},
                 ],
             },
+            {
+                "name": "Сдача в аренду имущества",
+                "children": [
+                    {"name": "Сдача в аренду недвижимости"},
+                ],
+            },
+            {"name": "Дивиденды"},
         ],
     },
     {
@@ -100,6 +112,15 @@ CATEGORY_SEED: list[dict] = [
         ],
     },
     {
+        "name": "Социальные выплаты",
+        "scope": "INCOME",
+        "children": [
+            {"name": "Пенсия"},
+            {"name": "Пособия"},
+        ],
+    },
+    {"name": "Алименты полученные", "scope": "INCOME"},
+    {
         "name": "Автомобиль",
         "scope": "EXPENSE",
         "children": [
@@ -122,6 +143,7 @@ CATEGORY_SEED: list[dict] = [
         "name": "Недвижимость",
         "scope": "EXPENSE",
         "children": [
+            {"name": "Аренда жилья"},
             {
                 "name": "ЖКУ",
                 "children": [
@@ -144,6 +166,38 @@ CATEGORY_SEED: list[dict] = [
         ],
     },
     {"name": "Благотворительность", "scope": "EXPENSE"},
+    {
+        "name": "Дети",
+        "scope": "EXPENSE",
+        "children": [
+            {"name": "Детское питание"},
+            {"name": "Детская одежда"},
+            {"name": "Игрушки"},
+            {"name": "Карманные расходы"},
+            {"name": "Образование детей"},
+        ],
+    },
+    {
+        "name": "Образование",
+        "scope": "EXPENSE",
+        "children": [
+            {
+                "name": "Основное образование",
+                "children": [
+                    {"name": "Школа"},
+                    {"name": "Высшее образование"},
+                    {"name": "Среднее образование"},
+                ],
+            },
+            {
+                "name": "Дополнительное образование",
+                "children": [
+                    {"name": "Повышение квалификации"},
+                    {"name": "Курсы"},
+                ],
+            },
+        ],
+    },
     {
         "name": "Хобби и увлечения",
         "scope": "EXPENSE",
@@ -275,6 +329,7 @@ CATEGORY_SEED: list[dict] = [
     },
     {"name": "Подписки", "scope": "EXPENSE"},
     {"name": "Подарки", "scope": "EXPENSE"},
+    {"name": "Алименты оплаченные", "scope": "EXPENSE"},
     {
         "name": "Страхование",
         "scope": "EXPENSE",
@@ -303,6 +358,7 @@ CATEGORY_SEED: list[dict] = [
             {"name": "БАДы"},
             {"name": "Косметические процедуры"},
             {"name": "Косметические средства"},
+            {"name": "Парикмахерская"},
             {"name": "Солярий"},
         ],
     },

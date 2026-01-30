@@ -78,6 +78,7 @@ import {
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
 import { useCategoryIcon } from "@/hooks/use-category-icon";
+import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 import {
   createTransactionChain,
@@ -119,7 +120,7 @@ import {
 import { PINK_GRADIENT as PINK_GRADIENT_CONST } from "@/lib/gradients";
 import { useOnboarding } from "@/components/onboarding-context";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
-import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
+import { buildCounterpartyTransactionCounts, getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 
 const CATEGORY_PLACEHOLDER = "-";
@@ -449,9 +450,8 @@ export default function FinancialPlanningPage() {
     if (!cpId) return null;
     const counterparty = counterpartiesById.get(cpId);
     if (!counterparty) return null;
-    return counterparty.entity_type === "PERSON"
-      ? counterparty.photo_url ?? null
-      : counterparty.logo_url ?? null;
+    const candidates = getCounterpartyImageUrlCandidates(counterparty, API_BASE);
+    return candidates[0] ?? null;
   };
   const itemCounterpartyName = (id: number | null | undefined) => {
     if (!id) return "";
@@ -464,6 +464,10 @@ export default function FinancialPlanningPage() {
       return parts.length > 0 ? parts.join(" ") : "";
     }
     return cp.name || cp.full_name || "";
+  };
+  const getCounterpartyForItemId = (id: number) => {
+    const cpId = itemsById.get(id)?.counterparty_id;
+    return cpId ? counterpartiesById.get(cpId) ?? null : null;
   };
   const itemBankLogoUrl = itemCounterpartyLogoUrl;
   const itemBankName = itemCounterpartyName;
@@ -1050,27 +1054,22 @@ export default function FinancialPlanningPage() {
       ? counterpartiesById.get(chain.counterparty_id) ?? null
       : null;
     const counterpartyName = counterparty ? buildCounterpartyName(counterparty) : null;
-    const counterpartyLogo =
-      counterparty?.entity_type === "PERSON"
-        ? counterparty?.photo_url
-        : counterparty?.logo_url;
+    const {
+      currentSrc: counterpartyLogoUrl,
+      onError: counterpartyLogoOnError,
+      showFallbackIcon: counterpartyShowFallback,
+    } = useCounterpartyImage(counterparty, API_BASE);
 
     // Банк/контрагент по активу, как в карточке актива
     const primaryCounterparty =
       primaryItem?.counterparty_id != null
         ? counterpartiesById.get(primaryItem.counterparty_id) ?? null
         : null;
-    const rawPrimaryLogoUrl =
-      primaryCounterparty?.entity_type === "PERSON"
-        ? primaryCounterparty?.photo_url
-        : primaryCounterparty?.logo_url;
-    const primaryLogoUrlFull = rawPrimaryLogoUrl
-      ? rawPrimaryLogoUrl.startsWith("http")
-        ? rawPrimaryLogoUrl
-        : rawPrimaryLogoUrl.startsWith("/")
-          ? `${API_BASE}${rawPrimaryLogoUrl}`
-          : `${API_BASE}/${rawPrimaryLogoUrl}`
-      : null;
+    const {
+      currentSrc: primaryLogoUrl,
+      onError: primaryLogoOnError,
+      showFallbackIcon: primaryShowFallback,
+    } = useCounterpartyImage(primaryCounterparty, API_BASE);
     const CounterpartyIcon =
       counterparty?.entity_type === "PERSON"
         ? User
@@ -1226,40 +1225,37 @@ export default function FinancialPlanningPage() {
                       backgroundColor: `${PLACEHOLDER_COLOR_DARK}10`,
                     }}
                   >
-                    {primaryLogoUrlFull ? (
-                      <img
-                        src={primaryLogoUrlFull}
-                        alt=""
-                        className="h-5 w-5 rounded object-contain"
-                      />
-                    ) : (
-                      <>
-                        {primaryCounterparty && (
-                          (primaryCounterparty.entity_type === "PERSON" ? (
-                            <User
-                              className="h-3.5 w-3.5"
-                              style={{ color: PLACEHOLDER_COLOR_DARK }}
-                              strokeWidth={1.5}
-                            />
-                          ) : (
-                            <>
-                              {(() => {
-                                const Icon = getLegalDefaultIcon(
-                                  primaryCounterparty.industry_id ?? null
-                                );
-                                return (
-                                  <Icon
-                                    className="h-3.5 w-3.5"
-                                    style={{ color: PLACEHOLDER_COLOR_DARK }}
-                                    strokeWidth={1.5}
-                                  />
-                                );
-                              })()}
-                            </>
-                          ))
-                        )}
-                      </>
-                    )}
+                    {(primaryLogoUrl || primaryShowFallback) && primaryCounterparty ? (
+                      primaryLogoUrl ? (
+                        <img
+                          src={primaryLogoUrl}
+                          alt=""
+                          className="h-5 w-5 rounded object-contain"
+                          onError={primaryLogoOnError}
+                        />
+                      ) : (
+                        primaryCounterparty.entity_type === "PERSON" ? (
+                          <User
+                            className="h-3.5 w-3.5"
+                            style={{ color: PLACEHOLDER_COLOR_DARK }}
+                            strokeWidth={1.5}
+                          />
+                        ) : (
+                          (() => {
+                            const Icon = getLegalDefaultIcon(
+                              primaryCounterparty.industry_id ?? null
+                            );
+                            return (
+                              <Icon
+                                className="h-3.5 w-3.5"
+                                style={{ color: PLACEHOLDER_COLOR_DARK }}
+                                strokeWidth={1.5}
+                              />
+                            );
+                          })()
+                        )
+                      )
+                    ) : null}
                   </div>
                 )}
                 <span style={{ color: textColor }}>
@@ -1277,19 +1273,22 @@ export default function FinancialPlanningPage() {
                       backgroundColor: `${PLACEHOLDER_COLOR_DARK}10`,
                     }}
                   >
-                    {counterpartyLogo ? (
-                      <img
-                        src={counterpartyLogo}
-                        alt=""
-                        className="h-5 w-5 rounded object-contain"
-                      />
-                    ) : (
-                      <CounterpartyIcon
-                        className="h-3.5 w-3.5"
-                        aria-hidden="true"
-                        style={{ color: PLACEHOLDER_COLOR_DARK }}
-                      />
-                    )}
+                    {(counterpartyLogoUrl || counterpartyShowFallback) && counterpartyName ? (
+                      counterpartyLogoUrl ? (
+                        <img
+                          src={counterpartyLogoUrl}
+                          alt=""
+                          className="h-5 w-5 rounded object-contain"
+                          onError={counterpartyLogoOnError}
+                        />
+                      ) : (
+                        <CounterpartyIcon
+                          className="h-3.5 w-3.5"
+                          aria-hidden="true"
+                          style={{ color: PLACEHOLDER_COLOR_DARK }}
+                        />
+                      )
+                    ) : null}
                   </div>
                   <span style={{ color: textColor }}>{counterpartyName}</span>
                 </div>
@@ -1437,6 +1436,8 @@ export default function FinancialPlanningPage() {
                 placeholder="Начните вводить название"
                 getItemTypeLabel={getItemTypeLabel}
                 getItemKind={resolveItemEffectiveKind}
+                getCounterpartyForItemId={getCounterpartyForItemId}
+                apiBase={API_BASE}
                 getBankLogoUrl={itemBankLogoUrl}
                 getBankName={itemBankName}
                 getItemBalance={getItemDisplayBalanceCents}
@@ -1492,6 +1493,7 @@ export default function FinancialPlanningPage() {
                 industries={industries}
                 counterpartyCounts={counterpartyTxCounts}
                 showChips={true}
+                apiBase={API_BASE}
               />
             </div>
           </FilterSection>
@@ -1678,6 +1680,8 @@ export default function FinancialPlanningPage() {
                   placeholder="Выберите счет"
                   getItemTypeLabel={getItemTypeLabel}
                   getItemKind={resolveItemEffectiveKind}
+                  getCounterpartyForItemId={getCounterpartyForItemId}
+                  apiBase={API_BASE}
                   getBankLogoUrl={itemBankLogoUrl}
                   getBankName={itemBankName}
                   getItemBalance={getItemDisplayBalanceCents}
@@ -1695,6 +1699,8 @@ export default function FinancialPlanningPage() {
                     placeholder="Выберите счет"
                     getItemTypeLabel={getItemTypeLabel}
                     getItemKind={resolveItemEffectiveKind}
+                    getCounterpartyForItemId={getCounterpartyForItemId}
+                    apiBase={API_BASE}
                     getBankLogoUrl={itemBankLogoUrl}
                     getBankName={itemBankName}
                     getItemBalance={getItemDisplayBalanceCents}
@@ -1713,6 +1719,7 @@ export default function FinancialPlanningPage() {
                   industries={industries}
                   disabled={counterpartyLoading}
                   counterpartyCounts={counterpartyTxCounts}
+                  apiBase={API_BASE}
                 />
                 {counterpartyError && (
                   <p className="text-xs" style={{ color: "#FB4C4F" }}>

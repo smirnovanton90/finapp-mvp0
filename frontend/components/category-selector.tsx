@@ -18,6 +18,7 @@ import {
 } from "@/lib/category-icons";
 import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
+import { CategoryIconImage } from "@/components/category-icon-image";
 
 export type CategoryPathOption = {
   l1: string;
@@ -218,13 +219,6 @@ export function CategorySelector({
     return null;
   }, [selectedPath, categoryLookup.pathToId, selectionMode]);
 
-  const selectedCategoryIcon = useMemo(() => {
-    if (selectionMode === "single") {
-      return resolveCategoryIcon(selectedCategoryId, categoryLookup);
-    }
-    return null;
-  }, [selectedCategoryId, categoryLookup, selectionMode]);
-
   const applySelection = (path: CategoryPathOption) => {
     if (disabled) return;
     if (selectionMode === "single" && onChange) {
@@ -319,8 +313,7 @@ export function CategorySelector({
     zIndex: 50,
   };
 
-  const showPrefix = selectionMode === "single" && selectedPath && !query && selectedCategoryIcon;
-  const CategoryIconNode = selectedCategoryIcon;
+  const showPrefix = selectionMode === "single" && selectedPath && !query && selectedCategoryId != null;
 
   return (
     <div className="space-y-3">
@@ -333,8 +326,14 @@ export function CategorySelector({
           disabled={disabled}
           prefixPlClass="pl-12"
           prefix={
-            showPrefix && CategoryIconNode ? (
-              <CategoryIconNode className="h-4 w-4" style={{ color: SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />
+            showPrefix && selectedCategoryId != null ? (
+              <CategoryIconImage
+                categoryId={selectedCategoryId}
+                categoryLookup={categoryLookup}
+                size={24}
+                className="h-6 w-6 rounded object-contain"
+                fallbackIconColor={SIDEBAR_TEXT_ACTIVE}
+              />
             ) : undefined
           }
           onChange={(event) => {
@@ -436,9 +435,10 @@ export function CategorySelector({
                           path.l3 === selectedPath.l3
                         : selectedPathsSet?.has(pathKey) ?? false;
 
-                    const CategoryIcon = path.categoryId
-                      ? resolveCategoryIcon(path.categoryId, categoryLookup)
-                      : CATEGORY_ICON_FALLBACK;
+                    const rowIconColor = isSelected ? "white" : SIDEBAR_TEXT_ACTIVE;
+                    const RowFallbackIcon = path.categoryId
+                      ? null
+                      : resolveCategoryIcon(path.categoryId, categoryLookup);
 
                     return (
                       <button
@@ -462,7 +462,21 @@ export function CategorySelector({
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => applySelection(path)}
                       >
-                        <CategoryIcon className="h-4 w-4" style={{ color: isSelected ? "white" : SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />
+                        {path.categoryId ? (
+                          <div className="h-6 w-6 shrink-0 rounded-sm overflow-hidden">
+                            <CategoryIconImage
+                              categoryId={path.categoryId}
+                              categoryLookup={categoryLookup}
+                              size={24}
+                              className="h-6 w-6 rounded-sm object-contain"
+                              fallbackIconColor={rowIconColor}
+                            />
+                          </div>
+                        ) : RowFallbackIcon ? (
+                          <RowFallbackIcon className="h-4 w-4 shrink-0" style={{ color: rowIconColor }} aria-hidden="true" />
+                        ) : (
+                          <div className="h-6 w-6 shrink-0 rounded-sm" />
+                        )}
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-normal break-words">
                             {path.label}

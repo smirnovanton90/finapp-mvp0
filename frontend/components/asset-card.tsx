@@ -45,8 +45,11 @@ import {
   Receipt,
   AlertCircle,
   User,
-  Factory,
+  Building2,
 } from "lucide-react";
+import { assetIconPath } from "@/lib/image-paths";
+import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
+import { CardIcon } from "@/components/card-icon";
 
 const MOEX_TYPE_CODES = ["securities", "bonds", "etf", "bpif", "pif"];
 
@@ -186,12 +189,7 @@ interface AssetCardProps {
 }
 
 // Simplified industry icon mapping (can be expanded if needed)
-const INDUSTRY_ICON_BY_ID: Record<number, React.ComponentType<{ className?: string; strokeWidth?: number }>> = {};
-
-function getLegalDefaultIcon(industryId: number | null): React.ComponentType<{ className?: string; strokeWidth?: number }> {
-  if (!industryId) return Factory;
-  return INDUSTRY_ICON_BY_ID[industryId] ?? Factory;
-}
+const COUNTERPARTY_LEGAL_FALLBACK_ICON = Building2;
 
 const CURRENCY_BADGE_CLASSES: Record<string, string> = {
   RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
@@ -281,42 +279,25 @@ export function AssetCard({
     : "";
 
   // Priority: 1. User uploaded photo, 2. 3D icon, 3. 2D icon
-  // 3D иконка — только PNG; при 404 показываем 2D
   const [iconFormat, setIconFormat] = React.useState<"png" | null>("png");
-  const icon3dPath = iconFormat ? `/icons-3d/${item.type_code}.${iconFormat}` : null;
+  const icon3dPath = assetIconPath(item.type_code, iconFormat);
   const hasPhoto = getItemPhotoUrl(item, API_BASE);
 
-  // Counterparty logo/icon handling
-  const counterpartyLogoUrl = counterparty
-    ? (counterparty.entity_type === "PERSON" ? counterparty.photo_url : counterparty.logo_url)
-    : null;
-  const rawCounterpartyLogoUrl = counterpartyLogoUrl;
-  const counterpartyLogoUrlFull = rawCounterpartyLogoUrl
-    ? rawCounterpartyLogoUrl.startsWith("http")
-      ? rawCounterpartyLogoUrl
-      : rawCounterpartyLogoUrl.startsWith("/")
-      ? `${API_BASE}${rawCounterpartyLogoUrl}`
-      : `${API_BASE}/${rawCounterpartyLogoUrl}`
-    : null;
+  // Counterparty: дефолтные — только статика; добавленные — API → person/legal → Lucide
+  const {
+    currentSrc: counterpartyCurrentSrc,
+    onError: counterpartyOnError,
+    showFallbackIcon: showCounterpartyIcon,
+  } = useCounterpartyImage(counterparty ?? null, API_BASE);
   const CounterpartyFallbackIcon = counterparty
-    ? (counterparty.entity_type === "PERSON"
-        ? User
-        : getLegalDefaultIcon(counterparty.industry_id ?? null))
+    ? (counterparty.entity_type === "PERSON" ? User : COUNTERPARTY_LEGAL_FALLBACK_ICON)
     : null;
-  const [showCounterpartyIcon, setShowCounterpartyIcon] = React.useState(!counterpartyLogoUrlFull);
-  
-  // Reset icon state when counterparty changes
-  React.useEffect(() => {
-    setShowCounterpartyIcon(!counterpartyLogoUrlFull);
-  }, [counterpartyLogoUrlFull]);
 
-  // Track image loading using universal hook
-  // Main image: hasPhoto or icon3dPath (if exists)
-  // Counterparty logo: only if exists and not showing fallback icon
   const mainImageUrl = hasPhoto || icon3dPath || null;
-  const counterpartyLogoUrlForPreloader = (counterpartyLogoUrlFull && !showCounterpartyIcon) 
-    ? counterpartyLogoUrlFull 
-    : null;
+  const counterpartyLogoUrlForPreloader =
+    counterparty && counterpartyCurrentSrc && !showCounterpartyIcon
+      ? counterpartyCurrentSrc
+      : null;
 
   const { isReady: isCardReady, imageRefs, setImageRef, handleImageLoad, handleImageError } = useImagePreloader({
     imageUrls: [mainImageUrl, counterpartyLogoUrlForPreloader],
@@ -362,51 +343,45 @@ export function AssetCard({
       <div className="pt-[12px] pr-[12px] pb-[12px] pl-[19px]">
         {/* Header: иконка + основная информация + кнопка меню */}
         <div className="flex items-start justify-between mb-3 gap-3">
-          {/* Icon */}
+          {/* Icon — единый CardIcon, без фона и обводки, с тенью */}
           <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
             {hasPhoto ? (
-              // 1. Priority: User uploaded image — тень по контуру скруглённого изображения
-              <img
-                ref={(el) => setImageRef(0, el)}
+              <CardIcon
                 src={hasPhoto}
                 alt={item.name}
-                className="w-[100px] h-[100px] rounded-lg object-cover"
-                style={{ boxShadow: "0 34px 48.8px 0 rgba(0,0,0,0.25)" }}
+                size={100}
+                shadow
+                objectFit="cover"
+                imgRef={(el) => setImageRef(0, el)}
                 onLoad={() => handleImageLoad(0)}
                 onError={() => handleImageError(0)}
               />
-            ) : (
-              // 2. Priority: 3D icon, fallback to 2D icon — тень по контуру иконки (drop-shadow)
-              <>
-                {icon3dPath && (
-                  <img
-                    ref={(el) => setImageRef(0, el)}
-                    src={icon3dPath}
-                    alt=""
-                    className="w-[100px] h-[100px] object-contain"
-                    style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
-                    onLoad={() => handleImageLoad(0)}
-                    onError={() => {
-                      setIconFormat(null);
-                      handleImageError(0); // 2D иконка не грузится, считаем слот готовым
-                    }}
-                  />
-                )}
-                {!icon3dPath && TypeIcon && (
-                  // 3. Priority: 2D icon (doesn't need loading) — тень по контуру иконки
-                  <div
-                    className="w-full h-full flex items-center justify-center"
-                    style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
-                  >
-                    <TypeIcon
-                      className="w-16 h-16"
-                      style={{ color: ACCENT }}
-                      strokeWidth={1.5}
-                    />
-                  </div>
-                )}
-              </>
-            )}
+            ) : icon3dPath ? (
+              <CardIcon
+                src={icon3dPath}
+                alt=""
+                fallbackIcon={TypeIcon ?? undefined}
+                size={100}
+                shadow
+                objectFit="contain"
+                fallbackIconColor={ACCENT}
+                imgRef={(el) => setImageRef(0, el)}
+                onLoad={() => handleImageLoad(0)}
+                onError={() => {
+                  setIconFormat(null);
+                  handleImageError(0);
+                }}
+              />
+            ) : TypeIcon ? (
+              <CardIcon
+                src={null}
+                alt=""
+                fallbackIcon={TypeIcon}
+                size={100}
+                shadow
+                fallbackIconColor={ACCENT}
+              />
+            ) : null}
           </div>
 
           {/* Info */}
@@ -437,35 +412,22 @@ export function AssetCard({
             </h3>
             {counterparty && CounterpartyFallbackIcon && (
               <div className="flex items-center gap-2 mb-1 justify-center">
-                <div className="relative h-5 w-5 shrink-0">
-                  {counterpartyLogoUrlFull && !showCounterpartyIcon ? (
-                    <img
-                      ref={(el) => setImageRef(1, el)}
-                      src={counterpartyLogoUrlFull}
-                      alt=""
-                      className="h-5 w-5 rounded object-contain"
-                      style={{ border: `1px solid ${PLACEHOLDER_COLOR_DARK}40` }}
-                      onLoad={() => handleImageLoad(1)}
-                      onError={() => {
-                        setShowCounterpartyIcon(true);
-                        handleImageError(1); // Fallback icon doesn't need loading, mark as "loaded"
-                      }}
-                    />
-                  ) : (
-                    <div
-                      className="h-5 w-5 rounded flex items-center justify-center"
-                      style={{
-                        border: `1px solid ${PLACEHOLDER_COLOR_DARK}40`,
-                        backgroundColor: `${PLACEHOLDER_COLOR_DARK}10`,
-                      }}
-                    >
-                      <CounterpartyFallbackIcon
-                        className="h-3.5 w-3.5"
-                        style={{ color: PLACEHOLDER_COLOR_DARK }}
-                        strokeWidth={1.5}
-                      />
-                    </div>
-                  )}
+                <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">
+                  <CardIcon
+                    src={counterpartyCurrentSrc && !showCounterpartyIcon ? counterpartyCurrentSrc : null}
+                    alt={buildCounterpartyDisplayName(counterparty)}
+                    fallbackIcon={CounterpartyFallbackIcon}
+                    size={20}
+                    shadow={false}
+                    objectFit="contain"
+                    fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                    imgRef={(el) => setImageRef(1, el)}
+                    onLoad={() => handleImageLoad(1)}
+                    onError={() => {
+                      counterpartyOnError();
+                      handleImageError(1);
+                    }}
+                  />
                 </div>
                 <span
                   className="text-sm font-normal text-center"

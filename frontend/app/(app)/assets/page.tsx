@@ -1237,6 +1237,10 @@ export default function Page() {
     }
     return cp.name || cp.full_name || "";
   };
+  const getCounterpartyForItemId = (id: number) => {
+    const cpId = itemsById.get(id)?.counterparty_id;
+    return cpId ? counterpartiesById.get(cpId) ?? null : null;
+  };
   const linkedCardsByAccountId = useMemo(() => {
     const map = new Map<number, ItemOut[]>();
     items.forEach((item) => {
@@ -3653,7 +3657,7 @@ export default function Page() {
                             src={counterpartyLogoUrl}
                             alt={counterpartyName}
                             className={[
-                              "mx-auto h-5 w-5 rounded object-contain bg-white",
+                              "mx-auto h-5 w-5 rounded object-contain",
                               isArchived || isClosed ? "opacity-40" : "",
                             ].join(" ")}
                             loading="lazy"
@@ -4220,6 +4224,7 @@ export default function Page() {
                       industries={industries}
                       disabled={counterpartyLoading}
                       counterpartyCounts={counterpartyTxCounts}
+                      apiBase={API_BASE}
                       filterByIndustryId={
                         isBankCounterparty
                           ? industries.find((ind) => ind.name === "Банки")?.id ?? null
@@ -4514,6 +4519,8 @@ export default function Page() {
                         getItemTypeLabel={getItemTypeLabel}
                         getItemKind={resolveItemEffectiveKind}
                         getItemBalance={getItemDisplayBalanceCents}
+                        getCounterpartyForItemId={getCounterpartyForItemId}
+                        apiBase={API_BASE}
                         getBankLogoUrl={itemCounterpartyLogoUrl}
                         getBankName={itemCounterpartyName}
                         itemCounts={itemTxCounts}
@@ -4577,6 +4584,8 @@ export default function Page() {
                       getItemTypeLabel={getItemTypeLabel}
                       getItemKind={resolveItemEffectiveKind}
                       getItemBalance={getItemDisplayBalanceCents}
+                      getCounterpartyForItemId={getCounterpartyForItemId}
+                      apiBase={API_BASE}
                       getBankLogoUrl={itemCounterpartyLogoUrl}
                       getBankName={itemCounterpartyName}
                       itemCounts={itemTxCounts}
@@ -4669,6 +4678,8 @@ export default function Page() {
                       getItemTypeLabel={getItemTypeLabel}
                       getItemKind={resolveItemEffectiveKind}
                       getItemBalance={getItemDisplayBalanceCents}
+                      getCounterpartyForItemId={getCounterpartyForItemId}
+                      apiBase={API_BASE}
                       getBankLogoUrl={itemCounterpartyLogoUrl}
                       getBankName={itemCounterpartyName}
                       itemCounts={itemTxCounts}
@@ -4742,6 +4753,8 @@ export default function Page() {
                             getItemTypeLabel={getItemTypeLabel}
                             getItemKind={resolveItemEffectiveKind}
                             getItemBalance={getItemDisplayBalanceCents}
+                            getCounterpartyForItemId={getCounterpartyForItemId}
+                            apiBase={API_BASE}
                             getBankLogoUrl={itemCounterpartyLogoUrl}
                             getBankName={itemCounterpartyName}
                             itemCounts={itemTxCounts}
@@ -4898,6 +4911,8 @@ export default function Page() {
                     getItemTypeLabel={getItemTypeLabel}
                     getItemKind={resolveItemEffectiveKind}
                     getItemBalance={getItemDisplayBalanceCents}
+                    getCounterpartyForItemId={getCounterpartyForItemId}
+                    apiBase={API_BASE}
                     getBankLogoUrl={itemCounterpartyLogoUrl}
                     getBankName={itemCounterpartyName}
                     itemCounts={itemTxCounts}
@@ -4976,6 +4991,8 @@ export default function Page() {
                   getItemTypeLabel={getItemTypeLabel}
                   getItemKind={resolveItemEffectiveKind}
                   getItemBalance={getItemDisplayBalanceCents}
+                  getCounterpartyForItemId={getCounterpartyForItemId}
+                  apiBase={API_BASE}
                   getBankLogoUrl={itemCounterpartyLogoUrl}
                   getBankName={itemCounterpartyName}
                   itemCounts={itemTxCounts}
@@ -5231,6 +5248,7 @@ export default function Page() {
               emptyMessage="Нет контрагентов"
               noResultsMessage="Ничего не найдено"
               counterpartyCounts={counterpartyTxCounts}
+              apiBase={API_BASE}
             />
           </FilterSection>
 

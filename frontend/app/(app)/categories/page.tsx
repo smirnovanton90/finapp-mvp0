@@ -29,6 +29,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { CategoryNode, CategoryScope, buildCategoryLookup } from "@/lib/categories";
 import {
   CATEGORY_ICON_BY_NAME,
+  CATEGORY_ICON_NAME_BY_L1,
   CATEGORY_ICON_OPTIONS,
 } from "@/lib/category-icons";
 import { cn } from "@/lib/utils";
@@ -57,7 +58,7 @@ import {
 
 const ALLOWED_ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_ICON_BYTES = 2 * 1024 * 1024;
-import { Camera, ChevronDown, ChevronRight, Folder, Pencil, Plus, MoreVertical, Trash2, Upload } from "lucide-react";
+import { Camera, ChevronDown, ChevronRight, Folder, Pencil, Plus, MoreVertical, Trash2, Upload, User } from "lucide-react";
 
 type DeleteTarget = {
   id: number;
@@ -136,19 +137,24 @@ function filterTreeByFilters(
 
   const walk = (list: CategoryNode[], parentNames: string[]): CategoryNode[] => {
     return list
-      .filter(
-        (node) =>
+      .map((node) => {
+        const filteredChildren = node.children?.length
+          ? walk(node.children, [...parentNames, node.name])
+          : undefined;
+        const nodeMatches =
           matchName(node, parentNames) &&
           matchScope(node) &&
           matchSource(node) &&
-          matchStatus(node)
-      )
-      .map((node) => ({
-        ...node,
-        children: node.children?.length
-          ? walk(node.children, [...parentNames, node.name])
-          : undefined,
-      }));
+          matchStatus(node);
+        const keepNode =
+          nodeMatches || (filteredChildren != null && filteredChildren.length > 0);
+        if (!keepNode) return null;
+        return {
+          ...node,
+          children: filteredChildren,
+        };
+      })
+      .filter((n): n is CategoryNode => n != null);
   };
   return walk(nodes, []);
 }
@@ -194,8 +200,16 @@ function CategoryCard({
   const { categoryIcon3dPath, CategoryIcon: CategoryIcon2d, setCategoryIconFormat } =
     useCategoryIcon(node.id, categoryLookup);
 
+  // Для L1-категорий по умолчанию приоритет у маппинга из конфига (актуальная иконка без зависимости от БД)
   const iconName =
-    node.icon_name && node.icon_name.trim().length > 0 ? node.icon_name : undefined;
+    depth === 0 &&
+    node.owner_user_id == null &&
+    node.name &&
+    CATEGORY_ICON_NAME_BY_L1[node.name]
+      ? CATEGORY_ICON_NAME_BY_L1[node.name]
+      : node.icon_name && node.icon_name.trim().length > 0
+        ? node.icon_name
+        : undefined;
   const PreviewIcon = iconName ? CATEGORY_ICON_BY_NAME[iconName] : CategoryIcon2d;
 
   const indent = depth * INDENT_PX;
@@ -278,6 +292,15 @@ function CategoryCard({
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {node.owner_user_id != null && (
+            <IconButton
+              appearance="inactive"
+              aria-label="Добавлено пользователем"
+              disabled
+            >
+              <User className="h-4 w-4" />
+            </IconButton>
+          )}
           {depth < MAX_DEPTH && !isDeleted && (
             <IconButton
               aria-label="Добавить подкатегорию"

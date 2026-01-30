@@ -45,7 +45,6 @@ import {
   CheckCircle2,
   CircleDashed,
   Coins,
-  Factory,
   FileDown,
   FileText,
   Filter,
@@ -167,8 +166,13 @@ import {
   CATEGORY_ICON_FALLBACK,
   CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
+import { categoryIconPath, transferIconPath } from "@/lib/image-paths";
+import { resolveApiImageUrl } from "@/lib/api-image-url";
+import { getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
 import { useOnboarding } from "@/components/onboarding-context";
 import { useImagePreloader } from "@/hooks/use-image-preloader";
+import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
+import { CardIcon } from "@/components/card-icon";
 import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 type TransactionsViewMode = "actual" | "planning";
@@ -249,26 +253,6 @@ const MOEX_TYPE_CODES = new Set([
   "pif",
   "precious_metals",
 ]);
-const INDUSTRY_ICON_BY_ID: Record<number, LucideIcon> = {
-  1: Zap,
-  2: Truck,
-  3: ShoppingCart,
-  4: Shield,
-  5: Landmark,
-  6: Wifi,
-  7: Building2,
-  8: GraduationCap,
-  9: HeartPulse,
-  10: Briefcase,
-  11: Trophy,
-  12: Home,
-};
-
-function getLegalDefaultIcon(industryId: number | null): LucideIcon {
-  if (!industryId) return Factory;
-  return INDUSTRY_ICON_BY_ID[industryId] ?? Factory;
-}
-
 function isMoexItem(item?: ItemOut | null) {
   if (!item) return false;
   if (item.instrument_id) return true;
@@ -1158,7 +1142,9 @@ function TransactionCardRow({
   counterparty,
   itemName,
   itemCurrencyCode,
-  itemBankLogoUrl,
+  primaryItemCounterparty,
+  counterpartyItemCounterparty,
+  apiBase,
   itemBankName,
   categoryIconForId,
   categoryLinesForId,
@@ -1178,7 +1164,9 @@ function TransactionCardRow({
   counterparty: CounterpartyOut | null;
   itemName: (id: number | null | undefined) => string;
   itemCurrencyCode: (id: number | null | undefined) => string;
-  itemBankLogoUrl: (id: number | null | undefined) => string | null;
+  primaryItemCounterparty: CounterpartyOut | null;
+  counterpartyItemCounterparty: CounterpartyOut | null;
+  apiBase: string;
   itemBankName: (id: number | null | undefined) => string;
   categoryIconForId: (
     categoryId: number | null
@@ -1220,9 +1208,24 @@ function TransactionCardRow({
     !isTransfer && currencyCode && currencyCode !== "RUB" && rubEquivalent !== null;
   const primaryCurrency = itemCurrencyCode(primaryDisplayId);
   const counterpartyCurrency = itemCurrencyCode(counterpartyDisplayId);
-  const primaryBankLogo = itemBankLogoUrl(primaryDisplayId);
+  const {
+    currentSrc: primaryBankLogo,
+    onError: primaryBankLogoOnError,
+  } = useCounterpartyImage(primaryItemCounterparty, apiBase);
+  const primaryBankFallbackIcon =
+    primaryItemCounterparty
+      ? (primaryItemCounterparty.entity_type === "PERSON" ? User : Building2)
+      : undefined;
   const primaryBankName = itemBankName(primaryDisplayId);
-  const counterpartyBankLogo = itemBankLogoUrl(counterpartyDisplayId);
+
+  const {
+    currentSrc: counterpartyBankLogo,
+    onError: counterpartyBankLogoOnError,
+  } = useCounterpartyImage(counterpartyItemCounterparty, apiBase);
+  const counterpartyBankFallbackIcon =
+    counterpartyItemCounterparty
+      ? (counterpartyItemCounterparty.entity_type === "PERSON" ? User : Building2)
+      : undefined;
   const counterpartyBankName = itemBankName(counterpartyDisplayId);
   const primaryAmountCents = tx.amount_rub;
   const counterpartyAmountCents = tx.amount_counterparty ?? tx.amount_rub;
@@ -1331,22 +1334,13 @@ function TransactionCardRow({
   const chainLabel =
     isPlanned && tx.chain_name?.trim() ? tx.chain_name.trim() : null;
   const counterpartyName = counterparty ? buildCounterpartyName(counterparty) : null;
-  const rawCounterpartyLogoUrl =
-    counterparty?.entity_type === "PERSON"
-      ? counterparty?.photo_url ?? null
-      : counterparty?.logo_url ?? null;
-  // Преобразуем относительные URL в абсолютные
-  const counterpartyLogoUrl = rawCounterpartyLogoUrl
-    ? rawCounterpartyLogoUrl.startsWith("http://") || rawCounterpartyLogoUrl.startsWith("https://")
-      ? rawCounterpartyLogoUrl
-      : rawCounterpartyLogoUrl.startsWith("/")
-        ? `${API_BASE}${rawCounterpartyLogoUrl}`
-        : `${API_BASE}/${rawCounterpartyLogoUrl}`
-    : null;
+  const {
+    currentSrc: counterpartyLogoUrl,
+    onError: counterpartyLogoOnError,
+    showFallbackIcon: counterpartyShowFallbackIcon,
+  } = useCounterpartyImage(counterparty ?? null, API_BASE);
   const CounterpartyFallbackIcon =
-    counterparty?.entity_type === "PERSON"
-      ? User
-      : getLegalDefaultIcon(counterparty?.industry_id ?? null);
+    counterparty?.entity_type === "PERSON" ? User : Building2;
   const counterpartyIconTone = tx.isDeleted ? "text-slate-400" : "text-slate-300";
 
   const categoryLines = categoryLinesForId(tx.category_id);
@@ -1362,14 +1356,11 @@ function TransactionCardRow({
   );
   const categoryIcon3dPath =
     categoryIconName && categoryIconFormat
-      ? `/icons-3d/categories/${categoryIconName}.${categoryIconFormat}`
+      ? categoryIconPath(categoryIconName, categoryIconFormat)
       : null;
 
-  // 3D иконка стрелки для переводов — только PNG, при 404 показываем 2D
   const [transferIconFormat, setTransferIconFormat] = useState<"png" | null>("png");
-  const transferIcon3dPath = transferIconFormat
-    ? `/icons-3d/transfer-arrow.${transferIconFormat}`
-    : null;
+  const transferIcon3dPath = transferIconPath(transferIconFormat);
 
   const imageUrls = [
     primaryBankLogo,
@@ -1523,20 +1514,24 @@ function TransactionCardRow({
           >
             {itemName(primaryDisplayId)}
           </div>
-          {primaryBankLogo && (
+          {(primaryItemCounterparty && (primaryBankLogo || primaryBankFallbackIcon)) && (
             <div
               className="flex items-center justify-center"
               style={{ marginTop: 4 }}
             >
-              <img
-                ref={(el) => setImageRef(0, el)}
-                src={primaryBankLogo}
+              <CardIcon
+                src={primaryBankLogo ?? null}
                 alt={primaryBankName || ""}
-                className="rounded bg-white object-contain"
-                style={{ width: 20, height: 20 }}
-                loading="lazy"
+                size={20}
+                shadow={false}
+                fallbackIcon={primaryBankFallbackIcon}
+                fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                imgRef={(el) => setImageRef(0, el)}
                 onLoad={() => handleImageLoad(0)}
-                onError={() => handleImageError(0)}
+                onError={() => {
+                  primaryBankLogoOnError();
+                  handleImageError(0);
+                }}
               />
             </div>
           )}
@@ -1552,44 +1547,27 @@ function TransactionCardRow({
           }}
         >
           {isTransfer ? (
-            transferIcon3dPath ? (
-              <img
-                ref={(el) => setImageRef(1, el)}
-                src={transferIcon3dPath}
-                alt=""
-                style={{
-                  width: 90,
-                  height: 90,
-                  objectFit: "contain",
-                  filter: "drop-shadow(4px -1px 6.5px rgba(0,0,0,0.3))",
-                }}
-                onLoad={() => handleImageLoad(1)}
-                onError={() => {
-                  handleImageError(1);
-                  setTransferIconFormat(null);
-                }}
-              />
-            ) : (
-              <ArrowRight
-                style={{
-                  width: 56,
-                  height: 56,
-                  color: ACCENT2,
-                  filter: "drop-shadow(4px -1px 6.5px rgba(0,0,0,0.3))",
-                }}
-              />
-            )
+            <CardIcon
+              src={transferIcon3dPath}
+              alt=""
+              size={90}
+              shadow
+              fallbackIcon={ArrowRight}
+              fallbackIconColor={ACCENT2}
+              imgRef={(el) => setImageRef(1, el)}
+              onLoad={() => handleImageLoad(1)}
+              onError={() => {
+                handleImageError(1);
+                setTransferIconFormat(null);
+              }}
+            />
           ) : categoryIcon3dPath ? (
-            <img
-              ref={(el) => setImageRef(1, el)}
+            <CardIcon
               src={categoryIcon3dPath}
               alt=""
-              style={{
-                width: 90,
-                height: 90,
-                objectFit: "contain",
-                filter: "drop-shadow(4px -1px 6.5px rgba(0,0,0,0.3))",
-              }}
+              size={90}
+              shadow
+              imgRef={(el) => setImageRef(1, el)}
               onLoad={() => handleImageLoad(1)}
               onError={() => {
                 handleImageError(1);
@@ -1647,20 +1625,24 @@ function TransactionCardRow({
               >
                 {itemName(counterpartyDisplayId)}
               </div>
-              {counterpartyBankLogo && (
+              {(counterpartyItemCounterparty && (counterpartyBankLogo || counterpartyBankFallbackIcon)) && (
                 <div
                   className="flex items-center justify-center"
                   style={{ marginTop: 4 }}
                 >
-                  <img
-                    ref={(el) => setImageRef(2, el)}
-                    src={counterpartyBankLogo}
+                  <CardIcon
+                    src={counterpartyBankLogo ?? null}
                     alt={counterpartyBankName || ""}
-                    className="rounded bg-white object-contain"
-                    style={{ width: 20, height: 20 }}
-                    loading="lazy"
+                    size={20}
+                    shadow={false}
+                    fallbackIcon={counterpartyBankFallbackIcon}
+                    fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                    imgRef={(el) => setImageRef(2, el)}
                     onLoad={() => handleImageLoad(2)}
-                    onError={() => handleImageError(2)}
+                    onError={() => {
+                      counterpartyBankLogoOnError();
+                      handleImageError(2);
+                    }}
                   />
                 </div>
               )}
@@ -1728,28 +1710,20 @@ function TransactionCardRow({
               className="flex items-center gap-2"
               style={{ marginBottom: 4 }}
             >
-              {counterpartyLogoUrl ? (
-                <img
-                  ref={(el) => setImageRef(3, el)}
-                  src={counterpartyLogoUrl}
-                  alt=""
-                  className="rounded bg-white object-contain"
-                  style={{ width: 20, height: 20 }}
-                  loading="lazy"
-                  onLoad={() => handleImageLoad(3)}
-                  onError={() => handleImageError(3)}
-                />
-              ) : (
-                <div
-                  className={`flex items-center justify-center rounded bg-white ${counterpartyIconTone}`}
-                  style={{ width: 20, height: 20 }}
-                >
-                  <CounterpartyFallbackIcon
-                    className="h-4 w-4"
-                    aria-hidden="true"
-                  />
-                </div>
-              )}
+              <CardIcon
+                src={counterpartyLogoUrl ?? null}
+                alt=""
+                size={20}
+                shadow={false}
+                fallbackIcon={CounterpartyFallbackIcon}
+                fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                imgRef={(el) => setImageRef(3, el)}
+                onLoad={() => handleImageLoad(3)}
+                onError={() => {
+                  counterpartyLogoOnError();
+                  handleImageError(3);
+                }}
+              />
               <div
                 style={{
                   fontSize: 14,
@@ -2349,15 +2323,18 @@ function TransactionsView({
     tx.primary_card_item_id ?? tx.primary_item_id;
   const getDisplayCounterpartyItemId = (tx: TransactionOut) =>
     tx.counterparty_card_item_id ?? tx.counterparty_item_id;
-  const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
+  const getItemCounterparty = (id: number | null | undefined) => {
     if (!id) return null;
     const cpId = itemsById.get(id)?.counterparty_id;
     if (!cpId) return null;
-    const counterparty = counterpartiesById.get(cpId);
-    if (!counterparty) return null;
-    return counterparty.entity_type === "PERSON"
-      ? counterparty.photo_url ?? null
-      : counterparty.logo_url ?? null;
+    return counterpartiesById.get(cpId) ?? null;
+  };
+  const getCounterpartyForItemId = (id: number) => getItemCounterparty(id) ?? null;
+  const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
+    const cp = getItemCounterparty(id);
+    if (!cp) return null;
+    const candidates = getCounterpartyImageUrlCandidates(cp, API_BASE);
+    return candidates[0] ?? null;
   };
   const itemCounterpartyName = (id: number | null | undefined) => {
     if (!id) return "";
@@ -4322,6 +4299,8 @@ function TransactionsView({
                   noResultsMessage="Ничего не найдено"
                   getItemTypeLabel={getItemTypeLabel}
                   getItemKind={resolveItemEffectiveKind}
+                  getCounterpartyForItemId={getCounterpartyForItemId}
+                  apiBase={API_BASE}
                   getBankLogoUrl={itemBankLogoUrl}
                   getBankName={itemBankName}
                   getItemBalance={getItemDisplayBalanceCents}
@@ -4389,6 +4368,7 @@ function TransactionsView({
                   industries={industries}
                   counterpartyCounts={counterpartyTxCounts}
                   showChips={true}
+                  apiBase={API_BASE}
                 />
               </div>
           </FilterSection>
@@ -4611,7 +4591,9 @@ function TransactionsView({
                               Банк не найден
                             </div>
                           ) : (
-                            filteredImportBanks.map((bank) => (
+                            filteredImportBanks.map((bank) => {
+                              const bankLogoUrl = resolveApiImageUrl(bank.logo_url, API_BASE);
+                              return (
                               <button
                                 key={bank.id}
                                 type="button"
@@ -4627,15 +4609,16 @@ function TransactionsView({
                                   setImportError(null);
                                 }}
                               >
-                                {bank.logo_url ? (
-                                  <img
-                                    src={bank.logo_url}
+                                {bankLogoUrl ? (
+                                  <CardIcon
+                                    src={bankLogoUrl}
                                     alt=""
-                                    className="h-8 w-8 rounded border border-border/60 object-contain bg-white"
-                                    loading="lazy"
+                                    size={32}
+                                    shadow={false}
+                                    className="rounded border border-border/60"
                                   />
                                 ) : (
-                                  <div className="h-8 w-8 rounded border border-border/60 bg-slate-100" />
+                                  <div className="h-8 w-8 rounded border border-border/60" />
                                 )}
                                 <div className="flex flex-col">
                                   <span className="text-sm font-medium">{bank.name}</span>
@@ -4644,7 +4627,8 @@ function TransactionsView({
                                   </span>
                                 </div>
                               </button>
-                            ))
+                              );
+                            })
                           )}
                         </div>
                       )}
@@ -4686,6 +4670,8 @@ function TransactionsView({
                           placeholder="Выберите счет"
                           getItemTypeLabel={getItemTypeLabel}
                           getItemKind={resolveItemEffectiveKind}
+                          getCounterpartyForItemId={getCounterpartyForItemId}
+                          apiBase={API_BASE}
                           getBankLogoUrl={itemBankLogoUrl}
                           getBankName={itemBankName}
                           getItemBalance={getItemDisplayBalanceCents}
@@ -4743,6 +4729,8 @@ function TransactionsView({
                       placeholder="Выберите счет"
                     getItemTypeLabel={getItemTypeLabel}
                     getItemKind={resolveItemEffectiveKind}
+                    getCounterpartyForItemId={getCounterpartyForItemId}
+                    apiBase={API_BASE}
                     getBankLogoUrl={itemBankLogoUrl}
                       getBankName={itemBankName}
                       getItemBalance={getItemDisplayBalanceCents}
@@ -5194,6 +5182,8 @@ function TransactionsView({
                         placeholder="Выберите"
                         getItemTypeLabel={getItemTypeLabel}
                         getItemKind={resolveItemEffectiveKind}
+                        getCounterpartyForItemId={getCounterpartyForItemId}
+                        apiBase={API_BASE}
                         getBankLogoUrl={itemBankLogoUrl}
                         getBankName={itemBankName}
                         getItemBalance={getItemDisplayBalanceCents}
@@ -5222,6 +5212,8 @@ function TransactionsView({
                           placeholder="Выберите"
                           getItemTypeLabel={getItemTypeLabel}
                           getItemKind={resolveItemEffectiveKind}
+                          getCounterpartyForItemId={getCounterpartyForItemId}
+                          apiBase={API_BASE}
                           getBankLogoUrl={itemBankLogoUrl}
                           getBankName={itemBankName}
                           getItemBalance={getItemDisplayBalanceCents}
@@ -5242,6 +5234,7 @@ function TransactionsView({
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
+                            apiBase={API_BASE}
                           />
                           {receiptMessage && (
                             <div className="flex flex-wrap items-center gap-2">
@@ -5552,7 +5545,9 @@ function TransactionsView({
                     counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
                     itemName={itemName}
                     itemCurrencyCode={itemCurrencyCode}
-                    itemBankLogoUrl={itemBankLogoUrl}
+                    primaryItemCounterparty={getItemCounterparty(tx.primary_card_item_id ?? tx.primary_item_id)}
+                    counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
+                    apiBase={API_BASE}
                     itemBankName={itemBankName}
                     categoryIconForId={resolveCategoryIcon}
                     categoryLinesForId={getCategoryLines}

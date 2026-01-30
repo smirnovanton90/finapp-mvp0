@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import { MoreVertical, Pencil, Trash2, User, Factory } from "lucide-react";
+import { MoreVertical, Pencil, Trash2, User, Building2 } from "lucide-react";
 import { useImagePreloader } from "@/hooks/use-image-preloader";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -18,13 +18,8 @@ import {
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
 } from "@/lib/colors";
-import type { LucideIcon } from "lucide-react";
-
-const INDUSTRY_ICON_BY_ID: Record<number, LucideIcon> = {};
-function getLegalDefaultIcon(industryId: number | null): LucideIcon {
-  if (!industryId) return Factory;
-  return INDUSTRY_ICON_BY_ID[industryId] ?? Factory;
-}
+import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
+import { CardIcon } from "@/components/card-icon";
 
 function buildPersonName(counterparty: CounterpartyOut) {
   if (counterparty.entity_type !== "PERSON") return counterparty.name;
@@ -66,19 +61,12 @@ export function CounterpartyCard({
       : counterparty.name;
   const entityLabel = ENTITY_LABELS[counterparty.entity_type] ?? counterparty.entity_type;
 
-  const imageUrl =
-    counterparty.entity_type === "PERSON"
-      ? counterparty.photo_url
-      : counterparty.logo_url;
-  const imageUrlFull = imageUrl
-    ? imageUrl.startsWith("http")
-      ? imageUrl
-      : imageUrl.startsWith("/")
-      ? `${API_BASE}${imageUrl}`
-      : `${API_BASE}/${imageUrl}`
-    : null;
-
-  const imageUrls = [imageUrlFull ?? null];
+  const {
+    currentSrc: imageCurrentSrc,
+    onError: imageOnError,
+    showFallbackIcon: showFallbackIcon,
+  } = useCounterpartyImage(counterparty, API_BASE);
+  const imageUrls = [imageCurrentSrc ?? null];
   const { isReady: isCardReady, setImageRef, handleImageLoad, handleImageError } =
     useImagePreloader({ imageUrls, cacheCheckDelay: 0 });
   const hasCalledOnReadyRef = useRef(false);
@@ -90,9 +78,7 @@ export function CounterpartyCard({
   }, [isCardReady, onReady]);
 
   const FallbackIcon =
-    counterparty.entity_type === "PERSON"
-      ? User
-      : getLegalDefaultIcon(counterparty.industry_id ?? null);
+    counterparty.entity_type === "PERSON" ? User : Building2;
 
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
   const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
@@ -106,36 +92,23 @@ export function CounterpartyCard({
     >
       <div className="p-[12px]">
         <div className="flex items-start justify-between mb-3 gap-3">
-          {/* Изображение 100x100 */}
+          {/* Изображение 100x100 — без фона и обводки, единый CardIcon с тенью */}
           <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
-            {imageUrlFull ? (
-              <img
-                ref={(el) => setImageRef(0, el)}
-                src={imageUrlFull}
-                alt=""
-                className="w-[100px] h-[100px] rounded-lg object-contain"
-                style={{
-                  filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
-                  backgroundColor: "transparent",
-                }}
-                onLoad={() => handleImageLoad(0)}
-                onError={() => handleImageError(0)}
-              />
-            ) : (
-              <div
-                className="w-[100px] h-[100px] rounded-lg flex items-center justify-center"
-                style={{
-                  backgroundColor: `${PLACEHOLDER_COLOR_DARK}20`,
-                  filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
-                }}
-              >
-                <FallbackIcon
-                  className="w-16 h-16"
-                  style={{ color: PLACEHOLDER_COLOR_DARK }}
-                  strokeWidth={1.5}
-                />
-              </div>
-            )}
+            <CardIcon
+              src={imageCurrentSrc && !showFallbackIcon ? imageCurrentSrc : null}
+              alt={title}
+              fallbackIcon={FallbackIcon}
+              size={100}
+              shadow
+              objectFit="contain"
+              fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+              imgRef={(el) => setImageRef(0, el)}
+              onLoad={() => handleImageLoad(0)}
+              onError={() => {
+                imageOnError();
+                handleImageError(0);
+              }}
+            />
           </div>
 
           {/* Центр: тип + название */}
@@ -196,7 +169,7 @@ export function CounterpartyCard({
 
           {/* Меню */}
           {isUser && (
-            <div className="shrink-0">
+            <div className="shrink-0 flex flex-col items-center gap-1">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <IconButton aria-label="Открыть меню действий">
@@ -224,6 +197,13 @@ export function CounterpartyCard({
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
+              <IconButton
+                appearance="inactive"
+                aria-label="Добавлено пользователем"
+                disabled
+              >
+                <User className="h-4 w-4" />
+              </IconButton>
             </div>
           )}
         </div>

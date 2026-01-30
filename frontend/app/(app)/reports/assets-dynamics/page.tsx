@@ -11,6 +11,7 @@ import {
   fetchMarketInstrumentPrice,
   fetchMarketInstrumentPrices,
   fetchTransactions,
+  API_BASE,
   BankOut,
   CounterpartyOut,
   FxRateOut,

@@ -31,6 +31,7 @@ import {
   makeCategoryPathKey,
 } from "@/lib/categories";
 import {
+  API_BASE,
   createLimit,
   deleteLimit,
   fetchCategories,
@@ -808,6 +809,7 @@ export default function LimitsPage() {
               placeholder="Начните вводить название"
               emptyMessage="Нет контрагентов"
               noResultsMessage="Ничего не найдено"
+              apiBase={API_BASE}
             />
           </FilterSection>
 

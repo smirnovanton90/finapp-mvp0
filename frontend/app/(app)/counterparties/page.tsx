@@ -1,22 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import * as React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Camera, ChevronDown, Plus, Upload, Users } from "lucide-react";
+import { Camera, ChevronDown, Plus, Trash2, Upload, Users } from "lucide-react";
 
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { FormModal } from "@/components/form-modal";
 import { TextField, SelectField } from "@/components/ui/form-field";
 import {
@@ -27,7 +25,7 @@ import {
   LegalFormOut,
   createCounterparty,
   deleteCounterparty,
-  fetchCounterparties,
+  fetchCounterpartiesPage,
   fetchCounterpartyIndustries,
   fetchLegalForms,
   updateCounterparty,
@@ -41,7 +39,7 @@ import { AuthInput } from "@/components/ui/auth-input";
 import { CounterpartyCard } from "@/components/counterparty-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
-import { ACCENT, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
+import { ACCENT, ACTIVE_TEXT_DARK, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
 import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
@@ -79,6 +77,9 @@ export default function CounterpartiesPage() {
   const { activeStep, isWizardOpen } = useOnboarding();
 
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [industries, setIndustries] = useState<CounterpartyIndustryOut[]>([]);
   const [legalForms, setLegalForms] = useState<LegalFormOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +117,7 @@ export default function CounterpartiesPage() {
   const [selectedIndustryIds, setSelectedIndustryIds] = useState<Set<number>>(
     () => new Set()
   );
-  const [sourceFilter, setSourceFilter] = useState<Set<string>>(() => new Set(["added"]));
+  const [sourceFilter, setSourceFilter] = useState<Set<string>>(() => new Set(["added", "default"]));
   const [showLegalEntities, setShowLegalEntities] = useState(true);
   const [showPersonEntities, setShowPersonEntities] = useState(true);
   const [showActiveStatus, setShowActiveStatus] = useState(true);
@@ -152,42 +153,36 @@ export default function CounterpartiesPage() {
     return (id: number | null) => (id ? map.get(id) ?? "" : "");
   }, [industries]);
 
-  const normalizedNameFilter = useMemo(
-    () => normalizeFilterValue(nameFilter),
-    [nameFilter]
-  );
-  const filteredCounterparties = useMemo(() => {
-    return counterparties.filter((item) => {
-      const isDeleted = Boolean(item.deleted_at);
-      if (isDeleted && !showDeletedStatus) return false;
-      if (!isDeleted && !showActiveStatus) return false;
-      const isUser = item.owner_user_id != null;
-      const showDefault = sourceFilter.has("default");
-      const showAdded = sourceFilter.has("added");
-      const matchesSource = (showDefault && !isUser) || (showAdded && isUser);
-      if (!matchesSource) return false;
-      if (item.entity_type === "LEGAL" && !showLegalEntities) return false;
-      if (item.entity_type === "PERSON" && !showPersonEntities) return false;
-      if (selectedIndustryIds.size > 0) {
-        if (!item.industry_id || !selectedIndustryIds.has(item.industry_id)) {
-          return false;
-        }
-      }
-      if (!normalizedNameFilter) return true;
-      return normalizeFilterValue(getCounterpartyFilterText(item)).includes(
-        normalizedNameFilter
-      );
-    });
+  const counterpartyQueryParams = useMemo(() => {
+    const entityTypes: ("LEGAL" | "PERSON")[] = [];
+    if (showLegalEntities) entityTypes.push("LEGAL");
+    if (showPersonEntities) entityTypes.push("PERSON");
+    return {
+      include_deleted: showDeletedStatus,
+      deleted_only: !showActiveStatus && showDeletedStatus,
+      source:
+        sourceFilter.size > 0
+          ? (Array.from(sourceFilter) as ("added" | "default")[])
+          : undefined,
+      entity_type: entityTypes.length === 2 || entityTypes.length === 0 ? undefined : entityTypes,
+      status_active: showActiveStatus,
+      status_deleted: showDeletedStatus,
+      industry_ids:
+        selectedIndustryIds.size > 0 ? Array.from(selectedIndustryIds) : undefined,
+      name_query: nameFilter.trim() || undefined,
+    };
   }, [
-    counterparties,
-    normalizedNameFilter,
-    selectedIndustryIds,
     sourceFilter,
-    showDeletedStatus,
     showLegalEntities,
     showPersonEntities,
     showActiveStatus,
+    showDeletedStatus,
+    selectedIndustryIds,
+    nameFilter,
   ]);
+
+  // Фильтр по имени применяется на бэкенде (name_query); список уже отфильтрован
+  const filteredCounterparties = counterparties;
 
   useEffect(() => {
     const currentIds = new Set(filteredCounterparties.map((c) => c.id));
@@ -228,16 +223,23 @@ export default function CounterpartiesPage() {
     }
   }, [searchParams]);
 
-  const loadAll = async () => {
+  const PAGE_SIZE = 50;
+
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [counterpartyData, legalFormData, industryData] = await Promise.all([
-        fetchCounterparties({ include_deleted: true }),
+      const [pageData, legalFormData, industryData] = await Promise.all([
+        fetchCounterpartiesPage({
+          ...counterpartyQueryParams,
+          limit: PAGE_SIZE,
+        }),
         fetchLegalForms(),
         fetchCounterpartyIndustries(),
       ]);
-      setCounterparties(counterpartyData);
+      setCounterparties(pageData.items);
+      setNextCursor(pageData.next_cursor);
+      setHasMore(pageData.has_more);
       setLegalForms(legalFormData);
       setIndustries(industryData);
     } catch (e: any) {
@@ -245,12 +247,31 @@ export default function CounterpartiesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [counterpartyQueryParams]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const pageData = await fetchCounterpartiesPage({
+        ...counterpartyQueryParams,
+        limit: PAGE_SIZE,
+        cursor: nextCursor,
+      });
+      setCounterparties((prev) => [...prev, ...pageData.items]);
+      setNextCursor(pageData.next_cursor);
+      setHasMore(pageData.has_more);
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось загрузить контрагентов.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [counterpartyQueryParams, nextCursor, loadingMore]);
 
   useEffect(() => {
     if (!session) return;
     loadAll();
-  }, [session]);
+  }, [session, loadAll]);
 
   const resetForm = () => {
     setEntityType("LEGAL");
@@ -956,63 +977,106 @@ export default function CounterpartiesPage() {
                 По выбранным фильтрам контрагентов нет.
               </div>
             ) : (
-              <div
-                className="grid grid-cols-2 xl:grid-cols-3 gap-4"
-                style={{
-                  opacity: contentVisible ? 1 : 0,
-                  transition: "opacity 0.3s ease-in-out",
-                }}
-              >
-                {filteredCounterparties.map((item) => (
-                  <div key={item.id}>
-                    <CounterpartyCard
-                      counterparty={item}
-                      industryLabel={industryLabel(item.industry_id) || undefined}
-                      legalFormLabel={item.entity_type === "LEGAL" && item.legal_form ? legalFormLabel(item.legal_form) : undefined}
-                      onEdit={(c) => {
-                        setEditing(c);
-                        setIsDialogOpen(true);
-                      }}
-                      onDelete={(c) => setDeleteTarget(c)}
-                      onReady={() => {
-                        if (!readyCardSetRef.current.has(item.id)) {
-                          readyCardSetRef.current.add(item.id);
-                          setReadyCardCount((prev) => prev + 1);
-                        }
-                      }}
-                    />
+              <>
+                <div
+                  className="grid grid-cols-2 xl:grid-cols-3 gap-4"
+                  style={{
+                    opacity: contentVisible ? 1 : 0,
+                    transition: "opacity 0.3s ease-in-out",
+                  }}
+                >
+                  {filteredCounterparties.map((item) => (
+                    <div key={item.id}>
+                      <CounterpartyCard
+                        counterparty={item}
+                        industryLabel={industryLabel(item.industry_id) || undefined}
+                        legalFormLabel={item.entity_type === "LEGAL" && item.legal_form ? legalFormLabel(item.legal_form) : undefined}
+                        onEdit={(c) => {
+                          setEditing(c);
+                          setIsDialogOpen(true);
+                        }}
+                        onDelete={(c) => setDeleteTarget(c)}
+                        onReady={() => {
+                          if (!readyCardSetRef.current.has(item.id)) {
+                            readyCardSetRef.current.add(item.id);
+                            setReadyCardCount((prev) => prev + 1);
+                          }
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {hasMore && (
+                  <div className="flex justify-center pt-2">
+                    <IconButton
+                      type="button"
+                      aria-label={loadingMore ? "Загрузка..." : "Загрузить ещё"}
+                      onClick={loadMore}
+                      disabled={loadingMore || loading}
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </IconButton>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         </div>
 
-      <AlertDialog
+      <Dialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить контрагента?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Контрагент будет перемещен в раздел удаленных.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-rose-600 text-white hover:bg-rose-700"
-              onClick={handleDelete}
-              disabled={isDeleting}
+        <DialogContent
+          className="sm:max-w-[600px] gap-4"
+          style={{ backgroundColor: MODAL_BG }}
+        >
+          <div className="grid gap-4">
+            <DialogHeader>
+              <DialogTitle
+                className="flex items-center gap-3 text-[32px] font-medium"
+                style={{ color: ACTIVE_TEXT_DARK }}
+              >
+                <Trash2 className="w-8 h-8" style={{ color: RED }} />
+                Удалить контрагента?
+              </DialogTitle>
+            </DialogHeader>
+            <p
+              className="text-sm"
+              style={{ color: PLACEHOLDER_COLOR_DARK }}
             >
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              Контрагент будет перемещен в раздел удаленных.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="glass"
+                className="rounded-lg border-0"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as React.CSSProperties
+                }
+                onClick={() => setDeleteTarget(null)}
+                disabled={isDeleting}
+              >
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                className="rounded-lg border-0 bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
+                onClick={handleDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? "Удаляем..." : "Удалить"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

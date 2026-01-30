@@ -128,6 +128,12 @@ export type CounterpartyOut = {
   deleted_at: string | null;
 };
 
+export type CounterpartyPageOut = {
+  items: CounterpartyOut[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
 export type OnboardingStateOut = {
   device_type: OnboardingDeviceType;
   status: OnboardingStatus;
@@ -542,6 +548,45 @@ export async function fetchCounterparties(options?: {
   if (options?.deleted_only) params.set("deleted_only", "true");
   const qs = params.toString();
   const res = await authFetch(`${API_BASE}/counterparties${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export type FetchCounterpartiesPageParams = {
+  limit?: number;
+  cursor?: string | null;
+  include_deleted?: boolean;
+  deleted_only?: boolean;
+  source?: ("added" | "default")[];
+  entity_type?: ("LEGAL" | "PERSON")[];
+  status_active?: boolean;
+  status_deleted?: boolean;
+  industry_ids?: number[];
+  name_query?: string | null;
+};
+
+export async function fetchCounterpartiesPage(
+  options?: FetchCounterpartiesPageParams
+): Promise<CounterpartyPageOut> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.cursor) params.set("cursor", options.cursor);
+  if (options?.include_deleted) params.set("include_deleted", "true");
+  if (options?.deleted_only) params.set("deleted_only", "true");
+  if (options?.status_active !== undefined)
+    params.set("status_active", options.status_active ? "true" : "false");
+  if (options?.status_deleted !== undefined)
+    params.set("status_deleted", options.status_deleted ? "true" : "false");
+  if (options?.source?.length)
+    options.source.forEach((s) => params.append("source", s));
+  if (options?.entity_type?.length)
+    options.entity_type.forEach((t) => params.append("entity_type", t));
+  if (options?.industry_ids?.length)
+    options.industry_ids.forEach((id) => params.append("industry_ids", String(id)));
+  if (options?.name_query?.trim())
+    params.set("name_query", options.name_query.trim());
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/counterparties/page${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

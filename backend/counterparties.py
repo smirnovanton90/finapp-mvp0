@@ -18,6 +18,7 @@ from schemas import (
     CounterpartyCreate,
     CounterpartyIndustryOut,
     CounterpartyOut,
+    CounterpartyPageOut,
     CounterpartyUpdate,
     LegalFormOut,
 )
@@ -270,6 +271,79 @@ def list_counterparties(
         apply_logo_url(row)
         apply_photo_url(row)
     return rows
+
+
+@router.get("/page", response_model=CounterpartyPageOut)
+def list_counterparties_page(
+    limit: int = Query(50, ge=1, le=200),
+    cursor: str | None = None,
+    include_deleted: bool = Query(default=False),
+    deleted_only: bool = Query(default=False),
+    source: list[str] | None = Query(default=None),
+    entity_type: list[str] | None = Query(default=None),
+    status_active: bool = Query(default=True),
+    status_deleted: bool = Query(default=False),
+    industry_ids: list[int] | None = Query(default=None),
+    name_query: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(Counterparty).where(
+        or_(Counterparty.owner_user_id.is_(None), Counterparty.owner_user_id == user.id)
+    )
+    if deleted_only:
+        stmt = stmt.where(
+            Counterparty.owner_user_id == user.id, Counterparty.deleted_at.isnot(None)
+        )
+    elif not include_deleted:
+        stmt = stmt.where(Counterparty.deleted_at.is_(None))
+    if source:
+        source_set = set(s.upper() for s in source)
+        if source_set == {"ADDED"}:
+            stmt = stmt.where(Counterparty.owner_user_id == user.id)
+        elif source_set == {"DEFAULT"}:
+            stmt = stmt.where(Counterparty.owner_user_id.is_(None))
+    if status_active and not status_deleted:
+        stmt = stmt.where(Counterparty.deleted_at.is_(None))
+    elif status_deleted and not status_active:
+        stmt = stmt.where(Counterparty.deleted_at.isnot(None))
+    if entity_type:
+        types = [t.upper() for t in entity_type]
+        stmt = stmt.where(Counterparty.entity_type.in_(types))
+    if industry_ids:
+        stmt = stmt.where(Counterparty.industry_id.in_(industry_ids))
+    if name_query and (q := normalize_text(name_query)):
+        q_pattern = f"%{q}%"
+        stmt = stmt.where(
+            or_(
+                Counterparty.name.ilike(q_pattern),
+                func.coalesce(Counterparty.full_name, "").ilike(q_pattern),
+                func.coalesce(Counterparty.first_name, "").ilike(q_pattern),
+                func.coalesce(Counterparty.last_name, "").ilike(q_pattern),
+                func.coalesce(Counterparty.middle_name, "").ilike(q_pattern),
+            )
+        )
+    if cursor:
+        try:
+            cursor_id = int(cursor)
+            stmt = stmt.where(Counterparty.id < cursor_id)
+        except ValueError:
+            pass
+    stmt = stmt.order_by(Counterparty.id.desc()).limit(limit + 1)
+    rows = list(db.execute(stmt).scalars())
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit]
+    next_cursor = None
+    if rows:
+        last = rows[-1]
+        apply_logo_url(last)
+        apply_photo_url(last)
+        next_cursor = str(last.id)
+    for row in rows:
+        apply_logo_url(row)
+        apply_photo_url(row)
+    return CounterpartyPageOut(items=rows, next_cursor=next_cursor, has_more=has_more)
 
 
 @router.get("/legal-forms", response_model=list[LegalFormOut])

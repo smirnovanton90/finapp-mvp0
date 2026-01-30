@@ -9,9 +9,8 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { User, Building2 } from "lucide-react";
-
 import { CounterpartyOut, CounterpartyIndustryOut } from "@/lib/api";
+import { CounterpartyIconImage } from "@/components/counterparty-icon-image";
 import {
   normalizeCounterpartySearch,
   buildCounterpartyDisplayName,
@@ -40,6 +39,7 @@ type CounterpartySelectorProps = {
   filterByIndustryId?: number | null;
   industries?: CounterpartyIndustryOut[];
   counterpartyCounts?: Map<number, number> | Record<number, number>;
+  apiBase: string;
 };
 
 const DEFAULT_EMPTY_MESSAGE = "Нет контрагентов.";
@@ -62,6 +62,7 @@ export function CounterpartySelector({
   filterByIndustryId,
   industries = [],
   counterpartyCounts,
+  apiBase,
 }: CounterpartySelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -135,11 +136,6 @@ export function CounterpartySelector({
       : "";
   const inputValue = query || selectedLabel;
   const selectedCounterparty = selectionMode === "single" ? selectedCounterparties[0] : null;
-  const selectedImageUrl = selectedCounterparty
-    ? selectedCounterparty.entity_type === "PERSON"
-      ? selectedCounterparty.photo_url
-      : selectedCounterparty.logo_url
-    : null;
 
   const applySelection = (id: number) => {
     if (disabled) return;
@@ -219,22 +215,16 @@ export function CounterpartySelector({
     zIndex: 50,
   };
 
-  const DefaultIcon = selectedCounterparty
-    ? selectedCounterparty.entity_type === "PERSON" ? User : Building2
-    : null;
-
   const prefix =
-    selectedImageUrl && !query ? (
-      <img
-        src={selectedImageUrl}
+    selectedCounterparty && !query ? (
+      <CounterpartyIconImage
+        counterparty={selectedCounterparty}
+        apiBase={apiBase}
+        size={24}
+        className="h-6 w-6 rounded object-contain"
+        fallbackIconColor={SIDEBAR_TEXT_ACTIVE}
         alt={selectedLabel}
-        className="h-6 w-6 rounded bg-white object-contain"
-        loading="lazy"
       />
-    ) : !selectedImageUrl && selectedCounterparty && !query && DefaultIcon ? (
-      <span className="flex h-6 w-6 items-center justify-center rounded bg-white">
-        <DefaultIcon className="h-4 w-4" style={{ color: SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />
-      </span>
     ) : undefined;
 
   return (
@@ -347,13 +337,6 @@ export function CounterpartySelector({
                     const isDeleted = Boolean(counterparty.deleted_at);
                     const logoToneClass = isDeleted ? "opacity-50" : "";
 
-                    const DefaultIcon =
-                      counterparty.entity_type === "PERSON" ? User : Building2;
-                    const imageUrl =
-                      counterparty.entity_type === "PERSON"
-                        ? counterparty.photo_url
-                        : counterparty.logo_url;
-
                     return (
                       <button
                         key={counterparty.id}
@@ -376,20 +359,16 @@ export function CounterpartySelector({
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => applySelection(counterparty.id)}
                       >
-                        {imageUrl ? (
-                          <img
-                            src={imageUrl}
+                        <div className={`h-6 w-6 shrink-0 ${logoToneClass}`}>
+                          <CounterpartyIconImage
+                            counterparty={counterparty}
+                            apiBase={apiBase}
+                            size={24}
+                            className="h-6 w-6 rounded object-contain"
+                            fallbackIconColor={isSelected ? "white" : SIDEBAR_TEXT_ACTIVE}
                             alt={displayName}
-                            className={`h-6 w-6 rounded bg-white object-contain ${logoToneClass}`}
-                            loading="lazy"
                           />
-                        ) : (
-                          <div
-                            className={`flex h-6 w-6 items-center justify-center rounded bg-white ${logoToneClass}`}
-                          >
-                            <DefaultIcon className="h-4 w-4" style={{ color: isSelected ? "white" : SIDEBAR_TEXT_ACTIVE }} aria-hidden="true" />
-                          </div>
-                        )}
+                        </div>
                         <div className="min-w-0 flex-1">
                           <div
                             className="text-sm font-normal break-words"

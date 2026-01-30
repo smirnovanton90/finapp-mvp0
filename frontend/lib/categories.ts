@@ -1,3 +1,5 @@
+import { CATEGORY_ICON_NAME_BY_L1 } from "@/lib/category-icons";
+
 export type CategoryScope = "INCOME" | "EXPENSE" | "BOTH";
 
 export type CategoryNode = {
@@ -318,7 +320,15 @@ export function buildCategoryLookup(nodes: CategoryNode[]) {
     items.forEach((item) => {
       const nextTrail = [...trail, item.name];
       idToPath.set(item.id, nextTrail);
-      idToIcon.set(item.id, item.icon_name ?? null);
+      // Для L1-категорий по умолчанию приоритет у маппинга из конфига (актуальная иконка без зависимости от БД)
+      const iconName =
+        nextTrail.length === 1 &&
+        item.owner_user_id == null &&
+        item.name &&
+        CATEGORY_ICON_NAME_BY_L1[item.name]
+          ? CATEGORY_ICON_NAME_BY_L1[item.name]
+          : item.icon_name ?? null;
+      idToIcon.set(item.id, iconName);
       pathToId.set(makeCategoryPathKey(...nextTrail), item.id);
       if (item.children?.length) {
         walk(item.children, nextTrail);

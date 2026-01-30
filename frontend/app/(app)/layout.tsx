@@ -17,7 +17,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
-  const { isCollapsed } = useSidebar();
+  const { isCollapsed, isFilterPanelCollapsed } = useSidebar();
   const sessionKey = (session?.user as { id?: string })?.id ?? "anon";
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -27,6 +27,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isLimitsPage = pathname === "/limits" || pathname?.startsWith("/limits/");
   const isCounterpartiesPage = pathname === "/counterparties" || pathname?.startsWith("/counterparties/");
   const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage || isLimitsPage || isCounterpartiesPage;
+  const filtersOpen = isSpecialPage && !isFilterPanelCollapsed;
+  const showFiltersStrip = isSpecialPage && !isCollapsed;
+  const asidePadding = 20;
+  const collapsedNavWidth = 100;
+  const filterPanelWidth = 400;
+  const contentMarginLeft = isCollapsed
+    ? asidePadding + collapsedNavWidth + (isSpecialPage && !isFilterPanelCollapsed ? filterPanelWidth : 0)
+    : filtersOpen
+      ? asidePadding + 300 + filterPanelWidth
+      : showFiltersStrip
+        ? asidePadding + 300
+        : asidePadding + 300;
 
   useEffect(() => {
     if (status !== "loading" && !session) {
@@ -114,11 +126,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="relative z-10 flex">
           <Sidebar />
           <div
-            className={cn(
-              "flex-1 transition-all duration-300",
-              isCollapsed ? "ml-[120px]" : "ml-[320px]",
-              !isSpecialPage && "min-h-screen flex items-center"
-            )}
+            className={cn("flex-1 transition-all duration-300", !isSpecialPage && "min-h-screen flex items-center")}
+            style={{ marginLeft: contentMarginLeft }}
           >
             {isSpecialPage ? (
               children

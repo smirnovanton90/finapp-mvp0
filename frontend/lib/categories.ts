@@ -307,6 +307,8 @@ export function makeCategoryPathKey(l1?: string, l2?: string, l3?: string) {
   return [l1, l2, l3].map((value) => value?.trim() ?? "").join("||");
 }
 
+export type CategoryLookup = ReturnType<typeof buildCategoryLookup>;
+
 export function buildCategoryLookup(nodes: CategoryNode[]) {
   const idToPath = new Map<number, string[]>();
   const idToIcon = new Map<number, string | null>();

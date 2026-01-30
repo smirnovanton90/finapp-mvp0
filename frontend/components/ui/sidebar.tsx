@@ -9,7 +9,6 @@ import {
   ArrowLeftRight,
   LineChart,
   BarChart3,
-  ChevronDown,
   ArrowLeft,
   ArrowRight,
   LayoutDashboard,
@@ -17,14 +16,22 @@ import {
   Gauge,
   Users,
   User,
+  Filter,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useSidebar } from "./sidebar-context";
 import { fetchUserMe, fetchUserPhotoAsBlob } from "@/lib/api";
-import { ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACTIVE_TEXT_DARK, MODAL_BG, SIDEBAR_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
+
+const SIDEBAR_BASE_WIDTH = 300;
+const FILTER_PANEL_WIDTH = 400;
+/** Padding aside: 10px left + 10px right. Учитываем в width, чтобы контент подложки не выезжал за край (box-sizing: border-box). */
+const ASIDE_PADDING_H = 20;
 
 const nav = [
   { href: "/dashboard", label: "\u0414\u044d\u0448\u0431\u043e\u0440\u0434", icon: LayoutDashboard },
@@ -82,12 +89,16 @@ function IconFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
+const FILTER_PAGES = ["/assets", "/transactions", "/financial-planning", "/limits", "/counterparties"];
+
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { isCollapsed, toggleSidebar } = useSidebar();
+  const { isCollapsed, toggleSidebar, isFilterPanelCollapsed, toggleFilterPanel } = useSidebar();
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
   const isCabinetActive = pathname === "/cabinet" || pathname.startsWith("/cabinet/");
+  const hasFilters = FILTER_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  const showFiltersSection = hasFilters && !isCollapsed;
 
   // Загрузка фото пользователя
   useEffect(() => {
@@ -127,53 +138,83 @@ export function Sidebar() {
     };
   }, []);
 
+  const filtersOpen = hasFilters && !isFilterPanelCollapsed;
+  const showFilterStrip = hasFilters;
+  const unifiedBg = showFiltersSection || (isCollapsed && hasFilters);
+  const contentWidth = isCollapsed
+    ? hasFilters
+      ? 100 + (filtersOpen ? FILTER_PANEL_WIDTH : 0)
+      : 100
+    : showFiltersSection
+      ? SIDEBAR_BASE_WIDTH + (filtersOpen ? FILTER_PANEL_WIDTH : 0)
+      : SIDEBAR_BASE_WIDTH;
+  const asideWidth = contentWidth + ASIDE_PADDING_H;
+  /* На страницах с фильтрами всегда рендерим слот (в т.ч. при свёрнутом сайдбаре), чтобы createPortal не падал. */
+  const renderFilterSlot = hasFilters;
+
   return (
     <aside
-      className={cn(
-        "fixed left-0 top-0 h-screen p-[10px] transition-[width] duration-300",
-        isCollapsed ? "w-[100px]" : "w-[300px]"
-      )}
+      className="fixed left-0 top-0 h-screen p-[10px] transition-[width] duration-300"
+      style={{ width: asideWidth }}
     >
-      <div className="flex h-full w-full flex-col rounded-[9px] bg-sidebar">
-        {/* Collapse toggle */}
-        <div className="relative h-[55px]">
-          <Button
-            variant="glass"
-            onClick={toggleSidebar}
-            className={cn(
-              "absolute top-[10px] h-[35px] w-[35px] rounded-[9px] p-0",
-              isCollapsed ? "left-1/2 -translate-x-1/2" : "right-[10px]"
-            )}
-            style={
-              {
-                "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
-              } as CSSProperties
-            }
-            aria-label={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
-          >
-            {isCollapsed ? (
-              <IconFrame>
-                <ArrowRight
-                  className="size-[15px]"
+      <div
+        className={cn(
+          "flex h-full w-full",
+          renderFilterSlot && "flex-row gap-0",
+          unifiedBg && "rounded-[9px] bg-sidebar"
+        )}
+      >
+        {/* Left part: nav + footer. Подложка только когда нет единой подложки (не на странице с фильтрами или сайдбар развёрнут без фильтров). */}
+        <div
+          className={cn(
+            "flex h-full flex-col shrink-0",
+            unifiedBg ? (isCollapsed ? "w-[100px]" : "w-[300px]") : isCollapsed ? "w-[100px] rounded-[9px] bg-sidebar" : "w-full rounded-[9px] bg-sidebar"
+          )}
+        >
+        {/* Кнопки сворачивания сайдбара (слева) и разворота фильтров (справа) — IconButton. На вкладках без фильтра одна кнопка — по центру. */}
+        <div
+          className={cn(
+            "relative h-[55px] flex items-center gap-[10px] pr-[10px]",
+            isCollapsed && !showFilterStrip ? "justify-center pr-0" : "justify-end"
+          )}
+        >
+          <Tooltip content={isCollapsed ? "Развернуть меню" : "Свернуть меню"} side="right" className="flex">
+            <IconButton
+              onClick={toggleSidebar}
+              aria-label={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
+              appearance={isCollapsed ? "inactive" : "default"}
+            >
+              {isCollapsed ? (
+                <ArrowRight className="size-4" strokeWidth={1.5} style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+              ) : (
+                <ArrowLeft className="size-4" strokeWidth={1.5} style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+              )}
+            </IconButton>
+          </Tooltip>
+          {showFilterStrip && (
+            <Tooltip
+              content={isFilterPanelCollapsed ? "Развернуть фильтры" : "Свернуть фильтры"}
+              side="right"
+              className="flex"
+            >
+              <IconButton
+                onClick={toggleFilterPanel}
+                aria-expanded={!isFilterPanelCollapsed}
+                aria-label={isFilterPanelCollapsed ? "Развернуть фильтры" : "Свернуть фильтры"}
+                appearance={isFilterPanelCollapsed ? "inactive" : "default"}
+              >
+                <Filter
+                  className="size-4"
                   strokeWidth={1.5}
-                  style={{ color: SIDEBAR_TEXT_INACTIVE }}
+                  style={{ color: isFilterPanelCollapsed ? SIDEBAR_TEXT_INACTIVE : ACTIVE_TEXT_DARK }}
                 />
-              </IconFrame>
-            ) : (
-              <IconFrame>
-                <ArrowLeft
-                  className="size-[15px]"
-                  strokeWidth={1.5}
-                  style={{ color: SIDEBAR_TEXT_INACTIVE }}
-                />
-              </IconFrame>
-            )}
-          </Button>
+              </IconButton>
+            </Tooltip>
+          )}
         </div>
 
         {/* Navigation */}
-        <nav className="mt-[10px] flex flex-1 flex-col gap-[10px] overflow-y-auto pb-[10px]">
+        <nav className="scrollbar-dropdown mt-[10px] flex flex-1 flex-col gap-[10px] overflow-y-auto pb-[10px] min-h-0">
           {nav.map((item) => {
             const active = pathname === item.href || pathname.startsWith(item.href + "/");
             const Icon = item.icon;
@@ -381,6 +422,23 @@ export function Sidebar() {
             )}
           </div>
         </div>
+        </div>
+
+        {/* Панель фильтров справа. Без своей подложки — единая с сайдбаром при showFiltersSection. Слот всегда в DOM при hasFilters. */}
+        {renderFilterSlot && (
+          <div
+            className={cn(
+              "h-full shrink-0 flex flex-col overflow-hidden min-h-0 transition-[width] duration-300",
+              filtersOpen ? "w-[400px]" : "w-0 min-w-0 overflow-hidden pointer-events-none"
+            )}
+            aria-hidden={!filtersOpen}
+          >
+            <div
+              id={SIDEBAR_FILTERS_SLOT_ID}
+              className="scrollbar-dropdown flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-3 px-3"
+            />
+          </div>
+        )}
       </div>
     </aside>
   );

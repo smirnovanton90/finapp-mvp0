@@ -29,7 +29,9 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useRouter } from "next/navigation";
@@ -53,7 +55,7 @@ import { Label } from "@/components/ui/label";
 import { CategorySelector } from "@/components/category-selector";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
-import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { FilterSection } from "@/components/filter-panel";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { IconButton } from "@/components/ui/icon-button";
 import { useSidebar } from "@/components/ui/sidebar-context";
@@ -76,6 +78,7 @@ import {
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
 import { useCategoryIcon } from "@/hooks/use-category-icon";
+import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 import {
   createTransactionChain,
   deleteTransactionChain,
@@ -290,6 +293,8 @@ export default function FinancialPlanningPage() {
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [industries, setIndustries] = useState<CounterpartyIndustryOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1350,262 +1355,9 @@ export default function FinancialPlanningPage() {
     >
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <FilterPanel
-          addButton={(collapsed) => (
-            <>
-              <Button
-                className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-                style={{ backgroundColor: ACCENT }}
-                aria-label={collapsed ? "Добавить цепочку" : undefined}
-                onClick={() => setIsDialogOpen(true)}
-              >
-                <Plus
-                  className={cn("h-5 w-5", !collapsed && "mr-2")}
-                  style={{ color: "white", opacity: 0.85 }}
-                />
-                {!collapsed && (
-                  <span style={{ color: "white", opacity: 0.85 }}>Добавить цепочку</span>
-                )}
-              </Button>
-              <FormModal
-                open={isDialogOpen}
-                onOpenChange={(open) => {
-                  setIsDialogOpen(open);
-                  if (!open) resetForm();
-                }}
-                title="Добавить цепочку транзакций"
-                icon={<LineChart className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
-                formError={formError}
-                onSubmit={handleCreate}
-                onCancel={() => {
-                  setIsDialogOpen(false);
-                  resetForm();
-                }}
-                submitLabel={isSubmitting ? "Добавляем..." : "Добавить"}
-                loading={isSubmitting}
-                size="medium"
-              >
-                <TextField
-                  label="Название цепочки"
-                  value={chainName}
-                  onChange={(e) => setChainName(e.target.value)}
-                  placeholder="Например, аренда офиса"
-                />
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <DateField
-                    label="Дата начала"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
-                  <DateField
-                    label="Дата окончания"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                  />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <SelectField
-                    label="Частота"
-                    value={frequency}
-                    onValueChange={(value) =>
-                      setFrequency(value as TransactionChainFrequency)
-                    }
-                    options={[
-                      { value: "DAILY", label: "Ежедневно" },
-                      { value: "WEEKLY", label: "Еженедельно" },
-                      { value: "MONTHLY", label: "Ежемесячно" },
-                      { value: "REGULAR", label: "Регулярно" },
-                    ]}
-                    placeholder="Выберите частоту"
-                  />
-                  {frequency === "WEEKLY" && (
-                    <SelectField
-                      label="День недели"
-                      value={String(weeklyDay)}
-                      onValueChange={(value) => setWeeklyDay(Number(value))}
-                      options={WEEKDAY_LABELS.map((label, index) => ({
-                        value: String(index),
-                        label,
-                      }))}
-                      placeholder="Выберите день недели"
-                    />
-                  )}
-                  {frequency === "MONTHLY" && (
-                    <SelectField
-                      label="Правило месяца"
-                      value={monthlyMode}
-                      onValueChange={(value) =>
-                        setMonthlyMode(
-                          value as "DAY_OF_MONTH" | TransactionChainMonthlyRule
-                        )
-                      }
-                      options={[
-                        { value: "DAY_OF_MONTH", label: "Число месяца" },
-                        { value: "FIRST_DAY", label: "Первый день" },
-                        { value: "LAST_DAY", label: "Последний день" },
-                      ]}
-                      placeholder="Выберите правило"
-                    />
-                  )}
-                  {frequency === "MONTHLY" && monthlyMode === "DAY_OF_MONTH" && (
-                    <TextField
-                      label="Число месяца"
-                      type="number"
-                      min={1}
-                      max={31}
-                      value={monthlyDay}
-                      onChange={(e) => setMonthlyDay(e.target.value)}
-                    />
-                  )}
-                  {frequency === "REGULAR" && (
-                    <TextField
-                      label="Интервал (дней)"
-                      type="number"
-                      min={1}
-                      value={intervalDays}
-                      onChange={(e) => setIntervalDays(e.target.value)}
-                    />
-                  )}
-                </div>
-
-                <div className="grid gap-2">
-                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Направление</Label>
-                  <SegmentedSelector
-                    options={[
-                      { value: "INCOME", label: "Доход", colorScheme: "green" },
-                      { value: "EXPENSE", label: "Расход", colorScheme: "red" },
-                      { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
-                    ]}
-                    value={direction}
-                    onChange={(value) => {
-                      setDirection(value as "INCOME" | "EXPENSE" | "TRANSFER");
-                      setCounterpartyItemId(null);
-                    }}
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Актив/обязательство</Label>
-                  <ItemSelector
-                    items={items}
-                    selectedIds={primaryItemId ? [primaryItemId] : []}
-                    onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
-                    selectionMode="single"
-                    placeholder="Выберите счет"
-                    getItemTypeLabel={getItemTypeLabel}
-                    getItemKind={resolveItemEffectiveKind}
-                    getBankLogoUrl={itemBankLogoUrl}
-                    getBankName={itemBankName}
-                    getItemBalance={getItemDisplayBalanceCents}
-                    itemCounts={itemTxCounts}
-                  />
-                </div>
-                {isTransfer && (
-                  <div className="grid gap-2">
-                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Контрагент (счёт)</Label>
-                    <ItemSelector
-                      items={items.filter((item) => item.id !== primaryItemId)}
-                      selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
-                      onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
-                      selectionMode="single"
-                      placeholder="Выберите счет"
-                      getItemTypeLabel={getItemTypeLabel}
-                      getItemKind={resolveItemEffectiveKind}
-                      getBankLogoUrl={itemBankLogoUrl}
-                      getBankName={itemBankName}
-                      getItemBalance={getItemDisplayBalanceCents}
-                      itemCounts={itemTxCounts}
-                    />
-                  </div>
-                )}
-
-                <div className="grid gap-2">
-                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Контрагент</Label>
-                  <CounterpartySelector
-                    counterparties={selectableCounterparties}
-                    selectedIds={counterpartyId ? [counterpartyId] : []}
-                    onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
-                    selectionMode="single"
-                    placeholder="Начните вводить название"
-                    industries={industries}
-                    disabled={counterpartyLoading}
-                    counterpartyCounts={counterpartyTxCounts}
-                  />
-                  {counterpartyError && (
-                    <p className="text-xs" style={{ color: "#FB4C4F" }}>
-                      {counterpartyError}
-                    </p>
-                  )}
-                </div>
-
-                {isTransfer && isCrossCurrencyTransfer ? (
-                  <>
-                    <TextField
-                      label={`Сумма списания (${primaryCurrency ?? "-"})`}
-                      value={amountStr}
-                      onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                      onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                      inputMode="decimal"
-                      placeholder="Например: 1 234,56"
-                    />
-                    <TextField
-                      label={`Сумма поступления (${counterpartyCurrency ?? "-"})`}
-                      value={amountCounterpartyStr}
-                      onChange={(e) =>
-                        setAmountCounterpartyStr(formatRubInput(e.target.value))
-                      }
-                      onBlur={() =>
-                        setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev))
-                      }
-                      inputMode="decimal"
-                      placeholder="Например: 1 234,56"
-                    />
-                  </>
-                ) : (
-                  <TextField
-                    label={primaryCurrency ? `Сумма (${primaryCurrency})` : "Сумма"}
-                    value={amountStr}
-                    onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                    onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                    inputMode="decimal"
-                    placeholder="Например: 1 234,56"
-                  />
-                )}
-
-                {!isTransfer && (
-                  <div className="grid gap-2">
-                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Категория</Label>
-                    <CategorySelector
-                      categoryNodes={categoryNodes}
-                      selectedPath={selectedCategoryPath}
-                      onChange={(path) => {
-                        if (path) {
-                          applyCategorySelection(path.l1, path.l2, path.l3);
-                        } else {
-                          applyCategorySelection("", "", "");
-                        }
-                      }}
-                      placeholder="Начните вводить категорию"
-                      direction={direction}
-                      disabled={isSubmitting}
-                    />
-                  </div>
-                )}
-
-                <TextField
-                  label="Комментарий"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder="Комментарий"
-                />
-              </FormModal>
-            </>
-          )}
-          additionalActions={[]}
-        >
+      {mounted && typeof document !== "undefined" &&
+        createPortal(
+          <div className="space-y-4 py-2">
           <FilterSection
             label="Вид цепочки"
             onReset={() => setSelectedDirections(new Set())}
@@ -1802,10 +1554,248 @@ export default function FinancialPlanningPage() {
               multiple={true}
             />
           </FilterSection>
-        </FilterPanel>
+          </div>,
+          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
+        )}
 
         <div className="flex-1 min-w-0 pt-[30px]">
           <div className="w-[900px] mx-auto">
+            <FormModal
+              open={isDialogOpen}
+              onOpenChange={(open) => {
+                setIsDialogOpen(open);
+                if (!open) resetForm();
+              }}
+              title="Добавить цепочку транзакций"
+              icon={<LineChart className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+              formError={formError}
+              onSubmit={handleCreate}
+              onCancel={() => {
+                setIsDialogOpen(false);
+                resetForm();
+              }}
+              submitLabel={isSubmitting ? "Добавляем..." : "Добавить"}
+              loading={isSubmitting}
+              size="medium"
+            >
+              <TextField
+                label="Название цепочки"
+                value={chainName}
+                onChange={(e) => setChainName(e.target.value)}
+                placeholder="Например, аренда офиса"
+              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <DateField
+                  label="Дата начала"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+                <DateField
+                  label="Дата окончания"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <SelectField
+                  label="Частота"
+                  value={frequency}
+                  onValueChange={(value) =>
+                    setFrequency(value as TransactionChainFrequency)
+                  }
+                  options={[
+                    { value: "DAILY", label: "Ежедневно" },
+                    { value: "WEEKLY", label: "Еженедельно" },
+                    { value: "MONTHLY", label: "Ежемесячно" },
+                    { value: "REGULAR", label: "Регулярно" },
+                  ]}
+                  placeholder="Выберите частоту"
+                />
+                {frequency === "WEEKLY" && (
+                  <SelectField
+                    label="День недели"
+                    value={String(weeklyDay)}
+                    onValueChange={(value) => setWeeklyDay(Number(value))}
+                    options={WEEKDAY_LABELS.map((label, index) => ({
+                      value: String(index),
+                      label,
+                    }))}
+                    placeholder="Выберите день недели"
+                  />
+                )}
+                {frequency === "MONTHLY" && (
+                  <SelectField
+                    label="Правило месяца"
+                    value={monthlyMode}
+                    onValueChange={(value) =>
+                      setMonthlyMode(
+                        value as "DAY_OF_MONTH" | TransactionChainMonthlyRule
+                      )
+                    }
+                    options={[
+                      { value: "DAY_OF_MONTH", label: "Число месяца" },
+                      { value: "FIRST_DAY", label: "Первый день" },
+                      { value: "LAST_DAY", label: "Последний день" },
+                    ]}
+                    placeholder="Выберите правило"
+                  />
+                )}
+                {frequency === "MONTHLY" && monthlyMode === "DAY_OF_MONTH" && (
+                  <TextField
+                    label="Число месяца"
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={monthlyDay}
+                    onChange={(e) => setMonthlyDay(e.target.value)}
+                  />
+                )}
+                {frequency === "REGULAR" && (
+                  <TextField
+                    label="Интервал (дней)"
+                    type="number"
+                    min={1}
+                    value={intervalDays}
+                    onChange={(e) => setIntervalDays(e.target.value)}
+                  />
+                )}
+              </div>
+              <div className="grid gap-2">
+                <Label style={{ color: ACTIVE_TEXT_DARK }}>Направление</Label>
+                <SegmentedSelector
+                  options={[
+                    { value: "INCOME", label: "Доход", colorScheme: "green" },
+                    { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                    { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
+                  ]}
+                  value={direction}
+                  onChange={(value) => {
+                    setDirection(value as "INCOME" | "EXPENSE" | "TRANSFER");
+                    setCounterpartyItemId(null);
+                  }}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label style={{ color: ACTIVE_TEXT_DARK }}>Актив/обязательство</Label>
+                <ItemSelector
+                  items={items}
+                  selectedIds={primaryItemId ? [primaryItemId] : []}
+                  onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                  selectionMode="single"
+                  placeholder="Выберите счет"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
+                  getBankLogoUrl={itemBankLogoUrl}
+                  getBankName={itemBankName}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  itemCounts={itemTxCounts}
+                />
+              </div>
+              {isTransfer && (
+                <div className="grid gap-2">
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Контрагент (счёт)</Label>
+                  <ItemSelector
+                    items={items.filter((item) => item.id !== primaryItemId)}
+                    selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
+                    onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
+                    selectionMode="single"
+                    placeholder="Выберите счет"
+                    getItemTypeLabel={getItemTypeLabel}
+                    getItemKind={resolveItemEffectiveKind}
+                    getBankLogoUrl={itemBankLogoUrl}
+                    getBankName={itemBankName}
+                    getItemBalance={getItemDisplayBalanceCents}
+                    itemCounts={itemTxCounts}
+                  />
+                </div>
+              )}
+              <div className="grid gap-2">
+                <Label style={{ color: ACTIVE_TEXT_DARK }}>Контрагент</Label>
+                <CounterpartySelector
+                  counterparties={selectableCounterparties}
+                  selectedIds={counterpartyId ? [counterpartyId] : []}
+                  onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                  selectionMode="single"
+                  placeholder="Начните вводить название"
+                  industries={industries}
+                  disabled={counterpartyLoading}
+                  counterpartyCounts={counterpartyTxCounts}
+                />
+                {counterpartyError && (
+                  <p className="text-xs" style={{ color: "#FB4C4F" }}>
+                    {counterpartyError}
+                  </p>
+                )}
+              </div>
+              {isTransfer && isCrossCurrencyTransfer ? (
+                <>
+                  <TextField
+                    label={`Сумма списания (${primaryCurrency ?? "-"})`}
+                    value={amountStr}
+                    onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+                    onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                    inputMode="decimal"
+                    placeholder="Например: 1 234,56"
+                  />
+                  <TextField
+                    label={`Сумма поступления (${counterpartyCurrency ?? "-"})`}
+                    value={amountCounterpartyStr}
+                    onChange={(e) =>
+                      setAmountCounterpartyStr(formatRubInput(e.target.value))
+                    }
+                    onBlur={() =>
+                      setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev))
+                    }
+                    inputMode="decimal"
+                    placeholder="Например: 1 234,56"
+                  />
+                </>
+              ) : (
+                <TextField
+                  label={primaryCurrency ? `Сумма (${primaryCurrency})` : "Сумма"}
+                  value={amountStr}
+                  onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                  inputMode="decimal"
+                  placeholder="Например: 1 234,56"
+                />
+              )}
+              {!isTransfer && (
+                <div className="grid gap-2">
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Категория</Label>
+                  <CategorySelector
+                    categoryNodes={categoryNodes}
+                    selectedPath={selectedCategoryPath}
+                    onChange={(path) => {
+                      if (path) {
+                        applyCategorySelection(path.l1, path.l2, path.l3);
+                      } else {
+                        applyCategorySelection("", "", "");
+                      }
+                    }}
+                    placeholder="Начните вводить категорию"
+                    direction={direction}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              )}
+              <TextField
+                label="Комментарий"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Комментарий"
+              />
+            </FormModal>
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <Button
+                className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                style={{ backgroundColor: ACCENT }}
+                onClick={() => setIsDialogOpen(true)}
+              >
+                <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                <span style={{ color: "white", opacity: 0.85 }}>Добавить цепочку</span>
+              </Button>
+            </div>
             {loading ? (
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : visibleChains.length === 0 ? (
@@ -1837,7 +1827,7 @@ export default function FinancialPlanningPage() {
                             "--icon-button-bg": ACCENT_FILL_LIGHT,
                             "--icon-button-bg-hover": ACCENT_FILL_MEDIUM,
                             color: ACTIVE_TEXT_DARK,
-                          }}
+                          } as CSSProperties}
                           onClick={() => openChainTransactions(chain.id, "total")}
                         >
                           {stats.total}
@@ -1850,7 +1840,7 @@ export default function FinancialPlanningPage() {
                             "--icon-button-bg": GREEN_FILL,
                             "--icon-button-bg-hover": GREEN_TRANSACTION,
                             color: ACTIVE_TEXT_DARK,
-                          }}
+                          } as CSSProperties}
                           onClick={() => openChainTransactions(chain.id, "realized")}
                         >
                           {stats.realized}
@@ -1863,7 +1853,7 @@ export default function FinancialPlanningPage() {
                             "--icon-button-bg": RED_FILL,
                             "--icon-button-bg-hover": RED,
                             color: ACTIVE_TEXT_DARK,
-                          }}
+                          } as CSSProperties}
                           onClick={() => openChainTransactions(chain.id, "overdue")}
                         >
                           {stats.overdue}
@@ -1876,7 +1866,7 @@ export default function FinancialPlanningPage() {
                             "--icon-button-bg": ACCENT_FILL_MEDIUM,
                             "--icon-button-bg-hover": ACCENT,
                             color: ACTIVE_TEXT_DARK,
-                          }}
+                          } as CSSProperties}
                           onClick={() => openChainTransactions(chain.id, "upcoming")}
                         >
                           {stats.upcoming}
@@ -1889,7 +1879,7 @@ export default function FinancialPlanningPage() {
                             "--icon-button-bg": BACKGROUND_DT,
                             "--icon-button-bg-hover": MODAL_BG,
                             color: PLACEHOLDER_COLOR_DARK,
-                          }}
+                          } as CSSProperties}
                           onClick={() => openChainTransactions(chain.id, "deleted")}
                         >
                           {stats.deleted}
@@ -1902,7 +1892,6 @@ export default function FinancialPlanningPage() {
             )}
           </div>
         </div>
-      </div>
 
       <AlertDialog
         open={deleteTarget !== null}

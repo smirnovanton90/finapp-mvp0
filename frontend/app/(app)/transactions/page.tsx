@@ -10,6 +10,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useSearchParams } from "next/navigation";
@@ -89,7 +90,7 @@ import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
 import { ChainSelector } from "@/components/chain-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
-import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { FilterSection } from "@/components/filter-panel";
 import { FormModal } from "@/components/form-modal";
 import { TextField, DateField, FormField } from "@/components/ui/form-field";
 import {
@@ -167,6 +168,7 @@ import {
   CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
 import { useOnboarding } from "@/components/onboarding-context";
+import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 type TransactionsViewMode = "actual" | "planning";
 
@@ -1870,7 +1872,7 @@ function TransactionsView({
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
-  const { isFilterPanelCollapsed, toggleFilterPanel, isCollapsed } = useSidebar();
+  const { isCollapsed } = useSidebar();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
   const defaultShowPlannedRealized = isPlanningView;
@@ -2023,6 +2025,8 @@ function TransactionsView({
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [comment, setComment] = useState("");
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [importBankId, setImportBankId] = useState<number | null>(null);
   const [importBankSearch, setImportBankSearch] = useState("");
   const [importBankDropdownOpen, setImportBankDropdownOpen] = useState(false);
@@ -4007,56 +4011,10 @@ function TransactionsView({
     >
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <FilterPanel
-          addButton={(collapsed) => (
-            <Dialog
-              open={isDialogOpen}
-              onOpenChange={(open) => {
-                if (open) {
-                  if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
-                  openCreateDialog();
-                } else {
-                  closeDialog();
-                }
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button
-                  className="w-full h-10 rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-                  style={{
-                    backgroundColor: ACCENT,
-                  }}
-                  aria-label={collapsed ? "Добавить" : undefined}
-                >
-                  <Plus
-                    className={cn("h-5 w-5", !collapsed && "mr-2")}
-                    style={{ color: "white", opacity: 0.85 }}
-                  />
-                  {!collapsed && (
-                    <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
-                  )}
-                </Button>
-              </DialogTrigger>
-            </Dialog>
-          )}
-          additionalActions={[
-            {
-              icon: <QrCode className="h-5 w-5" />,
-              label: "Загрузить чек",
-              onClick: () => qrCodeInputRef.current?.click(),
-              disabled: isQrCodeLoading,
-              variant: "glass",
-            },
-            {
-              icon: <FileDown className="h-5 w-5" />,
-              label: "Импортировать выписку",
-              onClick: () => handleImportOpenChange(true),
-              variant: "glass",
-            },
-          ]}
-        >
-          <FilterSection
+      {mounted && typeof document !== "undefined" &&
+        createPortal(
+          <div className="space-y-4 py-2">
+            <FilterSection
             label="Вид транзакции"
             onReset={() => setSelectedDirections(new Set<TransactionOut["direction"]>())}
             showReset={selectedDirections.size > 0}
@@ -4466,9 +4424,10 @@ function TransactionsView({
                 />
               </div>
           </FilterSection>
-        </FilterPanel>
-            
-            {/* Shared elements for both collapsed and expanded states */}
+          </div>,
+          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
+        )}
+
             {/* QR Code input for receipt upload */}
             <input
               ref={qrCodeInputRef}
@@ -5306,6 +5265,60 @@ function TransactionsView({
 
         <div className="flex-1 min-w-0 pt-[30px]">
           <div className="w-[900px] mx-auto">
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <Dialog
+                open={isDialogOpen}
+                onOpenChange={(open) => {
+                  if (open) {
+                    if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                    openCreateDialog();
+                  } else {
+                    closeDialog();
+                  }
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button
+                    className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                    style={{ backgroundColor: ACCENT }}
+                  >
+                    <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                    <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+                  </Button>
+                </DialogTrigger>
+              </Dialog>
+              <Button
+                type="button"
+                variant="glass"
+                className="rounded-[9px] border-0 flex items-center justify-center text-sm font-normal"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as CSSProperties
+                }
+                onClick={() => qrCodeInputRef.current?.click()}
+                disabled={isQrCodeLoading}
+              >
+                <QrCode className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                <span style={{ color: "white", opacity: 0.85 }}>Загрузить чек</span>
+              </Button>
+              <Button
+                type="button"
+                variant="glass"
+                className="rounded-[9px] border-0 flex items-center justify-center text-sm font-normal"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as CSSProperties
+                }
+                onClick={() => handleImportOpenChange(true)}
+              >
+                <FileDown className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                <span style={{ color: "white", opacity: 0.85 }}>Импортировать выписку</span>
+              </Button>
+            </div>
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
@@ -5427,7 +5440,6 @@ function TransactionsView({
             </div>
           </div>
         </div>
-      </div>
 
       <AlertDialog
         open={isBulkEditConfirmOpen}

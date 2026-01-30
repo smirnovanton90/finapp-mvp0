@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { Camera, ChevronDown, Plus, Upload, Users } from "lucide-react";
 
@@ -33,13 +34,14 @@ import {
   uploadCounterpartyPhoto,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
-import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { FilterSection } from "@/components/filter-panel";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { AuthInput } from "@/components/ui/auth-input";
 import { CounterpartyCard } from "@/components/counterparty-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
 import { ACCENT, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
+import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const MAX_LOGO_DIM = 1024;
@@ -78,6 +80,8 @@ export default function CounterpartiesPage() {
   const [legalForms, setLegalForms] = useState<LegalFormOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -761,8 +765,9 @@ export default function CounterpartiesPage() {
         </div>
       </FormModal>
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <FilterPanel onAddClick={openCreateDialog} addButtonLabel="Добавить">
+      {mounted && typeof document !== "undefined" &&
+        createPortal(
+          <div className="space-y-4 py-2">
               <FilterSection
                 label="Название"
                 onReset={() => setNameFilter("")}
@@ -893,10 +898,22 @@ export default function CounterpartiesPage() {
                   )
                 )}
               </div>
-        </FilterPanel>
+          </div>,
+          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
+        )}
 
-        <div className="flex-1 min-w-0">
-          <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
+      <div className="flex-1 min-w-0">
+        <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <Button
+              className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+              style={{ backgroundColor: ACCENT }}
+              onClick={openCreateDialog}
+            >
+              <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+              <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+            </Button>
+          </div>
             {loading ? (
               <div className="text-center py-12 text-muted-foreground">
                 Загрузка контрагентов…
@@ -934,7 +951,6 @@ export default function CounterpartiesPage() {
             )}
           </div>
         </div>
-      </div>
 
       <AlertDialog
         open={deleteTarget !== null}

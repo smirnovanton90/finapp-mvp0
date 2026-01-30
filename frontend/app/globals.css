@@ -304,22 +304,28 @@
 }
 
 /* Selector dropdowns (Item, Category, Counterparty): dark-theme scrollbar */
-.dark .selector-dropdown {
+/* Same scrollbar style for sidebar nav and filter panel */
+.dark .selector-dropdown,
+.dark .scrollbar-dropdown {
   scrollbar-width: thin;
   scrollbar-color: rgba(93, 95, 215, 0.5) #25243F;
 }
-.dark .selector-dropdown::-webkit-scrollbar {
+.dark .selector-dropdown::-webkit-scrollbar,
+.dark .scrollbar-dropdown::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-.dark .selector-dropdown::-webkit-scrollbar-track {
+.dark .selector-dropdown::-webkit-scrollbar-track,
+.dark .scrollbar-dropdown::-webkit-scrollbar-track {
   background: #25243F;
   border-radius: 4px;
 }
-.dark .selector-dropdown::-webkit-scrollbar-thumb {
+.dark .selector-dropdown::-webkit-scrollbar-thumb,
+.dark .scrollbar-dropdown::-webkit-scrollbar-thumb {
   background: rgba(93, 95, 215, 0.5);
   border-radius: 4px;
 }
-.dark .selector-dropdown::-webkit-scrollbar-thumb:hover {
+.dark .selector-dropdown::-webkit-scrollbar-thumb:hover,
+.dark .scrollbar-dropdown::-webkit-scrollbar-thumb:hover {
   background: rgba(93, 95, 215, 0.65);
 }

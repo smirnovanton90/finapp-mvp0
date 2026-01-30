@@ -37,25 +37,11 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   }, [isFilterPanelCollapsed]);
 
   const toggleSidebar = () => {
-    setIsCollapsed((prev) => {
-      const newValue = !prev;
-      // Если сайдбар разворачивается, сворачиваем панель фильтров
-      if (!newValue) {
-        setIsFilterPanelCollapsed(true);
-      }
-      return newValue;
-    });
+    setIsCollapsed((prev) => !prev);
   };
 
   const toggleFilterPanel = () => {
-    setIsFilterPanelCollapsed((prev) => {
-      const newValue = !prev;
-      // Если панель фильтров разворачивается, сворачиваем сайдбар
-      if (!newValue) {
-        setIsCollapsed(true);
-      }
-      return newValue;
-    });
+    setIsFilterPanelCollapsed((prev) => !prev);
   };
 
   return (

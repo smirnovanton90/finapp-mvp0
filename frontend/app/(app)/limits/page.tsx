@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { Gauge, Plus } from "lucide-react";
@@ -43,7 +44,7 @@ import {
   updateLimit,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
-import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { FilterSection } from "@/components/filter-panel";
 import { LimitCard } from "@/components/limit-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { AuthInput } from "@/components/ui/auth-input";
@@ -51,6 +52,7 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
 import { PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, ACCENT } from "@/lib/colors";
 import { cn } from "@/lib/utils";
+import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 const CATEGORY_PLACEHOLDER = "-";
 const CATEGORY_PATH_SEPARATOR = " / ";
@@ -169,6 +171,8 @@ export default function LimitsPage() {
   const [limits, setLimits] = useState<LimitOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [counterparties, setCounterparties] = useState<import("@/lib/api").CounterpartyOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -679,9 +683,10 @@ export default function LimitsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <FilterPanel onAddClick={openCreateDialog} addButtonLabel="Добавить">
-          <FilterSection
+      {mounted && typeof document !== "undefined" &&
+        createPortal(
+          <div className="space-y-4 py-2">
+            <FilterSection
             label="Название"
             onReset={() => setFilterName("")}
             showReset={!!filterName}
@@ -839,10 +844,22 @@ export default function LimitsPage() {
               multiple={true}
             />
           </FilterSection>
-        </FilterPanel>
+          </div>,
+          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
+        )}
 
-        <div className="flex-1 min-w-0">
-          <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto pt-[30px]">
+      <div className="flex-1 min-w-0">
+        <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto pt-[30px]">
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <Button
+              className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+              style={{ backgroundColor: ACCENT }}
+              onClick={openCreateDialog}
+            >
+              <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+              <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+            </Button>
+          </div>
             {error && (
               <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
                 {error}
@@ -894,7 +911,6 @@ export default function LimitsPage() {
             )}
           </div>
         </div>
-      </div>
     </main>
   );
 }

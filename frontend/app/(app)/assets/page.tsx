@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import {
   AlertCircle,
   Archive,
@@ -39,7 +40,7 @@ import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
-import { FilterPanel, FilterSection } from "@/components/filter-panel";
+import { FilterSection } from "@/components/filter-panel";
 import { AssetCard } from "@/components/asset-card";
 import { AssetCardSkeleton } from "@/components/asset-card-skeleton";
 import { AuthInput } from "@/components/ui/auth-input";
@@ -47,6 +48,7 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
+import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 import { cn } from "@/lib/utils";
 
 import {
@@ -647,6 +649,8 @@ export default function Page() {
   const [filterCurrencyCodes, setFilterCurrencyCodes] = useState<Set<string>>(new Set());
   const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
   const [isTypeCodeFilterOpen, setIsTypeCodeFilterOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ItemOut | null>(null);
@@ -4997,12 +5001,10 @@ export default function Page() {
 
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        <FilterPanel
-          onAddClick={() => openCreateModal("ASSET", ALL_TYPE_CODES, { general: true })}
-          addButtonLabel="Добавить"
-        >
-          <FilterSection
+      {mounted && typeof document !== "undefined" &&
+        createPortal(
+          <div className="space-y-4 py-2">
+            <FilterSection
             label="Тип"
             onReset={() => setFilterType(new Set())}
             showReset={filterType.size > 0}
@@ -5285,10 +5287,22 @@ export default function Page() {
               </div>
             )}
           </div>
-        </FilterPanel>
+          </div>,
+          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
+        )}
 
-        <div className="flex-1 min-w-0">
-          <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
+      <div className="flex-1 min-w-0">
+        <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <Button
+              className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+              style={{ backgroundColor: ACCENT }}
+              onClick={() => openCreateModal("ASSET", ALL_TYPE_CODES, { general: true })}
+            >
+              <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+              <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+            </Button>
+          </div>
             {visibleItems.length === 0 && !loading ? (
               <div className="text-center py-12 text-muted-foreground">
                 Нет активов или обязательств
@@ -5375,7 +5389,6 @@ export default function Page() {
             )}
           </div>
         </div>
-      </div>
     </main>
   );
 }

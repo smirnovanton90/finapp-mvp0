@@ -219,10 +219,10 @@ export function CounterpartyCard({
             className="space-y-1 text-xs mt-2 text-center"
             style={{ color: PLACEHOLDER_COLOR_DARK }}
           >
-            {counterparty.entity_type !== "LEGAL" && counterparty.full_name && (
+            {counterparty.entity_type === "PERSON" && counterparty.full_name && (
               <div className="truncate">{counterparty.full_name}</div>
             )}
-            {counterparty.entity_type !== "LEGAL" &&
+            {counterparty.entity_type === "PERSON" &&
               (counterparty.inn || counterparty.ogrn) && (
                 <div className="truncate">
                   {[

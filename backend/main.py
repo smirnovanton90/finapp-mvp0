@@ -50,6 +50,7 @@ from transaction_chains import router as transaction_chains_router
 from categories import router as categories_router
 from limits import router as limits_router
 from counterparties import router as counterparties_router
+from receipts import router as receipts_router
 from market import router as market_router, resolve_market_instrument
 from onboarding import router as onboarding_router
 from market_utils import is_moex_item, is_moex_type
@@ -132,6 +133,7 @@ app.include_router(transaction_chains_router)
 app.include_router(categories_router)
 app.include_router(limits_router)
 app.include_router(counterparties_router)
+app.include_router(receipts_router)
 app.include_router(market_router)
 app.include_router(onboarding_router)
 

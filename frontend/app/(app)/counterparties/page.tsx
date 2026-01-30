@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Camera, ChevronDown, Plus, Upload, Users } from "lucide-react";
 
 import {
@@ -73,6 +74,8 @@ function getCounterpartyFilterText(counterparty: CounterpartyOut) {
 
 export default function CounterpartiesPage() {
   const { data: session } = useSession();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { activeStep, isWizardOpen } = useOnboarding();
 
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
@@ -195,6 +198,18 @@ export default function CounterpartiesPage() {
     };
   }, [logoPreview, photoPreview]);
 
+  // Открыть форму создания с предзаполненным ИНН при переходе с транзакций (распознавание чека)
+  useEffect(() => {
+    const create = searchParams.get("create");
+    const innFromUrl = searchParams.get("inn");
+    if (create === "1" && innFromUrl?.trim()) {
+      setEntityType("LEGAL");
+      setInn(innFromUrl.trim());
+      setEditing(null);
+      setIsDialogOpen(true);
+    }
+  }, [searchParams]);
+
   const loadAll = async () => {
     setLoading(true);
     setError(null);
@@ -242,7 +257,9 @@ export default function CounterpartiesPage() {
   useEffect(() => {
     if (!isDialogOpen) return;
     if (!editing) {
-      resetForm();
+      // Не сбрасывать форму, если открыли из ссылки «создать с ИНН» (распознавание чека)
+      const fromReceipt = searchParams.get("create") === "1" && searchParams.get("inn")?.trim();
+      if (!fromReceipt) resetForm();
       return;
     }
 
@@ -263,7 +280,7 @@ export default function CounterpartiesPage() {
     setPhotoError(null);
     setPhotoPreview(editing.photo_url ?? null);
     setFormError(null);
-  }, [editing, isDialogOpen]);
+  }, [editing, isDialogOpen, searchParams]);
 
   useEffect(() => {
     if (!isWizardOpen || activeStep?.key !== "counterparties") return;
@@ -566,6 +583,9 @@ export default function CounterpartiesPage() {
           if (!open) {
             setEditing(null);
             setFormError(null);
+            if (searchParams.get("create") === "1" && searchParams.get("inn")) {
+              router.replace("/counterparties", { scroll: false });
+            }
           }
         }}
         title={editing ? "Изменить контрагента" : "Добавить контрагента"}
@@ -675,16 +695,15 @@ export default function CounterpartiesPage() {
               {entityType === "LEGAL" && (
                 <SelectField
                   label="Отрасль"
-                  value={industryId}
-                  onValueChange={setIndustryId}
-                  options={
-                    industries.length === 0
-                      ? [{ value: "", label: "Нет отраслей" }]
-                      : industries.map((industry) => ({
-                          value: String(industry.id),
-                          label: industry.name,
-                        }))
-                  }
+                  value={industryId || "__none"}
+                  onValueChange={(v) => setIndustryId(v === "__none" ? "" : v)}
+                  options={[
+                    { value: "__none", label: industries.length === 0 ? "Нет отраслей" : "Выберите отрасль" },
+                    ...industries.map((industry) => ({
+                      value: String(industry.id),
+                      label: industry.name,
+                    })),
+                  ]}
                   placeholder="Выберите отрасль"
                   required
                 />

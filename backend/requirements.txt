@@ -34,4 +34,6 @@ uvicorn==0.38.0
 watchfiles==1.1.1
 websockets==15.0.1
 Pillow==10.4.0
+easyocr==1.7.2
+numpy>=1.24.0,<3
 python-multipart==0.0.21

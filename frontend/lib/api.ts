@@ -560,6 +560,25 @@ export async function fetchCounterpartyIndustries(): Promise<
   return res.json();
 }
 
+export type ReceiptRecognizeOut = {
+  inn: string | null;
+  transaction_date: string | null;
+  amount_rub: number | null;
+  raw_text: string | null;
+  counterparty: CounterpartyOut | null;
+};
+
+export async function recognizeReceipt(file: File): Promise<ReceiptRecognizeOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await authFetch(`${API_BASE}/receipts/recognize`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function createCounterparty(
   payload: CounterpartyCreate
 ): Promise<CounterpartyOut> {

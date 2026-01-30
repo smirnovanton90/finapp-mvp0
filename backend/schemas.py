@@ -736,3 +736,13 @@ class CounterpartyOut(CounterpartyBase):
 class LegalFormOut(BaseModel):
     code: str
     label: str
+
+
+class ReceiptRecognizeOut(BaseModel):
+    """Результат распознавания чека (OCR): ИНН, дата, сумма, сырой текст и контрагент при совпадении."""
+
+    inn: str | None = None
+    transaction_date: str | None = None  # YYYY-MM-DD
+    amount_rub: int | None = None  # в копейках
+    raw_text: str | None = None
+    counterparty: CounterpartyOut | None = None

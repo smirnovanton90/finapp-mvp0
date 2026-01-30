@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useSearchParams } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar-context";
@@ -136,6 +137,7 @@ import {
   fetchTransactions,
   fetchTransactionsPage,
   fetchTransactionChains,
+  recognizeReceipt,
   BankOut,
   CounterpartyOut,
   CounterpartyIndustryOut,
@@ -2038,6 +2040,12 @@ function TransactionsView({
   const [importConfirmed, setImportConfirmed] = useState(false);
   const [isQrCodeLoading, setIsQrCodeLoading] = useState(false);
   const qrCodeInputRef = useRef<HTMLInputElement>(null);
+  const [receiptRecognizing, setReceiptRecognizing] = useState(false);
+  const [receiptMessage, setReceiptMessage] = useState<{
+    type: "success" | "suggest_create";
+    inn?: string;
+  } | null>(null);
+  const receiptToolbarInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedTxIds, setSelectedTxIds] = useState<Set<number>>(() => new Set());
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
@@ -2545,6 +2553,7 @@ function TransactionsView({
     setLoanInterestStr("");
     applyCategorySelection("", "", "");
     setComment("");
+    setReceiptMessage(null);
   };
 
   const closeDialog = () => {
@@ -2556,6 +2565,7 @@ function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setIsBulkEditing(false);
+    setReceiptMessage(null);
   };
 
   const openCreateDialog = () => {
@@ -2568,6 +2578,68 @@ function TransactionsView({
     setIsBulkEditConfirmOpen(false);
     resetForm();
     setDialogMode("create");
+  };
+
+  /** Загрузка фото чека из тулбара: декодирование QR (дата, сумма, ФН/ФП/ФД) + OCR (ИНН, контрагент), объединение и заполнение формы. */
+  const handleReceiptUploadFromToolbar = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      setFormError("Выберите изображение чека (JPEG, PNG или WebP).");
+      event.target.value = "";
+      openCreateDialog();
+      return;
+    }
+    setReceiptRecognizing(true);
+    setFormError(null);
+    setReceiptMessage(null);
+    try {
+      const [qrSettled, ocrSettled] = await Promise.allSettled([
+        decodeQRCode(file).then((raw) => parseReceiptQR(raw)),
+        recognizeReceipt(file),
+      ]);
+      const qrData: ParsedReceiptData | null =
+        qrSettled.status === "fulfilled" && qrSettled.value ? qrSettled.value : null;
+      const ocrResult =
+        ocrSettled.status === "fulfilled" ? ocrSettled.value : null;
+
+      openCreateDialog();
+
+      if (qrData) {
+        setDate(qrData.date);
+        setAmountStr(formatCentsForInput(qrData.amount));
+        const commentParts: string[] = [];
+        if (qrData.fn) commentParts.push(`ФН: ${qrData.fn}`);
+        if (qrData.fp) commentParts.push(`ФП: ${qrData.fp}`);
+        if (qrData.i) commentParts.push(`ФД: ${qrData.i}`);
+        if (commentParts.length) setComment(commentParts.join(", "));
+      } else if (ocrResult) {
+        if (ocrResult.transaction_date) setDate(ocrResult.transaction_date);
+        if (ocrResult.amount_rub != null) setAmountStr(formatCentsForInput(ocrResult.amount_rub));
+      }
+
+      if (ocrResult) {
+        if (ocrResult.counterparty) {
+          setCounterpartyId(ocrResult.counterparty.id);
+          setReceiptMessage({ type: "success" });
+          const fresh = await fetchCounterparties();
+          setCounterparties(fresh);
+        } else if (ocrResult.inn) {
+          setReceiptMessage({ type: "suggest_create", inn: ocrResult.inn });
+        } else if (!qrData) {
+          setFormError("На изображении не удалось определить ИНН контрагента. Попробуйте более чёткое фото чека.");
+        }
+      } else if (!qrData) {
+        setFormError("Не удалось распознать чек (ни QR-код, ни текст).");
+      }
+    } catch (e: any) {
+      openCreateDialog();
+      setFormError(e?.message ?? "Не удалось обработать чек.");
+    } finally {
+      setReceiptRecognizing(false);
+      event.target.value = "";
+    }
   };
 
   const handleQrCodeUpload = async (file: File) => {
@@ -4428,17 +4500,25 @@ function TransactionsView({
           document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
         )}
 
-            {/* QR Code input for receipt upload */}
+            {/* Тулбар: фото чека — OCR (распознавание по изображению) */}
+            <input
+              ref={receiptToolbarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              aria-label="Загрузить фото чека"
+              onChange={handleReceiptUploadFromToolbar}
+            />
+            {/* QR-код чека ФНС (отдельный поток) */}
             <input
               ref={qrCodeInputRef}
               type="file"
               accept="image/*"
               className="hidden"
+              aria-label="Загрузить QR-код чека"
               onChange={(e) => {
                 const file = e.target.files?.[0];
-                if (file) {
-                  handleQrCodeUpload(file);
-                }
+                if (file) handleQrCodeUpload(file);
               }}
             />
             
@@ -5097,18 +5177,40 @@ function TransactionsView({
                     )}
 
                     {!isTransfer && (
-                      <FormField label="Контрагент" error={counterpartyError ?? undefined}>
-                        <CounterpartySelector
-                          counterparties={selectableCounterparties}
-                          selectedIds={counterpartyId ? [counterpartyId] : []}
-                          onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
-                          selectionMode="single"
-                          placeholder="Начните вводить название"
-                          industries={industries}
-                          disabled={counterpartyLoading}
-                          counterpartyCounts={counterpartyTxCounts}
-                        />
-                      </FormField>
+                      <>
+                        <FormField label="Контрагент" error={counterpartyError ?? undefined}>
+                          <CounterpartySelector
+                            counterparties={selectableCounterparties}
+                            selectedIds={counterpartyId ? [counterpartyId] : []}
+                            onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                            selectionMode="single"
+                            placeholder="Начните вводить название"
+                            industries={industries}
+                            disabled={counterpartyLoading}
+                            counterpartyCounts={counterpartyTxCounts}
+                          />
+                          {receiptMessage && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {receiptMessage.type === "success" && (
+                                <span className="text-sm" style={{ color: GREEN }}>
+                                  Контрагент по чеку выбран.
+                                </span>
+                              )}
+                              {receiptMessage.type === "suggest_create" && receiptMessage.inn && (
+                                <span className="text-sm text-muted-foreground">
+                                  По чеку определён ИНН {receiptMessage.inn}. Контрагент не найден.{" "}
+                                  <Link
+                                    href={`/counterparties?create=1&inn=${encodeURIComponent(receiptMessage.inn)}`}
+                                    className="font-medium text-violet-600 hover:underline"
+                                  >
+                                    Создать контрагента
+                                  </Link>
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </FormField>
+                      </>
                     )}
 
                     {isLoanRepayment ? (
@@ -5297,11 +5399,17 @@ function TransactionsView({
                     "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
                   } as CSSProperties
                 }
-                onClick={() => qrCodeInputRef.current?.click()}
-                disabled={isQrCodeLoading}
+                onClick={() => receiptToolbarInputRef.current?.click()}
+                disabled={receiptRecognizing}
               >
-                <QrCode className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                <span style={{ color: "white", opacity: 0.85 }}>Загрузить чек</span>
+                {receiptRecognizing ? (
+                  <span style={{ color: "white", opacity: 0.85 }}>Распознавание…</span>
+                ) : (
+                  <>
+                    <Receipt className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                    <span style={{ color: "white", opacity: 0.85 }}>Загрузить чек</span>
+                  </>
+                )}
               </Button>
               <Button
                 type="button"

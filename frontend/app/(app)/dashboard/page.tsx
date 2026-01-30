@@ -11,7 +11,7 @@ import {
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Target, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowRight, PieChart, Target, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -38,6 +38,7 @@ import {
   LimitOut,
   TransactionOut,
 } from "@/lib/api";
+import { ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import {
   OVERDUE_TRANSACTIONS_GRADIENT,
@@ -97,6 +98,37 @@ const OTHER_ASSET_TYPES = [
   "sole_proprietor",
   "other_asset",
 ];
+
+type AssetStructureSegment = {
+  label: string;
+  value: number;
+  percent: number;
+  color: string;
+};
+
+function describeDonutArc(
+  cx: number,
+  cy: number,
+  outerR: number,
+  innerR: number,
+  startAngleRad: number,
+  endAngleRad: number
+): string {
+  const xi1 = cx + innerR * Math.cos(startAngleRad);
+  const yi1 = cy - innerR * Math.sin(startAngleRad);
+  const xo1 = cx + outerR * Math.cos(startAngleRad);
+  const yo1 = cy - outerR * Math.sin(startAngleRad);
+  const xo2 = cx + outerR * Math.cos(endAngleRad);
+  const yo2 = cy - outerR * Math.sin(endAngleRad);
+  const xi2 = cx + innerR * Math.cos(endAngleRad);
+  const yi2 = cy - innerR * Math.sin(endAngleRad);
+  const angleSpan = Math.abs(endAngleRad - startAngleRad);
+  const largeArc = angleSpan > Math.PI ? 1 : 0;
+  const sweep = endAngleRad < startAngleRad ? 1 : 0;
+  const innerSweep = 1 - sweep;
+  return `M ${xi1} ${yi1} L ${xo1} ${yo1} A ${outerR} ${outerR} 0 ${largeArc} ${sweep} ${xo2} ${yo2} L ${xi2} ${yi2} A ${innerR} ${innerR} 0 ${largeArc} ${innerSweep} ${xi1} ${yi1} Z`;
+}
+
 const DONUT_COLORS = [
   "#7F5CFF",
   "#34D399",
@@ -870,6 +902,30 @@ export default function DashboardPage() {
     [otherAssetItems, rateByCode]
   );
 
+  const assetSegments = useMemo((): AssetStructureSegment[] => {
+    const byType = new Map<string, number>();
+    activeItems.forEach((item) => {
+      if (resolveItemEffectiveKind(item) !== "ASSET") return;
+      const value = getRubEquivalentCents(item) ?? 0;
+      if (value <= 0) return;
+      byType.set(item.type_code, (byType.get(item.type_code) ?? 0) + value);
+    });
+    const rows = Array.from(byType.entries())
+      .map(([typeCode, value]) => ({
+        label: ITEM_TYPE_LABELS[typeCode] ?? typeCode,
+        value,
+      }))
+      .sort((a, b) => b.value - a.value);
+    const total = rows.reduce((s, x) => s + x.value, 0);
+    if (total <= 0) return [];
+    return rows.map((row, index) => ({
+      label: row.label,
+      value: row.value,
+      percent: row.value / total,
+      color: DONUT_COLORS[index % DONUT_COLORS.length],
+    }));
+  }, [activeItems, rateByCode, resolveItemEffectiveKind]);
+
   const liabilityTotalsByType = useMemo(() => {
     const totals: Record<string, number> = {};
     LIABILITY_TYPES.forEach((type) => {
@@ -880,6 +936,24 @@ export default function DashboardPage() {
     });
     return totals;
   }, [liabilityItems, rateByCode]);
+
+  const liabilitySegments = useMemo((): AssetStructureSegment[] => {
+    const rows = Object.entries(liabilityTotalsByType)
+      .filter(([, value]) => value > 0)
+      .map(([code]) => ({
+        label: LIABILITY_TYPES.find((t) => t.code === code)?.label ?? code,
+        value: liabilityTotalsByType[code],
+      }))
+      .sort((a, b) => b.value - a.value);
+    const total = rows.reduce((s, x) => s + x.value, 0);
+    if (total <= 0) return [];
+    return rows.map((row, index) => ({
+      label: row.label,
+      value: row.value,
+      percent: row.value / total,
+      color: DONUT_COLORS[index % DONUT_COLORS.length],
+    }));
+  }, [liabilityTotalsByType]);
 
   const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
     const assets = activeItems
@@ -1792,6 +1866,172 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden border-0 bg-gradient-to-br from-slate-700 via-slate-600 to-slate-800 text-white shadow-[0_20px_50px_-28px_rgba(15,23,42,0.5)]">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-2xl font-normal text-white/90">
+              <PieChart className="h-5 w-5 text-white/90" />
+              Структура активов и обязательств
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-6 xl:flex-row xl:gap-8">
+            {loading ? (
+              <div className="text-sm text-white/80">Загрузка...</div>
+            ) : (
+              <>
+                <div className="flex min-w-0 flex-1 flex-col gap-3 xl:min-w-0">
+                  <span className="text-sm font-medium text-white/90">Активы</span>
+                  <div className="flex flex-row items-start gap-4">
+                    <div className="flex shrink-0 justify-center">
+                      {assetSegments.length === 0 ? (
+                        <div className="flex h-40 w-40 items-center justify-center rounded-full border border-dashed border-white/40 bg-white/5 sm:h-44 sm:w-44">
+                          <span className="text-center text-xs text-white/60">
+                            Нет активов
+                          </span>
+                        </div>
+                      ) : (
+                        <svg
+                          viewBox="0 0 200 200"
+                          className="h-40 w-40 sm:h-44 sm:w-44"
+                          aria-hidden="true"
+                        >
+                          {assetSegments.map((segment, index) => {
+                            const startAngle =
+                              Math.PI / 2 -
+                              2 * Math.PI * assetSegments
+                                .slice(0, index)
+                                .reduce((s, x) => s + x.percent, 0);
+                            const endAngle =
+                              startAngle - 2 * Math.PI * segment.percent;
+                            const d = describeDonutArc(
+                              100,
+                              100,
+                              80,
+                              48,
+                              startAngle,
+                              endAngle
+                            );
+                            return (
+                              <path
+                                key={segment.label}
+                                d={d}
+                                fill={segment.color}
+                                className="transition-opacity hover:opacity-90"
+                              />
+                            );
+                          })}
+                        </svg>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-2">
+                      {assetSegments.map((segment) => (
+                        <div
+                          key={segment.label}
+                          className="flex items-center justify-between gap-3 text-sm"
+                        >
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <span
+                              className="h-3 w-3 shrink-0 rounded-full"
+                              style={{ backgroundColor: segment.color }}
+                            />
+                            <span className="min-w-0 truncate text-white/90">
+                              {segment.label}
+                            </span>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2 text-right text-white/90">
+                            <span className="whitespace-nowrap font-medium">
+                              {formatRub(segment.value)}
+                            </span>
+                            <span className="whitespace-nowrap text-white/70">
+                              {formatPercent(segment.percent * 100)}%
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-6 xl:pt-0 xl:pl-8">
+                  <div className="flex min-w-0 flex-1 flex-col gap-3 xl:min-w-0">
+                    <span className="text-sm font-medium text-white/90">
+                      Обязательства
+                    </span>
+                    <div className="flex flex-row items-start gap-4">
+                      <div className="flex shrink-0 justify-center">
+                        {liabilitySegments.length === 0 ? (
+                          <div className="flex h-40 w-40 items-center justify-center rounded-full border border-dashed border-white/40 bg-white/5 sm:h-44 sm:w-44">
+                            <span className="text-center text-xs text-white/60">
+                              Нет обязательств
+                            </span>
+                          </div>
+                        ) : (
+                          <svg
+                            viewBox="0 0 200 200"
+                            className="h-40 w-40 sm:h-44 sm:w-44"
+                            aria-hidden="true"
+                          >
+                            {liabilitySegments.map((segment, index) => {
+                              const startAngle =
+                                Math.PI / 2 -
+                                2 * Math.PI * liabilitySegments
+                                  .slice(0, index)
+                                  .reduce((s, x) => s + x.percent, 0);
+                              const endAngle =
+                                startAngle - 2 * Math.PI * segment.percent;
+                              const d = describeDonutArc(
+                                100,
+                                100,
+                                80,
+                                48,
+                                startAngle,
+                                endAngle
+                              );
+                              return (
+                                <path
+                                  key={segment.label}
+                                  d={d}
+                                  fill={segment.color}
+                                  className="transition-opacity hover:opacity-90"
+                                />
+                              );
+                            })}
+                          </svg>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-2">
+                        {liabilitySegments.map((segment) => (
+                          <div
+                            key={segment.label}
+                            className="flex items-center justify-between gap-3 text-sm"
+                          >
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <span
+                                className="h-3 w-3 shrink-0 rounded-full"
+                                style={{ backgroundColor: segment.color }}
+                              />
+                              <span className="min-w-0 truncate text-white/90">
+                                {segment.label}
+                              </span>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2 text-right text-white/90">
+                              <span className="whitespace-nowrap font-medium">
+                                {formatRub(segment.value)}
+                              </span>
+                              <span className="whitespace-nowrap text-white/70">
+                                {formatPercent(segment.percent * 100)}%
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

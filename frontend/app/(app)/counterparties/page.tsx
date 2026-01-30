@@ -923,30 +923,26 @@ export default function CounterpartiesPage() {
                 По выбранным фильтрам контрагентов нет.
               </div>
             ) : (
-              <div
-                className="columns-2 xl:columns-3 gap-4"
-                style={{ position: "relative", zIndex: 2 }}
-              >
-                {filteredCounterparties.map((item) => (
-                  <div
-                    key={item.id}
-                    style={{
-                      breakInside: "avoid",
-                      marginBottom: "1rem",
-                    }}
-                  >
-                    <CounterpartyCard
-                      counterparty={item}
-                      industryLabel={industryLabel(item.industry_id) || undefined}
-                      legalFormLabel={item.entity_type === "LEGAL" && item.legal_form ? legalFormLabel(item.legal_form) : undefined}
-                      onEdit={(c) => {
-                        setEditing(c);
-                        setIsDialogOpen(true);
-                      }}
-                      onDelete={(c) => setDeleteTarget(c)}
-                    />
-                  </div>
-                ))}
+              <div className="relative">
+                <div
+                  className="grid grid-cols-2 xl:grid-cols-3 gap-4"
+                  style={{ position: "relative", zIndex: 2 }}
+                >
+                  {filteredCounterparties.map((item) => (
+                    <div key={item.id}>
+                        <CounterpartyCard
+                        counterparty={item}
+                        industryLabel={industryLabel(item.industry_id) || undefined}
+                        legalFormLabel={item.entity_type === "LEGAL" && item.legal_form ? legalFormLabel(item.legal_form) : undefined}
+                        onEdit={(c) => {
+                          setEditing(c);
+                          setIsDialogOpen(true);
+                        }}
+                        onDelete={(c) => setDeleteTarget(c)}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

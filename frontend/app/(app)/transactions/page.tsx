@@ -26,12 +26,10 @@ import {
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
   GREEN,
-  GREEN_FILL,
   GREEN_TRANSACTION,
   RED,
-  RED_FILL,
   ACCENT2,
-  ACCENT_FILL_LIGHT,
+  MODAL_BG,
 } from "@/lib/colors";
 import {
   ArrowRight,
@@ -1256,13 +1254,14 @@ function TransactionCardRow({
 
   // Цвета и заливки по новому дизайну карточки
   const stripeColor = isIncome ? GREEN : isExpense ? RED : ACCENT2;
-  const fillColor = isIncome ? GREEN_FILL : isExpense ? RED_FILL : ACCENT_FILL_LIGHT;
+  // Заливка контейнера подсветки: доход — GREEN_TRANSACTION, расход — RED, перевод — ACCENT2
+  const highlightFillColor = isIncome ? GREEN_TRANSACTION : isExpense ? RED : ACCENT2;
 
-  // Фон всей карточки: только для фактических транзакций
+  // Фон всей карточки: для фактических — MODAL_BG для всех трёх видов (доход, расход, перевод)
   const outerBackgroundColor =
-    !isPlanned && !tx.isDeleted ? fillColor : "transparent";
+    !isPlanned && !tx.isDeleted ? MODAL_BG : "transparent";
 
-  // Обводка: у плановых по всем сторонам, у фактических — без обводки
+  // Обводка: у плановых — по всем сторонам, у фактических — слева 7px (GREEN_TRANSACTION / RED / ACCENT2) с закруглением
   const outerBorderColor = tx.isDeleted
     ? "rgba(148,163,184,0.4)"
     : isIncome
@@ -1270,21 +1269,33 @@ function TransactionCardRow({
       : stripeColor;
 
   const outerBorderStyle =
-    isPlanned && !tx.isDeleted
+    tx.isDeleted
       ? {
-          borderColor: outerBorderColor,
-          borderStyle: "solid" as const,
-          borderWidth: 1,
-          borderLeftWidth: 7,
-        }
-      : {
-          borderColor: "transparent",
+          borderColor: "transparent" as const,
           borderStyle: "solid" as const,
           borderWidth: 0,
-        };
+        }
+      : isPlanned
+        ? {
+            borderColor: outerBorderColor,
+            borderStyle: "solid" as const,
+            borderWidth: 1,
+            borderLeftWidth: 7,
+          }
+        : {
+            borderColor: highlightFillColor,
+            borderStyle: "solid" as const,
+            borderWidth: 0,
+            borderLeftWidth: 7,
+          };
 
   const textColor = tx.isDeleted ? "rgba(148,163,184,1)" : ACTIVE_TEXT_DARK;
   const subtleTextColor = tx.isDeleted ? "rgba(148,163,184,1)" : PLACEHOLDER_COLOR_DARK;
+
+  // Цвет суммы: доход — GREEN, расход — RED; перевод: уменьшение — RED, увеличение — GREEN
+  const leftAmountColor =
+    tx.isDeleted ? textColor : isTransfer ? RED : isIncome ? GREEN : RED;
+  const rightAmountColor = tx.isDeleted ? textColor : isTransfer ? GREEN : textColor;
 
   const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-100";
   const actionHoverClass = tx.isDeleted ? "" : "hover:text-white";
@@ -1383,7 +1394,7 @@ function TransactionCardRow({
 
   return (
     <div
-      className="flex items-stretch overflow-hidden rounded-lg transition-transform duration-200 ease-out hover:-translate-y-1"
+      className="flex items-stretch overflow-hidden rounded-lg"
       style={{
         width: 900,
         boxSizing: "border-box",
@@ -1393,27 +1404,18 @@ function TransactionCardRow({
         transition: "opacity 0.2s ease-in-out",
       }}
     >
-      {/* Контейнер 1 — подсветка */}
+      {/* Контейнер 1 — подсветка: заливка GREEN_TRANSACTION / RED / ACCENT2 */}
       <div
         className="flex items-center justify-center"
         style={{
           width: 10,
           padding: 0,
           marginLeft: !tx.isDeleted ? -10 : 0,
-          // у фактических транзакций полоса заливается по направлению
-          backgroundColor:
-            !isPlanned && !tx.isDeleted
-              ? isIncome
-                ? GREEN_TRANSACTION
-                : isExpense
-                  ? RED
-                  : ACCENT2
-              : "transparent",
+          backgroundColor: tx.isDeleted ? "transparent" : highlightFillColor,
+          // Тень от подсветки: X 0, Y 0, Blur 250, Spread 50 (только для фактических)
           boxShadow:
             !isPlanned && !tx.isDeleted
-              ? `0 0 250px 500px ${
-                  isIncome ? GREEN_TRANSACTION : isExpense ? RED : ACCENT2
-                }`
+              ? `0 0 250px 50px ${highlightFillColor}`
               : "none",
         }}
       />
@@ -1485,7 +1487,7 @@ function TransactionCardRow({
             style={{
               fontSize: 24,
               fontWeight: 500,
-              color: textColor,
+              color: leftAmountColor,
               textAlign: "center",
             }}
           >
@@ -1559,7 +1561,7 @@ function TransactionCardRow({
                   width: 90,
                   height: 90,
                   objectFit: "contain",
-                  filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
+                  filter: "drop-shadow(4px -1px 6.5px rgba(0,0,0,0.3))",
                 }}
                 onLoad={() => handleImageLoad(1)}
                 onError={() => {
@@ -1569,11 +1571,11 @@ function TransactionCardRow({
               />
             ) : (
               <ArrowRight
-                className="text-white"
                 style={{
                   width: 56,
                   height: 56,
-                  filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
+                  color: ACCENT2,
+                  filter: "drop-shadow(4px -1px 6.5px rgba(0,0,0,0.3))",
                 }}
               />
             )
@@ -1586,7 +1588,7 @@ function TransactionCardRow({
                 width: 90,
                 height: 90,
                 objectFit: "contain",
-                filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
+                filter: "drop-shadow(4px -1px 6.5px rgba(0,0,0,0.3))",
               }}
               onLoad={() => handleImageLoad(1)}
               onError={() => {
@@ -1600,13 +1602,12 @@ function TransactionCardRow({
               style={{
                 width: 90,
                 height: 90,
-                filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
+                filter: "drop-shadow(4px -1px 6.5px rgba(0,0,0,0.3))",
               }}
             >
               <CategoryIcon
-                className="text-white"
                 strokeWidth={1.5}
-                style={{ width: 56, height: 56 }}
+                style={{ width: 56, height: 56, color: ACCENT2 }}
               />
             </div>
           )}
@@ -1629,7 +1630,7 @@ function TransactionCardRow({
                 style={{
                   fontSize: 24,
                   fontWeight: 500,
-                  color: textColor,
+                  color: rightAmountColor,
                   textAlign: "center",
                 }}
               >

@@ -154,7 +154,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen p-[10px] transition-[width] duration-300"
+      className="fixed left-0 top-0 z-20 h-screen p-[10px] transition-[width] duration-300"
       style={{ width: asideWidth }}
     >
       <div

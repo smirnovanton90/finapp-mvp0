@@ -25,8 +25,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isAssetsPage = pathname === "/assets" || pathname?.startsWith("/assets/");
   const isFinancialPlanningPage = pathname === "/financial-planning" || pathname?.startsWith("/financial-planning/");
   const isLimitsPage = pathname === "/limits" || pathname?.startsWith("/limits/");
+  const isCategoriesPage = pathname === "/categories" || pathname?.startsWith("/categories/");
   const isCounterpartiesPage = pathname === "/counterparties" || pathname?.startsWith("/counterparties/");
-  const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage || isLimitsPage || isCounterpartiesPage;
+  const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage || isLimitsPage || isCategoriesPage || isCounterpartiesPage;
   const filtersOpen = isSpecialPage && !isFilterPanelCollapsed;
   const showFiltersStrip = isSpecialPage && !isCollapsed;
   const asidePadding = 20;

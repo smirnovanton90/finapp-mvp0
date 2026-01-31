@@ -9,6 +9,7 @@ from models import Transaction, Item, User, Counterparty
 from market_utils import is_moex_item
 from schemas import (
     TransactionCreate,
+    TransactionDebtsCreate,
     TransactionOut,
     TransactionStatusUpdate,
     TransactionPageOut,
@@ -18,6 +19,12 @@ from schemas import (
 )
 from sqlalchemy import select, and_, or_, func
 from datetime import date, datetime, time, timezone
+
+from counterparty_settlements import (
+    ensure_counterparty_settlements_item,
+    update_settlements_item_closed_status,
+    COUNTERPARTY_SETTLEMENTS_TYPE,
+)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -105,6 +112,8 @@ def transfer_delta(kind: str, is_primary: bool, amount: int) -> int:
 def get_min_balance(item: Item) -> int:
     if item.type_code == "bank_card" and item.card_kind == "CREDIT":
         return -(item.credit_limit or 0)
+    if item.type_code == "counterparty_settlements":
+        return - (2 ** 62)
     return 0
 
 
@@ -329,12 +338,78 @@ def list_deleted_transactions(
 
 
 @router.post("", response_model=TransactionOut)
-@router.post("", response_model=TransactionOut)
 def create_transaction(
     data: TransactionCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    return _create_transaction_impl(db, user, data)
+
+
+@router.post("/debts", response_model=TransactionOut)
+def create_debts_transaction(
+    data: TransactionDebtsCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not user.accounting_start_date:
+        raise HTTPException(
+            status_code=400,
+            detail="Дата начала учёта не задана.",
+        )
+    resolve_counterparty(db, user, data.counterparty_id)
+
+    primary_item = _load_item(db, user, data.primary_item_id, True, "primary")
+    if primary_item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+        raise HTTPException(
+            status_code=400,
+            detail="Выберите обычный актив/обязательство, а не «Взаиморасчёты».",
+        )
+    if is_moex_item(primary_item):
+        raise HTTPException(
+            status_code=400,
+            detail="Операция «Долги» не поддерживается для MOEX инструментов.",
+        )
+
+    tx_date = data.transaction_date.date()
+    accounting_start = user.accounting_start_date
+    open_date = max(accounting_start, tx_date) if accounting_start else tx_date
+
+    settlements_item = ensure_counterparty_settlements_item(
+        db=db,
+        user=user,
+        counterparty_id=data.counterparty_id,
+        currency_code=primary_item.currency_code,
+        open_date=open_date,
+        accounting_start_date=accounting_start,
+    )
+
+    if data.debt_direction == "I_PAID":
+        primary_item_id = primary_item.id
+        counterparty_item_id = settlements_item.id
+    else:
+        primary_item_id = settlements_item.id
+        counterparty_item_id = primary_item.id
+
+    payload = TransactionCreate(
+        transaction_date=data.transaction_date,
+        primary_item_id=primary_item_id,
+        counterparty_item_id=counterparty_item_id,
+        counterparty_id=data.counterparty_id,
+        amount_rub=data.amount_rub,
+        amount_counterparty=None,
+        primary_quantity_lots=None,
+        counterparty_quantity_lots=None,
+        direction="TRANSFER",
+        transaction_type=data.transaction_type,
+        category_id=None,
+        comment=data.comment,
+        status=data.status,
+    )
+    return _create_transaction_impl(db, user, payload)
+
+
+def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -> Transaction:
     primary_side = _resolve_effective_side(db, user, data.primary_item_id, True, "primary")
     primary = primary_side.effective_item
     primary_is_moex = is_moex_item(primary)
@@ -502,6 +577,10 @@ def create_transaction(
                         detail=balance_violation_detail(counter, -counter_delta, data.transaction_date),
                     )
                 counter.current_value_rub = counter_next
+
+    if data.direction == "TRANSFER" and counter:
+        update_settlements_item_closed_status(db, primary)
+        update_settlements_item_closed_status(db, counter)
 
     db.add(tx)
     db.commit()
@@ -783,6 +862,10 @@ def update_transaction(
     tx.category_id = category.id if category else None
     tx.comment = data.comment
 
+    for item in items_by_id.values():
+        if item and item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+            update_settlements_item_closed_status(db, item)
+
     db.commit()
     db.refresh(tx)
     return tx
@@ -860,6 +943,10 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
                 counter.current_value_rub += counter_delta
 
     tx.deleted_at = datetime.now(timezone.utc)
+
+    update_settlements_item_closed_status(db, primary)
+    if counter:
+        update_settlements_item_closed_status(db, counter)
 
 
 def purge_card_transactions(db: Session, user: User, card_item_id: int) -> int:

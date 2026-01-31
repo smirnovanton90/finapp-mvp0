@@ -395,6 +395,22 @@ class TransactionBase(BaseModel):
 class TransactionCreate(TransactionBase):
     status: TransactionStatus | None = None
 
+
+DebtDirection = Literal["I_PAID", "THEY_PAID"]
+
+
+class TransactionDebtsCreate(BaseModel):
+    """Payload for creating a «Долги» (debts) transaction — transfer to/from Взаиморасчёты."""
+
+    debt_direction: DebtDirection
+    counterparty_id: int
+    primary_item_id: int = Field(..., description="User-selected asset/liability (source or target)")
+    transaction_date: datetime
+    amount_rub: int = Field(..., ge=1)
+    transaction_type: TransactionType = "ACTUAL"
+    comment: str | None = None
+    status: TransactionStatus | None = None
+
 class TransactionOut(TransactionBase):
     id: int
     status: TransactionStatus

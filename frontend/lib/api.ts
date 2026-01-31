@@ -428,6 +428,19 @@ export type TransactionCreate = {
   comment?: string | null;
 };
 
+export type DebtDirection = "I_PAID" | "THEY_PAID";
+
+export type TransactionDebtsCreate = {
+  debt_direction: DebtDirection;
+  counterparty_id: number;
+  primary_item_id: number;
+  transaction_date: string;
+  amount_rub: number;
+  transaction_type?: TransactionType;
+  comment?: string | null;
+  status?: TransactionStatus | null;
+};
+
 export const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 async function authFetch(input: RequestInfo, init?: RequestInit) {
@@ -996,6 +1009,17 @@ export async function createTransaction(
   payload: TransactionCreate
 ): Promise<TransactionOut> {
   const res = await authFetch(`${API_BASE}/transactions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createDebtsTransaction(
+  payload: TransactionDebtsCreate
+): Promise<TransactionOut> {
+  const res = await authFetch(`${API_BASE}/transactions/debts`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

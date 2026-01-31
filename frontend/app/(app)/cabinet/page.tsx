@@ -415,6 +415,7 @@ export default function CabinetPage() {
               </label>
               <Switch
                 checked={theme === "dark"}
+                disabled={theme === "dark"}
                 onCheckedChange={(checked) => {
                   setTheme(checked ? "dark" : "light");
                 }}

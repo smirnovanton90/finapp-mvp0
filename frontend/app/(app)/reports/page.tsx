@@ -58,6 +58,27 @@ export default function ReportsPage() {
               </span>
             </Link>
           </Button>
+
+          <Button
+            asChild
+            variant="glass"
+            className="h-16 justify-start rounded-[9px] pl-4 pr-4 text-base font-normal"
+            style={
+              {
+                "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
+              } as CSSProperties
+            }
+          >
+            <Link
+              href="/reports/counterparty-settlements"
+              className="flex w-full items-center gap-3"
+            >
+              <span className="flex-1 text-left">
+                Расчёты с контрагентом
+              </span>
+            </Link>
+          </Button>
         </section>
       </div>
     </main>

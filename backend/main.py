@@ -830,12 +830,20 @@ def list_fx_rates_batch(
     return results
 
 
+COUNTERPARTY_SETTLEMENTS_TYPE = "counterparty_settlements"
+
+
 @app.post("/items", response_model=ItemOut)
 def create_item(
     payload: ItemCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if payload.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+        raise HTTPException(
+            status_code=400,
+            detail="Взаиморасчёты создаются автоматически при первой транзакции «Долги» с контрагентом.",
+        )
     accounting_start_date = _ensure_accounting_start_date(user)
     is_moex = is_moex_type(payload.type_code)
     instrument_id = None
@@ -1097,6 +1105,11 @@ def update_item(
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+        raise HTTPException(
+            status_code=400,
+            detail="Редактирование актива «Взаиморасчёты» недоступно.",
+        )
     if item.archived_at is not None:
         raise HTTPException(status_code=400, detail="Cannot edit archived item")
     if item.closed_at is not None:
@@ -1434,6 +1447,11 @@ def archive_item(
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+        raise HTTPException(
+            status_code=400,
+            detail="Архивация актива «Взаиморасчёты» недоступна.",
+        )
 
     if item.archived_at is None:
         item.archived_at = func.now()
@@ -1456,6 +1474,11 @@ def close_item(
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+        raise HTTPException(
+            status_code=400,
+            detail="Закрытие актива «Взаиморасчёты» недоступно; статус меняется автоматически при нулевом балансе.",
+        )
     if item.archived_at is not None:
         raise HTTPException(status_code=400, detail="Cannot close deleted item")
     

@@ -146,7 +146,6 @@ const ASSET_TYPES = [
   { code: "precious_metals", label: "Драгоценные металлы" },
   { code: "crypto", label: "Криптовалюта" },
   { code: "loan_to_third_party", label: "Предоставленные займы третьим лицам" },
-  { code: "third_party_receivables", label: "Долги третьих лиц" },
   { code: "real_estate", label: "Квартира" },
   { code: "townhouse", label: "Дом / таунхаус" },
   { code: "land_plot", label: "Земельный участок" },
@@ -180,7 +179,6 @@ const LIABILITY_TYPES = [
   { code: "installment", label: "Рассрочка" },
   { code: "microloan", label: "МФО" },
   { code: "private_loan", label: "Полученные займы от третьих лиц" },
-  { code: "third_party_payables", label: "Долги третьим лицам" },
   { code: "tax_debt", label: "Налоги и обязательные платежи" },
   { code: "personal_income_tax_debt", label: "Задолженность по НДФЛ" },
   { code: "property_tax_debt", label: "Задолженность по налогу на имущество" },
@@ -222,7 +220,7 @@ const MOEX_TYPE_CODES = [
   "pif",
   "precious_metals",
 ];
-const THIRD_PARTY_DEBT_TYPES = ["loan_to_third_party", "third_party_receivables"];
+const THIRD_PARTY_DEBT_TYPES = ["loan_to_third_party", "counterparty_settlements"];
 const REAL_ESTATE_TYPES = [
   "real_estate",
   "townhouse",
@@ -243,7 +241,7 @@ const CREDIT_LIABILITY_TYPES = [
   "installment",
   "microloan",
 ];
-const THIRD_PARTY_LOAN_TYPES = ["private_loan", "third_party_payables"];
+const THIRD_PARTY_LOAN_TYPES = ["private_loan", "counterparty_settlements"];
 const LOAN_LIABILITY_TYPES = [...CREDIT_LIABILITY_TYPES, ...THIRD_PARTY_LOAN_TYPES];
 const TAX_LIABILITY_TYPES = [
   "tax_debt",
@@ -271,9 +269,7 @@ const MANDATORY_COUNTERPARTY_TYPE_CODES = [
   "car_loan",
   "education_loan",
   "loan_to_third_party",
-  "third_party_receivables",
   "private_loan",
-  "third_party_payables",
 ];
 
 const OPTIONAL_COUNTERPARTY_TYPE_CODES = [
@@ -323,7 +319,6 @@ const AUTO_PLAN_LOAN_TYPES = [
   ...CREDIT_LIABILITY_TYPES,
   ...THIRD_PARTY_LOAN_TYPES,
   "loan_to_third_party",
-  "third_party_receivables",
 ];
 
 const ITEM_SECTIONS: {
@@ -364,7 +359,7 @@ const ITEM_SECTIONS: {
   {
     id: "third_party_loans",
     kind: "LIABILITY",
-    label: "Займы от третьих лиц",
+    label: "Долги третьим лицам",
     typeCodes: THIRD_PARTY_LOAN_TYPES,
   },
   {
@@ -413,7 +408,7 @@ const TYPE_ICON_BY_CODE: Record<
   precious_metals: Coins,
   crypto: Coins,
   loan_to_third_party: Users,
-  third_party_receivables: Users,
+  counterparty_settlements: Users,
   real_estate: Home,
   townhouse: Home,
   land_plot: Home,
@@ -442,7 +437,6 @@ const TYPE_ICON_BY_CODE: Record<
   installment: Receipt,
   microloan: Coins,
   private_loan: Users,
-  third_party_payables: Users,
   tax_debt: Receipt,
   personal_income_tax_debt: Receipt,
   property_tax_debt: Receipt,
@@ -1508,36 +1502,6 @@ export default function Page() {
     });
     return list;
   }, [visibleItems, itemTxCounts, resolveItemEffectiveKind, getRubEquivalentCents]);
-
-  // Отслеживание готовности карточек для скрытия скелетонов
-  const [readyCardsCount, setReadyCardsCount] = useState(0);
-  const readyCardsSet = useRef<Set<number>>(new Set());
-  
-  // Обновляем счетчик при изменении списка элементов (удаляем только те, которых больше нет)
-  useEffect(() => {
-    const currentItemIds = new Set(visibleItems.map(item => item.id));
-    // Удаляем ID карточек, которых больше нет в списке
-    let hasChanges = false;
-    readyCardsSet.current.forEach(id => {
-      if (!currentItemIds.has(id)) {
-        readyCardsSet.current.delete(id);
-        hasChanges = true;
-      }
-    });
-    // Обновляем счетчик, если были изменения
-    if (hasChanges) {
-      setReadyCardsCount(readyCardsSet.current.size);
-    }
-    // Если список пустой, очищаем все
-    if (visibleItems.length === 0) {
-      readyCardsSet.current.clear();
-      setReadyCardsCount(0);
-    }
-  }, [visibleItems.map(item => item.id).join(',')]);
-
-  // Контент виден только когда есть элементы и все карточки вызвали onReady (избегаем мигания: пустая сетка не показывается с opacity 1)
-  const contentVisible =
-    visibleItems.length > 0 && readyCardsCount >= visibleItems.length;
 
   const activeAssetItems = useMemo(
     () =>
@@ -3569,9 +3533,10 @@ export default function Page() {
                   const isArchived = Boolean(it.archived_at);
                   const isClosed = Boolean(it.closed_at);
                   const isLinkedCard = it.type_code === "bank_card" && Boolean(it.card_account_id);
-                  const canEdit = !isArchived && !isClosed;
-                  const canClose = !isArchived && !isClosed;
-                  const canDelete = !isArchived;
+                  const isSettlements = it.type_code === "counterparty_settlements";
+                  const canEdit = !isArchived && !isClosed && !isSettlements;
+                  const canClose = !isArchived && !isClosed && !isSettlements;
+                  const canDelete = !isArchived && !isSettlements;
                   const linkedAccount =
                     it.type_code === "bank_card" && it.card_account_id
                       ? itemsById.get(it.card_account_id)
@@ -4393,8 +4358,10 @@ export default function Page() {
 
               {/* Right panel - collapsible */}
               <div
-                className={`overflow-hidden transition-all duration-300 ${
-                  isRightPanelOpen ? "w-[340px] opacity-100" : "w-0 opacity-0"
+                className={`transition-all duration-300 ${
+                  isRightPanelOpen
+                    ? "w-[340px] opacity-100 overflow-visible"
+                    : "w-0 opacity-0 overflow-hidden"
                 }`}
               >
                 <div className="w-[340px] grid content-start gap-4 pl-4">
@@ -5333,14 +5300,8 @@ export default function Page() {
               </div>
             ) : (
               <div className="relative">
-                {/* Разделы с карточками активов: opacity до вызова onReady со всех карточек */}
-                <div
-                  className="space-y-8"
-                  style={{
-                    opacity: contentVisible ? 1 : 0,
-                    transition: "opacity 0.3s ease-in-out",
-                  }}
-                >
+                {/* Разделы с карточками: каждая карточка сама управляет своей opacity при загрузке изображений */}
+                <div className="space-y-8">
                   {orderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
                     <div key={section.id}>
                       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
@@ -5393,12 +5354,6 @@ export default function Page() {
                                 onArchive={(item) => onArchive(item)}
                                 onClose={(item) => onClose(item)}
                                 getItemDisplayBalanceCents={getItemDisplayBalanceCents}
-                                onReady={() => {
-                                  if (!readyCardsSet.current.has(item.id)) {
-                                    readyCardsSet.current.add(item.id);
-                                    setReadyCardsCount((prev) => prev + 1);
-                                  }
-                                }}
                               />
                             </div>
                           );

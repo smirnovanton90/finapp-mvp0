@@ -61,6 +61,7 @@ import {
   Receipt,
   Shield,
   ShoppingCart,
+  SlidersHorizontal,
   Sparkles,
   Trophy,
   Trash2,
@@ -124,6 +125,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   createTransaction,
+  createDebtsTransaction,
   deleteTransaction,
   fetchBanks,
   fetchCategories,
@@ -141,6 +143,8 @@ import {
   FxRateOut,
   ItemOut,
   TransactionCreate,
+  TransactionDebtsCreate,
+  DebtDirection,
   TransactionChainOut,
   TransactionOut,
   updateTransaction,
@@ -179,7 +183,7 @@ type TransactionsViewMode = "actual" | "planning";
 
 type TransactionCard = TransactionOut & { isDeleted?: boolean };
 
-type TransactionFormMode = "STANDARD" | "LOAN_REPAYMENT";
+type TransactionFormMode = "STANDARD" | "LOAN_REPAYMENT" | "DEBTS";
 
 type BulkEditBaseline = {
   date: string;
@@ -1953,6 +1957,7 @@ function TransactionsView({
   const [dialogMode, setDialogMode] = useState<
     "create" | "edit" | "bulk-edit" | null
   >(null);
+  const [isLoanRepaymentModalOpen, setIsLoanRepaymentModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<TransactionOut | null>(null);
   const [realizeSource, setRealizeSource] = useState<TransactionCard | null>(null);
   const [bulkEditIds, setBulkEditIds] = useState<number[] | null>(null);
@@ -2015,6 +2020,7 @@ function TransactionsView({
     "EXPENSE"
   );
   const [formMode, setFormMode] = useState<TransactionFormMode>("STANDARD");
+  const [debtDirection, setDebtDirection] = useState<DebtDirection>("I_PAID");
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
   const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
@@ -2411,10 +2417,19 @@ function TransactionsView({
   const primaryIsMoex = isMoexItem(primaryItem);
   const counterpartyIsMoex = isTransfer && isMoexItem(counterpartyItem);
   const isLoanRepayment = formMode === "LOAN_REPAYMENT";
+  const isDebts = formMode === "DEBTS";
   const isActualTransaction = formTransactionType === "ACTUAL";
   const isPlannedTransaction = formTransactionType === "PLANNED";
   const showCounterpartySelect = isTransfer || isLoanRepayment;
-  const primarySelectItems = isLoanRepayment ? assetItems : activeItems;
+  const primarySelectItemsForDebts = useMemo(
+    () => activeItems.filter((it) => it.type_code !== "counterparty_settlements"),
+    [activeItems]
+  );
+  const primarySelectItems = isLoanRepayment
+    ? assetItems
+    : isDebts
+      ? primarySelectItemsForDebts
+      : activeItems;
   const counterpartySelectItems = isLoanRepayment ? liabilityItems : activeItems;
   const primaryCurrencyCode = primaryItemId
     ? getEffectiveItemMeta(primaryItemId)?.currencyCode ?? null
@@ -2550,6 +2565,7 @@ function TransactionsView({
     setDate(new Date().toISOString().slice(0, 10));
     setDirection("EXPENSE");
     setFormMode("STANDARD");
+    setDebtDirection("I_PAID");
     setFormTransactionType(defaultShowActual ? "ACTUAL" : "PLANNED");
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
@@ -2577,7 +2593,7 @@ function TransactionsView({
     setReceiptMessage(null);
   };
 
-  const openCreateDialog = () => {
+  const openCreateDialog = (initialMode?: TransactionFormMode) => {
     lastActiveElementRef.current = null;
     setFormError(null);
     setEditingTx(null);
@@ -2586,7 +2602,145 @@ function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     resetForm();
+    if (initialMode) setFormMode(initialMode);
+    if (initialMode === "DEBTS") setDebtDirection("I_PAID");
     setDialogMode("create");
+  };
+
+  const openLoanRepaymentModal = () => {
+    lastActiveElementRef.current = null;
+    setFormError(null);
+    resetForm();
+    setFormMode("LOAN_REPAYMENT");
+    setIsLoanRepaymentModalOpen(true);
+  };
+
+  const closeLoanRepaymentModal = () => {
+    setIsLoanRepaymentModalOpen(false);
+    setFormMode("STANDARD");
+    setFormError(null);
+  };
+
+  const handleLoanRepaymentSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setFormError(null);
+    if (!primaryItemId) {
+      setFormError("Выберите актив, с которого производится погашение.");
+      return;
+    }
+    if (!counterpartyItemId) {
+      setFormError("Выберите обязательство.");
+      return;
+    }
+    const primaryIsMoex = isMoexItem(itemsById.get(primaryItemId) ?? null);
+    const counterpartyIsMoex = isMoexItem(itemsById.get(counterpartyItemId) ?? null);
+    if (primaryIsMoex || counterpartyIsMoex) {
+      setFormError("Операции погашения не поддерживают MOEX инструменты.");
+      return;
+    }
+    const primaryMeta = getEffectiveItemMeta(primaryItemId);
+    const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
+    if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+      setFormError(
+        "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
+      );
+      return;
+    }
+    if (counterpartyMeta?.minDate && date < counterpartyMeta.minDate) {
+      setFormError(
+        "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
+      );
+      return;
+    }
+    if (
+      primaryMeta?.currencyCode &&
+      counterpartyMeta?.currencyCode &&
+      primaryMeta.currencyCode !== counterpartyMeta.currencyCode
+    ) {
+      setFormError(
+        "Для погашения кредита выберите актив и обязательство в одной валюте."
+      );
+      return;
+    }
+    if (!loanTotalStr.trim()) {
+      setFormError("Укажите общую сумму платежа.");
+      return;
+    }
+    const totalCents = parseRubToCents(loanTotalStr);
+    if (!Number.isFinite(totalCents) || totalCents < 0) {
+      setFormError(
+        "Введите корректную общую сумму платежа в формате 1234,56."
+      );
+      return;
+    }
+    if (!loanInterestStr.trim()) {
+      setFormError("Укажите сумму в погашение процентов.");
+      return;
+    }
+    const interestCents = parseRubToCents(loanInterestStr);
+    if (!Number.isFinite(interestCents) || interestCents < 0) {
+      setFormError(
+        "Введите корректную сумму в погашение процентов в формате 1234,56."
+      );
+      return;
+    }
+    const principalCents = totalCents - interestCents;
+    if (principalCents < 0) {
+      setFormError(
+        "Сумма в погашение процентов не может превышать общую сумму платежа."
+      );
+      return;
+    }
+    const isPlanned = formTransactionType === "PLANNED";
+    if (isPlanned) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (date < today) {
+        setFormError(
+          "Плановая транзакция не может быть создана ранее текущего дня."
+        );
+        return;
+      }
+    }
+    const expenseCategoryId = resolveCategoryId(cat1, cat2, cat3);
+    if (!expenseCategoryId) {
+      setFormError("Выберите категорию из списка.");
+      return;
+    }
+    try {
+      const basePayload = {
+        transaction_date: date,
+        primary_item_id: primaryItemId,
+        counterparty_id: counterpartyId ?? null,
+        transaction_type: formTransactionType,
+        comment: comment || null,
+      };
+      const expensePayload = {
+        ...basePayload,
+        counterparty_item_id: null,
+        amount_rub: interestCents,
+        amount_counterparty: null,
+        direction: "EXPENSE" as const,
+        category_id: expenseCategoryId,
+      };
+      const transferPayload = {
+        ...basePayload,
+        counterparty_item_id: counterpartyItemId,
+        amount_rub: principalCents,
+        amount_counterparty: null,
+        direction: "TRANSFER" as const,
+        category_id: null,
+      };
+      await Promise.all([
+        createTransaction(expensePayload),
+        createTransaction(transferPayload),
+      ]);
+      closeLoanRepaymentModal();
+      await loadAll();
+    } catch (err: unknown) {
+      setFormError(
+        (err as Error)?.message ?? "Не удалось создать транзакции."
+      );
+    }
   };
 
   /** Загрузка фото чека из тулбара: декодирование QR (дата, сумма, ФН/ФП/ФД) + OCR (ИНН, контрагент), объединение и заполнение формы. */
@@ -4813,73 +4967,24 @@ function TransactionsView({
                       return;
                     }
 
-                    if (isLoanRepayment) {
+                    if (isDebts) {
+                      if (!counterpartyId) {
+                        setFormError("Выберите контрагента.");
+                        return;
+                      }
                       if (!primaryItemId) {
-                        setFormError("Выберите актив, с которого производится погашение.");
+                        setFormError("Выберите актив или обязательство.");
                         return;
                       }
-                      if (!counterpartyItemId) {
-                        setFormError("Выберите обязательство.");
+                      const debtCents = parseRubToCents(amountStr);
+                      if (!Number.isFinite(debtCents) || debtCents <= 0) {
+                        setFormError("Введите сумму в формате 1234,56 (больше нуля).");
                         return;
                       }
-                      if (primaryIsMoex || counterpartyIsMoex) {
-                        setFormError("Операции погашения не поддерживают MOEX инструменты.");
-                        return;
-                      }
-
                       const primaryMeta = getEffectiveItemMeta(primaryItemId);
                       if (primaryMeta?.minDate && date < primaryMeta.minDate) {
                         setFormError(
                           "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
-                        );
-                        return;
-                      }
-                      const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
-                      if (
-                        counterpartyMeta?.minDate &&
-                        date < counterpartyMeta.minDate
-                      ) {
-                        setFormError(
-                          "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
-                        );
-                        return;
-                      }
-                      if (
-                        primaryMeta?.currencyCode &&
-                        counterpartyMeta?.currencyCode &&
-                        primaryMeta.currencyCode !== counterpartyMeta.currencyCode
-                      ) {
-                        setFormError(
-                          "Для погашения кредита выберите актив и обязательство в одной валюте."
-                        );
-                        return;
-                      }
-                      if (!loanTotalStr.trim()) {
-                        setFormError("Укажите общую сумму платежа.");
-                        return;
-                      }
-                      const totalCents = parseRubToCents(loanTotalStr);
-                      if (!Number.isFinite(totalCents) || totalCents < 0) {
-                        setFormError(
-                          "Введите корректную общую сумму платежа в формате 1234,56."
-                        );
-                        return;
-                      }
-                      if (!loanInterestStr.trim()) {
-                        setFormError("Укажите сумму в погашение процентов.");
-                        return;
-                      }
-                      const interestCents = parseRubToCents(loanInterestStr);
-                      if (!Number.isFinite(interestCents) || interestCents < 0) {
-                        setFormError(
-                          "Введите корректную сумму в погашение процентов в формате 1234,56."
-                        );
-                        return;
-                      }
-                      const principalCents = totalCents - interestCents;
-                      if (principalCents < 0) {
-                        setFormError(
-                          "Сумма в погашение процентов не может превышать общую сумму платежа."
                         );
                         return;
                       }
@@ -4892,71 +4997,29 @@ function TransactionsView({
                           return;
                         }
                       }
-
-                    try {
-                      const payloadTransactionType = isRealizeMode
-                        ? "ACTUAL"
-                        : formTransactionType;
-                      const transactionDate =
-                        isEditMode && editingTx
-                          ? mergeDateWithTime(date, editingTx.transaction_date)
-                          : date;
-                      const expenseCategoryId = resolveCategoryId(cat1, cat2, cat3);
-                      if (!expenseCategoryId) {
-                        setFormError("Выберите категорию из списка.");
-                        return;
+                      try {
+                        const transactionDate =
+                          isEditMode && editingTx
+                            ? mergeDateWithTime(date, editingTx.transaction_date)
+                            : date;
+                        await createDebtsTransaction({
+                          debt_direction: debtDirection,
+                          counterparty_id: counterpartyId,
+                          primary_item_id: primaryItemId,
+                          transaction_date: transactionDate,
+                          amount_rub: debtCents,
+                          transaction_type: formTransactionType,
+                          comment: comment || null,
+                        });
+                        closeDialog();
+                        await loadAll();
+                      } catch (err: unknown) {
+                        setFormError(
+                          (err as Error)?.message ?? "Не удалось создать транзакцию «Долги»."
+                        );
                       }
-                      const basePayload = {
-                        transaction_date: transactionDate,
-                        primary_item_id: primaryItemId,
-                        counterparty_id: counterpartyId ?? null,
-                        transaction_type: payloadTransactionType,
-                        comment: comment || null,
-                      };
-                        const expensePayload = {
-                          ...basePayload,
-                          counterparty_item_id: null,
-                          amount_rub: interestCents,
-                          amount_counterparty: null,
-                          direction: "EXPENSE" as const,
-                          category_id: expenseCategoryId,
-                        };
-                        const transferPayload = {
-                          ...basePayload,
-                          counterparty_item_id: counterpartyItemId,
-                          amount_rub: principalCents,
-                          amount_counterparty: null,
-                          direction: "TRANSFER" as const,
-                          category_id: null,
-                        };
-
-                        await Promise.all([
-                          createTransaction(expensePayload),
-                          createTransaction(transferPayload),
-                        ]);
-                        if (realizeSource) {
-                          try {
-                            await updateTransactionStatus(
-                              realizeSource.id,
-                              "REALIZED"
-                            );
-                          } catch (e: any) {
-                            setError(
-                              e?.message ??
-                                "Не удалось отметить плановую транзакцию как реализованную."
-                            );
-                          }
-                            setRealizeSource(null);
-                          }
-                          closeDialog();
-                          await loadAll();
-                        } catch (e: any) {
-                          setFormError(
-                            e?.message ?? "Не удалось создать транзакции."
-                          );
-                        }
-                        return;
-                      }
+                      return;
+                    }
 
                       const cents = parseRubToCents(amountStr);
                       let counterpartyCents: number | null = null;
@@ -5129,37 +5192,35 @@ function TransactionsView({
                       </FormField>
                     )}
 
+                    {isDebts ? (
+                      <FormField label="Направление">
+                        <SegmentedSelector
+                          options={[
+                            { value: "I_PAID", label: "Я заплатил", colorScheme: "red" },
+                            { value: "THEY_PAID", label: "Заплатили мне", colorScheme: "green" },
+                          ]}
+                          value={debtDirection}
+                          onChange={(v) => setDebtDirection(v as DebtDirection)}
+                        />
+                      </FormField>
+                    ) : (
                     <FormField label="Характер транзакции">
                       <SegmentedSelector
                         options={[
                           { value: "INCOME", label: "Доход", colorScheme: "green" },
                           { value: "EXPENSE", label: "Расход", colorScheme: "red" },
                           { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
-                          ...(!isEditMode && !isBulkEdit
-                            ? [
-                                {
-                                  value: "LOAN_REPAYMENT",
-                                  label: "Погашение кредитов",
-                                  colorScheme: "orange" as const,
-                                },
-                              ]
-                            : []),
                         ]}
-                        value={isLoanRepayment ? "LOAN_REPAYMENT" : direction}
+                        value={direction}
                         onChange={(v) => {
-                          if (v === "LOAN_REPAYMENT") {
-                            setFormMode("LOAN_REPAYMENT");
-                            setDirection("EXPENSE");
-                            applyCategorySelection("", "", "");
-                          } else {
-                            setFormMode("STANDARD");
-                            setDirection(v as "INCOME" | "EXPENSE" | "TRANSFER");
-                            setCounterpartyItemId(null);
-                            applyCategorySelection("", "", "");
-                          }
+                          setFormMode("STANDARD");
+                          setDirection(v as "INCOME" | "EXPENSE" | "TRANSFER");
+                          setCounterpartyItemId(null);
+                          applyCategorySelection("", "", "");
                         }}
                       />
                     </FormField>
+                    )}
 
                     <DateField
                       label="Дата транзакции"
@@ -5171,7 +5232,9 @@ function TransactionsView({
                       label={
                         isLoanRepayment
                           ? "Актив, с которого производится погашение"
-                          : "Актив / обязательство"
+                          : isDebts
+                            ? "Актив / обязательство"
+                            : "Актив / обязательство"
                       }
                     >
                       <ItemSelector
@@ -5222,7 +5285,7 @@ function TransactionsView({
                       </FormField>
                     )}
 
-                    {!isTransfer && (
+                    {(!isTransfer || isDebts) && (
                       <>
                         <FormField label="Контрагент" error={counterpartyError ?? undefined}>
                           <CounterpartySelector
@@ -5384,7 +5447,7 @@ function TransactionsView({
                         </div>
                       )}
 
-                    {!isTransfer && (
+                    {!isTransfer && !isDebts && (
                       <FormField label="Категория">
                         <CategorySelector
                           categoryNodes={categoryNodes}
@@ -5412,6 +5475,126 @@ function TransactionsView({
                   </div>
                 </FormModal>
 
+            {/* Модалка «Погашение кредитов» — отдельно от доходов/расходов/переводов */}
+            <FormModal
+              open={isLoanRepaymentModalOpen}
+              onOpenChange={(open) => {
+                if (!open) closeLoanRepaymentModal();
+                else setIsLoanRepaymentModalOpen(true);
+              }}
+              title="Погашение кредитов"
+              icon={<GraduationCap className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+              formError={formError}
+              onSubmit={handleLoanRepaymentSubmit}
+              onCancel={closeLoanRepaymentModal}
+              submitLabel="Создать"
+              loading={loading}
+              size="medium"
+            >
+              <div className="grid gap-4">
+                <FormField label="Тип транзакции">
+                  <SegmentedSelector
+                    options={[
+                      { value: "ACTUAL", label: "Фактическая", colorScheme: "purple" },
+                      { value: "PLANNED", label: "Плановая", colorScheme: "orange" },
+                    ]}
+                    value={formTransactionType}
+                    onChange={(v) => setFormTransactionType(v as TransactionOut["transaction_type"])}
+                  />
+                </FormField>
+                <DateField
+                  label="Дата транзакции"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+                <FormField label="Актив, с которого производится погашение">
+                  <ItemSelector
+                    items={assetItems}
+                    selectedIds={primaryItemId ? [primaryItemId] : []}
+                    onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                    selectionMode="single"
+                    placeholder="Выберите"
+                    getItemTypeLabel={getItemTypeLabel}
+                    getItemKind={resolveItemEffectiveKind}
+                    getCounterpartyForItemId={getCounterpartyForItemId}
+                    apiBase={API_BASE}
+                    getBankLogoUrl={itemBankLogoUrl}
+                    getBankName={itemBankName}
+                    getItemBalance={getItemDisplayBalanceCents}
+                    itemCounts={itemTxCounts}
+                  />
+                </FormField>
+                <FormField label="Обязательство">
+                  <ItemSelector
+                    items={liabilityItems.filter((it) => it.id !== primaryItemId)}
+                    selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
+                    onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
+                    selectionMode="single"
+                    placeholder="Выберите"
+                    getItemTypeLabel={getItemTypeLabel}
+                    getItemKind={resolveItemEffectiveKind}
+                    getCounterpartyForItemId={getCounterpartyForItemId}
+                    apiBase={API_BASE}
+                    getBankLogoUrl={itemBankLogoUrl}
+                    getBankName={itemBankName}
+                    getItemBalance={getItemDisplayBalanceCents}
+                    itemCounts={itemTxCounts}
+                  />
+                </FormField>
+                <TextField
+                  label={
+                    primaryCurrencyCode
+                      ? `Общая сумма платежа (${primaryCurrencyCode})`
+                      : "Общая сумма платежа"
+                  }
+                  value={loanTotalStr}
+                  onChange={(e) => setLoanTotalStr(formatRubInput(e.target.value))}
+                  onBlur={() => setLoanTotalStr((prev) => normalizeRubOnBlur(prev))}
+                  inputMode="decimal"
+                  placeholder="Например: 1 234,56"
+                />
+                <div className="grid gap-2">
+                  <TextField
+                    label={
+                      primaryCurrencyCode
+                        ? `Сумма в погашение процентов (${primaryCurrencyCode})`
+                        : "Сумма в погашение процентов"
+                    }
+                    value={loanInterestStr}
+                    onChange={(e) => setLoanInterestStr(formatRubInput(e.target.value))}
+                    onBlur={() => setLoanInterestStr((prev) => normalizeRubOnBlur(prev))}
+                    inputMode="decimal"
+                    placeholder="Например: 1 234,56"
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    Сумма в погашение основного долга: {loanPrincipalLabel}
+                  </div>
+                </div>
+                <FormField label="Категория">
+                  <CategorySelector
+                    categoryNodes={categoryNodes}
+                    selectedPath={selectedCategoryPath}
+                    onChange={(path) => {
+                      if (path) {
+                        applyCategorySelection(path.l1, path.l2, path.l3);
+                      } else {
+                        applyCategorySelection("", "", "");
+                      }
+                    }}
+                    placeholder="Поиск категории"
+                    direction="EXPENSE"
+                    disabled={false}
+                  />
+                </FormField>
+                <TextField
+                  label="Комментарий"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="Например: ежемесячный платёж"
+                />
+              </div>
+            </FormModal>
+
         <div className="flex-1 min-w-0 pt-[30px]">
           <div className="w-[900px] mx-auto">
             <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -5426,15 +5609,43 @@ function TransactionsView({
                   }
                 }}
               >
-                <DialogTrigger asChild>
-                  <Button
-                    className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-                    style={{ backgroundColor: ACCENT }}
-                  >
-                    <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                    <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
-                  </Button>
-                </DialogTrigger>
+                <div className="flex rounded-[9px] overflow-hidden border-0">
+                  <DialogTrigger asChild>
+                    <Button
+                      className="rounded-r-none rounded-l-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                      style={{ backgroundColor: ACCENT }}
+                    >
+                      <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                      <span style={{ color: "white", opacity: 0.85 }}>Простая транзакция</span>
+                    </Button>
+                  </DialogTrigger>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        className="rounded-l-none rounded-r-[9px] border-0 border-l border-white/30 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal min-w-[44px] px-2"
+                        style={{ backgroundColor: ACCENT }}
+                        aria-label="Специальная транзакция"
+                      >
+                        <SlidersHorizontal className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem
+                        onSelect={openLoanRepaymentModal}
+                      >
+                        <GraduationCap className="mr-2 h-4 w-4" />
+                        Погашение кредитов
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => openCreateDialog("DEBTS")}
+                      >
+                        <Coins className="mr-2 h-4 w-4" />
+                        Долги
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </Dialog>
               <Button
                 type="button"

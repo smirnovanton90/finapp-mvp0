@@ -18,6 +18,7 @@ export const ITEM_TYPE_LABELS: Record<string, string> = {
   crypto: "Криптовалюта",
   loan_to_third_party: "Предоставленные займы третьим лицам",
   third_party_receivables: "Долги третьих лиц",
+  counterparty_settlements: "Взаиморасчёты",
   real_estate: "Квартира",
   townhouse: "Дом / таунхаус",
   land_plot: "Земельный участок",

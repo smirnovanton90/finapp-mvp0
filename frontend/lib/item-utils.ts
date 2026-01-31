@@ -81,6 +81,9 @@ export function getEffectiveItemKind(
   item: Pick<ItemOut, "kind" | "type_code" | "card_kind">,
   balanceCents: number
 ): ItemKind {
+  if (item.type_code === "counterparty_settlements") {
+    return balanceCents < 0 ? "LIABILITY" : "ASSET";
+  }
   if (item.type_code !== "bank_card") return item.kind;
   if (item.card_kind !== "CREDIT") return "ASSET";
   return balanceCents < 0 ? "LIABILITY" : "ASSET";

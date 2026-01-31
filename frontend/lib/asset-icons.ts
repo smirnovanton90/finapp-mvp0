@@ -46,6 +46,7 @@ export const TYPE_ICON_BY_CODE: Record<
   crypto: Coins,
   loan_to_third_party: Users,
   third_party_receivables: Users,
+  counterparty_settlements: Users,
   real_estate: Home,
   townhouse: Home,
   land_plot: Home,

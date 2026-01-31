@@ -351,7 +351,8 @@ export function AssetCard({
             )}
           </div>
 
-          {/* Кнопка меню — отдельный блок после картинки и информации */}
+          {/* Кнопка меню — отдельный блок после картинки и информации (скрыта для Взаиморасчётов) */}
+          {item.type_code !== "counterparty_settlements" && (
           <div className="shrink-0">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -396,6 +397,7 @@ export function AssetCard({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+          )}
         </div>
 
         {/* Deposit details */}

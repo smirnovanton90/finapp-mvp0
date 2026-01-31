@@ -92,6 +92,7 @@ const PROPERTY_TYPES = [
 const OTHER_ASSET_TYPES = [
   "loan_to_third_party",
   "third_party_receivables",
+  "counterparty_settlements",
   "npf",
   "investment_life_insurance",
   "business_share",
@@ -154,6 +155,7 @@ const LIABILITY_TYPES = [
   { code: "microloan", label: "МФО" },
   { code: "private_loan", label: "Полученные займы от третьих лиц" },
   { code: "third_party_payables", label: "Долги третьим лицам" },
+  { code: "counterparty_settlements", label: "Взаиморасчёты" },
   { code: "tax_debt", label: "Налоги и обязательные платежи" },
   { code: "personal_income_tax_debt", label: "Задолженность по НДФЛ" },
   { code: "property_tax_debt", label: "Задолженность по налогу на имущество" },

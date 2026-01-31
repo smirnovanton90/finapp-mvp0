@@ -32,6 +32,7 @@ import {
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormModal } from "@/components/form-modal";
+import { ConfirmModal } from "@/components/confirm-modal";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -655,6 +656,17 @@ export default function Page() {
   const [closingDate, setClosingDate] = useState(() => getTodayDateKey());
   const [closeTransferItemId, setCloseTransferItemId] = useState<string>("");
   const [closeWriteOff, setCloseWriteOff] = useState(false);
+
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
+  const askConfirm = useCallback((title: string, message: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setConfirmDialog({ title, message, resolve });
+    });
+  }, []);
 
   const [kind, setKind] = useState<ItemKind>("ASSET");
   const [allowedTypeCodes, setAllowedTypeCodes] = useState<string[]>(CASH_TYPES);
@@ -3187,7 +3199,8 @@ export default function Page() {
         const wasPlanEnabled = editingItem.plan_settings?.enabled ?? false;
         if (originalPlanSignature && nextPlanSignature !== originalPlanSignature) {
           if (wasPlanEnabled && planEnabled) {
-            const confirmed = window.confirm(
+            const confirmed = await askConfirm(
+              "Изменить параметры плана?",
               "Параметры плана изменились. Плановые транзакции будут перестроены, а нереализованные удалены. Продолжить?"
             );
             if (!confirmed) {
@@ -3196,7 +3209,8 @@ export default function Page() {
             }
           }
           if (wasPlanEnabled && !planEnabled) {
-            const confirmed = window.confirm(
+            const confirmed = await askConfirm(
+              "Отключить плановые транзакции?",
               "Плановые транзакции будут отключены, нереализованные будут удалены. Продолжить?"
             );
             if (!confirmed) {
@@ -3212,7 +3226,8 @@ export default function Page() {
           nextCardAccountId &&
           nextCardAccountId !== editingItem.card_account_id;
         if (isCardLinkChange) {
-          const confirmed = window.confirm(
+          const confirmed = await askConfirm(
+            "Привязать карту к другому счету?",
             "Все транзакции по карте будут удалены и карта будет привязана к счету. Продолжить?"
           );
           if (!confirmed) {
@@ -3299,7 +3314,8 @@ export default function Page() {
     setError(null);
     try {
       if (item.plan_settings?.enabled) {
-        const confirmed = window.confirm(
+        const confirmed = await askConfirm(
+          "Архивировать актив?",
           "Есть плановые транзакции. Нереализованные будут удалены. Продолжить?"
         );
         if (!confirmed) {
@@ -3346,7 +3362,8 @@ export default function Page() {
       if (item.type_code === "bank_account") {
         const linkedCards = linkedCardsByAccountId.get(item.id) ?? [];
         if (linkedCards.length > 0) {
-          const confirmed = window.confirm(
+          const confirmed = await askConfirm(
+            "Закрыть счет?",
             "К счету привязаны активные карты. Закрыть счет вместе с привязанными картами?"
           );
           if (!confirmed) {
@@ -5366,6 +5383,26 @@ export default function Page() {
             )}
           </div>
         </div>
+
+      <ConfirmModal
+        open={confirmDialog !== null}
+        onOpenChange={(open) => {
+          if (!open && confirmDialog) {
+            confirmDialog.resolve(false);
+            setConfirmDialog(null);
+          }
+        }}
+        title={confirmDialog?.title ?? ""}
+        description={confirmDialog?.message ?? ""}
+        confirmLabel="Продолжить"
+        variant="primary"
+        onConfirm={() => {
+          if (confirmDialog) {
+            confirmDialog.resolve(true);
+            setConfirmDialog(null);
+          }
+        }}
+      />
     </main>
   );
 }

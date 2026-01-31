@@ -1,4 +1,12 @@
 import argparse
+import os
+import sys
+
+# Загружаем .env из директории backend при запуске из корня проекта
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if os.path.basename(_backend_dir) == "backend" and _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
+    os.chdir(_backend_dir)
 
 from sqlalchemy import select
 
@@ -81,6 +89,8 @@ def main() -> None:
         session.close()
 
     print("Seeded categories")
+    if not args.dry_run:
+        print("Перезапустите бэкенд (API), чтобы сбросить кэш категорий и увидеть новые категории в приложении.")
 
 
 if __name__ == "__main__":

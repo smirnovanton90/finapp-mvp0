@@ -113,16 +113,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmModal } from "@/components/confirm-modal";
 import {
   createTransaction,
   createDebtsTransaction,
@@ -6117,84 +6108,50 @@ function TransactionsView({
           </div>
         </div>
 
-      <AlertDialog
+      <ConfirmModal
         open={isBulkEditConfirmOpen}
-        onOpenChange={(open) => {
-          if (!open) setIsBulkEditConfirmOpen(false);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Применить изменения ко всем выбранным транзакциям?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Изменения из формы будут применены ко всем выбранным транзакциям.
-              Подтвердите действие перед сохранением.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isBulkEditing}>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-violet-600 text-white hover:bg-violet-700"
-              disabled={isBulkEditing}
-              onClick={applyBulkEdit}
-            >
-              Подтвердить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onOpenChange={setIsBulkEditConfirmOpen}
+        title="Применить изменения ко всем выбранным транзакциям?"
+        description="Изменения из формы будут применены ко всем выбранным транзакциям. Подтвердите действие перед сохранением."
+        confirmLabel="Подтвердить"
+        variant="primary"
+        loading={isBulkEditing}
+        onConfirm={applyBulkEdit}
+      />
 
-      <AlertDialog
+      <ConfirmModal
         open={deleteCount > 0}
         onOpenChange={(open) => {
           if (!open) setDeleteIds(null);
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {isBulkDelete ? "Удалить выбранные транзакции?" : "Удалить транзакцию?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Транзакции будут перемещены в список удаленных.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
-
-            <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700 text-white"
-              disabled={isDeleting}
-              onClick={async () => {
-                if (!deleteIds || deleteIds.length === 0) return;
-                const idsToDelete = deleteIds;
-                setIsDeleting(true);
-                try {
-                  await Promise.all(idsToDelete.map((id) => deleteTransaction(id)));
-                  setSelectedTxIds((prev) => {
-                    if (prev.size === 0) return prev;
-                    const next = new Set(prev);
-                    idsToDelete.forEach((id) => next.delete(id));
-                    return next;
-                  });
-                  setDeleteIds(null);
-                  await loadAll();
-                } catch (e: any) {
-                  setError(e?.message ?? "Не удалось удалить транзакции.");
-                  setDeleteIds(null);
-                } finally {
-                  setIsDeleting(false);
-                }
-              }}
-            >
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={isBulkDelete ? "Удалить выбранные транзакции?" : "Удалить транзакцию?"}
+        description="Транзакции будут перемещены в список удаленных."
+        confirmLabel="Удалить"
+        variant="destructive"
+        loading={isDeleting}
+        onConfirm={async () => {
+          if (!deleteIds || deleteIds.length === 0) return;
+          const idsToDelete = deleteIds;
+          setIsDeleting(true);
+          try {
+            await Promise.all(idsToDelete.map((id) => deleteTransaction(id)));
+            setSelectedTxIds((prev) => {
+              if (prev.size === 0) return prev;
+              const next = new Set(prev);
+              idsToDelete.forEach((id) => next.delete(id));
+              return next;
+            });
+            setDeleteIds(null);
+            await loadAll();
+          } catch (e: any) {
+            setError(e?.message ?? "Не удалось удалить транзакции.");
+            setDeleteIds(null);
+            throw e;
+          } finally {
+            setIsDeleting(false);
+          }
+        }}
+      />
     </main>
   );
 }

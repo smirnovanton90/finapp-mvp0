@@ -6,16 +6,7 @@ import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { Gauge, Plus } from "lucide-react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CategorySelector } from "@/components/category-selector";
@@ -658,31 +649,18 @@ export default function LimitsPage() {
         />
       </FormModal>
 
-      <AlertDialog
+      <ConfirmModal
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить лимит?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Лимит будет перемещен в раздел удаленных.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-rose-600 text-white hover:bg-rose-700"
-              onClick={handleDeleteLimit}
-              disabled={isDeleting}
-            >
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title="Удалить лимит?"
+        description="Лимит будет перемещен в раздел удаленных."
+        confirmLabel="Удалить"
+        variant="destructive"
+        loading={isDeleting}
+        onConfirm={handleDeleteLimit}
+      />
 
       {mounted && typeof document !== "undefined" &&
         createPortal(

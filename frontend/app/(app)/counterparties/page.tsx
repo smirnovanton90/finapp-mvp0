@@ -5,14 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Camera, ChevronDown, Plus, Trash2, Upload, Users } from "lucide-react";
+import { Camera, ChevronDown, Plus, Upload, Users } from "lucide-react";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { FormModal } from "@/components/form-modal";
@@ -39,7 +34,7 @@ import { AuthInput } from "@/components/ui/auth-input";
 import { CounterpartyCard } from "@/components/counterparty-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
-import { ACCENT, ACTIVE_TEXT_DARK, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
+import { ACCENT, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
 import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
@@ -1006,60 +1001,18 @@ export default function CounterpartiesPage() {
           </div>
         </div>
 
-      <Dialog
+      <ConfirmModal
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-      >
-        <DialogContent
-          className="sm:max-w-[600px] gap-4"
-          style={{ backgroundColor: MODAL_BG }}
-        >
-          <div className="grid gap-4">
-            <DialogHeader>
-              <DialogTitle
-                className="flex items-center gap-3 text-[32px] font-medium"
-                style={{ color: ACTIVE_TEXT_DARK }}
-              >
-                <Trash2 className="w-8 h-8" style={{ color: RED }} />
-                Удалить контрагента?
-              </DialogTitle>
-            </DialogHeader>
-            <p
-              className="text-sm"
-              style={{ color: PLACEHOLDER_COLOR_DARK }}
-            >
-              Контрагент будет перемещен в раздел удаленных.
-            </p>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button
-                type="button"
-                variant="glass"
-                className="rounded-lg border-0"
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as React.CSSProperties
-                }
-                onClick={() => setDeleteTarget(null)}
-                disabled={isDeleting}
-              >
-                Отмена
-              </Button>
-              <Button
-                type="button"
-                className="rounded-lg border-0 bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
-                onClick={handleDelete}
-                disabled={isDeleting}
-              >
-                {isDeleting ? "Удаляем..." : "Удалить"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+        title="Удалить контрагента?"
+        description="Контрагент будет перемещен в раздел удаленных."
+        confirmLabel="Удалить"
+        variant="destructive"
+        loading={isDeleting}
+        onConfirm={handleDelete}
+      />
     </main>
   );
 }

@@ -3,16 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { FormModal } from "@/components/form-modal";
 import { TextField, SelectField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
@@ -426,6 +423,8 @@ export default function CategoriesPage() {
   const addIconInputRef = useRef<HTMLInputElement>(null);
   const addIconPreviewUrlRef = useRef<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  /** При удалении: true = удалить с дочерними, false = только выбранную */
+  const [deleteCascade, setDeleteCascade] = useState(true);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [editScope, setEditScope] = useState<CategoryScope>("BOTH");
   const [editIcon, setEditIcon] = useState("");
@@ -656,9 +655,11 @@ export default function CategoriesPage() {
     setError(null);
     try {
       if (deleteTarget.ownerUserId == null) {
-        await updateCategoryVisibility(deleteTarget.id, false);
+        await updateCategoryVisibility(deleteTarget.id, false, {
+          cascade: deleteCascade,
+        });
       } else {
-        await deleteCategory(deleteTarget.id);
+        await deleteCategory(deleteTarget.id, { cascade: deleteCascade });
       }
       setDeleteTarget(null);
       await loadCategories(true);
@@ -910,22 +911,18 @@ export default function CategoriesPage() {
               )}
             </div>
             <div className="grid content-start gap-4 min-w-0">
-              <div className="grid gap-2" role="group" aria-label="Область">
-                <Label style={{ color: ACTIVE_TEXT_DARK }}>Область</Label>
-                <SegmentedSelector
-                  options={[
-                    { value: "INCOME", label: "Доход", colorScheme: "green" },
-                    { value: "EXPENSE", label: "Расход", colorScheme: "red" },
-                    { value: "BOTH", label: "Доходы и расходы", colorScheme: "purple" },
-                  ]}
-                  value={editScope}
-                  onChange={(value) => setEditScope(value as CategoryScope)}
-                  className={editTarget?.ownerUserId == null ? "opacity-60 pointer-events-none" : ""}
-                />
-              </div>
-              {editTarget?.ownerUserId == null && (
-                <div className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                  Для общих категорий область менять нельзя.
+              {editTarget?.ownerUserId != null && (
+                <div className="grid gap-2" role="group" aria-label="Область">
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Область</Label>
+                  <SegmentedSelector
+                    options={[
+                      { value: "INCOME", label: "Доход", colorScheme: "green" },
+                      { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                      { value: "BOTH", label: "Доходы и расходы", colorScheme: "purple" },
+                    ]}
+                    value={editScope}
+                    onChange={(value) => setEditScope(value as CategoryScope)}
+                  />
                 </div>
               )}
               <SelectField
@@ -955,36 +952,80 @@ export default function CategoriesPage() {
         </div>
       </FormModal>
 
-      <AlertDialog
+      <Dialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteCascade(true);
+          }
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Удалить категорию {deleteTarget ? `"${deleteTarget.name}"` : ""}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteTarget?.ownerUserId == null
-                ? "Категория будет скрыта только для вас."
-                : deleteTarget?.childCount
-                  ? `Будут удалены и все подкатегории: ${deleteTarget.childCount}.`
-                  : "Действие нельзя отменить."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 text-white hover:bg-red-700"
-              onClick={handleDelete}
+        <DialogContent
+          className="sm:max-w-[600px] gap-4"
+          style={{ backgroundColor: MODAL_BG }}
+        >
+        <div className="grid gap-4">
+          <DialogHeader>
+            <DialogTitle
+              className="flex items-center gap-3 text-[32px] font-medium"
+              style={{ color: ACTIVE_TEXT_DARK }}
             >
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              <Trash2 className="w-8 h-8 shrink-0" style={{ color: RED }} />
+              {`Удалить категорию ${deleteTarget ? `"${deleteTarget.name}"` : ""}?`}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+            {deleteTarget?.childCount != null && deleteTarget.childCount > 0
+              ? null
+              : deleteTarget?.ownerUserId == null
+                ? "Категория будет скрыта только для вас."
+                : "Действие нельзя отменить."}
+          </div>
+          {deleteTarget?.childCount != null && deleteTarget.childCount > 0 && (
+            <div className="flex items-center justify-between gap-3">
+              <label
+                htmlFor="delete-cascade"
+                className="text-sm cursor-pointer"
+                style={{ color: ACTIVE_TEXT_DARK }}
+              >
+                Удалить также все дочерние категории
+              </label>
+              <Switch
+                id="delete-cascade"
+                checked={deleteCascade}
+                onCheckedChange={setDeleteCascade}
+              />
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="glass"
+              className="rounded-lg border-0"
+              style={
+                {
+                  "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                  "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                } as React.CSSProperties
+              }
+              onClick={() => setDeleteTarget(null)}
+              disabled={syncing}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              className="rounded-lg border-0 bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
+              onClick={handleDelete}
+              disabled={syncing}
+            >
+              {syncing ? "..." : "Удалить"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+      </Dialog>
 
       {mounted && typeof document !== "undefined" &&
         document.getElementById(SIDEBAR_FILTERS_SLOT_ID) &&

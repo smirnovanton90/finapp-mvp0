@@ -252,30 +252,55 @@ def update_category_scope(
 def update_category_visibility(
     category_id: int,
     payload: CategoryVisibilityUpdate,
+    cascade: bool = True,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     category = fetch_category(db, user, category_id, allow_archived=True)
-    state = db.execute(
-        select(UserCategoryState).where(
-            UserCategoryState.user_id == user.id,
-            UserCategoryState.category_id == category_id,
-        )
-    ).scalar_one_or_none()
-
-    if state:
-        state.enabled = payload.enabled
+    if cascade:
+        all_categories = db.execute(
+            select(Category).where(
+                or_(
+                    Category.owner_user_id.is_(None),
+                    Category.owner_user_id == user.id,
+                )
+            )
+        ).scalars().all()
+        by_parent: dict[int | None, list[Category]] = {}
+        for item in all_categories:
+            by_parent.setdefault(item.parent_id, []).append(item)
+        to_update: list[Category] = []
+        stack = [category]
+        while stack:
+            current = stack.pop()
+            to_update.append(current)
+            stack.extend(by_parent.get(current.id, []))
     else:
-        state = UserCategoryState(
-            user_id=user.id,
-            category_id=category_id,
-            enabled=payload.enabled,
-        )
-        db.add(state)
+        to_update = [category]
+
+    result_state = None
+    for cat in to_update:
+        state = db.execute(
+            select(UserCategoryState).where(
+                UserCategoryState.user_id == user.id,
+                UserCategoryState.category_id == cat.id,
+            )
+        ).scalar_one_or_none()
+        if state:
+            state.enabled = payload.enabled
+        else:
+            state = UserCategoryState(
+                user_id=user.id,
+                category_id=cat.id,
+                enabled=payload.enabled,
+            )
+            db.add(state)
+        if cat.id == category_id:
+            result_state = state
 
     db.commit()
     invalidate_category_cache(user.id)
-    return build_category_out(category, state)
+    return build_category_out(category, result_state)
 
 
 @router.patch("/{category_id}/icon", response_model=CategoryOut)
@@ -323,6 +348,7 @@ def update_category_icon(
 @router.delete("/{category_id}")
 def delete_category(
     category_id: int,
+    cascade: bool = True,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -333,22 +359,35 @@ def delete_category(
     if category.archived_at is not None:
         return {"ok": True}
 
-    all_categories = db.execute(
-        select(Category).where(Category.owner_user_id == user.id)
-    ).scalars()
-    by_parent: dict[int | None, list[Category]] = {}
-    for item in all_categories:
-        by_parent.setdefault(item.parent_id, []).append(item)
+    if cascade:
+        all_categories = db.execute(
+            select(Category).where(Category.owner_user_id == user.id)
+        ).scalars()
+        by_parent: dict[int | None, list[Category]] = {}
+        for item in all_categories:
+            by_parent.setdefault(item.parent_id, []).append(item)
 
-    to_archive: list[Category] = []
-    stack = [category]
-    while stack:
-        current = stack.pop()
-        to_archive.append(current)
-        stack.extend(by_parent.get(current.id, []))
+        to_archive: list[Category] = []
+        stack = [category]
+        while stack:
+            current = stack.pop()
+            to_archive.append(current)
+            stack.extend(by_parent.get(current.id, []))
 
-    for item in to_archive:
-        item.archived_at = sa.func.now()
+        for item in to_archive:
+            item.archived_at = sa.func.now()
+    else:
+        # Удалить только выбранную: переносим дочерние категории к родителю выбранной
+        children = db.execute(
+            select(Category).where(
+                Category.owner_user_id == user.id,
+                Category.parent_id == category.id,
+                Category.archived_at.is_(None),
+            )
+        ).scalars().all()
+        for child in children:
+            child.parent_id = category.parent_id
+        category.archived_at = sa.func.now()
 
     db.commit()
     invalidate_category_cache(user.id)

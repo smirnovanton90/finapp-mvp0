@@ -827,9 +827,17 @@ export async function updateCategoryScope(
 
 export async function updateCategoryVisibility(
   id: number,
-  enabled: boolean
+  enabled: boolean,
+  options?: { cascade?: boolean }
 ): Promise<CategoryNode> {
-  const res = await authFetch(`${API_BASE}/categories/${id}/visibility`, {
+  const params = new URLSearchParams();
+  if (options?.cascade !== undefined) {
+    params.set("cascade", options.cascade ? "true" : "false");
+  }
+  const url = params.toString()
+    ? `${API_BASE}/categories/${id}/visibility?${params.toString()}`
+    : `${API_BASE}/categories/${id}/visibility`;
+  const res = await authFetch(url, {
     method: "PATCH",
     body: JSON.stringify({ enabled }),
   });
@@ -849,8 +857,18 @@ export async function updateCategoryIcon(
   return res.json();
 }
 
-export async function deleteCategory(id: number): Promise<void> {
-  const res = await authFetch(`${API_BASE}/categories/${id}`, {
+export async function deleteCategory(
+  id: number,
+  options?: { cascade?: boolean }
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (options?.cascade !== undefined) {
+    params.set("cascade", options.cascade ? "true" : "false");
+  }
+  const url = params.toString()
+    ? `${API_BASE}/categories/${id}?${params.toString()}`
+    : `${API_BASE}/categories/${id}`;
+  const res = await authFetch(url, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await readError(res));

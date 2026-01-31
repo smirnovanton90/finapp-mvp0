@@ -36,16 +36,7 @@ import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useRouter } from "next/navigation";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1897,31 +1888,18 @@ export default function FinancialPlanningPage() {
           </div>
         </div>
 
-      <AlertDialog
+      <ConfirmModal
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить цепочку?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Все плановые транзакции из этой цепочки будут перенесены в удаленные.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-rose-600 text-white hover:bg-rose-700"
-              onClick={handleDeleteChain}
-              disabled={isDeleting}
-            >
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title="Удалить цепочку?"
+        description="Все плановые транзакции из этой цепочки будут перенесены в удаленные."
+        confirmLabel="Удалить"
+        variant="destructive"
+        loading={isDeleting}
+        onConfirm={handleDeleteChain}
+      />
     </main>
   );
 }

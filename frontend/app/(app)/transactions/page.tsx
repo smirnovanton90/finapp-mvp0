@@ -5767,7 +5767,7 @@ function TransactionsView({
                             }
                           }}
                           placeholder="Поиск категории"
-                          direction={isDebts && debtDirection === "THEY_PAID_FOR_ME" ? "EXPENSE" : direction}
+                          direction={isDebts && debtDirection === "THEY_PAID_FOR_ME" ? "EXPENSE" : direction === "TRANSFER" ? undefined : direction}
                           disabled={false}
                         />
                       </FormField>

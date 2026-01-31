@@ -133,25 +133,20 @@ function filterTreeByFilters(
   };
 
   const walk = (list: CategoryNode[], parentNames: string[]): CategoryNode[] => {
-    return list
-      .map((node) => {
-        const filteredChildren = node.children?.length
-          ? walk(node.children, [...parentNames, node.name])
-          : undefined;
-        const nodeMatches =
-          matchName(node, parentNames) &&
-          matchScope(node) &&
-          matchSource(node) &&
-          matchStatus(node);
-        const keepNode =
-          nodeMatches || (filteredChildren != null && filteredChildren.length > 0);
-        if (!keepNode) return null;
-        return {
-          ...node,
-          children: filteredChildren,
-        };
-      })
-      .filter((n): n is CategoryNode => n != null);
+    return list.flatMap((node) => {
+      const filteredChildren = node.children?.length
+        ? walk(node.children, [...parentNames, node.name])
+        : undefined;
+      const nodeMatches =
+        matchName(node, parentNames) &&
+        matchScope(node) &&
+        matchSource(node) &&
+        matchStatus(node);
+      const keepNode =
+        nodeMatches || (filteredChildren != null && filteredChildren.length > 0);
+      if (!keepNode) return [];
+      return [{ ...node, children: filteredChildren }];
+    });
   };
   return walk(nodes, []);
 }

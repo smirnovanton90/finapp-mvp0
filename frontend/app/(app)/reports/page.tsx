@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { ACTIVE_TEXT_DARK, MODAL_BG, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 
 function ReportChartPreview({ id }: { id: string }) {
   const width = 280;
@@ -120,17 +121,17 @@ function ReportCard({
     <Link
       href={href}
       className={cn(
-        "group flex flex-col gap-6 rounded-xl p-6 transition-colors sm:flex-row sm:items-stretch sm:gap-8",
-        "bg-[rgba(37,36,63,0.7)] hover:bg-[rgba(45,42,75,0.85)]",
-        "border border-white/[0.08]",
+        "group relative flex flex-col gap-6 rounded-lg overflow-hidden border-0 outline-none p-6 sm:flex-row sm:items-stretch sm:gap-8",
+        "transition-transform duration-200 ease-out hover:-translate-y-1",
         className
       )}
+      style={{ backgroundColor: MODAL_BG }}
     >
       <div className="flex min-w-0 flex-1 flex-col justify-center gap-2">
-        <h2 className="text-lg font-semibold text-[rgba(255,255,255,0.92)] sm:text-xl">
+        <h2 className="text-lg font-semibold sm:text-xl" style={{ color: ACTIVE_TEXT_DARK }}>
           {title}
         </h2>
-        <p className="text-sm leading-snug text-[rgba(197,191,241,0.75)]">
+        <p className="text-sm leading-snug" style={{ color: PLACEHOLDER_COLOR_DARK }}>
           {description}
         </p>
       </div>

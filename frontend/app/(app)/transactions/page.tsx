@@ -5365,11 +5365,55 @@ function TransactionsView({
                     )}
 
                     <DateField
-                      label={isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID" || debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME") ? "Дата" : "Дата транзакции"}
+                      label={direction === "INCOME" || direction === "EXPENSE" || direction === "TRANSFER" || (isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID" || debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME")) ? "Дата" : "Дата транзакции"}
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                     />
 
+                    {direction === "TRANSFER" ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <FormField label="Откуда">
+                        <ItemSelector
+                          items={primarySelectItems}
+                          selectedIds={primaryItemId ? [primaryItemId] : []}
+                          onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                          selectionMode="single"
+                          placeholder="Выберите"
+                          getItemTypeLabel={getItemTypeLabel}
+                          getItemKind={resolveItemEffectiveKind}
+                          getCounterpartyForItemId={getCounterpartyForItemId}
+                          apiBase={API_BASE}
+                          getBankLogoUrl={itemBankLogoUrl}
+                          getBankName={itemBankName}
+                          getItemBalance={getItemDisplayBalanceCents}
+                          itemCounts={itemTxCounts}
+                          disabled={isImportFormDisabled}
+                        />
+                      </FormField>
+                      <FormField label="Куда">
+                        <ItemSelector
+                          items={counterpartySelectItems.filter(
+                            (it) => it.id !== primaryItemId
+                          )}
+                          selectedIds={
+                            counterpartyItemId ? [counterpartyItemId] : []
+                          }
+                          onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
+                          selectionMode="single"
+                          placeholder="Выберите"
+                          getItemTypeLabel={getItemTypeLabel}
+                          getItemKind={resolveItemEffectiveKind}
+                          getCounterpartyForItemId={getCounterpartyForItemId}
+                          apiBase={API_BASE}
+                          getBankLogoUrl={itemBankLogoUrl}
+                          getBankName={itemBankName}
+                          getItemBalance={getItemDisplayBalanceCents}
+                          itemCounts={itemTxCounts}
+                        />
+                      </FormField>
+                    </div>
+                    ) : (
+                    <>
                     {!(isDebts && debtDirection === "THEY_PAID_FOR_ME") && (
                     <FormField
                       label={
@@ -5431,6 +5475,8 @@ function TransactionsView({
                           itemCounts={itemTxCounts}
                         />
                       </FormField>
+                    )}
+                    </>
                     )}
 
                     {isDebts && debtDirection === "I_PAID_FOR_SOMEONE" && (

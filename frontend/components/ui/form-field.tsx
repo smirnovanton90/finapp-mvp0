@@ -17,17 +17,19 @@ import {
   ACTIVE_TEXT_DARK,
   PLACEHOLDER_COLOR_DARK,
 } from "@/lib/colors";
+import { cn } from "@/lib/utils";
 
 interface FormFieldProps {
   label: string;
   required?: boolean;
   error?: string;
+  className?: string;
   children: React.ReactNode;
 }
 
-export function FormField({ label, required, error, children }: FormFieldProps) {
+export function FormField({ label, required, error, className, children }: FormFieldProps) {
   return (
-    <div className="grid gap-2">
+    <div className={cn("grid gap-2 min-w-0", className)}>
       <Label style={{ color: ACTIVE_TEXT_DARK }}>
         {label}
         {required && <span style={{ color: "#FB4C4F" }}> *</span>}
@@ -171,8 +173,8 @@ export function SelectField({
             boxShadow,
           }}
         >
-          {/* Inner container */}
-          <div className="relative flex items-center px-4 h-10 z-10">
+          {/* Inner container: min-h and items-start so selected value can wrap */}
+          <div className="relative flex items-start px-4 min-h-10 py-2 z-10">
             <Select 
               value={value} 
               onValueChange={onValueChange} 
@@ -183,7 +185,7 @@ export function SelectField({
               }}
             >
               <SelectTrigger 
-                className="!w-full !h-auto !border-0 !bg-transparent dark:!bg-transparent dark:hover:!bg-transparent !shadow-none !p-0 !px-0 !py-0 !rounded-none !focus:ring-0 !focus:outline-none !data-[state=open]:ring-0"
+                className="!w-full !h-auto !border-0 !bg-transparent dark:!bg-transparent dark:hover:!bg-transparent !shadow-none !p-0 !px-0 !py-0 !rounded-none !focus:ring-0 !focus:outline-none !data-[state=open]:ring-0 [&_[data-slot=select-value]]:[overflow:visible] [&_[data-slot=select-value]]:[display:block] [&_[data-slot=select-value]]:[-webkit-line-clamp:unset] [&_[data-slot=select-value]]:whitespace-normal [&_[data-slot=select-value]]:break-words"
                 style={{
                   color: value ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,
                   backgroundColor: "transparent",

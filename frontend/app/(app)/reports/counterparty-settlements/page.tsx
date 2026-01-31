@@ -46,8 +46,18 @@ function balanceStatusLabel(amountCents: number): string {
   return "Задолженности нет";
 }
 
-/** Тип актива «Взаиморасчёты» — один item на контрагента, сальдо может быть плюс/минус. */
+/** Типы активов/обязательств для расчётов с контрагентом. */
 const COUNTERPARTY_SETTLEMENTS_TYPE = "counterparty_settlements" as const;
+const LOAN_TO_THIRD_PARTY_TYPE = "loan_to_third_party" as const;
+const PRIVATE_LOAN_TYPE = "private_loan" as const;
+
+const SOURCE_LABELS = {
+  settlements: "Взаиморасчёты",
+  loan_given: "Предоставленные займы",
+  loan_received: "Полученные займы",
+} as const;
+
+type SourceType = keyof typeof SOURCE_LABELS;
 
 function getRelativeDateKey(daysOffset: number) {
   const d = new Date();
@@ -64,6 +74,7 @@ type ReportRow =
       dateKey: string;
       comment: string;
       amountCents: number;
+      sourceType: SourceType;
     }
   | { type: "paid_to"; amountCents: number }
   | { type: "received_from"; amountCents: number };
@@ -72,32 +83,50 @@ type ReportData = {
   rows: ReportRow[];
   openingBalance: number;
   closingBalance: number;
+  openingBalanceSettlements: number;
+  openingBalanceLoanGiven: number;
+  openingBalanceLoanReceived: number;
+  closingBalanceSettlements: number;
+  closingBalanceLoanGiven: number;
+  closingBalanceLoanReceived: number;
 };
 
 /**
- * Вычисляет дельту по сальдо взаиморасчётов для одной стороны транзакции (primary или counterparty),
- * когда эта сторона — item типа «Взаиморасчёты» (counterparty_settlements). Хранится как ASSET: + = нам должны, − = мы должны.
+ * Вычисляет дельту по сальдо для одной стороны транзакции (primary или counterparty),
+ * когда эта сторона — item из нашего набора (взаиморасчёты, займы выданные, займы полученные).
+ * ASSET: + = в вашу пользу; LIABILITY: инвертируем знак.
  */
 function transactionDeltaForSide(
   tx: TransactionOut,
-  itemIds: Set<number>,
-  _itemsById: Map<number, ItemOut>,
+  itemId: number,
+  itemsById: Map<number, ItemOut>,
   isPrimary: boolean
 ): number {
+  const item = itemsById.get(itemId);
+  if (!item) return 0;
   const amount = tx.amount_rub ?? 0;
-  const itemId = isPrimary
-    ? (tx.primary_item_id != null && itemIds.has(tx.primary_item_id) ? tx.primary_item_id : tx.primary_card_item_id ?? null)
-    : (tx.counterparty_item_id != null && itemIds.has(tx.counterparty_item_id) ? tx.counterparty_item_id : tx.counterparty_card_item_id ?? null);
-  if (itemId == null) return 0;
-  // counterparty_settlements всегда ASSET: приход на счёт = +, списание = −
-  const kindSign = 1;
+  // ASSET: приход = +; LIABILITY: приход = рост долга = − в «вашу пользу»
+  const kindSign = item.kind === "LIABILITY" ? -1 : 1;
   let rawDelta: number;
   if (isPrimary) {
-    rawDelta = tx.direction === "INCOME" ? 1 : tx.direction === "EXPENSE" ? -1 : -1; // TRANSFER: primary отдаёт
+    rawDelta = tx.direction === "INCOME" ? 1 : tx.direction === "EXPENSE" ? -1 : -1;
   } else {
-    rawDelta = tx.direction === "INCOME" ? -1 : tx.direction === "EXPENSE" ? 1 : 1; // TRANSFER: counterparty получает
+    rawDelta = tx.direction === "INCOME" ? -1 : tx.direction === "EXPENSE" ? 1 : 1;
   }
   return kindSign * rawDelta * amount;
+}
+
+function getSourceTypeForItem(
+  itemId: number,
+  itemsById: Map<number, ItemOut>,
+  settlementIds: Set<number>,
+  loanGivenIds: Set<number>,
+  loanReceivedIds: Set<number>
+): SourceType | null {
+  if (settlementIds.has(itemId)) return "settlements";
+  if (loanGivenIds.has(itemId)) return "loan_given";
+  if (loanReceivedIds.has(itemId)) return "loan_received";
+  return null;
 }
 
 function buildReportData(
@@ -108,17 +137,34 @@ function buildReportData(
   items: ItemOut[]
 ): ReportData {
   const itemsById = new Map(items.map((i) => [i.id, i]));
-  const debtItems = items.filter(
+  const settlementItems = items.filter(
     (i) =>
       i.counterparty_id === counterpartyId &&
       i.type_code === COUNTERPARTY_SETTLEMENTS_TYPE
   );
-  const itemIds = new Set(debtItems.map((i) => i.id));
+  const loanGivenItems = items.filter(
+    (i) =>
+      i.counterparty_id === counterpartyId &&
+      i.type_code === LOAN_TO_THIRD_PARTY_TYPE
+  );
+  const loanReceivedItems = items.filter(
+    (i) =>
+      i.counterparty_id === counterpartyId &&
+      i.type_code === PRIVATE_LOAN_TYPE
+  );
+  const settlementIds = new Set(settlementItems.map((i) => i.id));
+  const loanGivenIds = new Set(loanGivenItems.map((i) => i.id));
+  const loanReceivedIds = new Set(loanReceivedItems.map((i) => i.id));
+  const allItemIds = new Set([
+    ...settlementIds,
+    ...loanGivenIds,
+    ...loanReceivedIds,
+  ]);
 
   const isRelevantTx = (tx: TransactionOut) => {
     const pid = tx.primary_item_id ?? tx.primary_card_item_id;
     const cid = tx.counterparty_item_id ?? tx.counterparty_card_item_id;
-    return (pid != null && itemIds.has(pid)) || (cid != null && itemIds.has(cid));
+    return (pid != null && allItemIds.has(pid)) || (cid != null && allItemIds.has(cid));
   };
   const isRealized = (tx: TransactionOut) =>
     tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
@@ -128,16 +174,49 @@ function buildReportData(
     let delta = 0;
     const pid = tx.primary_item_id ?? tx.primary_card_item_id;
     const cid = tx.counterparty_item_id ?? tx.counterparty_card_item_id;
-    if (pid != null && itemIds.has(pid)) delta += transactionDeltaForSide(tx, itemIds, itemsById, true);
-    if (cid != null && itemIds.has(cid)) delta += transactionDeltaForSide(tx, itemIds, itemsById, false);
+    if (pid != null && allItemIds.has(pid))
+      delta += transactionDeltaForSide(tx, pid, itemsById, true);
+    if (cid != null && allItemIds.has(cid))
+      delta += transactionDeltaForSide(tx, cid, itemsById, false);
     return delta;
+  };
+
+  const txDeltaBySource = (tx: TransactionOut) => {
+    let settlements = 0;
+    let loanGiven = 0;
+    let loanReceived = 0;
+    const pid = tx.primary_item_id ?? tx.primary_card_item_id;
+    const cid = tx.counterparty_item_id ?? tx.counterparty_card_item_id;
+    if (pid != null && allItemIds.has(pid)) {
+      const d = transactionDeltaForSide(tx, pid, itemsById, true);
+      if (settlementIds.has(pid)) settlements += d;
+      else if (loanGivenIds.has(pid)) loanGiven += d;
+      else if (loanReceivedIds.has(pid)) loanReceived += d;
+    }
+    if (cid != null && allItemIds.has(cid)) {
+      const d = transactionDeltaForSide(tx, cid, itemsById, false);
+      if (settlementIds.has(cid)) settlements += d;
+      else if (loanGivenIds.has(cid)) loanGiven += d;
+      else if (loanReceivedIds.has(cid)) loanReceived += d;
+    }
+    return { settlements, loanGiven, loanReceived };
   };
 
   const beforeStart = relevantTxs.filter((tx) => {
     const key = toDateKey(tx.transaction_date);
     return key && key < rangeStartKey;
   });
-  const openingBalance = beforeStart.reduce((sum, tx) => sum + txDelta(tx), 0);
+  let openingBalanceSettlements = 0;
+  let openingBalanceLoanGiven = 0;
+  let openingBalanceLoanReceived = 0;
+  beforeStart.forEach((tx) => {
+    const by = txDeltaBySource(tx);
+    openingBalanceSettlements += by.settlements;
+    openingBalanceLoanGiven += by.loanGiven;
+    openingBalanceLoanReceived += by.loanReceived;
+  });
+  const openingBalance =
+    openingBalanceSettlements + openingBalanceLoanGiven + openingBalanceLoanReceived;
 
   const periodTxs = relevantTxs
     .filter((tx) => {
@@ -147,29 +226,63 @@ function buildReportData(
     .sort((a, b) => toDateKey(a.transaction_date).localeCompare(toDateKey(b.transaction_date)));
 
   let periodNet = 0;
+  let periodNetSettlements = 0;
+  let periodNetLoanGiven = 0;
+  let periodNetLoanReceived = 0;
   let periodPaid = 0;
   let periodReceived = 0;
   const transactionRows: ReportRow[] = periodTxs.map((tx) => {
     const delta = txDelta(tx);
+    const by = txDeltaBySource(tx);
     periodNet += delta;
+    periodNetSettlements += by.settlements;
+    periodNetLoanGiven += by.loanGiven;
+    periodNetLoanReceived += by.loanReceived;
     if (delta < 0) periodPaid += Math.abs(delta);
     else if (delta > 0) periodReceived += delta;
+    const pid = tx.primary_item_id ?? tx.primary_card_item_id;
+    const cid = tx.counterparty_item_id ?? tx.counterparty_card_item_id;
+    const primarySource =
+      pid != null
+        ? getSourceTypeForItem(pid, itemsById, settlementIds, loanGivenIds, loanReceivedIds)
+        : null;
+    const counterpartySource =
+      cid != null
+        ? getSourceTypeForItem(cid, itemsById, settlementIds, loanGivenIds, loanReceivedIds)
+        : null;
+    const sourceType: SourceType =
+      primarySource ?? counterpartySource ?? "settlements";
     return {
       type: "transaction",
       dateKey: toDateKey(tx.transaction_date),
       comment: tx.comment?.trim() ?? "",
       amountCents: delta,
+      sourceType,
     };
   });
 
-  const closingBalance = openingBalance + periodNet;
+  const closingBalanceSettlements = openingBalanceSettlements + periodNetSettlements;
+  const closingBalanceLoanGiven = openingBalanceLoanGiven + periodNetLoanGiven;
+  const closingBalanceLoanReceived = openingBalanceLoanReceived + periodNetLoanReceived;
+  const closingBalance =
+    closingBalanceSettlements + closingBalanceLoanGiven + closingBalanceLoanReceived;
 
   const rows: ReportRow[] = [
     ...transactionRows,
     { type: "received_from", amountCents: periodPaid },
     { type: "paid_to", amountCents: periodReceived },
   ];
-  return { rows, openingBalance, closingBalance };
+  return {
+    rows,
+    openingBalance,
+    closingBalance,
+    openingBalanceSettlements,
+    openingBalanceLoanGiven,
+    openingBalanceLoanReceived,
+    closingBalanceSettlements,
+    closingBalanceLoanGiven,
+    closingBalanceLoanReceived,
+  };
 }
 
 export default function CounterpartySettlementsPage() {
@@ -232,7 +345,9 @@ export default function CounterpartySettlementsPage() {
     return items.filter(
       (i) =>
         i.counterparty_id === selectedId &&
-        i.type_code === COUNTERPARTY_SETTLEMENTS_TYPE
+        (i.type_code === COUNTERPARTY_SETTLEMENTS_TYPE ||
+          i.type_code === LOAN_TO_THIRD_PARTY_TYPE ||
+          i.type_code === PRIVATE_LOAN_TYPE)
     );
   }, [selectedId, items]);
 
@@ -351,11 +466,26 @@ export default function CounterpartySettlementsPage() {
                     className="relative rounded-lg overflow-hidden border-0 outline-none px-6 py-4"
                     style={{ backgroundColor: MODAL_BG }}
                   >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-sm text-muted-foreground">
-                          На {formatDateLabel(rangeStartKey)}
-                        </span>
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-sm text-muted-foreground">
+                            На {formatDateLabel(rangeStartKey)}
+                          </span>
+                          <span
+                            className="text-base font-medium"
+                            style={{
+                              color:
+                                reportData.openingBalance > 0
+                                  ? GREEN
+                                  : reportData.openingBalance < 0
+                                    ? RED
+                                    : undefined,
+                            }}
+                          >
+                            {balanceStatusLabel(reportData.openingBalance)}
+                          </span>
+                        </div>
                         <span
                           className="text-base font-medium"
                           style={{
@@ -367,22 +497,56 @@ export default function CounterpartySettlementsPage() {
                                   : undefined,
                           }}
                         >
-                          {balanceStatusLabel(reportData.openingBalance)}
+                          {formatSignedAmount(reportData.openingBalance)}
                         </span>
                       </div>
-                      <span
-                        className="text-base font-medium"
-                        style={{
-                          color:
-                            reportData.openingBalance > 0
-                              ? GREEN
-                              : reportData.openingBalance < 0
-                                ? RED
-                                : undefined,
-                        }}
-                      >
-                        {formatSignedAmount(reportData.openingBalance)}
-                      </span>
+                      <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+                        <div className="flex justify-between">
+                          <span>{SOURCE_LABELS.settlements}</span>
+                          <span
+                            style={{
+                              color:
+                                reportData.openingBalanceSettlements > 0
+                                  ? GREEN
+                                  : reportData.openingBalanceSettlements < 0
+                                    ? RED
+                                    : undefined,
+                            }}
+                          >
+                            {formatSignedAmount(reportData.openingBalanceSettlements)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{SOURCE_LABELS.loan_given}</span>
+                          <span
+                            style={{
+                              color:
+                                reportData.openingBalanceLoanGiven > 0
+                                  ? GREEN
+                                  : reportData.openingBalanceLoanGiven < 0
+                                    ? RED
+                                    : undefined,
+                            }}
+                          >
+                            {formatSignedAmount(reportData.openingBalanceLoanGiven)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{SOURCE_LABELS.loan_received}</span>
+                          <span
+                            style={{
+                              color:
+                                reportData.openingBalanceLoanReceived > 0
+                                  ? GREEN
+                                  : reportData.openingBalanceLoanReceived < 0
+                                    ? RED
+                                    : undefined,
+                            }}
+                          >
+                            {formatSignedAmount(reportData.openingBalanceLoanReceived)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -406,6 +570,9 @@ export default function CounterpartySettlementsPage() {
                                   >
                                     <TableCell className="pl-8 w-24 min-w-0 whitespace-nowrap">
                                       {formatDateLabel(row.dateKey)}
+                                    </TableCell>
+                                    <TableCell className="w-40 min-w-0 text-center text-muted-foreground whitespace-normal break-words">
+                                      {SOURCE_LABELS[row.sourceType]}
                                     </TableCell>
                                     <TableCell className="text-muted-foreground">
                                       {row.comment}
@@ -444,14 +611,14 @@ export default function CounterpartySettlementsPage() {
                                   className="border-b border-border/70 font-medium"
                                 >
                                   <TableCell
-                                    colSpan={2}
+                                    colSpan={3}
                                     className="pl-8 text-base font-medium"
                                     style={{ color: RED }}
                                   >
                                     Вы получили
                                   </TableCell>
                                   <TableCell
-                                    className="pr-8 text-right font-medium"
+                                    className="pr-8 text-right text-base font-medium"
                                     style={{
                                       color: row.amountCents > 0 ? RED : undefined,
                                     }}
@@ -470,14 +637,14 @@ export default function CounterpartySettlementsPage() {
                                   className="border-b border-border/70 font-medium"
                                 >
 <TableCell
-                                  colSpan={2}
+                                  colSpan={3}
                                   className="pl-8 text-base font-medium"
                                   style={{ color: GREEN }}
                                 >
                                   Вы заплатили
                                 </TableCell>
                                   <TableCell
-                                    className="pr-8 text-right font-medium"
+                                    className="pr-8 text-right text-base font-medium"
                                     style={{
                                       color:
                                         row.amountCents > 0 ? GREEN : undefined,
@@ -499,11 +666,26 @@ export default function CounterpartySettlementsPage() {
                     className="relative rounded-lg overflow-hidden border-0 outline-none px-6 py-4"
                     style={{ backgroundColor: MODAL_BG }}
                   >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-sm text-muted-foreground">
-                          На {formatDateLabel(rangeEndResolved)}
-                        </span>
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-sm text-muted-foreground">
+                            На {formatDateLabel(rangeEndResolved)}
+                          </span>
+                          <span
+                            className="text-base font-semibold"
+                            style={{
+                              color:
+                                reportData.closingBalance > 0
+                                  ? GREEN
+                                  : reportData.closingBalance < 0
+                                    ? RED
+                                    : undefined,
+                            }}
+                          >
+                            {balanceStatusLabel(reportData.closingBalance)}
+                          </span>
+                        </div>
                         <span
                           className="text-base font-semibold"
                           style={{
@@ -515,22 +697,56 @@ export default function CounterpartySettlementsPage() {
                                   : undefined,
                           }}
                         >
-                          {balanceStatusLabel(reportData.closingBalance)}
+                          {formatSignedAmount(reportData.closingBalance)}
                         </span>
                       </div>
-                      <span
-                        className="text-base font-semibold"
-                        style={{
-                          color:
-                            reportData.closingBalance > 0
-                              ? GREEN
-                              : reportData.closingBalance < 0
-                                ? RED
-                                : undefined,
-                        }}
-                      >
-                        {formatSignedAmount(reportData.closingBalance)}
-                      </span>
+                      <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+                        <div className="flex justify-between">
+                          <span>{SOURCE_LABELS.settlements}</span>
+                          <span
+                            style={{
+                              color:
+                                reportData.closingBalanceSettlements > 0
+                                  ? GREEN
+                                  : reportData.closingBalanceSettlements < 0
+                                    ? RED
+                                    : undefined,
+                            }}
+                          >
+                            {formatSignedAmount(reportData.closingBalanceSettlements)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{SOURCE_LABELS.loan_given}</span>
+                          <span
+                            style={{
+                              color:
+                                reportData.closingBalanceLoanGiven > 0
+                                  ? GREEN
+                                  : reportData.closingBalanceLoanGiven < 0
+                                    ? RED
+                                    : undefined,
+                            }}
+                          >
+                            {formatSignedAmount(reportData.closingBalanceLoanGiven)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>{SOURCE_LABELS.loan_received}</span>
+                          <span
+                            style={{
+                              color:
+                                reportData.closingBalanceLoanReceived > 0
+                                  ? GREEN
+                                  : reportData.closingBalanceLoanReceived < 0
+                                    ? RED
+                                    : undefined,
+                            }}
+                          >
+                            {formatSignedAmount(reportData.closingBalanceLoanReceived)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

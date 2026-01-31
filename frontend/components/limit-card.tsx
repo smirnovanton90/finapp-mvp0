@@ -139,7 +139,7 @@ function getPreviousPeriodRanges(
         ranges.push({
           startKey: toDateKey(d),
           endKey,
-          label: `${MONTH_NAMES_RU[d.getMonth()]} ${d.getFullYear()}`,
+          label: `${formatDateKeyToDisplay(toDateKey(d))} — ${formatDateKeyToDisplay(endKey)}`,
         });
       }
       d = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7);
@@ -149,10 +149,12 @@ function getPreviousPeriodRanges(
     const [sy] = effectiveStart.split("-").map(Number);
     const cy = today.getFullYear();
     for (let y = cy - 1; y >= sy; y--) {
+      const startKey = `${y}-01-01`;
+      const endKey = `${y}-12-31`;
       ranges.push({
-        startKey: `${y}-01-01`,
-        endKey: `${y}-12-31`,
-        label: String(y),
+        startKey,
+        endKey,
+        label: `${formatDateKeyToDisplay(startKey)} — ${formatDateKeyToDisplay(endKey)}`,
       });
       if (ranges.length >= 12) break;
     }
@@ -383,21 +385,23 @@ export function LimitCard({
 
         {/* Previous periods (collapsible) */}
         {previousRanges.length > 0 && (
-          <div className="border-t border-white/10 pt-3">
-            <button
-              type="button"
-              className="flex items-center justify-between w-full text-sm font-normal py-1 rounded hover:bg-white/5 transition-colors"
-              style={{ color: ACTIVE_TEXT_DARK }}
-              onClick={() => setExpanded((e) => !e)}
-              aria-expanded={expanded}
-            >
-              <span>Предыдущие периоды</span>
-              {expanded ? (
-                <ChevronUp className="h-4 w-4 shrink-0" />
-              ) : (
-                <ChevronDown className="h-4 w-4 shrink-0" />
-              )}
-            </button>
+          <div className="pt-3">
+            <div className="flex items-center justify-between w-full">
+              <span
+                className="text-sm font-normal"
+                style={{ color: ACTIVE_TEXT_DARK }}
+              >
+                Предыдущие периоды
+              </span>
+              <IconButton
+                type="button"
+                onClick={() => setExpanded((e) => !e)}
+                aria-expanded={expanded}
+                aria-label={expanded ? "Свернуть" : "Развернуть"}
+              >
+                {expanded ? <ChevronUp /> : <ChevronDown />}
+              </IconButton>
+            </div>
             {expanded && (
               <div className="space-y-3 mt-3">
                 {previousRanges.map((range) => {

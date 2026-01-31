@@ -93,7 +93,7 @@ export type ItemCreate = {
 
 export type BankOut = {
   id: number;
-  ogrn: string;
+  inn: string;
   name: string;
   license_status: string;
   logo_url: string | null;
@@ -116,7 +116,6 @@ export type CounterpartyOut = {
   full_name: string | null;
   legal_form: string | null;
   inn: string | null;
-  ogrn: string | null;
   first_name: string | null;
   last_name: string | null;
   middle_name: string | null;
@@ -151,7 +150,6 @@ export type CounterpartyCreate = {
   full_name?: string | null;
   legal_form?: string | null;
   inn?: string | null;
-  ogrn?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   middle_name?: string | null;

@@ -1,4 +1,4 @@
-"""One-off: print counterparty id for АО ТБанк (OGRN 1027739642281)."""
+"""One-off: print counterparty id for АО ТБанк (ИНН 7710140679)."""
 import sys
 from pathlib import Path
 
@@ -14,7 +14,7 @@ def main() -> None:
     try:
         row = session.execute(
             text(
-                "SELECT id FROM counterparties WHERE ogrn = '1027739642281' AND deleted_at IS NULL"
+                "SELECT id FROM counterparties WHERE inn = '7710140679' AND deleted_at IS NULL"
             )
         ).first()
         print(row[0] if row else "not found")

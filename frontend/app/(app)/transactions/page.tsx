@@ -228,17 +228,17 @@ GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url
 ).toString();
-const IMPORT_BANK_READY_OGRN = "1027739642281";
-const IMPORT_BANK_IN_PROGRESS_OGRN = "1027700132195";
-const IMPORT_BANK_ALFA_OGRN = "1027700067328";
-const IMPORT_BANK_PDF_OGRNS = new Set([
-  IMPORT_BANK_IN_PROGRESS_OGRN,
-  IMPORT_BANK_ALFA_OGRN,
+const IMPORT_BANK_READY_INN = "7710140679"; // Т-Банк
+const IMPORT_BANK_IN_PROGRESS_INN = "7707083893"; // Сбер
+const IMPORT_BANK_ALFA_INN = "7728168971"; // Альфа-Банк
+const IMPORT_BANK_PDF_INNS = new Set([
+  IMPORT_BANK_IN_PROGRESS_INN,
+  IMPORT_BANK_ALFA_INN,
 ]);
-const IMPORT_BANK_OGRNS = new Set([
-  IMPORT_BANK_READY_OGRN,
-  IMPORT_BANK_IN_PROGRESS_OGRN,
-  IMPORT_BANK_ALFA_OGRN,
+const IMPORT_BANK_INNS = new Set([
+  IMPORT_BANK_READY_INN,
+  IMPORT_BANK_IN_PROGRESS_INN,
+  IMPORT_BANK_ALFA_INN,
 ]);
 const PDF_AMOUNT_REGEX = /[+\-\u2212]?\d{1,3}(?:[ \u00A0]\d{3})*(?:,\d{2})/g;
 const PDF_DATE_TIME_REGEX = /\b\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\b/;
@@ -2263,7 +2263,7 @@ function TransactionsView({
     );
   }, [selectableCounterparties]);
   const importBankOptions = useMemo(
-    () => banks.filter((bank) => IMPORT_BANK_OGRNS.has(bank.ogrn)),
+    () => banks.filter((bank) => IMPORT_BANK_INNS.has(bank.inn)),
     [banks]
   );
 
@@ -2285,9 +2285,9 @@ function TransactionsView({
     () => importBankOptions.find((bank) => bank.id === importBankId) ?? null,
     [importBankId, importBankOptions]
   );
-  const isImportBankReady = selectedImportBank?.ogrn === IMPORT_BANK_READY_OGRN;
+  const isImportBankReady = selectedImportBank?.inn === IMPORT_BANK_READY_INN;
   const isImportBankInProgress = selectedImportBank
-    ? IMPORT_BANK_PDF_OGRNS.has(selectedImportBank.ogrn)
+    ? IMPORT_BANK_PDF_INNS.has(selectedImportBank.inn)
     : false;
   const isImportSupported = isImportBankReady || isImportBankInProgress;
   const isImportFormDisabled = isImporting;
@@ -3516,14 +3516,14 @@ function TransactionsView({
 
       try {
         const parsedRows =
-          selectedImportBank.ogrn === IMPORT_BANK_ALFA_OGRN
+          selectedImportBank.inn === IMPORT_BANK_ALFA_INN
             ? await parseAlfaStatementRows(importPdfFile)
             : await parsePdfStatementRows(importPdfFile);
         if (parsedRows.length === 0) {
           throw new Error("В выписке не найдены операции.");
         }
 
-        const isAlfaImport = selectedImportBank.ogrn === IMPORT_BANK_ALFA_OGRN;
+        const isAlfaImport = selectedImportBank.inn === IMPORT_BANK_ALFA_INN;
 
         for (let i = 0; i < parsedRows.length; i += 1) {
           const row = parsedRows[i];

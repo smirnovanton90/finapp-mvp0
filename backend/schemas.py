@@ -662,7 +662,7 @@ class FxRatesBatchRequest(BaseModel):
 
 class BankOut(BaseModel):
     id: int
-    ogrn: str
+    inn: str
     name: str
     license_status: str
     logo_url: str | None
@@ -686,7 +686,6 @@ class CounterpartyBase(BaseModel):
     full_name: str | None = Field(default=None, max_length=300)
     legal_form: str | None = Field(default=None, max_length=200)
     inn: str | None = Field(default=None, max_length=12)
-    ogrn: str | None = Field(default=None, max_length=15)
     first_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)
     middle_name: str | None = Field(default=None, max_length=100)
@@ -696,7 +695,6 @@ class CounterpartyBase(BaseModel):
         "full_name",
         "legal_form",
         "inn",
-        "ogrn",
         "first_name",
         "last_name",
         "middle_name",

@@ -141,19 +141,13 @@ export function CounterpartyCard({
                 </span>
               </div>
             )}
-            {counterparty.entity_type === "LEGAL" &&
-              (counterparty.inn || counterparty.ogrn) && (
+            {counterparty.entity_type === "LEGAL" && counterparty.inn && (
               <div className="w-full text-center mb-1">
                 <span
                   className="text-sm font-normal text-center break-words max-w-full"
                   style={{ color: PLACEHOLDER_COLOR_DARK }}
                 >
-                  {[
-                    counterparty.inn && `ИНН: ${counterparty.inn}`,
-                    counterparty.ogrn && `ОГРН: ${counterparty.ogrn}`,
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
+                  ИНН: {counterparty.inn}
                 </span>
               </div>
             )}
@@ -208,10 +202,9 @@ export function CounterpartyCard({
           )}
         </div>
 
-        {/* Доп. информация: для ФЛ — полное наименование и ИНН/ОГРН при наличии; для ЮЛ/ИП ИНН/ОГРН уже в блоке над отраслью */}
+        {/* Доп. информация: для ФЛ — полное наименование и ИНН при наличии; для ЮЛ/ИП ИНН уже в блоке над отраслью */}
         {((counterparty.entity_type !== "LEGAL" && counterparty.full_name) ||
-          (counterparty.entity_type !== "LEGAL" &&
-            (counterparty.inn || counterparty.ogrn))) && (
+          (counterparty.entity_type !== "LEGAL" && counterparty.inn)) && (
           <div
             className="space-y-1 text-xs mt-2 text-center"
             style={{ color: PLACEHOLDER_COLOR_DARK }}
@@ -219,17 +212,9 @@ export function CounterpartyCard({
             {counterparty.entity_type === "PERSON" && counterparty.full_name && (
               <div className="truncate">{counterparty.full_name}</div>
             )}
-            {counterparty.entity_type === "PERSON" &&
-              (counterparty.inn || counterparty.ogrn) && (
-                <div className="truncate">
-                  {[
-                    counterparty.inn && `ИНН: ${counterparty.inn}`,
-                    counterparty.ogrn && `ОГРН: ${counterparty.ogrn}`,
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                </div>
-              )}
+            {counterparty.entity_type === "PERSON" && counterparty.inn && (
+              <div className="truncate">ИНН: {counterparty.inn}</div>
+            )}
           </div>
         )}
       </div>

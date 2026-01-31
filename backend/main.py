@@ -786,7 +786,7 @@ def list_banks(
         Counterparty.industry_id == bank_industry_id,
         Counterparty.entity_type == "LEGAL",
         Counterparty.license_status.in_(_BANK_LICENSE_STATUSES),
-        Counterparty.ogrn.isnot(None),
+        Counterparty.inn.isnot(None),
         Counterparty.deleted_at.is_(None),
     )
     if q:

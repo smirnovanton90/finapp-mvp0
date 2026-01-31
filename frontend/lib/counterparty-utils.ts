@@ -14,7 +14,7 @@ export function isDefaultCounterparty(
 
 /**
  * URL-кандидаты для отображения иконки контрагента.
- * Дефолтные LEGAL: статика counterparty-<INN>-<OGRN>.png / counterparty-<INN>.png / counterparty-<OGRN>.png → legal.png.
+ * Дефолтные LEGAL: статика counterparty-<INN>.png → legal.png.
  * Дефолтные без идентификаторов / PERSON: person.png или legal.png.
  * Добавленные пользователем: API (logo/photo) → person.png/legal.png.
  */
@@ -25,10 +25,7 @@ export function getCounterpartyImageUrlCandidates(
   const candidates: string[] = [];
   if (isDefaultCounterparty(counterparty)) {
     if (counterparty.entity_type === "LEGAL") {
-      const staticPath = counterpartyStaticIconPath(
-        counterparty.inn,
-        counterparty.ogrn
-      );
+      const staticPath = counterpartyStaticIconPath(counterparty.inn);
       if (staticPath) candidates.push(staticPath);
     }
   } else {
@@ -101,11 +98,6 @@ export function buildCounterpartySearchText(
   // ИНН
   if (counterparty.inn) {
     parts.push(counterparty.inn);
-  }
-
-  // ОГРН
-  if (counterparty.ogrn) {
-    parts.push(counterparty.ogrn);
   }
 
   // Отрасль

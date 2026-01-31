@@ -103,28 +103,6 @@ def validate_inn(inn: str, entity_type: str) -> None:
             raise HTTPException(status_code=400, detail="ИНН не прошел проверку контрольного числа.")
 
 
-def validate_ogrn(ogrn: str, entity_type: str) -> None:
-    if not ogrn:
-        return
-    if entity_type != "LEGAL":
-        raise HTTPException(status_code=400, detail="ОГРН доступен только для ЮЛ/ИП.")
-    if not ogrn.isdigit():
-        raise HTTPException(status_code=400, detail="ОГРН должен содержать только цифры.")
-    length = len(ogrn)
-    if length not in (13, 15):
-        raise HTTPException(status_code=400, detail="ОГРН должен состоять из 13 или 15 цифр.")
-
-    digits = [int(d) for d in ogrn]
-    if length == 13:
-        checksum = int(ogrn[:12]) % 11 % 10
-        if checksum != digits[12]:
-            raise HTTPException(status_code=400, detail="ОГРН не прошел проверку контрольного числа.")
-    else:
-        checksum = int(ogrn[:14]) % 13 % 10
-        if checksum != digits[14]:
-            raise HTTPException(status_code=400, detail="ОГРН не прошел проверку контрольного числа.")
-
-
 def build_person_name(last_name: str, first_name: str, middle_name: str | None) -> str:
     parts = [last_name, first_name]
     if middle_name:
@@ -138,7 +116,6 @@ def ensure_unique_counterparty(
     entity_type: str,
     name: str,
     inn: str | None,
-    ogrn: str | None,
     first_name: str | None,
     last_name: str | None,
     middle_name: str | None,
@@ -158,11 +135,7 @@ def ensure_unique_counterparty(
             stmt = base.where(Counterparty.entity_type == "LEGAL", Counterparty.inn == inn)
             if db.execute(stmt).scalar_one_or_none():
                 raise HTTPException(status_code=400, detail="Контрагент с таким ИНН уже существует.")
-        if ogrn:
-            stmt = base.where(Counterparty.entity_type == "LEGAL", Counterparty.ogrn == ogrn)
-            if db.execute(stmt).scalar_one_or_none():
-                raise HTTPException(status_code=400, detail="Контрагент с таким ОГРН уже существует.")
-        if not inn and not ogrn:
+        if not inn:
             name_key = name.casefold()
             stmt = base.where(
                 Counterparty.entity_type == "LEGAL",
@@ -206,7 +179,6 @@ def normalize_payload(data: CounterpartyCreate | CounterpartyUpdate) -> dict:
     full_name = normalize_text(data.full_name)
     legal_form = normalize_text(data.legal_form)
     inn = normalize_digits(data.inn)
-    ogrn = normalize_digits(data.ogrn)
     first_name = normalize_text(data.first_name)
     last_name = normalize_text(data.last_name)
     middle_name = normalize_text(data.middle_name)
@@ -219,7 +191,6 @@ def normalize_payload(data: CounterpartyCreate | CounterpartyUpdate) -> dict:
         if legal_form and legal_form not in LEGAL_FORM_CODES:
             raise HTTPException(status_code=400, detail="Недопустимая ОПФ.")
         validate_inn(inn or "", entity_type)
-        validate_ogrn(ogrn or "", entity_type)
         return {
             "industry_id": industry_id,
             "entity_type": entity_type,
@@ -227,7 +198,6 @@ def normalize_payload(data: CounterpartyCreate | CounterpartyUpdate) -> dict:
             "full_name": full_name,
             "legal_form": legal_form,
             "inn": inn,
-            "ogrn": ogrn,
             "first_name": None,
             "last_name": None,
             "middle_name": None,
@@ -242,7 +212,6 @@ def normalize_payload(data: CounterpartyCreate | CounterpartyUpdate) -> dict:
         "full_name": None,
         "legal_form": None,
         "inn": None,
-        "ogrn": None,
         "first_name": first_name,
         "last_name": last_name,
         "middle_name": middle_name,
@@ -377,7 +346,6 @@ def create_counterparty(
         entity_type=normalized["entity_type"],
         name=normalized["name"],
         inn=normalized["inn"],
-        ogrn=normalized["ogrn"],
         first_name=normalized["first_name"],
         last_name=normalized["last_name"],
         middle_name=normalized["middle_name"],
@@ -401,8 +369,6 @@ def create_counterparty(
         constraint = ""
         if getattr(e, "orig", None) and getattr(e.orig, "diag", None):
             constraint = (e.orig.diag.constraint_name or "") if hasattr(e.orig.diag, "constraint_name") else ""
-        if "ogrn" in constraint.lower() or "ogrn" in err_msg.lower():
-            raise HTTPException(status_code=400, detail="Контрагент с таким ОГРН уже существует.")
         if "inn" in constraint.lower() or "inn" in err_msg.lower():
             raise HTTPException(status_code=400, detail="Контрагент с таким ИНН уже существует.")
         raise HTTPException(status_code=400, detail="Контрагент с такими реквизитами уже существует.")
@@ -436,7 +402,6 @@ def update_counterparty(
         entity_type=normalized["entity_type"],
         name=normalized["name"],
         inn=normalized["inn"],
-        ogrn=normalized["ogrn"],
         first_name=normalized["first_name"],
         last_name=normalized["last_name"],
         middle_name=normalized["middle_name"],
@@ -450,7 +415,6 @@ def update_counterparty(
     counterparty.full_name = normalized["full_name"]
     counterparty.legal_form = normalized["legal_form"]
     counterparty.inn = normalized["inn"]
-    counterparty.ogrn = normalized["ogrn"]
     counterparty.first_name = normalized["first_name"]
     counterparty.last_name = normalized["last_name"]
     counterparty.middle_name = normalized["middle_name"]
@@ -464,8 +428,6 @@ def update_counterparty(
         constraint = ""
         if getattr(e, "orig", None) and getattr(e.orig, "diag", None):
             constraint = (e.orig.diag.constraint_name or "") if hasattr(e.orig.diag, "constraint_name") else ""
-        if "ogrn" in constraint.lower() or "ogrn" in err_msg.lower():
-            raise HTTPException(status_code=400, detail="Контрагент с таким ОГРН уже существует.")
         if "inn" in constraint.lower() or "inn" in err_msg.lower():
             raise HTTPException(status_code=400, detail="Контрагент с таким ИНН уже существует.")
         raise HTTPException(status_code=400, detail="Контрагент с такими реквизитами уже существует.")

@@ -103,7 +103,6 @@ export default function CounterpartiesPage() {
   const [fullName, setFullName] = useState("");
   const [legalForm, setLegalForm] = useState("");
   const [inn, setInn] = useState("");
-  const [ogrn, setOgrn] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [middleName, setMiddleName] = useState("");
@@ -280,7 +279,6 @@ export default function CounterpartiesPage() {
     setFullName("");
     setLegalForm("");
     setInn("");
-    setOgrn("");
     setFirstName("");
     setLastName("");
     setMiddleName("");
@@ -308,7 +306,6 @@ export default function CounterpartiesPage() {
     setFullName(editing.full_name ?? "");
     setLegalForm(editing.legal_form ?? "");
     setInn(editing.inn ?? "");
-    setOgrn(editing.ogrn ?? "");
     setFirstName(editing.first_name ?? "");
     setLastName(editing.last_name ?? "");
     setMiddleName(editing.middle_name ?? "");
@@ -449,14 +446,6 @@ export default function CounterpartiesPage() {
         setFormError("ИНН должен состоять из 10 или 12 цифр.");
         return false;
       }
-      if (ogrn && !/^\d+$/.test(ogrn)) {
-        setFormError("ОГРН должен содержать только цифры.");
-        return false;
-      }
-      if (ogrn && ogrn.length !== 13 && ogrn.length !== 15) {
-        setFormError("ОГРН должен состоять из 13 или 15 цифр.");
-        return false;
-      }
       return true;
     }
 
@@ -482,7 +471,6 @@ export default function CounterpartiesPage() {
       full_name: entityType === "LEGAL" ? fullName.trim() || null : null,
       legal_form: entityType === "LEGAL" ? legalForm || null : null,
       inn: entityType === "LEGAL" ? inn.trim() || null : null,
-      ogrn: entityType === "LEGAL" ? ogrn.trim() || null : null,
       first_name: entityType === "PERSON" ? firstName.trim() : null,
       last_name: entityType === "PERSON" ? lastName.trim() : null,
       middle_name: entityType === "PERSON" ? middleName.trim() || null : null,
@@ -776,26 +764,15 @@ export default function CounterpartiesPage() {
                 ]}
                 placeholder="Выберите ОПФ"
               />
-              <div className="grid gap-4 md:grid-cols-2">
-                <TextField
-                  label="ИНН"
-                  value={inn}
-                  onChange={(e) =>
-                    setInn(e.target.value.replace(/\D/g, "").slice(0, 12))
-                  }
-                  placeholder="10 или 12 цифр"
-                  inputMode="numeric"
-                />
-                <TextField
-                  label="ОГРН"
-                  value={ogrn}
-                  onChange={(e) =>
-                    setOgrn(e.target.value.replace(/\D/g, "").slice(0, 15))
-                  }
-                  placeholder="13 или 15 цифр"
-                  inputMode="numeric"
-                />
-              </div>
+              <TextField
+                label="ИНН"
+                value={inn}
+                onChange={(e) =>
+                  setInn(e.target.value.replace(/\D/g, "").slice(0, 12))
+                }
+                placeholder="10 или 12 цифр"
+                inputMode="numeric"
+              />
             </>
           ) : (
             <>

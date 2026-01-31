@@ -210,7 +210,6 @@ class Counterparty(Base):
     full_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     legal_form: Mapped[str | None] = mapped_column(String(200), nullable=True)
     inn: Mapped[str | None] = mapped_column(String(12), nullable=True)
-    ogrn: Mapped[str | None] = mapped_column(String(15), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     middle_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -245,11 +244,11 @@ class Counterparty(Base):
             name="ck_counterparties_entity_type",
         ),
         Index(
-            "ux_counterparties_owner_ogrn",
+            "ux_counterparties_owner_inn",
             "owner_user_id",
-            "ogrn",
+            "inn",
             unique=True,
-            postgresql_where=text("ogrn IS NOT NULL"),
+            postgresql_where=text("inn IS NOT NULL"),
         ),
     )
 

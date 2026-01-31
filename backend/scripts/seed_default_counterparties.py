@@ -1,7 +1,7 @@
 """
 Сид контрагентов по умолчанию (доступны всем пользователям).
 Данные из counterparty_seed_data.DEFAULT_COUNTERPARTIES.
-При одинаковом ОГРН обновляется одна запись (последняя в списке).
+При одинаковом ИНН обновляется одна запись (последняя в списке).
 """
 import argparse
 import sys
@@ -43,7 +43,7 @@ def upsert_default_counterparties(dry_run: bool) -> int:
             industry = industry_by_name[data["industry"]]
             existing = session.execute(
                 select(Counterparty).where(
-                    Counterparty.ogrn == data["ogrn"],
+                    Counterparty.inn == data["inn"],
                     Counterparty.owner_user_id.is_(None),
                 )
             ).scalars().first()
@@ -54,7 +54,6 @@ def upsert_default_counterparties(dry_run: bool) -> int:
                 "full_name": (data["full_name"] or "").strip() or None,
                 "legal_form": (data["legal_form"] or "").strip() or None,
                 "inn": data["inn"].strip(),
-                "ogrn": data["ogrn"].strip(),
                 "industry_id": industry.id,
                 "owner_user_id": None,
             }

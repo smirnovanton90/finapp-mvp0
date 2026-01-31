@@ -33,20 +33,13 @@ export function counterpartyDefaultIconPath(
 }
 
 /**
- * Статичная иконка контрагента по ИНН и/или ОГРН (для дефолтных LEGAL).
- * Оба: counterparty-<INN>-<OGRN>.png, только ИНН: counterparty-<INN>.png, только ОГРН: counterparty-<OGRN>.png.
- * Возвращает null, если нет ни ИНН, ни ОГРН.
+ * Статичная иконка контрагента по ИНН (для дефолтных LEGAL).
+ * counterparty-<INN>.png. Возвращает null, если нет ИНН.
  */
 export function counterpartyStaticIconPath(
-  inn: string | null | undefined,
-  ogrn: string | null | undefined
+  inn: string | null | undefined
 ): string | null {
   const hasInn = Boolean(inn?.trim());
-  const hasOgrn = Boolean(ogrn?.trim());
-  if (hasInn && hasOgrn) {
-    return `${IMAGES_BASE}/counterparties/counterparty-${inn}-${ogrn}.png`;
-  }
   if (hasInn) return `${IMAGES_BASE}/counterparties/counterparty-${inn}.png`;
-  if (hasOgrn) return `${IMAGES_BASE}/counterparties/counterparty-${ogrn}.png`;
   return null;
 }

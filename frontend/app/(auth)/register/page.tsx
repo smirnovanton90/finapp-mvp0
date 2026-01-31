@@ -2,6 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState, type CSSProperties, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
@@ -127,7 +128,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 relative overflow-hidden">
+    <main className="flex flex-col min-h-screen px-6 relative overflow-hidden">
       {/* Background crossfade between dark/light */}
       <div
         className="absolute inset-0 pointer-events-none transition-opacity duration-700 ease-in-out"
@@ -143,8 +144,24 @@ export default function RegisterPage() {
           opacity: isDark ? 0 : 1,
         }}
       />
+
+      {/* Логотип — фиксированная позиция, top 100px, ширина до 1800px, растягивается по ширине */}
+      <div className="absolute top-[100px] left-1/2 -translate-x-1/2 w-full max-w-[1800px] z-10 px-6 aspect-[1800/554]">
+        <div className="relative w-full h-full">
+          <Image
+            src="/images/LOGO3.png"
+            alt="ПРОСТОФИН"
+            fill
+            className="object-contain object-center"
+            priority
+            sizes="(max-width: 1800px) 100vw, 1800px"
+          />
+        </div>
+      </div>
       
-      <div className="relative z-10 w-full max-w-[400px] flex flex-col items-center space-y-6">
+      {/* Контент под логотипом (отступ: top 100px + высота лого по aspect 1800/554) */}
+      <div className="relative z-10 w-full flex-1 flex flex-col items-center justify-center pt-[min(654px,calc(100px+30.8vw))] -translate-y-[8vh]">
+        <div className="w-full max-w-[400px] flex flex-col items-center space-y-6">
         {/* Header Text */}
         <h2 className="text-foreground text-center">Введите логин и пароль</h2>
 
@@ -220,6 +237,7 @@ export default function RegisterPage() {
           <Link href="/login" className="font-medium" style={{ color: ACCENT }}>
             Войти
           </Link>
+        </div>
         </div>
       </div>
     </main>

@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useSession } from "next-auth/react";
-import { Camera, Upload, X, CheckCircle2 } from "lucide-react";
+import { Camera, Upload, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { TextField, DateField } from "@/components/ui/form-field";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -19,8 +17,11 @@ import {
 } from "@/lib/api";
 import { useTheme } from "@/components/theme-provider";
 import { useAccountingStart } from "@/components/accounting-start-context";
-import { PremiumModal } from "@/components/premium-modal";
-import { cn } from "@/lib/utils";
+import {
+  MODAL_BG,
+  ACTIVE_TEXT_DARK,
+  PLACEHOLDER_COLOR_DARK,
+} from "@/lib/colors";
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 const MAX_PHOTO_DIM = 1024;
@@ -38,6 +39,24 @@ function formatShortDate(dateKey: string) {
   return `${paddedDay}.${paddedMonth}.${year}`;
 }
 
+/** Блок-карточка в стиле карточки актива: подложка MODAL_BG */
+function CabinetCard({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`relative rounded-lg overflow-hidden border-0 outline-none ${className ?? ""}`}
+      style={{ backgroundColor: MODAL_BG }}
+    >
+      <div className="p-6">{children}</div>
+    </div>
+  );
+}
+
 export default function CabinetPage() {
   const { data: session } = useSession();
   const { theme, setTheme } = useTheme();
@@ -48,23 +67,20 @@ export default function CabinetPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Форма профиля
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [birthDate, setBirthDate] = useState("");
 
-  // Фото
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     loadProfile();
   }, []);
 
-  // Очистка blob URL при размонтировании
   useEffect(() => {
     return () => {
       if (photoPreview?.startsWith("blob:")) {
@@ -72,6 +88,11 @@ export default function CabinetPage() {
       }
     };
   }, [photoPreview]);
+
+  const getProfilePhotoPreview = () =>
+    profile?.photo_url && profile.photo_url.startsWith("http") && !profile.photo_url.includes("googleusercontent.com")
+      ? null
+      : profile?.photo_url ?? null;
 
   const loadProfile = async () => {
     setLoading(true);
@@ -82,18 +103,12 @@ export default function CabinetPage() {
       setFirstName(me.first_name || "");
       setLastName(me.last_name || "");
       setBirthDate(me.birth_date || "");
-      // Обновляем photoPreview только если нет активного blob URL (превью выбранного файла)
       if (!photoPreview?.startsWith("blob:")) {
-        // Если есть photo_url и это не URL из Google, загружаем фото через API с авторизацией
         if (me.photo_url && me.photo_url.startsWith("http") && !me.photo_url.includes("googleusercontent.com")) {
           const blobUrl = await fetchUserPhotoAsBlob();
-          if (blobUrl) {
-            setPhotoPreview(blobUrl);
-          } else {
-            setPhotoPreview(null);
-          }
+          if (blobUrl) setPhotoPreview(blobUrl);
+          else setPhotoPreview(null);
         } else {
-          // URL из Google или нет фото
           setPhotoPreview(me.photo_url || null);
         }
       }
@@ -104,33 +119,35 @@ export default function CabinetPage() {
     }
   };
 
-  const handlePhotoChange = async (file: File | null) => {
+  const handlePhotoChange = (file: File | null) => {
     setPhotoError(null);
-
     if (photoPreview?.startsWith("blob:")) {
       URL.revokeObjectURL(photoPreview);
     }
-
     if (!file) {
       setPhotoFile(null);
-      setPhotoPreview(profile?.photo_url ?? null);
+      if (profile?.photo_url && !profile.photo_url.includes("googleusercontent.com")) {
+        fetchUserPhotoAsBlob().then((blobUrl) => {
+          setPhotoPreview(blobUrl ?? null);
+        });
+      } else {
+        setPhotoPreview(getProfilePhotoPreview());
+      }
+      if (photoInputRef.current) photoInputRef.current.value = "";
       return;
     }
-
     if (!ALLOWED_PHOTO_TYPES.includes(file.type)) {
       setPhotoError("Разрешены PNG, JPG или WEBP.");
       setPhotoFile(null);
-      setPhotoPreview(profile?.photo_url ?? null);
+      setPhotoPreview(getProfilePhotoPreview());
       return;
     }
-
     if (file.size > MAX_PHOTO_BYTES) {
       setPhotoError(`Размер фотографии не больше ${formatSize(MAX_PHOTO_BYTES)}.`);
       setPhotoFile(null);
-      setPhotoPreview(profile?.photo_url ?? null);
+      setPhotoPreview(getProfilePhotoPreview());
       return;
     }
-
     const objectUrl = URL.createObjectURL(file);
     const image = new Image();
     image.onload = () => {
@@ -138,7 +155,7 @@ export default function CabinetPage() {
         setPhotoError(`Разрешение не больше ${MAX_PHOTO_DIM}px.`);
         URL.revokeObjectURL(objectUrl);
         setPhotoFile(null);
-        setPhotoPreview(profile?.photo_url ?? null);
+        setPhotoPreview(getProfilePhotoPreview());
         return;
       }
       setPhotoFile(file);
@@ -148,34 +165,27 @@ export default function CabinetPage() {
       setPhotoError("Неверный формат изображения.");
       URL.revokeObjectURL(objectUrl);
       setPhotoFile(null);
-      setPhotoPreview(profile?.photo_url ?? null);
+      setPhotoPreview(getProfilePhotoPreview());
     };
     image.src = objectUrl;
   };
 
   const handlePhotoUpload = async () => {
     if (!photoFile) return;
-
     setUploadingPhoto(true);
     setPhotoError(null);
     try {
       const updated = await uploadUserPhoto(photoFile);
-      // Очищаем blob URL превью выбранного файла
       if (photoPreview?.startsWith("blob:")) {
         URL.revokeObjectURL(photoPreview);
       }
       setPhotoFile(null);
-      // Обновляем профиль
       setProfile(updated);
-      // Загружаем фото через API с авторизацией и создаем blob URL
       const blobUrl = await fetchUserPhotoAsBlob();
-      if (blobUrl) {
-        setPhotoPreview(blobUrl);
-      } else {
-        setPhotoPreview(null);
-      }
+      setPhotoPreview(blobUrl ?? null);
       setSuccess("Фотография успешно загружена.");
       setTimeout(() => setSuccess(null), 3000);
+      if (photoInputRef.current) photoInputRef.current.value = "";
     } catch (err) {
       setPhotoError(err instanceof Error ? err.message : "Не удалось загрузить фотографию.");
     } finally {
@@ -188,20 +198,17 @@ export default function CabinetPage() {
     setSaving(true);
     setError(null);
     setSuccess(null);
-
     try {
       const payload: UserProfileUpdate = {
         first_name: firstName.trim() || null,
         last_name: lastName.trim() || null,
         birth_date: birthDate || null,
       };
-
       if (!payload.first_name) {
         setError("Имя является обязательным полем.");
         setSaving(false);
         return;
       }
-
       const updated = await updateUserProfile(payload);
       setProfile(updated);
       setSuccess("Профиль успешно обновлен.");
@@ -213,165 +220,199 @@ export default function CabinetPage() {
     }
   };
 
-  // Формируем URL для фото: используем photoPreview, который может быть:
-  // 1. blob URL из выбранного файла (превью перед загрузкой)
-  // 2. blob URL из загруженного фото (через fetchUserPhotoAsBlob)
-  // 3. URL из Google (если фото из Google аккаунта)
   const photoUrl = photoPreview;
 
   return (
-    <div
-      className="container mx-auto p-6 max-w-4xl"
-      style={{
-        opacity: loading ? 0 : 1,
-        transition: "opacity 0.3s ease-in-out",
-      }}
-    >
-      <h1 className="text-3xl font-bold mb-6">Кабинет</h1>
+    <main className="min-h-screen px-8 py-8">
+      <div
+        className="flex w-full flex-col gap-6"
+        style={{
+          opacity: loading ? 0 : 1,
+          transition: "opacity 0.3s ease-in-out",
+        }}
+      >
+        {(error || success) && (
+          <div className="space-y-3">
+            {error && (
+              <div
+                className="text-sm rounded-md border p-3"
+                style={{
+                  color: "#FB4C4F",
+                  backgroundColor: "rgba(251, 76, 79, 0.08)",
+                  borderColor: "rgba(251, 76, 79, 0.3)",
+                }}
+              >
+                {error}
+              </div>
+            )}
+            {success && (
+              <div
+                className="text-sm rounded-md border p-3"
+                style={{
+                  color: "#34D399",
+                  backgroundColor: "rgba(52, 211, 153, 0.08)",
+                  borderColor: "rgba(52, 211, 153, 0.3)",
+                }}
+              >
+                {success}
+              </div>
+            )}
+          </div>
+        )}
 
-      {error && (
-        <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-md">
-          {error}
-        </div>
-      )}
-
-      {success && (
-        <div className="mb-4 p-3 bg-green-500/10 text-green-600 dark:text-green-400 rounded-md">
-          {success}
-        </div>
-      )}
-
-      <div className="grid gap-6">
-        {/* Секция профиля */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              Профиль
-              {profile?.google_sub && (
-                <Tooltip content="Профиль синхронизирован с Google аккаунтом">
-                  <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                </Tooltip>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Фото и поля формы */}
-              <div className="flex items-start gap-6">
-                {/* Фото слева */}
-                <div className="flex-shrink-0">
-                  <div className="relative">
-                    <div className="w-24 h-24 rounded-full bg-muted flex items-center justify-center overflow-hidden">
-                      {photoUrl ? (
-                        <img
-                          src={photoUrl}
-                          alt="Фото профиля"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <Camera className="w-8 h-8 text-muted-foreground" />
-                      )}
-                    </div>
-                    <label
-                      htmlFor="photo-upload"
-                      className="absolute bottom-0 right-0 w-8 h-8 bg-primary text-primary-foreground rounded-full flex items-center justify-center cursor-pointer hover:bg-primary/90 transition-colors"
-                    >
-                      <Upload className="w-4 h-4" />
-                    </label>
-                    <input
-                      id="photo-upload"
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      className="hidden"
-                      onChange={(e) => handlePhotoChange(e.target.files?.[0] || null)}
+        {/* Профиль — как карточка актива */}
+        <CabinetCard>
+          <h3
+            className="text-2xl font-medium mb-3 flex items-center gap-2"
+            style={{ color: ACTIVE_TEXT_DARK }}
+          >
+            Профиль
+            {profile?.google_sub && (
+              <Tooltip content="Профиль синхронизирован с Google аккаунтом">
+                <CheckCircle2
+                  className="w-5 h-5 shrink-0"
+                  style={{ color: PLACEHOLDER_COLOR_DARK }}
+                />
+              </Tooltip>
+            )}
+          </h3>
+          <div className="flex items-start gap-6">
+            {/* Фото — как в модалке добавления актива */}
+            <div className="relative flex-shrink-0">
+              <div
+                className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
+                onClick={() => photoInputRef.current?.click()}
+              >
+                {photoUrl ? (
+                  <img
+                    src={photoUrl}
+                    alt="Фото профиля"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div
+                    className="w-full h-full flex items-center justify-center"
+                    style={{ backgroundColor: "rgba(93,95,215,0.22)" }}
+                  >
+                    <Camera
+                      className="w-12 h-12"
+                      style={{ color: PLACEHOLDER_COLOR_DARK }}
                     />
                   </div>
-                  {photoError && (
-                    <p className="mt-2 text-sm text-destructive">{photoError}</p>
-                  )}
-                  {photoFile && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={handlePhotoUpload}
-                        disabled={uploadingPhoto}
-                      >
-                        {uploadingPhoto ? "Загрузка..." : "Загрузить"}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handlePhotoChange(null)}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Поля формы справа */}
-                <div className="flex-1 grid gap-4">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="firstName">
-                        Имя <span className="text-destructive">*</span>
-                      </Label>
-                      <Input
-                        id="firstName"
-                        className="border-2 border-border/70 bg-card shadow-none"
-                        value={firstName}
-                        onChange={(e) => setFirstName(e.target.value)}
-                        required
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="lastName">Фамилия</Label>
-                      <Input
-                        id="lastName"
-                        className="border-2 border-border/70 bg-card shadow-none"
-                        value={lastName}
-                        onChange={(e) => setLastName(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="birthDate">Дата рождения</Label>
-                    <Input
-                      id="birthDate"
-                      type="date"
-                      className="border-2 border-border/70 bg-card shadow-none"
-                      value={birthDate}
-                      onChange={(e) => setBirthDate(e.target.value)}
-                      max={new Date().toISOString().split("T")[0]}
-                    />
-                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                  <Upload className="w-8 h-8 text-white" />
                 </div>
               </div>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept={ALLOWED_PHOTO_TYPES.join(",")}
+                className="hidden"
+                onChange={(e) => handlePhotoChange(e.target.files?.[0] ?? null)}
+              />
+              {photoError && (
+                <p className="text-xs mt-1" style={{ color: "#FB4C4F" }}>
+                  {photoError}
+                </p>
+              )}
+              {photoFile && (
+                <div className="mt-2 flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handlePhotoUpload}
+                    disabled={uploadingPhoto}
+                    variant="authPrimary"
+                    className="rounded-lg border-0"
+                    style={
+                      {
+                        "--auth-primary-bg":
+                          "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                        "--auth-primary-bg-hover":
+                          "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                      } as React.CSSProperties
+                    }
+                  >
+                    {uploadingPhoto ? "Загрузка..." : "Загрузить"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="glass"
+                    className="rounded-lg border-0"
+                    style={
+                      {
+                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                      } as React.CSSProperties
+                    }
+                    onClick={() => handlePhotoChange(null)}
+                  >
+                    Отмена
+                  </Button>
+                </div>
+              )}
+            </div>
 
-              <Button
-                type="submit"
-                className="bg-violet-600 text-white hover:bg-violet-700"
-                disabled={saving}
-              >
-                {saving ? "Сохранение..." : "Сохранить"}
-              </Button>
+            <form onSubmit={handleSubmit} className="flex-1 grid gap-4 min-w-0">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <TextField
+                  label="Имя"
+                  required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                />
+                <TextField
+                  label="Фамилия"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                />
+              </div>
+              <DateField
+                label="Дата рождения"
+                value={birthDate}
+                onChange={(e) => setBirthDate(e.target.value)}
+                max={new Date().toISOString().split("T")[0]}
+              />
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="submit"
+                  variant="authPrimary"
+                  disabled={saving}
+                  className="rounded-lg border-0"
+                  style={
+                    {
+                      "--auth-primary-bg":
+                        "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                      "--auth-primary-bg-hover":
+                        "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                    } as React.CSSProperties
+                  }
+                >
+                  {saving ? "Сохранение..." : "Сохранить"}
+                </Button>
+              </div>
             </form>
-          </CardContent>
-        </Card>
+          </div>
+        </CabinetCard>
 
-        {/* Секция настроек */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Настройки</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Выбор темы */}
+        {/* Настройки */}
+        <CabinetCard>
+          <div className="space-y-4">
+            <h3
+              className="text-2xl font-medium"
+              style={{ color: ACTIVE_TEXT_DARK }}
+            >
+              Настройки
+            </h3>
             <div className="flex items-center justify-between">
-              <Label>Темная тема</Label>
+              <label
+                className="text-base"
+                style={{ color: ACTIVE_TEXT_DARK }}
+              >
+                Темная тема
+              </label>
               <Switch
                 checked={theme === "dark"}
                 onCheckedChange={(checked) => {
@@ -379,49 +420,36 @@ export default function CabinetPage() {
                 }}
               />
             </div>
+          </div>
+        </CabinetCard>
 
-            {/* Premium кнопка */}
-            <div className="flex items-center justify-between">
-              <div>
-                <Label>Premium</Label>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Расширенные возможности приложения
-                </p>
-              </div>
-              <Button
-                onClick={() => setIsPremiumModalOpen(true)}
-                className={cn(
-                  "h-[50px] text-[#DCDCDC]",
-                  "px-[22px] bg-gradient-to-r from-[#7C6CF1] via-[#6C5DD7] to-[#5544D1] hover:opacity-90"
-                )}
-              >
-                <span className="text-[20px] leading-[22px] font-medium font-['CodecProVariable',sans-serif]">
-                  Premium
-                </span>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Секция информации */}
+        {/* Информация */}
         {accountingStartDate && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Информация</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div>
-                <Label className="text-muted-foreground">Дата начала учета</Label>
-                <p className="text-lg font-semibold mt-2">
-                  {formatShortDate(accountingStartDate)}
-                </p>
+          <CabinetCard>
+            <h3
+              className="text-2xl font-medium mb-3"
+              style={{ color: ACTIVE_TEXT_DARK }}
+            >
+              Информация
+            </h3>
+            <div>
+              <div
+                className="text-sm font-normal"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+              >
+                Дата начала учета
               </div>
-            </CardContent>
-          </Card>
+              <p
+                className="text-lg font-normal mt-2"
+                style={{ color: ACTIVE_TEXT_DARK }}
+              >
+                {formatShortDate(accountingStartDate)}
+              </p>
+            </div>
+          </CabinetCard>
         )}
       </div>
 
-      <PremiumModal open={isPremiumModalOpen} onOpenChange={setIsPremiumModalOpen} />
-    </div>
+    </main>
   );
 }

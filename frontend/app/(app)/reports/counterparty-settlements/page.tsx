@@ -58,22 +58,11 @@ function getRelativeDateKey(daysOffset: number) {
   return `${y}-${m}-${day}`;
 }
 
-function buildDocumentLabel(tx: TransactionOut) {
-  const dateKey = toDateKey(tx.transaction_date);
-  const dateStr = dateKey ? formatDateLabel(dateKey) : "";
-  let kind: string;
-  if (tx.direction === "EXPENSE") kind = "Оплата";
-  else if (tx.direction === "INCOME") kind = "Поступление";
-  else kind = "Перевод";
-  const base = dateStr ? `${kind} от ${dateStr}` : kind;
-  return tx.comment?.trim() ? `${base} — ${tx.comment.trim()}` : base;
-}
-
 type ReportRow =
   | {
       type: "transaction";
       dateKey: string;
-      document: string;
+      comment: string;
       amountCents: number;
     }
   | { type: "paid_to"; amountCents: number }
@@ -168,7 +157,7 @@ function buildReportData(
     return {
       type: "transaction",
       dateKey: toDateKey(tx.transaction_date),
-      document: buildDocumentLabel(tx),
+      comment: tx.comment?.trim() ?? "",
       amountCents: delta,
     };
   });
@@ -363,9 +352,24 @@ export default function CounterpartySettlementsPage() {
                     style={{ backgroundColor: MODAL_BG }}
                   >
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-sm text-muted-foreground">
-                        Сальдо на начало периода
-                      </span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-sm text-muted-foreground">
+                          На {formatDateLabel(rangeStartKey)}
+                        </span>
+                        <span
+                          className="text-base font-medium"
+                          style={{
+                            color:
+                              reportData.openingBalance > 0
+                                ? GREEN
+                                : reportData.openingBalance < 0
+                                  ? RED
+                                  : undefined,
+                          }}
+                        >
+                          {balanceStatusLabel(reportData.openingBalance)}
+                        </span>
+                      </div>
                       <span
                         className="text-base font-medium"
                         style={{
@@ -377,7 +381,6 @@ export default function CounterpartySettlementsPage() {
                                 : undefined,
                         }}
                       >
-                        {balanceStatusLabel(reportData.openingBalance)}{" "}
                         {formatSignedAmount(reportData.openingBalance)}
                       </span>
                     </div>
@@ -391,8 +394,9 @@ export default function CounterpartySettlementsPage() {
                       <div className="overflow-x-auto">
                         <Table className="min-w-full table-fixed">
                           <TableBody>
-                            {reportData.rows.map((row, index) => {
-                              if (row.type === "transaction") {
+                            {reportData.rows
+                              .filter((row): row is ReportRow & { type: "transaction" } => row.type === "transaction")
+                              .map((row, index) => {
                                 const isPos = row.amountCents > 0;
                                 const isNeg = row.amountCents < 0;
                                 return (
@@ -400,11 +404,11 @@ export default function CounterpartySettlementsPage() {
                                     key={`tx-${index}`}
                                     className="border-b border-border/70"
                                   >
-                                    <TableCell className="pl-8 whitespace-nowrap">
+                                    <TableCell className="pl-8 w-24 min-w-0 whitespace-nowrap">
                                       {formatDateLabel(row.dateKey)}
                                     </TableCell>
                                     <TableCell className="text-muted-foreground">
-                                      {row.document}
+                                      {row.comment}
                                     </TableCell>
                                     <TableCell
                                       className="pr-8 text-right"
@@ -417,60 +421,74 @@ export default function CounterpartySettlementsPage() {
                                     </TableCell>
                                   </TableRow>
                                 );
-                              }
-                              if (row.type === "received_from") {
-                                return (
-                                  <TableRow
-                                    key="received_from"
-                                    className="border-b border-border/70 font-medium"
+                              })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className="relative rounded-lg overflow-hidden border-0 outline-none"
+                    style={{ backgroundColor: MODAL_BG }}
+                  >
+                    <div className="px-0 py-4">
+                      <div className="overflow-x-auto">
+                        <Table className="min-w-full table-fixed">
+                          <TableBody>
+                            {reportData.rows
+                              .filter((row): row is ReportRow & { type: "received_from" } => row.type === "received_from")
+                              .map((row) => (
+                                <TableRow
+                                  key="received_from"
+                                  className="border-b border-border/70 font-medium"
+                                >
+                                  <TableCell
+                                    colSpan={2}
+                                    className="pl-8 text-base font-medium"
+                                    style={{ color: RED }}
                                   >
-                                    <TableCell
-                                      colSpan={2}
-                                      className="pl-8 text-muted-foreground"
-                                    >
-                                      Вы получили
-                                    </TableCell>
-                                    <TableCell
-                                      className="pr-8 text-right font-medium"
-                                      style={{
-                                        color: row.amountCents > 0 ? RED : undefined,
-                                      }}
-                                    >
-                                      {row.amountCents > 0
-                                        ? formatSignedAmount(-row.amountCents)
-                                        : "0.00"}
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              }
-                              if (row.type === "paid_to") {
-                                return (
-                                  <TableRow
-                                    key="paid_to"
-                                    className="border-b border-border/70 font-medium"
+                                    Вы получили
+                                  </TableCell>
+                                  <TableCell
+                                    className="pr-8 text-right font-medium"
+                                    style={{
+                                      color: row.amountCents > 0 ? RED : undefined,
+                                    }}
                                   >
-                                    <TableCell
-                                      colSpan={2}
-                                      className="pl-8 text-muted-foreground"
-                                    >
-                                      Вы заплатили
-                                    </TableCell>
-                                    <TableCell
-                                      className="pr-8 text-right font-medium"
-                                      style={{
-                                        color:
-                                          row.amountCents > 0 ? GREEN : undefined,
-                                      }}
-                                    >
-                                      {row.amountCents > 0
-                                        ? formatSignedAmount(row.amountCents)
-                                        : "0.00"}
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              }
-                              return null;
-                            })}
+                                    {row.amountCents > 0
+                                      ? formatSignedAmount(-row.amountCents)
+                                      : "0.00"}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            {reportData.rows
+                              .filter((row): row is ReportRow & { type: "paid_to" } => row.type === "paid_to")
+                              .map((row) => (
+                                <TableRow
+                                  key="paid_to"
+                                  className="border-b border-border/70 font-medium"
+                                >
+<TableCell
+                                  colSpan={2}
+                                  className="pl-8 text-base font-medium"
+                                  style={{ color: GREEN }}
+                                >
+                                  Вы заплатили
+                                </TableCell>
+                                  <TableCell
+                                    className="pr-8 text-right font-medium"
+                                    style={{
+                                      color:
+                                        row.amountCents > 0 ? GREEN : undefined,
+                                    }}
+                                  >
+                                    {row.amountCents > 0
+                                      ? formatSignedAmount(row.amountCents)
+                                      : "0.00"}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
                           </TableBody>
                         </Table>
                       </div>
@@ -482,9 +500,24 @@ export default function CounterpartySettlementsPage() {
                     style={{ backgroundColor: MODAL_BG }}
                   >
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-sm text-muted-foreground">
-                        Сальдо на конец периода
-                      </span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-sm text-muted-foreground">
+                          На {formatDateLabel(rangeEndResolved)}
+                        </span>
+                        <span
+                          className="text-base font-semibold"
+                          style={{
+                            color:
+                              reportData.closingBalance > 0
+                                ? GREEN
+                                : reportData.closingBalance < 0
+                                  ? RED
+                                  : undefined,
+                          }}
+                        >
+                          {balanceStatusLabel(reportData.closingBalance)}
+                        </span>
+                      </div>
                       <span
                         className="text-base font-semibold"
                         style={{
@@ -496,7 +529,6 @@ export default function CounterpartySettlementsPage() {
                                 : undefined,
                         }}
                       >
-                        {balanceStatusLabel(reportData.closingBalance)}{" "}
                         {formatSignedAmount(reportData.closingBalance)}
                       </span>
                     </div>

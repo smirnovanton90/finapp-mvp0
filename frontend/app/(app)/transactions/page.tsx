@@ -126,6 +126,7 @@ import {
 import {
   createTransaction,
   createDebtsTransaction,
+  createTheyPaidForMeTransaction,
   deleteTransaction,
   fetchBanks,
   fetchCategories,
@@ -2021,6 +2022,9 @@ function TransactionsView({
   );
   const [formMode, setFormMode] = useState<TransactionFormMode>("STANDARD");
   const [debtDirection, setDebtDirection] = useState<DebtDirection>("I_PAID");
+  const [debtPayForCounterpartyId, setDebtPayForCounterpartyId] = useState<number | null>(null);
+  const [debtSplitAmountStr, setDebtSplitAmountStr] = useState("");
+  const [wherePaidCounterpartyId, setWherePaidCounterpartyId] = useState<number | null>(null);
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
   const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
@@ -2566,6 +2570,9 @@ function TransactionsView({
     setDirection("EXPENSE");
     setFormMode("STANDARD");
     setDebtDirection("I_PAID");
+    setDebtPayForCounterpartyId(null);
+    setDebtSplitAmountStr("");
+    setWherePaidCounterpartyId(null);
     setFormTransactionType(defaultShowActual ? "ACTUAL" : "PLANNED");
     setPrimaryItemId(null);
     setCounterpartyItemId(null);
@@ -4967,7 +4974,136 @@ function TransactionsView({
                       return;
                     }
 
-                    if (isDebts) {
+                    if (isDebts && debtDirection === "THEY_PAID_FOR_ME") {
+                      if (!counterpartyId) {
+                        setFormError("Выберите, кто платит.");
+                        return;
+                      }
+                      if (!wherePaidCounterpartyId) {
+                        setFormError("Выберите, где платит.");
+                        return;
+                      }
+                      if (counterpartyId === wherePaidCounterpartyId) {
+                        setFormError("Кто платит и Где платит должны различаться.");
+                        return;
+                      }
+                      const theyPaidCents = parseRubToCents(amountStr);
+                      if (!Number.isFinite(theyPaidCents) || theyPaidCents <= 0) {
+                        setFormError("Введите сумму в формате 1234,56 (больше нуля).");
+                        return;
+                      }
+                      const theyPaidCategoryId = resolveCategoryId(cat1, cat2, cat3);
+                      if (!theyPaidCategoryId) {
+                        setFormError("Выберите категорию.");
+                        return;
+                      }
+                      const transactionDate =
+                        isEditMode && editingTx
+                          ? mergeDateWithTime(date, editingTx.transaction_date)
+                          : date;
+                      try {
+                        await createTheyPaidForMeTransaction({
+                          who_paid_counterparty_id: counterpartyId,
+                          where_paid_counterparty_id: wherePaidCounterpartyId,
+                          amount_rub: theyPaidCents,
+                          transaction_date: transactionDate,
+                          category_id: theyPaidCategoryId,
+                          comment: comment || null,
+                        });
+                        closeDialog();
+                        await loadAll();
+                      } catch (err: unknown) {
+                        setFormError(
+                          (err as Error)?.message ?? "Не удалось создать транзакцию."
+                        );
+                      }
+                      return;
+                    }
+
+                    if (isDebts && debtDirection === "I_PAID_FOR_SOMEONE") {
+                      if (!primaryItemId) {
+                        setFormError("Выберите актив (откуда заплатили).");
+                        return;
+                      }
+                      if (!counterpartyId) {
+                        setFormError("Выберите, где платите.");
+                        return;
+                      }
+                      if (!debtPayForCounterpartyId) {
+                        setFormError("Выберите, за кого платите.");
+                        return;
+                      }
+                      const fullCents = parseRubToCents(amountStr);
+                      const splitCents = parseRubToCents(debtSplitAmountStr);
+                      if (!Number.isFinite(fullCents) || fullCents <= 0) {
+                        setFormError("Введите полную сумму платежа (больше нуля).");
+                        return;
+                      }
+                      if (!Number.isFinite(splitCents) || splitCents < 0) {
+                        setFormError("Введите часть суммы за контрагента (0 или больше).");
+                        return;
+                      }
+                      if (splitCents > fullCents) {
+                        setFormError("Часть за контрагента не может быть больше полной суммы.");
+                        return;
+                      }
+                      const expenseCents = fullCents - splitCents;
+                      const primaryMeta = getEffectiveItemMeta(primaryItemId);
+                      if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+                        setFormError(
+                          "Дата не может быть раньше даты начала действия выбранного актива."
+                        );
+                        return;
+                      }
+                      const resolvedCategoryId = resolveCategoryId(cat1, cat2, cat3);
+                      if (!resolvedCategoryId) {
+                        setFormError("Выберите категорию расхода.");
+                        return;
+                      }
+                      const transactionDate =
+                        isEditMode && editingTx
+                          ? mergeDateWithTime(date, editingTx.transaction_date)
+                          : date;
+                      try {
+                        if (expenseCents > 0) {
+                          await createTransaction({
+                            transaction_date: transactionDate,
+                            primary_item_id: primaryItemId,
+                            counterparty_item_id: null,
+                            counterparty_id: counterpartyId,
+                            amount_rub: expenseCents,
+                            amount_counterparty: null,
+                            primary_quantity_lots: null,
+                            counterparty_quantity_lots: null,
+                            direction: "EXPENSE",
+                            transaction_type: formTransactionType,
+                            category_id: resolvedCategoryId,
+                            comment: comment || null,
+                          });
+                        }
+                        if (splitCents > 0) {
+                          await createDebtsTransaction({
+                            debt_direction: "I_PAID",
+                            counterparty_id: debtPayForCounterpartyId,
+                            transaction_counterparty_id: counterpartyId,
+                            primary_item_id: primaryItemId,
+                            transaction_date: transactionDate,
+                            amount_rub: splitCents,
+                            transaction_type: formTransactionType,
+                            comment: comment || null,
+                          });
+                        }
+                        closeDialog();
+                        await loadAll();
+                      } catch (err: unknown) {
+                        setFormError(
+                          (err as Error)?.message ?? "Не удалось создать транзакцию."
+                        );
+                      }
+                      return;
+                    }
+
+                    if (isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID")) {
                       if (!counterpartyId) {
                         setFormError("Выберите контрагента.");
                         return;
@@ -5195,9 +5331,15 @@ function TransactionsView({
                     {isDebts ? (
                       <FormField label="Направление">
                         <SegmentedSelector
-                          options={[
-                            { value: "I_PAID", label: "Я заплатил", colorScheme: "red" },
-                            { value: "THEY_PAID", label: "Заплатили мне", colorScheme: "green" },
+                          optionsByRows={[
+                            [
+                              { value: "I_PAID", label: "Вы дали в долг / заплатили по долгу", colorScheme: "green" },
+                              { value: "THEY_PAID", label: "Вам дали в долг / заплатили по долгу", colorScheme: "red" },
+                            ],
+                            [
+                              { value: "I_PAID_FOR_SOMEONE", label: "Вы заплатили за кого-то", colorScheme: "green" },
+                              { value: "THEY_PAID_FOR_ME", label: "Кто-то заплатил за вас", colorScheme: "red" },
+                            ],
                           ]}
                           value={debtDirection}
                           onChange={(v) => setDebtDirection(v as DebtDirection)}
@@ -5223,17 +5365,22 @@ function TransactionsView({
                     )}
 
                     <DateField
-                      label="Дата транзакции"
+                      label={isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID" || debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME") ? "Дата" : "Дата транзакции"}
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                     />
 
+                    {!(isDebts && debtDirection === "THEY_PAID_FOR_ME") && (
                     <FormField
                       label={
                         isLoanRepayment
                           ? "Актив, с которого производится погашение"
                           : isDebts
-                            ? "Актив / обязательство"
+                            ? debtDirection === "I_PAID" || debtDirection === "I_PAID_FOR_SOMEONE"
+                              ? "Откуда платите"
+                              : debtDirection === "THEY_PAID"
+                                ? "Куда платят"
+                                : "Актив / обязательство"
                             : "Актив / обязательство"
                       }
                     >
@@ -5254,6 +5401,7 @@ function TransactionsView({
                         disabled={isImportFormDisabled}
                       />
                     </FormField>
+                    )}
 
                     {showCounterpartySelect && (
                       <FormField
@@ -5285,9 +5433,78 @@ function TransactionsView({
                       </FormField>
                     )}
 
-                    {(!isTransfer || isDebts) && (
+                    {isDebts && debtDirection === "I_PAID_FOR_SOMEONE" && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <FormField label="Где платите" error={counterpartyError ?? undefined}>
+                          <CounterpartySelector
+                            counterparties={selectableCounterparties}
+                            selectedIds={counterpartyId ? [counterpartyId] : []}
+                            onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                            selectionMode="single"
+                            placeholder="Начните вводить название"
+                            industries={industries}
+                            disabled={counterpartyLoading}
+                            counterpartyCounts={counterpartyTxCounts}
+                            apiBase={API_BASE}
+                          />
+                        </FormField>
+                        <FormField label="За кого платите">
+                          <CounterpartySelector
+                            counterparties={selectableCounterparties}
+                            selectedIds={debtPayForCounterpartyId ? [debtPayForCounterpartyId] : []}
+                            onChange={(ids) => setDebtPayForCounterpartyId(ids[0] ?? null)}
+                            selectionMode="single"
+                            placeholder="Начните вводить название"
+                            industries={industries}
+                            disabled={counterpartyLoading}
+                            counterpartyCounts={counterpartyTxCounts}
+                            apiBase={API_BASE}
+                          />
+                        </FormField>
+                      </div>
+                    )}
+                    {isDebts && debtDirection === "THEY_PAID_FOR_ME" && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <FormField label="Кто платит" error={counterpartyError ?? undefined}>
+                          <CounterpartySelector
+                            counterparties={selectableCounterparties}
+                            selectedIds={counterpartyId ? [counterpartyId] : []}
+                            onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                            selectionMode="single"
+                            placeholder="Начните вводить название"
+                            industries={industries}
+                            disabled={counterpartyLoading}
+                            counterpartyCounts={counterpartyTxCounts}
+                            apiBase={API_BASE}
+                          />
+                        </FormField>
+                        <FormField label="Где платит">
+                          <CounterpartySelector
+                            counterparties={selectableCounterparties}
+                            selectedIds={wherePaidCounterpartyId ? [wherePaidCounterpartyId] : []}
+                            onChange={(ids) => setWherePaidCounterpartyId(ids[0] ?? null)}
+                            selectionMode="single"
+                            placeholder="Начните вводить название"
+                            industries={industries}
+                            disabled={counterpartyLoading}
+                            counterpartyCounts={counterpartyTxCounts}
+                            apiBase={API_BASE}
+                          />
+                        </FormField>
+                      </div>
+                    )}
+                    {(!isTransfer || isDebts) && !(isDebts && (debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME")) && (
                       <>
-                        <FormField label="Контрагент" error={counterpartyError ?? undefined}>
+                        <FormField
+                          label={
+                            isDebts
+                              ? debtDirection === "I_PAID"
+                                ? "Кому платите"
+                                : "Кто платит"
+                              : "Контрагент"
+                          }
+                          error={counterpartyError ?? undefined}
+                        >
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={counterpartyId ? [counterpartyId] : []}
@@ -5362,6 +5579,59 @@ function TransactionsView({
                             Сумма в погашение основного долга: {loanPrincipalLabel}
                           </div>
                         </div>
+                      </>
+                    ) : isDebts && debtDirection === "I_PAID_FOR_SOMEONE" ? (
+                      <>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <TextField
+                            label={
+                              primaryCurrencyCode
+                                ? `Полная сумма (${primaryCurrencyCode})`
+                                : "Полная сумма"
+                            }
+                            value={amountStr}
+                            onChange={(e) =>
+                              setAmountStr(formatRubInput(e.target.value))
+                            }
+                            onBlur={() =>
+                              setAmountStr((prev) => normalizeRubOnBlur(prev))
+                            }
+                            inputMode="decimal"
+                            placeholder="Например: 1 234,56"
+                          />
+                          <TextField
+                            label={
+                              primaryCurrencyCode
+                                ? `Часть суммы в долг (${primaryCurrencyCode})`
+                                : "Часть суммы в долг"
+                            }
+                            value={debtSplitAmountStr}
+                            onChange={(e) =>
+                              setDebtSplitAmountStr(formatRubInput(e.target.value))
+                            }
+                            onBlur={() =>
+                              setDebtSplitAmountStr((prev) => normalizeRubOnBlur(prev))
+                            }
+                            inputMode="decimal"
+                            placeholder="Например: 300,00"
+                          />
+                        </div>
+                        <FormField label="Категория">
+                          <CategorySelector
+                            categoryNodes={categoryNodes}
+                            selectedPath={selectedCategoryPath}
+                            onChange={(path) => {
+                              if (path) {
+                                applyCategorySelection(path.l1, path.l2, path.l3);
+                              } else {
+                                applyCategorySelection("", "", "");
+                              }
+                            }}
+                            placeholder="Поиск категории"
+                            direction="EXPENSE"
+                            disabled={false}
+                          />
+                        </FormField>
                       </>
                     ) : isTransfer && isCrossCurrencyTransfer ? (
                       <>
@@ -5447,7 +5717,7 @@ function TransactionsView({
                         </div>
                       )}
 
-                    {!isTransfer && !isDebts && (
+                    {(!isTransfer && !isDebts) || (isDebts && debtDirection === "THEY_PAID_FOR_ME") ? (
                       <FormField label="Категория">
                         <CategorySelector
                           categoryNodes={categoryNodes}
@@ -5460,11 +5730,11 @@ function TransactionsView({
                             }
                           }}
                           placeholder="Поиск категории"
-                          direction={direction}
+                          direction={isDebts && debtDirection === "THEY_PAID_FOR_ME" ? "EXPENSE" : direction}
                           disabled={false}
                         />
                       </FormField>
-                    )}
+                    ) : null}
 
                     <TextField
                       label="Комментарий"

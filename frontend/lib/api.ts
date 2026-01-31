@@ -428,17 +428,31 @@ export type TransactionCreate = {
   comment?: string | null;
 };
 
-export type DebtDirection = "I_PAID" | "THEY_PAID";
+export type DebtDirection =
+  | "I_PAID"
+  | "THEY_PAID"
+  | "I_PAID_FOR_SOMEONE"
+  | "THEY_PAID_FOR_ME";
 
 export type TransactionDebtsCreate = {
-  debt_direction: DebtDirection;
+  debt_direction: "I_PAID" | "THEY_PAID";
   counterparty_id: number;
+  transaction_counterparty_id?: number | null;
   primary_item_id: number;
   transaction_date: string;
   amount_rub: number;
   transaction_type?: TransactionType;
   comment?: string | null;
   status?: TransactionStatus | null;
+};
+
+export type TransactionTheyPaidForMeCreate = {
+  who_paid_counterparty_id: number;
+  where_paid_counterparty_id: number;
+  amount_rub: number;
+  transaction_date?: string | null;
+  category_id?: number | null;
+  comment?: string | null;
 };
 
 export const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -1020,6 +1034,17 @@ export async function createDebtsTransaction(
   payload: TransactionDebtsCreate
 ): Promise<TransactionOut> {
   const res = await authFetch(`${API_BASE}/transactions/debts`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createTheyPaidForMeTransaction(
+  payload: TransactionTheyPaidForMeCreate
+): Promise<TransactionOut> {
+  const res = await authFetch(`${API_BASE}/transactions/they-paid-for-me`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

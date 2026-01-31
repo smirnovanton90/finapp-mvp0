@@ -403,13 +403,26 @@ class TransactionDebtsCreate(BaseModel):
     """Payload for creating a «Долги» (debts) transaction — transfer to/from Взаиморасчёты."""
 
     debt_direction: DebtDirection
-    counterparty_id: int
+    counterparty_id: int  # Used for Взаиморасчёты (settlements item)
+    transaction_counterparty_id: int | None = None  # If set, used as transaction counterparty (e.g. «Где платите»); otherwise same as counterparty_id
     primary_item_id: int = Field(..., description="User-selected asset/liability (source or target)")
     transaction_date: datetime
     amount_rub: int = Field(..., ge=1)
     transaction_type: TransactionType = "ACTUAL"
     comment: str | None = None
     status: TransactionStatus | None = None
+
+
+class TransactionTheyPaidForMeCreate(BaseModel):
+    """Payload for «Кто-то заплатил за меня» — expense from Взаиморасчёты (who paid) with counterparty (where paid)."""
+
+    who_paid_counterparty_id: int
+    where_paid_counterparty_id: int
+    amount_rub: int = Field(..., ge=1)
+    transaction_date: datetime | None = None
+    category_id: int | None = None
+    comment: str | None = None
+
 
 class TransactionOut(TransactionBase):
     id: int

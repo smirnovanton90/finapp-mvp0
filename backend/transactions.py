@@ -5,11 +5,12 @@ from sqlalchemy.orm import Session, selectinload
 from db import get_db
 from auth import get_current_user
 from category_service import resolve_category_or_400
-from models import Transaction, Item, User, Counterparty
+from models import Transaction, Item, User, Counterparty, Category
 from market_utils import is_moex_item
 from schemas import (
     TransactionCreate,
     TransactionDebtsCreate,
+    TransactionTheyPaidForMeCreate,
     TransactionOut,
     TransactionStatusUpdate,
     TransactionPageOut,
@@ -391,11 +392,15 @@ def create_debts_transaction(
         primary_item_id = settlements_item.id
         counterparty_item_id = primary_item.id
 
+    tx_counterparty_id = data.transaction_counterparty_id if data.transaction_counterparty_id is not None else data.counterparty_id
+    if data.transaction_counterparty_id is not None:
+        resolve_counterparty(db, user, data.transaction_counterparty_id)
+
     payload = TransactionCreate(
         transaction_date=data.transaction_date,
         primary_item_id=primary_item_id,
         counterparty_item_id=counterparty_item_id,
-        counterparty_id=data.counterparty_id,
+        counterparty_id=tx_counterparty_id,
         amount_rub=data.amount_rub,
         amount_counterparty=None,
         primary_quantity_lots=None,
@@ -407,6 +412,82 @@ def create_debts_transaction(
         status=data.status,
     )
     return _create_transaction_impl(db, user, payload)
+
+
+@router.post("/they-paid-for-me", response_model=TransactionOut)
+def create_they_paid_for_me_transaction(
+    data: TransactionTheyPaidForMeCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """«Кто-то заплатил за меня» — expense from Взаиморасчёты (who paid) with counterparty (where paid)."""
+    if not user.accounting_start_date:
+        raise HTTPException(
+            status_code=400,
+            detail="Дата начала учёта не задана.",
+        )
+    if data.who_paid_counterparty_id == data.where_paid_counterparty_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Кто заплатил и Где заплатил должны различаться.",
+        )
+    resolve_counterparty(db, user, data.who_paid_counterparty_id)
+    resolve_counterparty(db, user, data.where_paid_counterparty_id)
+
+    accounting_start = user.accounting_start_date
+    tx_date = data.transaction_date.date() if data.transaction_date else date.today()
+    open_date = max(accounting_start, tx_date)
+
+    settlements_item = ensure_counterparty_settlements_item(
+        db=db,
+        user=user,
+        counterparty_id=data.who_paid_counterparty_id,
+        currency_code="RUB",
+        open_date=open_date,
+        accounting_start_date=accounting_start,
+    )
+
+    category_id = data.category_id
+    if category_id is None:
+        default_cat = (
+            db.query(Category)
+            .filter(
+                Category.archived_at.is_(None),
+                or_(Category.owner_user_id.is_(None), Category.owner_user_id == user.id),
+                or_(Category.scope == "EXPENSE", Category.scope == "BOTH"),
+            )
+            .first()
+        )
+        if not default_cat:
+            raise HTTPException(
+                status_code=400,
+                detail="Нет доступной категории расхода. Создайте категорию или укажите категорию.",
+            )
+        category_id = default_cat.id
+    category = resolve_category_or_400(db, user, category_id)
+    if not category:
+        raise HTTPException(status_code=400, detail="Invalid category_id")
+
+    transaction_date = datetime.combine(tx_date, time(0, 0, 0), tzinfo=timezone.utc)
+
+    payload = TransactionCreate(
+        transaction_date=transaction_date,
+        primary_item_id=settlements_item.id,
+        counterparty_item_id=None,
+        counterparty_id=data.where_paid_counterparty_id,
+        amount_rub=data.amount_rub,
+        amount_counterparty=None,
+        primary_quantity_lots=None,
+        counterparty_quantity_lots=None,
+        direction="EXPENSE",
+        transaction_type="ACTUAL",
+        category_id=category.id,
+        comment=data.comment,
+        status=None,
+    )
+    tx = _create_transaction_impl(db, user, payload)
+    update_settlements_item_closed_status(db, settlements_item)
+    return tx
 
 
 def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -> Transaction:

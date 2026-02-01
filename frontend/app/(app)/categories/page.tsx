@@ -40,7 +40,7 @@ import {
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
 import { useCategoryIcon } from "@/hooks/use-category-icon";
-import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
+import { useSidebar } from "@/components/ui/sidebar-context";
 import {
   ACCENT,
   ACTIVE_TEXT_DARK,
@@ -397,6 +397,7 @@ function CategoryCardList({
 
 export default function CategoriesPage() {
   const { activeStep, isWizardOpen } = useOnboarding();
+  const { filtersSlotId } = useSidebar();
   const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -755,7 +756,7 @@ export default function CategoriesPage() {
         size="medium"
       >
         <div className="grid gap-4">
-          <div className="grid grid-cols-[200px_1fr] gap-4 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
             <div className="relative">
               <div
                 className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
@@ -871,7 +872,7 @@ export default function CategoriesPage() {
         size="medium"
       >
         <div className="grid gap-4">
-          <div className="grid grid-cols-[200px_1fr] gap-4 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
             <div className="relative">
               <div
                 className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
@@ -1023,7 +1024,7 @@ export default function CategoriesPage() {
       </Dialog>
 
       {mounted && typeof document !== "undefined" &&
-        document.getElementById(SIDEBAR_FILTERS_SLOT_ID) &&
+        document.getElementById(filtersSlotId) &&
         createPortal(
           <div className="space-y-4 py-2">
             <FilterSection
@@ -1096,7 +1097,7 @@ export default function CategoriesPage() {
               />
             </FilterSection>
           </div>,
-          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
+          document.getElementById(filtersSlotId)!
         )}
 
       <div className="flex-1 min-w-0 pt-[30px]">

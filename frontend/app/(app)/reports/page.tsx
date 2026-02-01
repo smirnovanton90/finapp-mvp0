@@ -146,7 +146,7 @@ function ReportCard({
 
 export default function ReportsPage() {
   return (
-    <main className="min-h-screen px-8 py-8 flex flex-col items-center">
+    <main className="min-h-screen px-4 sm:px-8 py-8 flex flex-col items-center">
       <div className="w-full max-w-[900px] space-y-6">
         <section className="flex flex-col gap-6">
           <ReportCard

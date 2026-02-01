@@ -70,7 +70,6 @@ import {
 } from "@/lib/category-icons";
 import { useCategoryIcon } from "@/hooks/use-category-icon";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
-import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 import {
   createTransactionChain,
   deleteTransactionChain,
@@ -278,7 +277,7 @@ export default function FinancialPlanningPage() {
   const { accountingStartDate } = useAccountingStart();
   const router = useRouter();
   const { activeStep, isWizardOpen } = useOnboarding();
-  const { isCollapsed } = useSidebar();
+  const { isCollapsed, filtersSlotId } = useSidebar();
 
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [items, setItems] = useState<ItemOut[]>([]);
@@ -1338,8 +1337,9 @@ export default function FinancialPlanningPage() {
     >
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-      {mounted && typeof document !== "undefined" &&
-        createPortal(
+      {mounted && typeof document !== "undefined" && (() => {
+        const el = document.getElementById(filtersSlotId);
+        return el ? createPortal(
           <div className="space-y-4 py-2">
           <FilterSection
             label="Вид цепочки"
@@ -1541,8 +1541,9 @@ export default function FinancialPlanningPage() {
             />
           </FilterSection>
           </div>,
-          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
-        )}
+          el
+        ) : null;
+      })()}
 
         <div className="flex-1 min-w-0 pt-[30px]">
           <div className="w-[900px] mx-auto">

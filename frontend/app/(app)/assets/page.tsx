@@ -49,7 +49,6 @@ import { useSidebar } from "@/components/ui/sidebar-context";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
-import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 import { cn } from "@/lib/utils";
 
 import {
@@ -3836,7 +3835,7 @@ export default function Page() {
 
   /* ------------------ основной UI ------------------ */
 
-  const { isCollapsed } = useSidebar();
+  const { isCollapsed, filtersSlotId } = useSidebar();
 
   return (
     <main
@@ -3876,11 +3875,11 @@ export default function Page() {
         size="wide"
         contentRef={dialogContentRef}
       >
-        <div className="flex items-start gap-0 transition-all duration-300 min-w-[600px]">
-              {/* Left part - fixed 600px so toggle button and right panel have space */}
-              <div className="w-[600px] grid content-start gap-4 flex-shrink-0 min-w-0">
+        <div className="flex flex-col md:flex-row items-start gap-0 transition-all duration-300 min-w-0 w-full max-w-[600px] md:max-w-none">
+              {/* Left part - full width on mobile, 600px on desktop */}
+              <div className="w-full md:w-[600px] grid content-start gap-4 flex-shrink-0 min-w-0">
             {/* Item Photo Upload and Type Selection in one row */}
-            <div className="grid grid-cols-[200px_1fr] gap-4 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
               {/* Item Photo Upload */}
               <div className="relative">
                 <div
@@ -5008,8 +5007,9 @@ export default function Page() {
 
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-      {mounted && typeof document !== "undefined" &&
-        createPortal(
+      {mounted && typeof document !== "undefined" && (() => {
+        const el = document.getElementById(filtersSlotId);
+        return el ? createPortal(
           <div className="space-y-4 py-2">
             <FilterSection
             label="Тип"
@@ -5296,8 +5296,9 @@ export default function Page() {
             )}
           </div>
           </div>,
-          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
-        )}
+          el
+        ) : null;
+      })()}
 
       <div className="flex-1 min-w-0">
         <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
@@ -5340,7 +5341,7 @@ export default function Page() {
                           {formatRub(totalRubCents)}
                         </span>
                       </div>
-                      <div className="columns-2 xl:columns-3 gap-4">
+                      <div className="columns-1 md:columns-2 xl:columns-3 gap-4">
                         {items.map((item) => {
                           const rate = rateByCode[item.currency_code];
                           const rubEquivalent = getRubEquivalentCents(item);

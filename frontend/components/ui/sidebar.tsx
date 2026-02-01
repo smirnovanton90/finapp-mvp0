@@ -94,11 +94,23 @@ const FILTER_PAGES = ["/assets", "/transactions", "/financial-planning", "/limit
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { isCollapsed, toggleSidebar, isFilterPanelCollapsed, toggleFilterPanel } = useSidebar();
+  const {
+    isCollapsed,
+    toggleSidebar,
+    isFilterPanelCollapsed,
+    toggleFilterPanel,
+    isDesktop,
+    mobileOpen,
+    setMobileOpen,
+  } = useSidebar();
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
   const isCabinetActive = pathname === "/cabinet" || pathname.startsWith("/cabinet/");
   const hasFilters = FILTER_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"));
   const showFiltersSection = hasFilters && !isCollapsed;
+  const isMobile = !isDesktop;
+
+  // На мобильном фильтры рендерятся в MobileFiltersDrawer, не в сайдбаре
+  const renderFilterSlot = hasFilters && isDesktop;
 
   // Загрузка фото пользователя
   useEffect(() => {
@@ -139,7 +151,7 @@ export function Sidebar() {
   }, []);
 
   const filtersOpen = hasFilters && !isFilterPanelCollapsed;
-  const showFilterStrip = hasFilters;
+  const showFilterStrip = hasFilters && isDesktop;
   const unifiedBg = showFiltersSection || (isCollapsed && hasFilters);
   const contentWidth = isCollapsed
     ? hasFilters
@@ -149,8 +161,142 @@ export function Sidebar() {
       ? SIDEBAR_BASE_WIDTH + (filtersOpen ? FILTER_PANEL_WIDTH : 0)
       : SIDEBAR_BASE_WIDTH;
   const asideWidth = contentWidth + ASIDE_PADDING_H;
-  /* На страницах с фильтрами всегда рендерим слот (в т.ч. при свёрнутом сайдбаре), чтобы createPortal не падал. */
-  const renderFilterSlot = hasFilters;
+
+  // Мобильный drawer: оверлей + панель слева (только нав + футер, без фильтров)
+  if (isMobile) {
+    return (
+      <>
+        <div
+          className={cn(
+            "fixed inset-0 z-20 bg-black/50 transition-opacity md:hidden",
+            mobileOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+          )}
+          aria-hidden
+          onClick={() => setMobileOpen(false)}
+        />
+        <aside
+          className={cn(
+            "fixed left-0 top-0 z-20 h-screen w-[min(300px,100vw)] max-w-[85vw] p-[10px]",
+            "transition-transform duration-300 ease-out md:hidden",
+            "flex flex-col rounded-r-[9px] bg-sidebar shadow-xl",
+            mobileOpen ? "translate-x-0" : "-translate-x-full"
+          )}
+        >
+          <div className="flex h-[55px] items-center justify-end pr-[10px]">
+            <IconButton
+              onClick={() => setMobileOpen(false)}
+              aria-label="Закрыть меню"
+              appearance="default"
+            >
+              <ArrowRight className="size-4" strokeWidth={1.5} style={{ color: SIDEBAR_TEXT_INACTIVE }} />
+            </IconButton>
+          </div>
+          <nav className="scrollbar-dropdown mt-[10px] flex flex-1 flex-col gap-[10px] overflow-y-auto pb-[10px] min-h-0">
+            {nav.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(item.href + "/");
+              const Icon = item.icon;
+              const itemColor = active ? ACTIVE_TEXT_DARK : SIDEBAR_TEXT_INACTIVE;
+              const variant = active ? "authPrimary" : "glass";
+              const buttonStyle = (active
+                ? ({
+                    "--auth-primary-bg":
+                      "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                    "--auth-primary-bg-hover":
+                      "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                  } as CSSProperties)
+                : ({
+                    "--glass-bg": "rgba(108, 93, 215, 0)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.22)",
+                  } as CSSProperties));
+              return (
+                <Button
+                  key={item.href}
+                  asChild
+                  variant={variant as "glass" | "authPrimary"}
+                  className="mx-[10px] h-[50px] w-[calc(100%-20px)] justify-start pl-[15px] pr-[15px] rounded-[9px] text-base font-normal min-w-0"
+                  style={buttonStyle}
+                >
+                  <Link href={item.href} onClick={() => setMobileOpen(false)}>
+                    <IconFrame>
+                      <Icon className="size-[30px]" strokeWidth={1.5} style={{ color: itemColor }} />
+                    </IconFrame>
+                    <span className="ml-[10px] flex-1 truncate" style={{ color: itemColor }}>
+                      {item.label}
+                    </span>
+                  </Link>
+                </Button>
+              );
+            })}
+          </nav>
+          <div className="pb-[10px] flex flex-col gap-[10px]">
+            <Button
+              variant={isCabinetActive ? "authPrimary" : "glass"}
+              className="mx-[10px] h-[50px] w-[calc(100%-20px)] justify-start rounded-[9px] pl-[15px] pr-[15px]"
+              style={
+                (isCabinetActive
+                  ? ({
+                      "--auth-primary-bg":
+                        "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                      "--auth-primary-bg-hover":
+                        "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                    } as CSSProperties)
+                  : ({
+                      "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                      "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
+                    } as CSSProperties))
+              }
+              onClick={() => {
+                setMobileOpen(false);
+                router.push("/cabinet");
+              }}
+            >
+              <div className="flex w-full items-center gap-[10px] min-w-0">
+                {userPhotoUrl ? (
+                  <IconFrame>
+                    <img
+                      src={userPhotoUrl}
+                      alt="Фото профиля"
+                      className="h-[30px] w-[30px] shrink-0 rounded-full object-cover"
+                    />
+                  </IconFrame>
+                ) : (
+                  <IconFrame>
+                    <User className="size-[30px]" strokeWidth={1.5} style={{ color: ACTIVE_TEXT_DARK }} />
+                  </IconFrame>
+                )}
+                <span className="flex-1 truncate text-base font-normal" style={{ color: ACTIVE_TEXT_DARK }}>
+                  Личный кабинет
+                </span>
+              </div>
+            </Button>
+            <Button
+              variant="glass"
+              className="mx-[10px] h-[50px] w-[calc(100%-20px)] justify-start rounded-[9px] pl-[15px] pr-[15px]"
+              style={
+                {
+                  "--glass-bg": "rgba(215, 93, 172, 0.22)",
+                  "--glass-bg-hover": "rgba(215, 93, 172, 0.32)",
+                } as CSSProperties
+              }
+              onClick={() => {
+                setMobileOpen(false);
+                signOut();
+              }}
+            >
+              <div className="flex w-full items-center gap-[10px] min-w-0">
+                <IconFrame>
+                  <LogOut className="size-[30px]" strokeWidth={1.5} style={{ color: ACTIVE_TEXT_DARK }} />
+                </IconFrame>
+                <span className="flex-1 truncate text-base font-normal" style={{ color: ACTIVE_TEXT_DARK }}>
+                  Выйти
+                </span>
+              </div>
+            </Button>
+          </div>
+        </aside>
+      </>
+    );
+  }
 
   return (
     <aside

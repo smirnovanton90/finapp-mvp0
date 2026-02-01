@@ -367,7 +367,7 @@ export default function CounterpartySettlementsPage() {
   const hasNoDebtItems = selectedId != null && debtItemsForSelected.length === 0 && !loading;
 
   return (
-    <main className="min-h-screen px-8 py-8">
+    <main className="min-h-screen px-4 sm:px-8 py-8">
       <div className="mx-auto flex w-full max-w-[900px] flex-col gap-6">
         <div className="flex flex-col gap-4">
           <div className="space-y-1.5 w-full">
@@ -387,7 +387,7 @@ export default function CounterpartySettlementsPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="cp-settlements-date-from">Дата от</Label>
               <div className="[&_div.relative.flex.items-center]:h-10 [&_input]:text-sm [&_input]:font-normal min-w-0">

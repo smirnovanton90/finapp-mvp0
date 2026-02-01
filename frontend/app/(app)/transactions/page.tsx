@@ -169,7 +169,6 @@ import { useOnboarding } from "@/components/onboarding-context";
 import { useImagePreloader } from "@/hooks/use-image-preloader";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { CardIcon } from "@/components/card-icon";
-import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 type TransactionsViewMode = "actual" | "planning";
 
@@ -1876,7 +1875,7 @@ function TransactionsView({
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
-  const { isCollapsed } = useSidebar();
+  const { isCollapsed, filtersSlotId } = useSidebar();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
   const defaultShowPlannedRealized = isPlanningView;
@@ -4266,8 +4265,9 @@ function TransactionsView({
     >
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-      {mounted && typeof document !== "undefined" &&
-        createPortal(
+      {mounted && typeof document !== "undefined" && (() => {
+        const el = document.getElementById(filtersSlotId);
+        return el ? createPortal(
           <div className="space-y-4 py-2">
             <FilterSection
             label="Вид транзакции"
@@ -4683,8 +4683,9 @@ function TransactionsView({
               </div>
           </FilterSection>
           </div>,
-          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
-        )}
+          el
+        ) : null;
+      })()}
 
             {/* Тулбар: фото чека — OCR (распознавание по изображению) */}
             <input

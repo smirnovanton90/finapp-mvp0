@@ -57,7 +57,7 @@ export function ThemeToggleFab() {
   const iconColor = isDark ? "#FFFFFF" : INK;
 
   return (
-    <div className="fixed right-6 bottom-6 z-50">
+    <div className="fixed right-4 bottom-4 md:right-6 md:bottom-6 z-50">
       <Button
         type="button"
         aria-label={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}

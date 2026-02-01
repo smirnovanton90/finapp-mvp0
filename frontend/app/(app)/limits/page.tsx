@@ -44,7 +44,6 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
 import { PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, ACCENT } from "@/lib/colors";
 import { cn } from "@/lib/utils";
-import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 const CATEGORY_PLACEHOLDER = "-";
 const CATEGORY_PATH_SEPARATOR = " / ";
@@ -550,7 +549,7 @@ export default function LimitsPage() {
     }
   };
 
-  const { isCollapsed } = useSidebar();
+  const { isCollapsed, filtersSlotId } = useSidebar();
 
   return (
     <main className={cn("min-h-screen pb-8", isCollapsed ? "pl-0" : "pl-0")}>
@@ -662,8 +661,9 @@ export default function LimitsPage() {
         onConfirm={handleDeleteLimit}
       />
 
-      {mounted && typeof document !== "undefined" &&
-        createPortal(
+      {mounted && typeof document !== "undefined" && (() => {
+        const el = document.getElementById(filtersSlotId);
+        return el ? createPortal(
           <div className="space-y-4 py-2">
             <FilterSection
             label="Название"
@@ -825,8 +825,9 @@ export default function LimitsPage() {
             />
           </FilterSection>
           </div>,
-          document.getElementById(SIDEBAR_FILTERS_SLOT_ID)!
-        )}
+          el
+        ) : null;
+      })()}
 
       <div className="flex-1 min-w-0">
         <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto pt-[30px]">
@@ -855,7 +856,7 @@ export default function LimitsPage() {
               </div>
             ) : (
               <div
-                className="columns-2 xl:columns-3 gap-4"
+                className="columns-1 md:columns-2 xl:columns-3 gap-4"
                 style={{
                   position: "relative",
                   zIndex: 2,

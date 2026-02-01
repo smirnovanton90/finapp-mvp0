@@ -2,6 +2,8 @@
 
 import { Sidebar } from "@/components/ui/sidebar";
 import { useSidebar } from "@/components/ui/sidebar-context";
+import { AppHeader } from "@/components/app-header";
+import { MobileFiltersDrawer } from "@/components/mobile-filters-drawer";
 import { cn } from "@/lib/utils";
 import { AccountingStartGate } from "@/components/accounting-start-gate";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
@@ -17,7 +19,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
-  const { isCollapsed, isFilterPanelCollapsed } = useSidebar();
+  const { isCollapsed, isFilterPanelCollapsed, isDesktop } = useSidebar();
   const sessionKey = (session?.user as { id?: string })?.id ?? "anon";
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -33,13 +35,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const asidePadding = 20;
   const collapsedNavWidth = 100;
   const filterPanelWidth = 400;
-  const contentMarginLeft = isCollapsed
+  const contentMarginLeftDesktop = isCollapsed
     ? asidePadding + collapsedNavWidth + (isSpecialPage && !isFilterPanelCollapsed ? filterPanelWidth : 0)
     : filtersOpen
       ? asidePadding + 300 + filterPanelWidth
       : showFiltersStrip
         ? asidePadding + 300
         : asidePadding + 300;
+  const contentMarginLeft = isDesktop ? contentMarginLeftDesktop : 0;
 
   useEffect(() => {
     if (status !== "loading" && !session) {
@@ -124,10 +127,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           }}
         />
 
+        <AppHeader />
+        <MobileFiltersDrawer />
         <div className="relative z-10 flex">
           <Sidebar />
           <div
-            className={cn("flex-1 transition-all duration-300", !isSpecialPage && "min-h-screen flex items-center")}
+            className={cn(
+              "flex-1 transition-all duration-300",
+              !isSpecialPage && "min-h-screen flex items-center",
+              !isDesktop && "pt-14 px-4"
+            )}
             style={{ marginLeft: contentMarginLeft }}
           >
             {isSpecialPage ? (

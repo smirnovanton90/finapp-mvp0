@@ -50,12 +50,13 @@ function DialogOverlay({
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
-    showCloseButton?: boolean
+    showCloseButton?: boolean;
+    overlayClassName?: string;
   }
->(({ className, children, showCloseButton = true, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, overlayClassName, ...props }, ref) => {
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden overscroll-contain">
         <div className="min-h-full flex flex-col items-center py-6">
           <DialogPrimitive.Content

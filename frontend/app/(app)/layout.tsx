@@ -6,7 +6,6 @@ import { AppHeader } from "@/components/app-header";
 import { MobileFiltersDrawer } from "@/components/mobile-filters-drawer";
 import { cn } from "@/lib/utils";
 import { AccountingStartGate } from "@/components/accounting-start-gate";
-import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
@@ -106,7 +105,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <AccountingStartGate>
-      <OnboardingWizard />
       <div
         className="relative min-h-screen overflow-hidden"
         key={sessionKey}

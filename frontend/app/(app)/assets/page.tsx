@@ -125,6 +125,7 @@ import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/forma
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
+import { assetIconPath } from "@/lib/image-paths";
 
 
 /* ------------------ справочники ------------------ */
@@ -3894,20 +3895,22 @@ export default function Page() {
                       className="w-full h-full object-cover"
                     />
                   ) : typeCode ? (
-                    // 2. Priority: 3D icon, fallback to 2D icon
+                    // 2. Priority: 3D icon (public/images/assets/<type_code>.png), fallback to 2D icon
                     <>
-                      {!show2dIcon && icon3dFormat && (
-                        <img
-                          src={`/icons-3d/${typeCode}.${icon3dFormat}`}
-                          alt=""
-                          className="w-full h-full object-contain"
-                          onError={() => {
-                            // При 404 — 2D иконка
-                            setIcon3dFormat(null);
-                            setShow2dIcon(true);
-                          }}
-                        />
-                      )}
+                      {!show2dIcon && icon3dFormat && (() => {
+                        const icon3dSrc = assetIconPath(typeCode, icon3dFormat);
+                        return icon3dSrc ? (
+                          <img
+                            src={icon3dSrc}
+                            alt=""
+                            className="w-full h-full object-contain"
+                            onError={() => {
+                              setIcon3dFormat(null);
+                              setShow2dIcon(true);
+                            }}
+                          />
+                        ) : null;
+                      })()}
                       {show2dIcon && TYPE_ICON_BY_CODE[typeCode] && (
                         <div
                           className="w-full h-full flex items-center justify-center"

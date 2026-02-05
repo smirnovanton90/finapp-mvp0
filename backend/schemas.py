@@ -381,6 +381,7 @@ class TransactionBase(BaseModel):
     transaction_type: TransactionType
     category_id: int | None = None
     comment: str | None = None
+    related_item_id: int | None = None
 
     @model_validator(mode="after")
     def validate_category_for_direction(self) -> "TransactionBase":
@@ -434,6 +435,7 @@ class TransactionOut(TransactionBase):
     counterparty_card_item_id: int | None = None
     deleted_at: datetime | None = None
     linked_item_id: int | None = None
+    related_item_id: int | None = None
     source: str | None = None
 
     class Config:
@@ -465,6 +467,7 @@ class TransactionChainCreate(BaseModel):
     direction: TransactionDirection
     category_id: int | None = None
     comment: str | None = None
+    related_item_id: int | None = None
 
     @model_validator(mode="after")
     def validate_frequency_details(self) -> "TransactionChainCreate":
@@ -540,6 +543,7 @@ class TransactionChainOut(BaseModel):
     deleted_at: datetime | None
     created_at: datetime
     linked_item_id: int | None = None
+    related_item_id: int | None = None
     source: TransactionChainSource | None = None
     purpose: TransactionChainPurpose | None = None
     amount_is_variable: bool | None = None

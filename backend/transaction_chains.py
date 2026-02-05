@@ -10,6 +10,7 @@ from category_service import resolve_category_or_400
 from db import get_db
 from models import Item, Transaction, TransactionChain, User, Counterparty
 from schemas import TransactionChainCreate, TransactionChainOut
+from transactions import _load_item as load_item_for_related
 
 router = APIRouter(prefix="/transaction-chains", tags=["transaction-chains"])
 
@@ -250,6 +251,9 @@ def create_transaction_chain(
     if not schedule_dates:
         raise HTTPException(status_code=400, detail="No dates generated for chain")
 
+    if data.related_item_id is not None:
+        load_item_for_related(db, user, data.related_item_id, False, "related_item")
+
     category = resolve_category_or_400(db, user, data.category_id)
 
     chain = TransactionChain(
@@ -263,6 +267,7 @@ def create_transaction_chain(
         monthly_rule=data.monthly_rule,
         interval_days=data.interval_days,
         linked_item_id=None,
+        related_item_id=data.related_item_id,
         source="MANUAL",
         purpose=None,
         primary_item_id=primary.id,
@@ -305,6 +310,7 @@ def create_transaction_chain(
                 status="CONFIRMED",
                 category_id=category.id if category else None,
                 comment=data.comment,
+                related_item_id=chain.related_item_id,
             )
         )
 

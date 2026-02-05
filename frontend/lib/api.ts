@@ -283,6 +283,7 @@ export type TransactionOut = {
   created_at: string;
   deleted_at: string | null;
   linked_item_id?: number | null;
+  related_item_id?: number | null;
   source?: TransactionSource | null;
 };
 
@@ -331,6 +332,7 @@ export type FetchTransactionsPageParams = {
   category_ids?: number[];
   counterparty_ids?: number[];
   comment_query?: string;
+  related_item_ids?: number[];
   min_amount?: number;
   max_amount?: number;
 };
@@ -354,6 +356,7 @@ export type TransactionChainCreate = {
   direction: TransactionDirection;
   category_id: number | null;
   comment?: string | null;
+  related_item_id?: number | null;
 };
 
 export type TransactionChainOut = {
@@ -379,6 +382,7 @@ export type TransactionChainOut = {
   deleted_at: string | null;
   created_at: string;
   linked_item_id?: number | null;
+  related_item_id?: number | null;
   source?: "AUTO_ITEM" | "MANUAL" | null;
   purpose?: "INTEREST" | "PRINCIPAL" | null;
   amount_is_variable?: boolean | null;
@@ -426,6 +430,7 @@ export type TransactionCreate = {
   category_id: number | null;
 
   comment?: string | null;
+  related_item_id?: number | null;
 };
 
 export type DebtDirection =
@@ -1024,6 +1029,9 @@ export async function fetchTransactionsPage(
   );
   options.counterparty_ids?.forEach((value) =>
     params.append("counterparty_ids", String(value))
+  );
+  options.related_item_ids?.forEach((value) =>
+    params.append("related_item_ids", String(value))
   );
   const qs = params.toString();
   const res = await authFetch(`${API_BASE}/transactions/page${qs ? `?${qs}` : ""}`);

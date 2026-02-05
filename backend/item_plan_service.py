@@ -929,6 +929,7 @@ def _create_chain_with_transactions(
         monthly_rule=monthly_rule,
         interval_days=interval_days,
         linked_item_id=item.id,
+        related_item_id=item.id,
         source="AUTO_ITEM",
         purpose=purpose,
         primary_item_id=primary_item.id,
@@ -969,6 +970,7 @@ def _create_chain_with_transactions(
                 status="CONFIRMED",
                 category_id=category_id,
                 comment=None,
+                related_item_id=chain.related_item_id,
             )
         )
 

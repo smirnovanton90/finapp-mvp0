@@ -84,6 +84,7 @@ import { Input } from "@/components/ui/input";
 import { AuthInput } from "@/components/ui/auth-input";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
+import { AssetItemIcon } from "@/components/asset-item-icon";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
@@ -1154,6 +1155,8 @@ function TransactionCardRow({
   onConfirm,
   isConfirming,
   onReady,
+  relatedItem,
+  relatedItemCounterparty,
 }: {
   tx: TransactionCard;
   counterparty: CounterpartyOut | null;
@@ -1184,6 +1187,8 @@ function TransactionCardRow({
   onConfirm: (tx: TransactionCard) => void;
   isConfirming: boolean;
   onReady?: () => void;
+  relatedItem: ItemOut | null;
+  relatedItemCounterparty: CounterpartyOut | null;
 }) {
   const isTransfer = tx.direction === "TRANSFER";
   const isExpense = tx.direction === "EXPENSE";
@@ -1731,6 +1736,32 @@ function TransactionCardRow({
             </div>
           )}
 
+          {relatedItem && (
+            <div
+              className="flex items-center gap-2"
+              style={{ marginBottom: 4 }}
+            >
+              <AssetItemIcon
+                item={relatedItem}
+                counterparty={relatedItemCounterparty}
+                apiBase={apiBase}
+                size={20}
+                shadow={false}
+                fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                alt=""
+              />
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 400,
+                  color: ACTIVE_TEXT_DARK,
+                }}
+              >
+                {relatedItem.name}
+              </div>
+            </div>
+          )}
+
           {commentText && commentText !== "-" && (
             <div className="flex items-center gap-2">
               <MessageSquare
@@ -1990,6 +2021,9 @@ function TransactionsView({
   const [selectedCounterpartyIds, setSelectedCounterpartyIds] = useState<Set<number>>(
     () => new Set()
   );
+  const [selectedRelatedItemIds, setSelectedRelatedItemIds] = useState<Set<number>>(
+    () => new Set()
+  );
   const [amountFrom, setAmountFrom] = useState("");
   const [amountTo, setAmountTo] = useState("");
   const [selectedDirections, setSelectedDirections] = useState<
@@ -2032,6 +2066,7 @@ function TransactionsView({
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [comment, setComment] = useState("");
+  const [relatedItemId, setRelatedItemId] = useState<number | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -2575,6 +2610,7 @@ function TransactionsView({
     setLoanInterestStr("");
     applyCategorySelection("", "", "");
     setComment("");
+    setRelatedItemId(null);
     setReceiptMessage(null);
   };
 
@@ -2955,6 +2991,7 @@ function TransactionsView({
     );
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
+    setRelatedItemId(tx.related_item_id ?? null);
   };
 
   const openCreateFromDialog = (
@@ -2995,6 +3032,7 @@ function TransactionsView({
     );
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
+    setRelatedItemId(tx.related_item_id ?? null);
   };
 
   const openRealizeDialog = (
@@ -3035,6 +3073,7 @@ function TransactionsView({
     );
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
+    setRelatedItemId(tx.related_item_id ?? null);
   };
 
   const openBulkEditDialog = () => {
@@ -3073,6 +3112,7 @@ function TransactionsView({
       cat2: baselineCat2 || CATEGORY_PLACEHOLDER,
       cat3: baselineCat3 || CATEGORY_PLACEHOLDER,
       comment: baselineTx.comment ?? "",
+      relatedItemId: baselineTx.related_item_id ?? null,
     };
 
     setFormError(null);
@@ -3094,6 +3134,7 @@ function TransactionsView({
     setCounterpartyQuantityLots(baseline.counterpartyQuantityLots);
     applyCategorySelection(baseline.cat1, baseline.cat2, baseline.cat3);
     setComment(baseline.comment);
+    setRelatedItemId(baseline.relatedItemId);
   };
 
   const handleConfirmStatus = async (tx: TransactionCard) => {
@@ -3134,6 +3175,7 @@ function TransactionsView({
       hasCat2Changed: cat2 !== bulkEditBaseline.cat2,
       hasCat3Changed: cat3 !== bulkEditBaseline.cat3,
       hasCommentChanged: comment !== bulkEditBaseline.comment,
+      hasRelatedItemChanged: relatedItemId !== bulkEditBaseline.relatedItemId,
     };
   };
 
@@ -3393,6 +3435,7 @@ function TransactionsView({
               return resolveCategoryId(nextL1, nextL2, nextL3);
             })(),
             comment: changes.hasCommentChanged ? comment || null : tx.comment ?? null,
+            related_item_id: changes.hasRelatedItemChanged ? relatedItemId ?? null : tx.related_item_id ?? null,
           };
 
           return updateTransaction(tx.id, payload);
@@ -3823,6 +3866,10 @@ function TransactionsView({
     if (selectedCounterpartyIds.size === 0) return EMPTY_NUMBER_ARRAY;
     return Array.from(selectedCounterpartyIds);
   }, [selectedCounterpartyIds]);
+  const relatedItemFilterIds = useMemo(() => {
+    if (selectedRelatedItemIds.size === 0) return undefined;
+    return Array.from(selectedRelatedItemIds);
+  }, [selectedRelatedItemIds]);
   const commentQuery = useMemo(() => commentFilter.trim(), [commentFilter]);
   const minAmount = useMemo(() => parseAmountFilter(amountFrom), [amountFrom]);
   const maxAmount = useMemo(() => parseAmountFilter(amountTo), [amountTo]);
@@ -3850,6 +3897,7 @@ function TransactionsView({
         category_ids: categoryFilterIds,
         counterparty_ids: counterpartyFilterIds,
         comment_query: commentQuery || undefined,
+        related_item_ids: relatedItemFilterIds,
         min_amount: minAmount ?? undefined,
         max_amount: maxAmount ?? undefined,
       },
@@ -3858,6 +3906,7 @@ function TransactionsView({
     cardItemFilterIds,
     categoryFilterIds,
     commentQuery,
+    relatedItemFilterIds,
     currencyItemIds,
     counterpartyFilterIds,
     dateFrom,
@@ -4459,6 +4508,32 @@ function TransactionsView({
                   itemCounts={itemTxCounts}
                   resetSignal={itemFilterResetKey}
                   ariaLabel="Активы/обязательства"
+                />
+              </div>
+          </FilterSection>
+          <FilterSection
+            label="Связанные активы/обязательства"
+            onReset={() => setSelectedRelatedItemIds(new Set())}
+            showReset={selectedRelatedItemIds.size > 0}
+          >
+              <div className="space-y-3">
+                <ItemSelector
+                  items={activeItems}
+                  selectedIds={Array.from(selectedRelatedItemIds)}
+                  onChange={(ids) => setSelectedRelatedItemIds(new Set(ids))}
+                  selectionMode="multi"
+                  placeholder="Начните вводить название"
+                  emptyMessage="Нет активов или обязательств."
+                  noResultsMessage="Ничего не найдено"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
+                  getCounterpartyForItemId={getCounterpartyForItemId}
+                  apiBase={API_BASE}
+                  getBankLogoUrl={itemBankLogoUrl}
+                  getBankName={itemBankName}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  itemCounts={itemTxCounts}
+                  ariaLabel="Связанные активы/обязательства"
                 />
               </div>
           </FilterSection>
@@ -5258,6 +5333,7 @@ function TransactionsView({
                           transaction_type: payloadTransactionType,
                           category_id: resolvedCategoryId,
                           comment: comment || null,
+                          related_item_id: relatedItemId ?? null,
                         };
 
                         if (isEditMode && editingTx) {
@@ -5774,6 +5850,26 @@ function TransactionsView({
                       </FormField>
                     ) : null}
 
+                    <FormField label="Связь с активом/обязательством">
+                      <ItemSelector
+                        items={activeItems}
+                        selectedIds={relatedItemId ? [relatedItemId] : []}
+                        onChange={(ids) => setRelatedItemId(ids[0] ?? null)}
+                        selectionMode="single"
+                        placeholder="Выберите"
+                        getItemTypeLabel={getItemTypeLabel}
+                        getItemKind={resolveItemEffectiveKind}
+                        getCounterpartyForItemId={getCounterpartyForItemId}
+                        apiBase={API_BASE}
+                        getBankLogoUrl={itemBankLogoUrl}
+                        getBankName={itemBankName}
+                        getItemBalance={getItemDisplayBalanceCents}
+                        itemCounts={itemTxCounts}
+                        disabled={isImportFormDisabled}
+                        ariaLabel="Связь с активом/обязательством"
+                      />
+                    </FormField>
+
                     <TextField
                       label="Комментарий"
                       value={comment}
@@ -6089,6 +6185,8 @@ function TransactionsView({
                         setReadyRowCount((prev) => prev + 1);
                       }
                     }}
+                    relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
+                    relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
                   />
                 ))}
               </div>

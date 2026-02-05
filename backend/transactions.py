@@ -230,6 +230,7 @@ def list_transactions_page(
     category_ids: list[int] | None = Query(default=None),
     counterparty_ids: list[int] | None = Query(default=None),
     comment_query: str | None = None,
+    related_item_ids: list[int] | None = Query(default=None),
     min_amount: int | None = Query(default=None, ge=0),
     max_amount: int | None = Query(default=None, ge=0),
     db: Session = Depends(get_db),
@@ -288,6 +289,8 @@ def list_transactions_page(
         trimmed = comment_query.strip()
         if trimmed:
             stmt = stmt.where(Transaction.comment.ilike(f"%{trimmed}%"))
+    if related_item_ids:
+        stmt = stmt.where(Transaction.related_item_id.in_(related_item_ids))
     if min_amount is not None or max_amount is not None:
         abs_amount = func.abs(Transaction.amount_rub)
         if min_amount is not None:
@@ -514,6 +517,9 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
 
     resolve_counterparty(db, user, data.counterparty_id)
 
+    if data.related_item_id is not None:
+        _load_item(db, user, data.related_item_id, False, "related_item")
+
     counter_side = None
     counter = None
     amount_counterparty = None
@@ -608,6 +614,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         status=status_value,
         category_id=category.id if category else None,
         comment=data.comment,
+        related_item_id=data.related_item_id,
     )
 
     if data.transaction_type == "ACTUAL":
@@ -735,6 +742,9 @@ def update_transaction(
         )
 
     resolve_counterparty(db, user, data.counterparty_id)
+
+    if data.related_item_id is not None:
+        _load_item(db, user, data.related_item_id, False, "related_item")
 
     new_counter_side = None
     new_counter = None
@@ -942,6 +952,7 @@ def update_transaction(
         tx.status = data.status
     tx.category_id = category.id if category else None
     tx.comment = data.comment
+    tx.related_item_id = data.related_item_id
 
     for item in items_by_id.values():
         if item and item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:

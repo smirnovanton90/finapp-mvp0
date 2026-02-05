@@ -325,6 +325,7 @@ export default function FinancialPlanningPage() {
     l3: string;
   } | null>(null);
   const [comment, setComment] = useState("");
+  const [relatedItemId, setRelatedItemId] = useState<number | null>(null);
   const onboardingAppliedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -609,6 +610,7 @@ export default function FinancialPlanningPage() {
     setAmountStr("");
     setAmountCounterpartyStr("");
     setComment("");
+    setRelatedItemId(null);
     setFormError(null);
     setSelectedCategoryPath(null);
   };
@@ -782,6 +784,7 @@ export default function FinancialPlanningPage() {
       direction,
       category_id: resolvedCategoryId,
       comment: comment || null,
+      related_item_id: relatedItemId ?? null,
     };
 
     try {
@@ -1301,6 +1304,17 @@ export default function FinancialPlanningPage() {
             </div>
           </div>
 
+          {/* Связанный актив/обязательство */}
+          {chain.related_item_id != null && itemsById.get(chain.related_item_id) && (
+            <div className="mt-3 flex items-center gap-2">
+              <span
+                className="text-sm font-normal"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+              >
+                Связан: {getItemName(chain.related_item_id)}
+              </span>
+            </div>
+          )}
           {/* Комментарий внизу карточки на всю ширину */}
           {chain.comment && chain.comment.trim() && (
             <div className="mt-3 flex items-center gap-2">
@@ -1771,6 +1785,25 @@ export default function FinancialPlanningPage() {
                   />
                 </div>
               )}
+              <div className="grid gap-2">
+                <Label style={{ color: ACTIVE_TEXT_DARK }}>Связь с активом/обязательством</Label>
+                <ItemSelector
+                  items={items}
+                  selectedIds={relatedItemId ? [relatedItemId] : []}
+                  onChange={(ids) => setRelatedItemId(ids[0] ?? null)}
+                  selectionMode="single"
+                  placeholder="Выберите"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
+                  getCounterpartyForItemId={getCounterpartyForItemId}
+                  apiBase={API_BASE}
+                  getBankLogoUrl={itemBankLogoUrl}
+                  getBankName={itemBankName}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  itemCounts={itemTxCounts}
+                  ariaLabel="Связь с активом/обязательством"
+                />
+              </div>
               <TextField
                 label="Комментарий"
                 value={comment}

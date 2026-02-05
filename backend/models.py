@@ -562,6 +562,13 @@ class Transaction(Base):
 
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    related_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    related_item: Mapped[Optional["Item"]] = relationship(
+        foreign_keys=[related_item_id]
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -654,6 +661,13 @@ class TransactionChain(Base):
     category: Mapped[Optional["Category"]] = relationship()
 
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    related_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id"), nullable=True
+    )
+    related_item: Mapped[Optional["Item"]] = relationship(
+        foreign_keys=[related_item_id]
+    )
 
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

@@ -50,7 +50,7 @@ class User(Base):
     transaction_chains: Mapped[list["TransactionChain"]] = relationship(
         back_populates="user"
     )
-    limits: Mapped[list["Limit"]] = relationship(back_populates="user")
+    limits: Mapped[list["Goal"]] = relationship(back_populates="user")
     categories: Mapped[list["Category"]] = relationship(back_populates="owner")
     category_states: Mapped[list["UserCategoryState"]] = relationship(
         back_populates="user"
@@ -722,7 +722,9 @@ class TransactionChain(Base):
     )
 
 
-class Limit(Base):
+class Goal(Base):
+    """Цель по категории (расходы или доходы) на период."""
+
     __tablename__ = "limits"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

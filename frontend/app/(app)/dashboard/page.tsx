@@ -28,14 +28,14 @@ import {
 } from "@/lib/category-icons";
 import {
   fetchCategories,
-  fetchLimits,
+  fetchGoals,
   fetchFxRates,
   fetchItems,
   fetchTransactions,
   FxRateOut,
   ItemKind,
   ItemOut,
-  LimitOut,
+  GoalOut,
   TransactionOut,
 } from "@/lib/api";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
@@ -44,6 +44,7 @@ import {
   OVERDUE_TRANSACTIONS_GRADIENT,
   NO_OVERDUE_TRANSACTIONS_GRADIENT,
 } from "@/lib/gradients";
+import { getGoalProgressColor } from "@/lib/goal-progress-color";
 import { ACCENT, GREEN, RED } from "@/lib/colors";
 
 type ChartPoint = {
@@ -300,24 +301,6 @@ function getChangeVariant(
   }
 }
 
-function getLimitProgressTone(ratio: number) {
-  if (ratio >= 1) return "over";
-  if (ratio >= 0.75) return "warn";
-  return "ok";
-}
-
-function getLimitProgressColor(tone: "over" | "warn" | "ok") {
-  if (tone === "over") return RED;
-  if (tone === "warn") return RED;
-  return GREEN;
-}
-
-function getLimitProgressTextColor(tone: "over" | "warn" | "ok") {
-  if (tone === "over") return RED;
-  if (tone === "warn") return RED;
-  return GREEN;
-}
-
 function changeBadgeClass(percent: number | null) {
   if (percent === null) return "bg-slate-100 text-slate-500";
   return percent >= 0
@@ -341,17 +324,17 @@ function formatRangeLabel(startKey: string, endKey: string) {
   return `${formatDateLabel(startKey)} - ${formatDateLabel(endKey)}`;
 }
 
-function getLimitRange(limit: LimitOut, today: Date) {
-  if (limit.period === "CUSTOM") {
-    if (!limit.custom_start_date || !limit.custom_end_date) return null;
+function getGoalRange(goal: GoalOut, today: Date) {
+  if (goal.period === "CUSTOM") {
+    if (!goal.custom_start_date || !goal.custom_end_date) return null;
     return {
-      startKey: limit.custom_start_date,
-      endKey: limit.custom_end_date,
-      rangeLabel: formatRangeLabel(limit.custom_start_date, limit.custom_end_date),
+      startKey: goal.custom_start_date,
+      endKey: goal.custom_end_date,
+      rangeLabel: formatRangeLabel(goal.custom_start_date, goal.custom_end_date),
     };
   }
 
-  if (limit.period === "WEEKLY") {
+  if (goal.period === "WEEKLY") {
     const start = getWeekStart(today);
     const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
     const startKey = toDateKey(start);
@@ -359,7 +342,7 @@ function getLimitRange(limit: LimitOut, today: Date) {
     return { startKey, endKey, rangeLabel: formatRangeLabel(startKey, endKey) };
   }
 
-  if (limit.period === "MONTHLY") {
+  if (goal.period === "MONTHLY") {
     const start = new Date(today.getFullYear(), today.getMonth(), 1);
     const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
     const startKey = toDateKey(start);
@@ -670,7 +653,7 @@ export default function DashboardPage() {
   const { accountingStartDate } = useAccountingStart();
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
-  const [limits, setLimits] = useState<LimitOut[]>([]);
+  const [goals, setGoals] = useState<GoalOut[]>([]);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
@@ -709,15 +692,15 @@ export default function DashboardPage() {
       fetchTransactions(),
       fetchFxRates().catch(() => [] as FxRateOut[]),
       fetchCategories({ includeArchived: false }),
-      fetchLimits(),
+      fetchGoals(),
     ])
-      .then(([itemsData, txData, fxRatesData, categoriesData, limitsData]) => {
+      .then(([itemsData, txData, fxRatesData, categoriesData, goalsData]) => {
         if (!active) return;
         setItems(itemsData);
         setTxs(txData);
         setFxRates(fxRatesData);
         setCategoryNodes(categoriesData);
-        setLimits(limitsData);
+        setGoals(goalsData);
       })
       .catch((e: any) => {
         if (!active) return;
@@ -762,42 +745,44 @@ export default function DashboardPage() {
     return map;
   }, [categoryNodes]);
 
-  const activeLimits = useMemo(
-    () => limits.filter((limit) => !limit.deleted_at),
-    [limits]
+  const activeGoals = useMemo(
+    () => goals.filter((goal) => !goal.deleted_at),
+    [goals]
   );
 
-  const limitSummaryById = useMemo(() => {
+  const goalSummaryById = useMemo(() => {
     const now = new Date();
-    const map = new Map<number, { spent: number; progress: number; rangeLabel: string }>();
-    activeLimits.forEach((limit) => {
-      const range = getLimitRange(limit, now);
+    const map = new Map<number, { amount: number; progress: number; rangeLabel: string }>();
+    activeGoals.forEach((goal) => {
+      const range = getGoalRange(goal, now);
       const categoryIds =
-        categoryDescendants.get(limit.category_id) ?? new Set([limit.category_id]);
-      let spent = 0;
+        categoryDescendants.get(goal.category_id) ?? new Set([goal.category_id]);
+      const scope = categoryLookup.idToScope?.get(goal.category_id);
+      const direction = scope === "INCOME" ? "INCOME" : "EXPENSE";
+      let amount = 0;
       if (range) {
         txs.forEach((tx) => {
-          if (tx.direction !== "EXPENSE") return;
+          if (tx.direction !== direction) return;
           if (!isRealizedTransaction(tx)) return;
           if (!tx.category_id || !categoryIds.has(tx.category_id)) return;
           const dateKey = toTxDateKey(tx.transaction_date);
           if (!dateKey) return;
           if (dateKey < range.startKey || dateKey > range.endKey) return;
-          spent += tx.amount_rub;
+          amount += tx.amount_rub;
         });
       }
       const progress =
-        limit.amount_rub > 0 ? Math.min(spent / limit.amount_rub, 1) : 0;
-      map.set(limit.id, {
-        spent,
+        goal.amount_rub > 0 ? Math.min(amount / goal.amount_rub, 1) : 0;
+      map.set(goal.id, {
+        amount,
         progress,
         rangeLabel: range?.rangeLabel ?? "",
       });
     });
     return map;
-  }, [activeLimits, categoryDescendants, txs]);
+  }, [activeGoals, categoryDescendants, categoryLookup.idToScope, txs]);
 
-  const formatLimitCategoryLabel = (categoryId: number | null) => {
+  const formatGoalCategoryLabel = (categoryId: number | null) => {
     if (!categoryId) return "-";
     const parts = categoryLookup.idToPath.get(categoryId) ?? [];
     const label = parts
@@ -1811,44 +1796,45 @@ export default function DashboardPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-2xl font-normal text-white/90">
               <Target className="h-5 w-5 text-white/90" />
-              Контроль лимитов
+              Цели
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {loading ? (
-              <div className="text-sm text-white/80">Загрузка лимитов...</div>
-            ) : activeLimits.length === 0 ? (
+              <div className="text-sm text-white/80">Загрузка целей...</div>
+            ) : activeGoals.length === 0 ? (
               <div className="rounded-lg border border-dashed border-white/40 bg-white/10 p-4 text-center text-sm text-white/80">
-                Активных лимитов пока нет.
+                Активных целей пока нет.
               </div>
             ) : (
               <div className="grid gap-3 md:grid-cols-2">
-                {activeLimits.map((limit) => {
-                  const summary = limitSummaryById.get(limit.id) ?? {
-                    spent: 0,
+                {activeGoals.map((goal) => {
+                  const summary = goalSummaryById.get(goal.id) ?? {
+                    amount: 0,
                     progress: 0,
                     rangeLabel: "",
                   };
                   const ratio =
-                    limit.amount_rub > 0 ? summary.spent / limit.amount_rub : 0;
-                  const tone = getLimitProgressTone(ratio);
-                  const progressColor = getLimitProgressColor(tone);
-                  const textColor = getLimitProgressTextColor(tone);
-                  const LimitCategoryIcon = resolveCategoryIcon(limit.category_id);
+                    goal.amount_rub > 0 ? summary.amount / goal.amount_rub : 0;
+                  const isIncomeGoal =
+                    categoryLookup.idToScope?.get(goal.category_id) === "INCOME";
+                  const progressColor = getGoalProgressColor(ratio, isIncomeGoal);
+                  const textColor = progressColor;
+                  const GoalCategoryIcon = resolveCategoryIcon(goal.category_id);
                   return (
                     <div
-                      key={limit.id}
+                      key={goal.id}
                       className="rounded-xl px-3 py-2"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium text-white/90">
-                            {limit.name}
+                            {goal.name}
                           </div>
                           <div className="flex min-w-0 items-center gap-2 truncate text-xs text-white/70">
-                            <LimitCategoryIcon className="h-4 w-4 shrink-0 text-white/70" />
+                            <GoalCategoryIcon className="h-4 w-4 shrink-0 text-white/70" />
                             <span className="truncate">
-                              {formatLimitCategoryLabel(limit.category_id)}
+                              {formatGoalCategoryLabel(goal.category_id)}
                             </span>
                           </div>
                         </div>
@@ -1856,9 +1842,9 @@ export default function DashboardPage() {
                           className="shrink-0 text-sm font-semibold whitespace-nowrap"
                         >
                           <span style={{ color: textColor }}>
-                            {formatRub(summary.spent)}
+                            {formatRub(summary.amount)}
                           </span>{" "}
-                          <span className="text-white/90">/ {formatRub(limit.amount_rub)}</span>
+                          <span className="text-white/90">/ {formatRub(goal.amount_rub)}</span>
                         </div>
                       </div>
                       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/20">

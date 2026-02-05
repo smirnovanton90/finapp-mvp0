@@ -11,21 +11,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCategoryIcon } from "@/hooks/use-category-icon";
 import { useImagePreloader } from "@/hooks/use-image-preloader";
-import type { LimitOut, LimitPeriod, TransactionOut } from "@/lib/api";
+import type { GoalOut, GoalPeriod, TransactionOut } from "@/lib/api";
+import type { TransactionDirection } from "@/lib/api";
 import {
   MODAL_BG,
   BACKGROUND_DT,
-  GREEN,
-  GREEN_TRANSACTION,
   ACCENT,
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
+  GREEN_TRANSACTION,
+  RED,
 } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
 import type { CategoryLookup } from "@/lib/categories";
+import { getGoalProgressColor } from "@/lib/goal-progress-color";
 import { formatAmount } from "@/lib/item-utils";
 
-const PERIOD_LABELS: Record<LimitPeriod, string> = {
+const PERIOD_LABELS: Record<GoalPeriod, string> = {
   MONTHLY: "Ежемесячно",
   WEEKLY: "Еженедельно",
   YEARLY: "Ежегодно",
@@ -44,7 +46,6 @@ function toDateKey(date: Date) {
   return `${y}-${m}-${d}`;
 }
 
-/** Форматирует ключ даты YYYY-MM-DD в "ДД.ММ.ГГГГ" */
 function formatDateKeyToDisplay(dateKey: string): string {
   const [y, m, d] = dateKey.split("-");
   return `${d}.${m}.${y}`;
@@ -62,16 +63,16 @@ export type PeriodRange = {
   label: string;
 };
 
-function getCurrentPeriodRange(limit: LimitOut, today: Date): PeriodRange | null {
-  if (limit.period === "CUSTOM") {
-    if (!limit.custom_start_date || !limit.custom_end_date) return null;
+function getCurrentPeriodRange(goal: GoalOut, today: Date): PeriodRange | null {
+  if (goal.period === "CUSTOM") {
+    if (!goal.custom_start_date || !goal.custom_end_date) return null;
     return {
-      startKey: limit.custom_start_date,
-      endKey: limit.custom_end_date,
-      label: `${limit.custom_start_date} — ${limit.custom_end_date}`,
+      startKey: goal.custom_start_date,
+      endKey: goal.custom_end_date,
+      label: `${goal.custom_start_date} — ${goal.custom_end_date}`,
     };
   }
-  if (limit.period === "WEEKLY") {
+  if (goal.period === "WEEKLY") {
     const start = getWeekStart(today);
     const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
     return {
@@ -80,7 +81,7 @@ function getCurrentPeriodRange(limit: LimitOut, today: Date): PeriodRange | null
       label: `${MONTH_NAMES_RU[start.getMonth()]} ${start.getFullYear()}`,
     };
   }
-  if (limit.period === "MONTHLY") {
+  if (goal.period === "MONTHLY") {
     const start = new Date(today.getFullYear(), today.getMonth(), 1);
     const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
     return {
@@ -99,18 +100,18 @@ function getCurrentPeriodRange(limit: LimitOut, today: Date): PeriodRange | null
 }
 
 function getPreviousPeriodRanges(
-  limit: LimitOut,
+  goal: GoalOut,
   today: Date,
   accountingStartKey: string | null
 ): PeriodRange[] {
   const ranges: PeriodRange[] = [];
-  const current = getCurrentPeriodRange(limit, today);
+  const current = getCurrentPeriodRange(goal, today);
   if (!current) return ranges;
 
-  const limitStartKey = limit.created_at ? limit.created_at.slice(0, 10) : accountingStartKey;
-  const effectiveStart = limitStartKey || current.startKey;
+  const goalStartKey = goal.created_at ? goal.created_at.slice(0, 10) : accountingStartKey;
+  const effectiveStart = goalStartKey || current.startKey;
 
-  if (limit.period === "MONTHLY") {
+  if (goal.period === "MONTHLY") {
     const [sy, sm] = effectiveStart.split("-").map(Number);
     const cy = today.getFullYear();
     const cm = today.getMonth();
@@ -128,7 +129,7 @@ function getPreviousPeriodRanges(
         });
       }
     }
-  } else if (limit.period === "WEEKLY") {
+  } else if (goal.period === "WEEKLY") {
     const curStart = getWeekStart(today);
     const curStartKey = toDateKey(curStart);
     let d = new Date(curStart.getFullYear(), curStart.getMonth(), curStart.getDate() - 7);
@@ -145,7 +146,7 @@ function getPreviousPeriodRanges(
       d = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7);
       if (ranges.length >= 24) break;
     }
-  } else if (limit.period === "YEARLY") {
+  } else if (goal.period === "YEARLY") {
     const [sy] = effectiveStart.split("-").map(Number);
     const cy = today.getFullYear();
     for (let y = cy - 1; y >= sy; y--) {
@@ -170,15 +171,16 @@ function toTxDateKey(value: string) {
   return value ? value.slice(0, 10) : "";
 }
 
-function spentInRange(
+function amountInRange(
   txs: TransactionOut[],
   categoryIds: Set<number>,
   startKey: string,
-  endKey: string
+  endKey: string,
+  direction: TransactionDirection
 ): number {
   let sum = 0;
   for (const tx of txs) {
-    if (tx.direction !== "EXPENSE") continue;
+    if (tx.direction !== direction) continue;
     if (!isRealizedTransaction(tx)) continue;
     if (!tx.category_id || !categoryIds.has(tx.category_id)) continue;
     const dateKey = toTxDateKey(tx.transaction_date);
@@ -188,68 +190,56 @@ function spentInRange(
   return sum;
 }
 
-function getProgressTone(ratio: number): "ok" | "warn" | "over" {
-  if (ratio >= 1) return "over";
-  if (ratio >= 0.75) return "warn";
-  return "ok";
-}
-
-function getProgressBarColor(tone: "ok" | "warn" | "over") {
-  if (tone === "over") return "#FB4C4F";
-  if (tone === "warn") return "#FF8D28";
-  return "#34D399";
-}
-
-export interface LimitCardProps {
-  limit: LimitOut;
+export interface GoalCardProps {
+  goal: GoalOut;
+  isIncomeGoal: boolean;
   categoryLookup: CategoryLookup;
   categoryPathLabel: string;
   categoryDescendants: Map<number, Set<number>>;
   txs: TransactionOut[];
-  currentSpent: number;
+  currentAmount: number;
   currentProgress: number;
-  onEdit?: (limit: LimitOut) => void;
-  onDelete?: (limit: LimitOut) => void;
-  /** Описание/комментарий лимита (если API будет поддерживать — подставить) */
+  onEdit?: (goal: GoalOut) => void;
+  onDelete?: (goal: GoalOut) => void;
   description?: string | null;
 }
 
-export function LimitCard({
-  limit,
+export function GoalCard({
+  goal,
+  isIncomeGoal,
   categoryLookup,
   categoryPathLabel,
   categoryDescendants,
   txs,
-  currentSpent,
+  currentAmount,
   currentProgress,
   onEdit,
   onDelete,
   description,
-}: LimitCardProps) {
+}: GoalCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const isDeleted = Boolean(limit.deleted_at);
-  const periodLabel = PERIOD_LABELS[limit.period];
+  const isDeleted = Boolean(goal.deleted_at);
+  const periodLabel = PERIOD_LABELS[goal.period];
   const today = new Date();
-  const currentRange = getCurrentPeriodRange(limit, today);
-  const previousRanges = getPreviousPeriodRanges(limit, today, null);
+  const currentRange = getCurrentPeriodRange(goal, today);
+  const previousRanges = getPreviousPeriodRanges(goal, today, null);
+  const direction: TransactionDirection = isIncomeGoal ? "INCOME" : "EXPENSE";
 
   const { categoryIcon3dPath, CategoryIcon, setCategoryIconFormat } = useCategoryIcon(
-    limit.category_id,
+    goal.category_id,
     categoryLookup
   );
-  const categoryImageUrl = categoryIcon3dPath || null;
   const { isReady, setImageRef, handleImageLoad, handleImageError } = useImagePreloader({
-    imageUrls: categoryImageUrl ? [categoryImageUrl] : [],
+    imageUrls: categoryIcon3dPath ? [categoryIcon3dPath] : [],
     cacheCheckDelay: 0,
   });
-  const categoryIds = categoryDescendants.get(limit.category_id) ?? new Set([limit.category_id]);
+  const categoryIds = categoryDescendants.get(goal.category_id) ?? new Set([goal.category_id]);
 
-  const currentTone = getProgressTone(
-    limit.amount_rub > 0 ? currentSpent / limit.amount_rub : 0
-  );
-  const currentBarColor = getProgressBarColor(currentTone);
+  const currentRatio = goal.amount_rub > 0 ? currentAmount / goal.amount_rub : 0;
+  const currentBarColor = getGoalProgressColor(currentRatio, isIncomeGoal);
 
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
+  const stripeColor = isIncomeGoal ? GREEN_TRANSACTION : RED;
 
   return (
     <div
@@ -260,8 +250,12 @@ export function LimitCard({
         transition: "opacity 0.2s ease-in-out",
       }}
     >
-      <div className="p-[12px]">
-        {/* Header: картинка + основная информация + кнопка меню */}
+      {/* Левая обводка: как у активов (доход) — зелёная, как у обязательств (расход) — красная */}
+      <div
+        className="absolute left-0 top-0 bottom-0 w-[7px] rounded-l-md"
+        style={{ backgroundColor: stripeColor }}
+      />
+      <div className="pt-[12px] pr-[12px] pb-[12px] pl-[19px]">
         <div className="flex items-start justify-between mb-3 gap-3">
           <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
             {categoryIcon3dPath ? (
@@ -300,7 +294,7 @@ export function LimitCard({
               className="text-2xl font-medium mb-1 text-center break-words max-w-full"
               style={{ color: ACTIVE_TEXT_DARK }}
             >
-              {limit.name}
+              {goal.name}
             </div>
             <div
               className="text-sm font-normal text-center"
@@ -309,17 +303,16 @@ export function LimitCard({
               {periodLabel}
             </div>
           </div>
-          {/* Кнопка меню — отдельный блок после картинки и информации */}
           <div className="shrink-0">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <IconButton aria-label="Меню лимита">
+                <IconButton aria-label="Меню цели">
                   <MoreVertical />
                 </IconButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 {onEdit && !isDeleted && (
-                  <DropdownMenuItem onClick={() => onEdit(limit)}>
+                  <DropdownMenuItem onClick={() => onEdit(goal)}>
                     <Pencil className="mr-2 h-4 w-4" />
                     Редактировать
                   </DropdownMenuItem>
@@ -327,7 +320,7 @@ export function LimitCard({
                 {onDelete && (
                   <DropdownMenuItem
                     variant="destructive"
-                    onClick={() => onDelete(limit)}
+                    onClick={() => onDelete(goal)}
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Удалить
@@ -338,7 +331,6 @@ export function LimitCard({
           </div>
         </div>
 
-        {/* Текущий период: "До" и дата окончания лимита */}
         {currentRange && (
           <div className="space-y-2 mb-3">
             <div className="flex items-center justify-between">
@@ -346,7 +338,7 @@ export function LimitCard({
                 До {formatDateKeyToDisplay(currentRange.endKey)}
               </span>
               <span className="text-2xl font-medium flex items-baseline gap-1">
-                <span style={{ color: GREEN }}>{formatAmount(currentSpent)}</span>
+                <span style={{ color: currentBarColor }}>{formatAmount(currentAmount)}</span>
                 <span style={{ color: ACTIVE_TEXT_DARK }}>/</span>
                 <span
                   style={{
@@ -356,7 +348,7 @@ export function LimitCard({
                     backgroundClip: "text",
                   }}
                 >
-                  {formatAmount(limit.amount_rub)}
+                  {formatAmount(goal.amount_rub)}
                 </span>
               </span>
             </div>
@@ -372,7 +364,6 @@ export function LimitCard({
           </div>
         )}
 
-        {/* Description (optional) */}
         {(description && description.trim()) && (
           <div
             className="flex items-start gap-2 mb-3 text-sm"
@@ -383,7 +374,6 @@ export function LimitCard({
           </div>
         )}
 
-        {/* Previous periods (collapsible) */}
         {previousRanges.length > 0 && (
           <div className="pt-3">
             <div className="flex items-center justify-between w-full">
@@ -405,16 +395,16 @@ export function LimitCard({
             {expanded && (
               <div className="space-y-3 mt-3">
                 {previousRanges.map((range) => {
-                  const spent = spentInRange(
+                  const amount = amountInRange(
                     txs,
                     categoryIds,
                     range.startKey,
-                    range.endKey
+                    range.endKey,
+                    direction
                   );
                   const progress =
-                    limit.amount_rub > 0 ? Math.min(spent / limit.amount_rub, 1) : 0;
-                  const tone = getProgressTone(progress);
-                  const barColor = getProgressBarColor(tone);
+                    goal.amount_rub > 0 ? Math.min(amount / goal.amount_rub, 1) : 0;
+                  const barColor = getGoalProgressColor(progress, isIncomeGoal);
                   return (
                     <div key={range.startKey} className="space-y-1">
                       <div className="flex items-center justify-between text-sm font-normal">
@@ -422,7 +412,7 @@ export function LimitCard({
                           {range.label}
                         </span>
                         <span style={{ color: ACTIVE_TEXT_DARK }}>
-                          {formatAmount(spent)} / {formatAmount(limit.amount_rub)}
+                          {formatAmount(amount)} / {formatAmount(goal.amount_rub)}
                         </span>
                       </div>
                       <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">

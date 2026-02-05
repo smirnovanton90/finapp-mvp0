@@ -18,6 +18,7 @@ TransactionChainSource = Literal["AUTO_ITEM", "MANUAL"]
 TransactionChainPurpose = Literal["INTEREST", "PRINCIPAL"]
 CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
 LimitPeriod = Literal["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"]
+GoalPeriod = LimitPeriod
 CounterpartyType = Literal["LEGAL", "PERSON"]
 OnboardingDeviceType = Literal["WEB", "MOBILE"]
 OnboardingStatus = Literal["PENDING", "POSTPONED", "IN_PROGRESS", "COMPLETED", "SKIPPED"]
@@ -590,6 +591,12 @@ class LimitOut(LimitBase):
 
     class Config:
         from_attributes = True
+
+
+# Цели (Goals) — публичный API и схема (алиасы для лимитов)
+GoalBase = LimitBase
+GoalCreate = LimitCreate
+GoalOut = LimitOut
 
 
 class CategoryCreate(BaseModel):

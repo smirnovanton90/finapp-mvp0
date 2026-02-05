@@ -51,8 +51,8 @@ const nav = [
     icon: LineChart,
   },
   {
-    href: "/limits",
-    label: "\u041b\u0438\u043c\u0438\u0442\u044b",
+    href: "/goals",
+    label: "Цели",
     icon: Gauge,
   },
   {
@@ -89,7 +89,7 @@ function IconFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-const FILTER_PAGES = ["/assets", "/transactions", "/financial-planning", "/limits", "/categories", "/counterparties"];
+const FILTER_PAGES = ["/assets", "/transactions", "/financial-planning", "/goals", "/categories", "/counterparties"];
 
 export function Sidebar() {
   const pathname = usePathname();

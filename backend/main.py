@@ -48,7 +48,7 @@ from transactions import (
 )
 from transaction_chains import router as transaction_chains_router
 from categories import router as categories_router
-from limits import router as limits_router
+from goals import router as goals_router
 from counterparties import router as counterparties_router
 from receipts import router as receipts_router
 from market import router as market_router, resolve_market_instrument
@@ -131,7 +131,7 @@ _BANK_INDUSTRY_NAME = "Банки"
 app.include_router(transactions_router)
 app.include_router(transaction_chains_router)
 app.include_router(categories_router)
-app.include_router(limits_router)
+app.include_router(goals_router)
 app.include_router(counterparties_router)
 app.include_router(receipts_router)
 app.include_router(market_router)

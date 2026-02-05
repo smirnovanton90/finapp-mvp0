@@ -10,7 +10,7 @@ const FILTER_PAGES = [
   "/assets",
   "/transactions",
   "/financial-planning",
-  "/limits",
+  "/goals",
   "/categories",
   "/counterparties",
 ];

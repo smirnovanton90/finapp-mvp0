@@ -23,7 +23,7 @@ export type OnboardingStepKey =
   | "categories"
   | "counterparties"
   | "transactions"
-  | "limits"
+  | "limits"  // key kept for backend; UI route is /goals
   | "planning"
   | "reports";
 
@@ -38,7 +38,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   { key: "categories", route: "/categories" },
   { key: "counterparties", route: "/counterparties" },
   { key: "transactions", route: "/transactions" },
-  { key: "limits", route: "/limits" },
+  { key: "limits", route: "/goals" },
   { key: "planning", route: "/financial-planning" },
   { key: "reports", route: "/reports" },
 ];

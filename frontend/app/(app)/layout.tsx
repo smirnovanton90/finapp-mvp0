@@ -25,10 +25,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isTransactionsPage = pathname === "/transactions" || pathname?.startsWith("/transactions/");
   const isAssetsPage = pathname === "/assets" || pathname?.startsWith("/assets/");
   const isFinancialPlanningPage = pathname === "/financial-planning" || pathname?.startsWith("/financial-planning/");
-  const isLimitsPage = pathname === "/limits" || pathname?.startsWith("/limits/");
+  const isGoalsPage = pathname === "/goals" || pathname?.startsWith("/goals/");
   const isCategoriesPage = pathname === "/categories" || pathname?.startsWith("/categories/");
   const isCounterpartiesPage = pathname === "/counterparties" || pathname?.startsWith("/counterparties/");
-  const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage || isLimitsPage || isCategoriesPage || isCounterpartiesPage;
+  const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage || isGoalsPage || isCategoriesPage || isCounterpartiesPage;
   const filtersOpen = isSpecialPage && !isFilterPanelCollapsed;
   const showFiltersStrip = isSpecialPage && !isCollapsed;
   const asidePadding = 20;

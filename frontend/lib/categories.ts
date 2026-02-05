@@ -314,12 +314,14 @@ export type CategoryLookup = ReturnType<typeof buildCategoryLookup>;
 export function buildCategoryLookup(nodes: CategoryNode[]) {
   const idToPath = new Map<number, string[]>();
   const idToIcon = new Map<number, string | null>();
+  const idToScope = new Map<number, CategoryScope>();
   const pathToId = new Map<string, number>();
 
   const walk = (items: CategoryNode[], trail: string[]) => {
     items.forEach((item) => {
       const nextTrail = [...trail, item.name];
       idToPath.set(item.id, nextTrail);
+      idToScope.set(item.id, item.scope);
       // Для L1-категорий по умолчанию приоритет у маппинга из конфига (актуальная иконка без зависимости от БД)
       const iconName =
         nextTrail.length === 1 &&
@@ -338,7 +340,7 @@ export function buildCategoryLookup(nodes: CategoryNode[]) {
 
   walk(nodes, []);
 
-  return { idToPath, idToIcon, pathToId };
+  return { idToPath, idToIcon, idToScope, pathToId };
 }
 
 export function buildCategoryDescendants(nodes: CategoryNode[]) {

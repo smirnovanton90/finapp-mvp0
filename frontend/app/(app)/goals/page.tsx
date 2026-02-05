@@ -10,10 +10,10 @@ import { ConfirmModal } from "@/components/confirm-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CategorySelector } from "@/components/category-selector";
+import { CounterpartySelector } from "@/components/counterparty-selector";
 import { FormModal } from "@/components/form-modal";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
-import { CounterpartySelector } from "@/components/counterparty-selector";
 import {
   buildCategoryDescendants,
   buildCategoryLookup,
@@ -21,23 +21,24 @@ import {
   CategoryNode,
   makeCategoryPathKey,
 } from "@/lib/categories";
+import type { CategoryScope } from "@/lib/categories";
 import {
   API_BASE,
-  createLimit,
-  deleteLimit,
+  createGoal,
+  deleteGoal,
   fetchCategories,
-  fetchLimits,
+  fetchGoals,
   fetchTransactions,
   fetchCounterparties,
-  LimitCreate,
-  LimitOut,
-  LimitPeriod,
+  GoalCreate,
+  GoalOut,
+  GoalPeriod,
   TransactionOut,
-  updateLimit,
+  updateGoal,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterSection } from "@/components/filter-panel";
-import { LimitCard } from "@/components/limit-card";
+import { GoalCard } from "@/components/goal-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
@@ -48,7 +49,7 @@ import { cn } from "@/lib/utils";
 const CATEGORY_PLACEHOLDER = "-";
 const CATEGORY_PATH_SEPARATOR = " / ";
 
-const PERIOD_LABELS: Record<LimitPeriod, string> = {
+const PERIOD_LABELS: Record<GoalPeriod, string> = {
   MONTHLY: "Ежемесячный",
   WEEKLY: "Еженедельный",
   YEARLY: "Ежегодный",
@@ -109,57 +110,48 @@ function getRangeLabel(startKey: string, endKey: string) {
   return `${formatDateLabel(startKey)} - ${formatDateLabel(endKey)}`;
 }
 
-function getLimitRange(limit: LimitOut, today: Date) {
-  if (limit.period === "CUSTOM") {
-    if (!limit.custom_start_date || !limit.custom_end_date) return null;
+function getGoalRange(goal: GoalOut, today: Date) {
+  if (goal.period === "CUSTOM") {
+    if (!goal.custom_start_date || !goal.custom_end_date) return null;
     return {
-      startKey: limit.custom_start_date,
-      endKey: limit.custom_end_date,
-      rangeLabel: getRangeLabel(limit.custom_start_date, limit.custom_end_date),
+      startKey: goal.custom_start_date,
+      endKey: goal.custom_end_date,
+      rangeLabel: getRangeLabel(goal.custom_start_date, goal.custom_end_date),
     };
   }
-
-  if (limit.period === "WEEKLY") {
+  if (goal.period === "WEEKLY") {
     const start = getWeekStart(today);
     const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
-    const startKey = toDateKey(start);
-    const endKey = toDateKey(end);
     return {
-      startKey,
-      endKey,
-      rangeLabel: getRangeLabel(startKey, endKey),
+      startKey: toDateKey(start),
+      endKey: toDateKey(end),
+      rangeLabel: getRangeLabel(toDateKey(start), toDateKey(end)),
     };
   }
-
-  if (limit.period === "MONTHLY") {
+  if (goal.period === "MONTHLY") {
     const start = new Date(today.getFullYear(), today.getMonth(), 1);
     const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    const startKey = toDateKey(start);
-    const endKey = toDateKey(end);
     return {
-      startKey,
-      endKey,
-      rangeLabel: getRangeLabel(startKey, endKey),
+      startKey: toDateKey(start),
+      endKey: toDateKey(end),
+      rangeLabel: getRangeLabel(toDateKey(start), toDateKey(end)),
     };
   }
-
   const start = new Date(today.getFullYear(), 0, 1);
   const end = new Date(today.getFullYear(), 11, 31);
-  const startKey = toDateKey(start);
-  const endKey = toDateKey(end);
   return {
-    startKey,
-    endKey,
-    rangeLabel: getRangeLabel(startKey, endKey),
+    startKey: toDateKey(start),
+    endKey: toDateKey(end),
+    rangeLabel: getRangeLabel(toDateKey(start), toDateKey(end)),
   };
 }
 
-export default function LimitsPage() {
+export default function GoalsPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
 
-  const [limits, setLimits] = useState<LimitOut[]>([]);
+  const [goals, setGoals] = useState<GoalOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [mounted, setMounted] = useState(false);
@@ -171,7 +163,7 @@ export default function LimitsPage() {
   const [filterName, setFilterName] = useState("");
   const [filterAmountFrom, setFilterAmountFrom] = useState("");
   const [filterAmountTo, setFilterAmountTo] = useState("");
-  const [filterPeriod, setFilterPeriod] = useState<Set<LimitPeriod>>(new Set());
+  const [filterPeriod, setFilterPeriod] = useState<Set<GoalPeriod>>(new Set());
   const [filterCategoryIds, setFilterCategoryIds] = useState<number[]>([]);
   const [filterCounterpartyIds, setFilterCounterpartyIds] = useState<number[]>([]);
   const [filterComment, setFilterComment] = useState("");
@@ -180,13 +172,13 @@ export default function LimitsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [editingLimit, setEditingLimit] = useState<LimitOut | null>(null);
+  const [editingGoal, setEditingGoal] = useState<GoalOut | null>(null);
 
-  const [deleteTarget, setDeleteTarget] = useState<LimitOut | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<GoalOut | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [limitName, setLimitName] = useState("");
-  const [period, setPeriod] = useState<LimitPeriod>("MONTHLY");
+  const [goalName, setGoalName] = useState("");
+  const [period, setPeriod] = useState<GoalPeriod>("MONTHLY");
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
   const [amountStr, setAmountStr] = useState("");
@@ -204,7 +196,7 @@ export default function LimitsPage() {
   }, [isWizardOpen]);
 
   const categoryMaps = useMemo(
-    () => buildCategoryMaps(categoryNodes, "EXPENSE"),
+    () => buildCategoryMaps(categoryNodes),
     [categoryNodes]
   );
 
@@ -244,38 +236,39 @@ export default function LimitsPage() {
     return paths;
   }, [categoryMaps]);
 
-
-  const activeLimits = useMemo(
-    () => limits.filter((limit) => !limit.deleted_at),
-    [limits]
+  const activeGoals = useMemo(
+    () => goals.filter((goal) => !goal.deleted_at),
+    [goals]
   );
-  const deletedLimits = useMemo(
-    () => limits.filter((limit) => limit.deleted_at),
-    [limits]
+  const deletedGoals = useMemo(
+    () => goals.filter((goal) => goal.deleted_at),
+    [goals]
   );
 
-  const visibleLimits = useMemo(() => {
+  const visibleGoals = useMemo(() => {
     const nameNorm = filterName.trim().toLowerCase();
     const amountFromCents = filterAmountFrom.trim() ? parseRubToCents(filterAmountFrom) : NaN;
     const amountToCents = filterAmountTo.trim() ? parseRubToCents(filterAmountTo) : NaN;
     const showActive = filterStatus.has("active");
     const showDeleted = filterStatus.has("deleted");
 
-    return limits.filter((limit) => {
-      if (nameNorm && !limit.name.toLowerCase().includes(nameNorm)) return false;
-      if (Number.isFinite(amountFromCents) && limit.amount_rub < amountFromCents) return false;
-      if (Number.isFinite(amountToCents) && limit.amount_rub > amountToCents) return false;
-      if (filterPeriod.size > 0 && !filterPeriod.has(limit.period)) return false;
-      if (filterCategoryIds.length > 0 && !filterCategoryIds.includes(limit.category_id)) return false;
-      const isDeleted = Boolean(limit.deleted_at);
+    return goals.filter((goal) => {
+      if (nameNorm && !goal.name.toLowerCase().includes(nameNorm)) return false;
+      if (Number.isFinite(amountFromCents) && goal.amount_rub < amountFromCents) return false;
+      if (Number.isFinite(amountToCents) && goal.amount_rub > amountToCents) return false;
+      if (filterPeriod.size > 0 && !filterPeriod.has(goal.period)) return false;
+      if (filterCategoryIds.length > 0 && !filterCategoryIds.includes(goal.category_id)) return false;
+      const isDeleted = Boolean(goal.deleted_at);
       if (isDeleted && !showDeleted) return false;
       if (!isDeleted && !showActive) return false;
 
       if (filterCounterpartyIds.length > 0) {
-        const categoryIds = categoryDescendants.get(limit.category_id) ?? new Set([limit.category_id]);
+        const categoryIds = categoryDescendants.get(goal.category_id) ?? new Set([goal.category_id]);
+        const scope = categoryLookup.idToScope?.get(goal.category_id);
+        const direction = scope === "INCOME" ? "INCOME" : "EXPENSE";
         const hasMatch = txs.some(
           (tx) =>
-            tx.direction === "EXPENSE" &&
+            tx.direction === direction &&
             isRealizedTransaction(tx) &&
             tx.category_id != null &&
             categoryIds.has(tx.category_id) &&
@@ -287,7 +280,7 @@ export default function LimitsPage() {
       return true;
     });
   }, [
-    limits,
+    goals,
     filterName,
     filterAmountFrom,
     filterAmountTo,
@@ -296,71 +289,77 @@ export default function LimitsPage() {
     filterCounterpartyIds,
     filterStatus,
     categoryDescendants,
+    categoryLookup.idToScope,
     txs,
   ]);
 
-  const limitSummaryById = useMemo(() => {
+  const goalSummaryById = useMemo(() => {
     const now = new Date();
     const map = new Map<
       number,
-      { spent: number; progress: number; rangeLabel: string | null }
+      { amount: number; progress: number; rangeLabel: string | null; isIncome: boolean }
     >();
 
-    limits.forEach((limit) => {
-      const range = getLimitRange(limit, now);
+    goals.forEach((goal) => {
+      const range = getGoalRange(goal, now);
       const categoryIds =
-        categoryDescendants.get(limit.category_id) ?? new Set([limit.category_id]);
-      let spent = 0;
+        categoryDescendants.get(goal.category_id) ?? new Set([goal.category_id]);
+      const scope: CategoryScope | undefined = categoryLookup.idToScope?.get(goal.category_id);
+      const isIncome = scope === "INCOME";
+      const direction = isIncome ? "INCOME" : "EXPENSE";
+      let amount = 0;
       if (range) {
         txs.forEach((tx) => {
-          if (tx.direction !== "EXPENSE") return;
+          if (tx.direction !== direction) return;
           if (!isRealizedTransaction(tx)) return;
           if (!tx.category_id || !categoryIds.has(tx.category_id)) return;
           const dateKey = toTxDateKey(tx.transaction_date);
           if (!dateKey) return;
           if (dateKey < range.startKey || dateKey > range.endKey) return;
-          spent += tx.amount_rub;
+          amount += tx.amount_rub;
         });
       }
       const progress =
-        limit.amount_rub > 0 ? Math.min(spent / limit.amount_rub, 1) : 0;
-      map.set(limit.id, {
-        spent,
+        goal.amount_rub > 0 ? Math.min(amount / goal.amount_rub, 1) : 0;
+      map.set(goal.id, {
+        amount,
         progress,
         rangeLabel: range?.rangeLabel ?? null,
+        isIncome,
       });
     });
     return map;
-  }, [categoryDescendants, limits, txs]);
+  }, [categoryDescendants, categoryLookup.idToScope, goals, txs]);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [limitsData, txData, categoriesData, counterpartiesData] = await Promise.all([
-        fetchLimits({ include_deleted: true }),
+      const [goalsData, txData, categoriesData, counterpartiesData] = await Promise.all([
+        fetchGoals({ include_deleted: true }),
         fetchTransactions(),
         fetchCategories(),
         fetchCounterparties(),
       ]);
-      setLimits(limitsData);
+      setGoals(goalsData);
       setTxs(txData);
       setCategoryNodes(categoriesData);
       setCounterparties(counterpartiesData);
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const err = e as { message?: string };
       setError(
-        e?.message ??
-          "Не удалось загрузить лимиты. Попробуйте обновить страницу."
+        err?.message ??
+          "Не удалось загрузить цели. Попробуйте обновить страницу."
       );
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!session) return;
     loadAll();
-  }, [session]);
+  }, [session, loadAll]);
 
   useEffect(() => {
     if (period !== "CUSTOM") return;
@@ -407,7 +406,7 @@ export default function LimitsPage() {
   const cat3 = selectedCategoryPath?.l3 || "";
 
   const resetForm = () => {
-    setLimitName("");
+    setGoalName("");
     setPeriod("MONTHLY");
     setCustomStartDate("");
     setCustomEndDate("");
@@ -418,32 +417,32 @@ export default function LimitsPage() {
 
   useEffect(() => {
     if (!isDialogOpen) return;
-    if (!editingLimit) {
+    if (!editingGoal) {
       resetForm();
       return;
     }
 
-    setLimitName(editingLimit.name);
-    setPeriod(editingLimit.period);
-    setCustomStartDate(editingLimit.custom_start_date ?? "");
-    setCustomEndDate(editingLimit.custom_end_date ?? "");
-    setAmountStr(formatCentsForInput(editingLimit.amount_rub));
-    const path = categoryLookup.idToPath.get(editingLimit.category_id) ?? [];
+    setGoalName(editingGoal.name);
+    setPeriod(editingGoal.period);
+    setCustomStartDate(editingGoal.custom_start_date ?? "");
+    setCustomEndDate(editingGoal.custom_end_date ?? "");
+    setAmountStr(formatCentsForInput(editingGoal.amount_rub));
+    const path = categoryLookup.idToPath.get(editingGoal.category_id) ?? [];
     const nextL1 = path[0] ?? "";
     const nextL2 = path[1] ?? CATEGORY_PLACEHOLDER;
     const nextL3 = path[2] ?? CATEGORY_PLACEHOLDER;
     applyCategorySelection(nextL1, nextL2, nextL3);
     setFormError(null);
-  }, [categoryLookup.idToPath, editingLimit, isDialogOpen, categoryMaps.l1.length]);
+  }, [categoryLookup.idToPath, editingGoal, isDialogOpen, categoryMaps.l1.length]);
 
   useEffect(() => {
     if (!isWizardOpen || activeStep?.key !== "limits") return;
     if (onboardingAppliedRef.current === "limits") return;
     if (categoryMaps.l1.length === 0) return;
     onboardingAppliedRef.current = "limits";
-    setEditingLimit(null);
+    setEditingGoal(null);
     setIsDialogOpen(true);
-    setLimitName("Лимит на расходы");
+    setGoalName("Цель на расходы");
     setPeriod("MONTHLY");
     setAmountStr("10 000");
     const l1 = categoryMaps.l1[0];
@@ -456,12 +455,12 @@ export default function LimitsPage() {
   }, [activeStep?.key, categoryMaps, isWizardOpen]);
 
   const openCreateDialog = () => {
-    setEditingLimit(null);
+    setEditingGoal(null);
     setIsDialogOpen(true);
   };
 
-  const openEditDialog = (limit: LimitOut) => {
-    setEditingLimit(limit);
+  const openEditDialog = (goal: GoalOut) => {
+    setEditingGoal(goal);
     setIsDialogOpen(true);
   };
 
@@ -469,27 +468,27 @@ export default function LimitsPage() {
     event.preventDefault();
     setFormError(null);
 
-    const trimmedName = limitName.trim();
+    const trimmedName = goalName.trim();
     if (!trimmedName) {
-      setFormError("Укажите название лимита.");
+      setFormError("Укажите название цели.");
       return;
     }
 
     const amountCents = parseRubToCents(amountStr);
     if (!Number.isFinite(amountCents) || amountCents <= 0) {
-      setFormError("Укажите сумму лимита.");
+      setFormError("Укажите сумму цели.");
       return;
     }
 
     const categoryId = resolveCategoryId(cat1, cat2, cat3);
     if (!categoryId) {
-      setFormError("Выберите категорию расхода.");
+      setFormError("Выберите категорию (доходов или расходов).");
       return;
     }
 
     if (period === "CUSTOM") {
       if (!customStartDate || !customEndDate) {
-        setFormError("Укажите период для лимита.");
+        setFormError("Укажите период для цели.");
         return;
       }
       if (customEndDate < customStartDate) {
@@ -497,12 +496,12 @@ export default function LimitsPage() {
         return;
       }
       if (accountingStartDate && customStartDate < accountingStartDate) {
-        setFormError("Дата начала лимита не может быть раньше даты начала учета.");
+        setFormError("Дата начала цели не может быть раньше даты начала учета.");
         return;
       }
     }
 
-    const payload: LimitCreate = {
+    const payload: GoalCreate = {
       name: trimmedName,
       period,
       category_id: categoryId,
@@ -513,35 +512,37 @@ export default function LimitsPage() {
 
     setIsSubmitting(true);
     try {
-      if (editingLimit) {
-        await updateLimit(editingLimit.id, payload);
+      if (editingGoal) {
+        await updateGoal(editingGoal.id, payload);
       } else {
-        await createLimit(payload);
+        await createGoal(payload);
       }
       await loadAll();
       setIsDialogOpen(false);
-      setEditingLimit(null);
-    } catch (e: any) {
+      setEditingGoal(null);
+    } catch (e: unknown) {
+      const err = e as { message?: string };
       setFormError(
-        e?.message ??
-          "Не удалось сохранить лимит. Проверьте данные и попробуйте снова."
+        err?.message ??
+          "Не удалось сохранить цель. Проверьте данные и попробуйте снова."
       );
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleDeleteLimit = async () => {
+  const handleDeleteGoal = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
     try {
-      await deleteLimit(deleteTarget.id);
+      await deleteGoal(deleteTarget.id);
       await loadAll();
       setDeleteTarget(null);
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const err = e as { message?: string };
       setError(
-        e?.message ??
-          "Не удалось удалить лимит. Попробуйте обновить страницу."
+        err?.message ??
+          "Не удалось удалить цель. Попробуйте обновить страницу."
       );
       setDeleteTarget(null);
     } finally {
@@ -558,25 +559,25 @@ export default function LimitsPage() {
         onOpenChange={(open) => {
           setIsDialogOpen(open);
           if (!open) {
-            setEditingLimit(null);
+            setEditingGoal(null);
             setFormError(null);
           }
         }}
-        title={editingLimit ? "Изменить лимит" : "Добавить лимит"}
+        title={editingGoal ? "Изменить цель" : "Добавить цель"}
         icon={<Gauge className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
         formError={formError}
         onSubmit={handleSubmit}
         onCancel={() => {
           setIsDialogOpen(false);
-          setEditingLimit(null);
+          setEditingGoal(null);
           setFormError(null);
         }}
         submitLabel={
           isSubmitting
-            ? editingLimit
+            ? editingGoal
               ? "Сохраняем..."
               : "Добавляем..."
-            : editingLimit
+            : editingGoal
               ? "Сохранить"
               : "Добавить"
         }
@@ -584,16 +585,16 @@ export default function LimitsPage() {
         size="medium"
       >
         <TextField
-          label="Название лимита"
-          value={limitName}
-          onChange={(e) => setLimitName(e.target.value)}
-          placeholder="Например, Рестораны"
+          label="Название цели"
+          value={goalName}
+          onChange={(e) => setGoalName(e.target.value)}
+          placeholder="Например, Рестораны или Зарплата"
         />
 
         <SelectField
-          label="Период лимита"
+          label="Период цели"
           value={period}
-          onValueChange={(value) => setPeriod(value as LimitPeriod)}
+          onValueChange={(value) => setPeriod(value as GoalPeriod)}
           options={[
             { value: "MONTHLY", label: "Ежемесячный" },
             { value: "WEEKLY", label: "Еженедельный" },
@@ -621,7 +622,7 @@ export default function LimitsPage() {
         )}
 
         <div className="grid gap-2">
-          <Label style={{ color: ACTIVE_TEXT_DARK }}>Категория расхода</Label>
+          <Label style={{ color: ACTIVE_TEXT_DARK }}>Категория (доходов или расходов)</Label>
           <CategorySelector
             categoryNodes={categoryNodes}
             selectedPath={selectedCategoryPath}
@@ -633,13 +634,12 @@ export default function LimitsPage() {
               }
             }}
             placeholder="Выберите категорию"
-            direction="EXPENSE"
             disabled={isSubmitting}
           />
         </div>
 
         <TextField
-          label="Сумма лимита"
+          label="Сумма цели"
           value={amountStr}
           onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
           onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
@@ -653,12 +653,12 @@ export default function LimitsPage() {
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-        title="Удалить лимит?"
-        description="Лимит будет перемещен в раздел удаленных."
+        title="Удалить цель?"
+        description="Цель будет перемещена в раздел удаленных."
         confirmLabel="Удалить"
         variant="destructive"
         loading={isDeleting}
-        onConfirm={handleDeleteLimit}
+        onConfirm={handleDeleteGoal}
       />
 
       {mounted && typeof document !== "undefined" && (() => {
@@ -681,7 +681,7 @@ export default function LimitsPage() {
           </FilterSection>
 
           <FilterSection
-            label="Сумма лимита"
+            label="Сумма цели"
             onReset={() => {
               setFilterAmountFrom("");
               setFilterAmountTo("");
@@ -770,7 +770,6 @@ export default function LimitsPage() {
                 }
               }}
               placeholder="Начните вводить название"
-              direction="EXPENSE"
             />
           </FilterSection>
 
@@ -847,12 +846,12 @@ export default function LimitsPage() {
               </div>
             )}
 
-            {visibleLimits.length === 0 && !loading ? (
+            {visibleGoals.length === 0 && !loading ? (
               <div
                 className="rounded-lg border border-dashed p-6 text-center text-sm"
                 style={{ borderColor: PLACEHOLDER_COLOR_DARK, color: PLACEHOLDER_COLOR_DARK }}
               >
-                Нет лимитов по заданным фильтрам.
+                Нет целей по заданным фильтрам.
               </div>
             ) : (
               <div
@@ -864,27 +863,29 @@ export default function LimitsPage() {
                   transition: "opacity 0.3s ease-in-out",
                 }}
               >
-                {visibleLimits.map((limit) => {
-                  const summary = limitSummaryById.get(limit.id) ?? {
-                    spent: 0,
+                {visibleGoals.map((goal) => {
+                  const summary = goalSummaryById.get(goal.id) ?? {
+                    amount: 0,
                     progress: 0,
                     rangeLabel: null,
+                    isIncome: false,
                   };
                   return (
                     <div
-                      key={limit.id}
+                      key={goal.id}
                       style={{ breakInside: "avoid", marginBottom: "1rem" }}
                     >
-                      <LimitCard
-                        limit={limit}
+                      <GoalCard
+                        goal={goal}
+                        isIncomeGoal={summary.isIncome}
                         categoryLookup={categoryLookup}
-                        categoryPathLabel={formatCategoryLabel(limit.category_id)}
+                        categoryPathLabel={formatCategoryLabel(goal.category_id)}
                         categoryDescendants={categoryDescendants}
                         txs={txs}
-                        currentSpent={summary.spent}
+                        currentAmount={summary.amount}
                         currentProgress={summary.progress}
-                        onEdit={limit.deleted_at ? undefined : openEditDialog}
-                        onDelete={(l) => setDeleteTarget(l)}
+                        onEdit={goal.deleted_at ? undefined : openEditDialog}
+                        onDelete={(g) => setDeleteTarget(g)}
                       />
                     </div>
                   );

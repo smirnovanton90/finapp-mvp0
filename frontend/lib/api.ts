@@ -390,12 +390,12 @@ export type TransactionChainOut = {
   amount_max_rub?: number | null;
 };
 
-export type LimitPeriod = "MONTHLY" | "WEEKLY" | "YEARLY" | "CUSTOM";
+export type GoalPeriod = "MONTHLY" | "WEEKLY" | "YEARLY" | "CUSTOM";
 
-export type LimitOut = {
+export type GoalOut = {
   id: number;
   name: string;
-  period: LimitPeriod;
+  period: GoalPeriod;
   custom_start_date: string | null;
   custom_end_date: string | null;
   category_id: number;
@@ -404,9 +404,9 @@ export type LimitOut = {
   deleted_at: string | null;
 };
 
-export type LimitCreate = {
+export type GoalCreate = {
   name: string;
-  period: LimitPeriod;
+  period: GoalPeriod;
   custom_start_date?: string | null;
   custom_end_date?: string | null;
   category_id: number;
@@ -1142,21 +1142,21 @@ export async function deleteTransactionChain(id: number): Promise<void> {
   if (!res.ok) throw new Error(await readError(res));
 }
 
-export async function fetchLimits(options?: {
+export async function fetchGoals(options?: {
   include_deleted?: boolean;
   deleted_only?: boolean;
-}): Promise<LimitOut[]> {
+}): Promise<GoalOut[]> {
   const params = new URLSearchParams();
   if (options?.include_deleted) params.set("include_deleted", "true");
   if (options?.deleted_only) params.set("deleted_only", "true");
   const qs = params.toString();
-  const res = await authFetch(`${API_BASE}/limits${qs ? `?${qs}` : ""}`);
+  const res = await authFetch(`${API_BASE}/goals${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
-export async function createLimit(payload: LimitCreate): Promise<LimitOut> {
-  const res = await authFetch(`${API_BASE}/limits`, {
+export async function createGoal(payload: GoalCreate): Promise<GoalOut> {
+  const res = await authFetch(`${API_BASE}/goals`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -1164,11 +1164,11 @@ export async function createLimit(payload: LimitCreate): Promise<LimitOut> {
   return res.json();
 }
 
-export async function updateLimit(
+export async function updateGoal(
   id: number,
-  payload: LimitCreate
-): Promise<LimitOut> {
-  const res = await authFetch(`${API_BASE}/limits/${id}`, {
+  payload: GoalCreate
+): Promise<GoalOut> {
+  const res = await authFetch(`${API_BASE}/goals/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -1176,8 +1176,8 @@ export async function updateLimit(
   return res.json();
 }
 
-export async function deleteLimit(id: number): Promise<void> {
-  const res = await authFetch(`${API_BASE}/limits/${id}`, {
+export async function deleteGoal(id: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/goals/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await readError(res));

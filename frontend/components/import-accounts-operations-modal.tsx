@@ -29,6 +29,7 @@ import {
   type ImportAccountCardState,
 } from "@/components/import-account-card";
 import { fetchItems, API_BASE } from "@/lib/api";
+import { validateStep2 } from "@/lib/import-step2-validation";
 
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
@@ -85,6 +86,7 @@ export function ImportAccountsOperationsModal({
   const [isDragOver, setIsDragOver] = React.useState(false);
   const [parsedData, setParsedData] = React.useState<DzenParsedData | null>(null);
   const [parseError, setParseError] = React.useState<string | null>(null);
+  const [step2Error, setStep2Error] = React.useState<string | null>(null);
   const [isParsing, setIsParsing] = React.useState(false);
   const [accountCardStates, setAccountCardStates] = React.useState<
     Map<string, ImportAccountCardState>
@@ -114,6 +116,7 @@ export function ImportAccountsOperationsModal({
       setIsDragOver(false);
       setParsedData(null);
       setParseError(null);
+      setStep2Error(null);
       setAccountCardStates(new Map());
     }
   }, [open]);
@@ -166,6 +169,19 @@ export function ImportAccountsOperationsModal({
       return;
     }
 
+    if (step === 2 && parsedData) {
+      setStep2Error(null);
+      const result = validateStep2(
+        parsedData.accounts,
+        parsedData.transactions,
+        accountCardStates
+      );
+      if (!result.valid) {
+        setStep2Error(result.error);
+        return;
+      }
+    }
+
     if (step < 5) {
       setStep((s) => (s + 1) as ImportStep);
     } else {
@@ -176,6 +192,7 @@ export function ImportAccountsOperationsModal({
 
   const handleBack = () => {
     if (step > 1) {
+      setStep2Error(null);
       setStep((s) => (s - 1) as ImportStep);
     }
   };
@@ -419,12 +436,32 @@ export function ImportAccountsOperationsModal({
             )}
             {step === 2 && parsedData && (
               <div className="flex flex-col gap-4">
-                <h3
-                  className="text-2xl font-medium shrink-0"
-                  style={{ color: ACTIVE_TEXT_DARK }}
+                <div
+                  className="shrink-0 text-center"
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 400,
+                    color: ACTIVE_TEXT_DARK,
+                    lineHeight: 1.4,
+                  }}
                 >
-                  Счета
-                </h3>
+                  <p className="mb-2">
+                    Выберите, какие счета вы хотите импортировать, с каким
+                    типом, названием, а также укажите текущий остаток
+                  </p>
+                  <p>
+                    Также Вы можете связать импортируемый счет с уже имеющимся
+                    активом/обязательством — для этого включите движок «Связать»
+                  </p>
+                </div>
+                {step2Error && (
+                  <p
+                    className="text-base shrink-0"
+                    style={{ color: "#FB4C4F" }}
+                  >
+                    {step2Error}
+                  </p>
+                )}
                 <div className="flex flex-col gap-4 overflow-auto min-w-0">
                   {parsedData.accounts.map((account) => {
                     const key = `${account.name}|${account.currency}`;

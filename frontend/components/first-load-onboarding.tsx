@@ -9,6 +9,7 @@ import {
   ImportHistoryModalContent,
   type ImportSourceKey,
 } from "@/components/import-history-modal-content";
+import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,6 +57,7 @@ export function FirstLoadOnboarding() {
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
+  const [importServiceModalOpen, setImportServiceModalOpen] = useState(false);
 
   const todayKey = useMemo(() => getTodayDateKey(), []);
   const displayToday = formatDisplayDate(todayKey);
@@ -118,10 +120,11 @@ export function FirstLoadOnboarding() {
   }, []);
 
   const onStartImport = useCallback(() => {
-    // Заглушка: сервис импорта будет реализован отдельно
-  }, []);
+    if (importSource) setImportServiceModalOpen(true);
+  }, [importSource]);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={true}
@@ -386,5 +389,14 @@ export function FirstLoadOnboarding() {
         )}
       </DialogContent>
     </Dialog>
+    <ImportAccountsOperationsModal
+      open={importServiceModalOpen}
+      onOpenChange={setImportServiceModalOpen}
+      onFinish={() => {
+        setImportStepSkipped(true);
+        setStep(4);
+      }}
+    />
+    </>
   );
 }

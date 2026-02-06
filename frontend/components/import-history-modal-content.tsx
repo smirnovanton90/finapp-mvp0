@@ -179,6 +179,7 @@ export function ImportHistoryModalContent({
               ...cardStyle.body,
             } as React.CSSProperties
           }
+          disabled={!selectedSource}
           onClick={onStartImport}
         >
           Начать импорт истории

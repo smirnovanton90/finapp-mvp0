@@ -21,6 +21,7 @@ import {
   ImportHistoryModalContent,
   type ImportSourceKey,
 } from "@/components/import-history-modal-content";
+import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   MODAL_BG,
@@ -84,6 +85,7 @@ export default function CabinetPage() {
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importServiceModalOpen, setImportServiceModalOpen] = useState(false);
   const [importSource, setImportSource] = useState<ImportSourceKey>(null);
 
   useEffect(() => {
@@ -474,11 +476,19 @@ export default function CabinetPage() {
               onSelectSource={setImportSource}
               onLater={() => setImportModalOpen(false)}
               onStartImport={() => {
-                // Заглушка: сервис импорта будет реализован отдельно
+                if (importSource) {
+                  setImportModalOpen(false);
+                  setImportServiceModalOpen(true);
+                }
               }}
             />
           </DialogContent>
         </Dialog>
+
+        <ImportAccountsOperationsModal
+          open={importServiceModalOpen}
+          onOpenChange={setImportServiceModalOpen}
+        />
 
         {/* Информация */}
         {accountingStartDate && (

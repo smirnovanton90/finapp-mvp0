@@ -153,7 +153,7 @@ export function ImportAccountsOperationsModal({
                 })}
               </div>
               {/* Ряд 2: подписи по центру под квадратами */}
-              <div className="flex flex-row justify-center items-start w-full gap-0 mt-5">
+              <div className="flex flex-row justify-center items-start w-full gap-0 mt-6">
                 {STEPS.map(({ key, label }, idx) => {
                   const isPassed = step > key;
                   const isCurrent = step === key;
@@ -210,6 +210,8 @@ export function ImportAccountsOperationsModal({
                 {
                   "--glass-bg": "rgba(108, 93, 215, 0.22)",
                   "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  fontSize: 18,
+                  fontWeight: 400,
                 } as React.CSSProperties
               }
               onClick={handleCancel}
@@ -224,6 +226,8 @@ export function ImportAccountsOperationsModal({
                   {
                     "--glass-bg": "rgba(108, 93, 215, 0.22)",
                     "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                    fontSize: 18,
+                    fontWeight: 400,
                   } as React.CSSProperties
                 }
                 onClick={handleBack}
@@ -240,6 +244,8 @@ export function ImportAccountsOperationsModal({
                     "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
                   "--auth-primary-bg-hover":
                     "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                  fontSize: 18,
+                  fontWeight: 400,
                 } as React.CSSProperties
               }
               onClick={handleNext}

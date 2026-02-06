@@ -52,8 +52,10 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean;
     overlayClassName?: string;
+    /** Заголовок для скринридеров (обязателен для доступности). Скрыт визуально. */
+    title?: string;
   }
->(({ className, children, showCloseButton = true, overlayClassName, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, overlayClassName, title = "Диалог", ...props }, ref) => {
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay className={overlayClassName} />
@@ -69,6 +71,9 @@ const DialogContent = React.forwardRef<
             )}
             {...props}
           >
+            <DialogPrimitive.Title className="sr-only">
+              {title}
+            </DialogPrimitive.Title>
             {children}
             {showCloseButton && (
               <DialogPrimitive.Close

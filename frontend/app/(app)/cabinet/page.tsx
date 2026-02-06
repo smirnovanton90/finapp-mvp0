@@ -18,10 +18,16 @@ import {
 import { useTheme } from "@/components/theme-provider";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import {
+  ImportHistoryModalContent,
+  type ImportSourceKey,
+} from "@/components/import-history-modal-content";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
   MODAL_BG,
   ACTIVE_TEXT_DARK,
   PLACEHOLDER_COLOR_DARK,
 } from "@/lib/colors";
+import { cn } from "@/lib/utils";
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 const MAX_PHOTO_DIM = 1024;
@@ -76,6 +82,9 @@ export default function CabinetPage() {
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importSource, setImportSource] = useState<ImportSourceKey>(null);
 
   useEffect(() => {
     loadProfile();
@@ -423,6 +432,53 @@ export default function CabinetPage() {
             </div>
           </div>
         </CabinetCard>
+
+        {/* Импорт истории */}
+        <CabinetCard>
+          <div className="space-y-4">
+            <h3
+              className="text-2xl font-medium"
+              style={{ color: ACTIVE_TEXT_DARK }}
+            >
+              Данные
+            </h3>
+            <Button
+              variant="authPrimary"
+              className="w-full sm:w-auto rounded-lg border-0"
+              style={
+                {
+                  "--auth-primary-bg":
+                    "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                  "--auth-primary-bg-hover":
+                    "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                } as React.CSSProperties
+              }
+              onClick={() => setImportModalOpen(true)}
+            >
+              Импорт истории из других приложений
+            </Button>
+          </div>
+        </CabinetCard>
+
+        <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
+          <DialogContent
+            showCloseButton={true}
+            title="Импорт истории из других приложений"
+            className={cn(
+              "w-full max-w-[calc(100%-2rem)] sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl h-[920px] max-h-[min(920px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
+              "bg-black border-0 rounded-[9px]"
+            )}
+          >
+            <ImportHistoryModalContent
+              selectedSource={importSource}
+              onSelectSource={setImportSource}
+              onLater={() => setImportModalOpen(false)}
+              onStartImport={() => {
+                // Заглушка: сервис импорта будет реализован отдельно
+              }}
+            />
+          </DialogContent>
+        </Dialog>
 
         {/* Информация */}
         {accountingStartDate && (

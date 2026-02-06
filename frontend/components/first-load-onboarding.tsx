@@ -5,6 +5,10 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 import { useAccountingStart } from "@/components/accounting-start-context";
+import {
+  ImportHistoryModalContent,
+  type ImportSourceKey,
+} from "@/components/import-history-modal-content";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -39,12 +43,14 @@ function formatDisplayDate(iso: string): string {
   return `${d}.${m}.${y}`;
 }
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 2 | 3 | 4;
 
 export function FirstLoadOnboarding() {
   const router = useRouter();
   const { accountingStartDate, setAccountingStartDate } = useAccountingStart();
   const [step, setStep] = useState<Step>(1);
+  const [importStepSkipped, setImportStepSkipped] = useState(false);
+  const [importSource, setImportSource] = useState<ImportSourceKey>(null);
   const [choiceToday, setChoiceToday] = useState(true);
   const [customDate, setCustomDate] = useState("");
   const [saving, setSaving] = useState(false);
@@ -55,7 +61,10 @@ export function FirstLoadOnboarding() {
   const displayToday = formatDisplayDate(todayKey);
 
   const goToStep2 = useCallback(() => setStep(2), []);
-  const goToStep3 = useCallback(() => setStep(3), []);
+  const goToStep3 = useCallback(() => {
+    setImportStepSkipped(false);
+    setStep(3);
+  }, []);
 
   const onStartTour = useCallback(() => {
     // Заглушка: «Начать тур» пока не работает
@@ -95,7 +104,7 @@ export function FirstLoadOnboarding() {
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (nextOpen === false && !accountingStartDate) {
-        setStep(3);
+        setStep(4);
         return;
       }
       setOpen(nextOpen);
@@ -103,12 +112,22 @@ export function FirstLoadOnboarding() {
     [accountingStartDate]
   );
 
+  const onImportLater = useCallback(() => {
+    setImportStepSkipped(true);
+    setStep(4);
+  }, []);
+
+  const onStartImport = useCallback(() => {
+    // Заглушка: сервис импорта будет реализован отдельно
+  }, []);
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={true}
+        title="Первоначальная настройка"
         className={cn(
-          "w-full max-w-[calc(100%-2rem)] sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl h-[800px] max-h-[min(800px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
+          "w-full max-w-[calc(100%-2rem)] sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl h-[920px] max-h-[min(920px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
           "bg-black border-0 rounded-[9px]"
         )}
       >
@@ -196,7 +215,7 @@ export function FirstLoadOnboarding() {
               <div className="flex flex-wrap gap-3 pt-2 justify-end">
                 <Button
                   variant="ghost"
-                  className="h-auto py-2 px-0 rounded-none border-0 bg-transparent font-medium hover:bg-transparent hover:no-underline"
+                  className="h-auto py-2 px-0 rounded-none border-0 bg-transparent font-medium hover:!bg-transparent dark:hover:!bg-transparent hover:no-underline"
                   style={{ color: ACCENT }}
                   onClick={goToStep3}
                 >
@@ -222,10 +241,21 @@ export function FirstLoadOnboarding() {
           </div>
         )}
 
-        {/* Шаг 3: Выбор даты начала учета */}
+        {/* Шаг 3: Импорт истории из других приложений */}
         {step === 3 && (
-          <div
+          <ImportHistoryModalContent
             key="step3"
+            selectedSource={importSource}
+            onSelectSource={setImportSource}
+            onLater={onImportLater}
+            onStartImport={onStartImport}
+          />
+        )}
+
+        {/* Шаг 4: Выбор даты начала учета (только если импорт пропущен) */}
+        {step === 4 && importStepSkipped && (
+          <div
+            key="step4"
             className="flex flex-col w-full h-full min-h-0 px-6 py-8 sm:px-10 sm:py-10 animate-in fade-in duration-300"
           >
             <p

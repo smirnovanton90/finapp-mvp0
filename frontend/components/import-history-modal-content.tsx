@@ -140,17 +140,25 @@ export function ImportHistoryModalContent({
                 >
                   {description}
                 </p>
-                <button
-                  type="button"
-                  className="text-left font-normal underline hover:no-underline focus:outline-none focus:underline"
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="text-left font-normal underline hover:no-underline focus:outline-none focus:underline cursor-pointer"
                   style={{ ...cardStyle.body, color: ACCENT }}
                   onClick={(e) => {
                     e.stopPropagation();
                     // Заглушка: инструкции пока не открываются
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      // Заглушка: инструкции пока не открываются
+                    }
+                  }}
                 >
                   {instructionLabel}
-                </button>
+                </span>
               </div>
             </button>
           );

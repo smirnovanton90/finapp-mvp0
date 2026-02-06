@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Download } from "lucide-react";
+import { Download, Upload } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +18,42 @@ import {
   PLACEHOLDER_COLOR_DARK,
 } from "@/lib/colors";
 import { cn } from "@/lib/utils";
+import type { ImportSourceKey } from "@/components/import-history-modal-content";
+import {
+  parseDzenCSVFile,
+  type DzenParsedData,
+} from "@/lib/dzen-csv-parser";
+import {
+  ImportAccountCard,
+  getInitialAccountCardState,
+  type ImportAccountCardState,
+} from "@/components/import-account-card";
+import { fetchItems, API_BASE } from "@/lib/api";
+
+/** Контент шага 1 по источнику импорта */
+const STEP1_CONTENT: Record<
+  NonNullable<ImportSourceKey>,
+  { title: string; description: string; instructionLabel: string }
+> = {
+  dzen: {
+    title: "Дзен-мани",
+    description:
+      "Импортируйте выписку в формате .csv, которую можно выгрузить из мобильного или WEB-приложения",
+    instructionLabel: "Инструкция по выгрузке выписки",
+  },
+  coinkeeper: {
+    title: "CoinKeeper",
+    description:
+      "Импортируйте выписку в формате .csv, которую можно выгрузить из мобильного или WEB-приложения",
+    instructionLabel: "Инструкция по выгрузке выписки",
+  },
+  own: {
+    title: "Своя выписка",
+    description:
+      "Если Вы ранее вели учет самостоятельно, например, в Excel или Google Sheets, то мы поможем Вам без труда импортировать их в ПРОСТОФИН, воспользовавшись несложной инструкцией",
+    instructionLabel: "Инструкция по импорту собственной выписки",
+  },
+};
 
 const STEPS = [
   { key: 1, label: "Выбор файла" },
@@ -32,6 +68,8 @@ type ImportStep = (typeof STEPS)[number]["key"];
 export type ImportAccountsOperationsModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Выбранный источник импорта (Дзен-мани, CoinKeeper, Своя выписка) */
+  importSource?: ImportSourceKey;
   /** Вызывается при завершении импорта (кнопка «Завершить импорт») */
   onFinish?: () => void;
 };
@@ -39,15 +77,95 @@ export type ImportAccountsOperationsModalProps = {
 export function ImportAccountsOperationsModal({
   open,
   onOpenChange,
+  importSource = "dzen",
   onFinish,
 }: ImportAccountsOperationsModalProps) {
   const [step, setStep] = React.useState<ImportStep>(1);
+  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
+  const [isDragOver, setIsDragOver] = React.useState(false);
+  const [parsedData, setParsedData] = React.useState<DzenParsedData | null>(null);
+  const [parseError, setParseError] = React.useState<string | null>(null);
+  const [isParsing, setIsParsing] = React.useState(false);
+  const [accountCardStates, setAccountCardStates] = React.useState<
+    Map<string, ImportAccountCardState>
+  >(new Map());
+  const [items, setItems] = React.useState<Awaited<ReturnType<typeof fetchItems>>>([]);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const acceptedTypes =
+    importSource === "own" ? ".csv,.xlsx,.xls" : ".csv";
+
+  const handleFileSelect = (file: File | null) => {
+    setSelectedFile(file);
+    setParsedData(null);
+    setParseError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const step1Content =
+    importSource && importSource in STEP1_CONTENT
+      ? STEP1_CONTENT[importSource]
+      : STEP1_CONTENT.dzen;
 
   React.useEffect(() => {
-    if (open) setStep(1);
+    if (open) {
+      setStep(1);
+      setSelectedFile(null);
+      setIsDragOver(false);
+      setParsedData(null);
+      setParseError(null);
+      setAccountCardStates(new Map());
+    }
   }, [open]);
 
-  const handleNext = () => {
+  React.useEffect(() => {
+    if (parsedData?.accounts?.length) {
+      const next = new Map<string, ImportAccountCardState>();
+      for (const acc of parsedData.accounts) {
+        const key = `${acc.name}|${acc.currency}`;
+        next.set(key, getInitialAccountCardState(acc));
+      }
+      setAccountCardStates(next);
+    }
+  }, [parsedData?.accounts]);
+
+  React.useEffect(() => {
+    if (parsedData && step === 2) {
+      fetchItems()
+        .then(setItems)
+        .catch(() => setItems([]));
+    }
+  }, [parsedData, step]);
+
+  const handleNext = async () => {
+    if (step === 1 && importSource === "dzen") {
+      setParseError(null);
+      if (!selectedFile) {
+        setParseError("Выберите файл для импорта.");
+        return;
+      }
+      setIsParsing(true);
+      try {
+        const data = await parseDzenCSVFile(selectedFile);
+        setParsedData(data);
+        setStep(2);
+      } catch (err) {
+        setParseError(
+          err instanceof Error ? err.message : "Не удалось обработать файл."
+        );
+      } finally {
+        setIsParsing(false);
+      }
+      return;
+    }
+
+    if (step === 1 && (importSource === "coinkeeper" || importSource === "own")) {
+      setParseError(null);
+      setParsedData(null);
+      setStep(2);
+      return;
+    }
+
     if (step < 5) {
       setStep((s) => (s + 1) as ImportStep);
     } else {
@@ -198,7 +316,154 @@ export function ImportAccountsOperationsModal({
               fontWeight: 400,
             }}
           >
-            {/* Пустой контент для каждого шага */}
+            {parseError && (
+              <p
+                className="text-base shrink-0"
+                style={{ color: "#FB4C4F" }}
+              >
+                {parseError}
+              </p>
+            )}
+            {step === 1 && (
+              <div className="flex flex-col gap-6">
+                <h3
+                  className="text-2xl font-medium"
+                  style={{ color: ACTIVE_TEXT_DARK }}
+                >
+                  {step1Content.title}
+                </h3>
+                <p style={{ lineHeight: 1.4 }}>
+                  {step1Content.description.includes(".csv")
+                    ? step1Content.description.split(".csv").map((part, i, arr) =>
+                        i < arr.length - 1 ? (
+                          <React.Fragment key={i}>
+                            {part}
+                            <span style={{ color: ACCENT }}>.csv</span>
+                          </React.Fragment>
+                        ) : (
+                          part
+                        )
+                      )
+                    : step1Content.description}
+                </p>
+                <button
+                  type="button"
+                  className="text-left font-normal underline hover:no-underline focus:outline-none focus:underline w-fit"
+                  style={{ color: ACCENT }}
+                  onClick={() => {
+                    // Заглушка: инструкции пока не открываются
+                  }}
+                >
+                  {step1Content.instructionLabel}
+                </button>
+                <div className="flex flex-col gap-2">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => fileInputRef.current?.click()}
+                    onKeyDown={(e) =>
+                      (e.key === "Enter" || e.key === " ") &&
+                      fileInputRef.current?.click()
+                    }
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDragOver(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDragOver(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDragOver(false);
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) handleFileSelect(file);
+                    }}
+                    className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed min-h-[140px] cursor-pointer transition-colors hover:opacity-90"
+                    style={{
+                      borderColor: isDragOver ? ACCENT : ACCENT2,
+                      backgroundColor: isDragOver
+                        ? "rgba(127, 92, 255, 0.12)"
+                        : "rgba(85, 68, 209, 0.08)",
+                    }}
+                  >
+                    <Upload
+                      className="w-10 h-10 shrink-0"
+                      style={{ color: ACCENT }}
+                    />
+                    {selectedFile ? (
+                      <span className="px-4 text-center break-all">
+                        {selectedFile.name}
+                      </span>
+                    ) : (
+                      <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                        Нажмите для выбора или перетащите файл
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    id="import-file-input"
+                    type="file"
+                    accept={acceptedTypes}
+                    className="hidden"
+                    onChange={(e) => {
+                      handleFileSelect(e.target.files?.[0] ?? null);
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            {step === 2 && parsedData && (
+              <div className="flex flex-col gap-4">
+                <h3
+                  className="text-2xl font-medium shrink-0"
+                  style={{ color: ACTIVE_TEXT_DARK }}
+                >
+                  Счета
+                </h3>
+                <div className="flex flex-col gap-4 overflow-auto min-w-0">
+                  {parsedData.accounts.map((account) => {
+                    const key = `${account.name}|${account.currency}`;
+                    const cardState =
+                      accountCardStates.get(key) ?? getInitialAccountCardState(account);
+                    return (
+                      <ImportAccountCard
+                        key={key}
+                        account={account}
+                        transactions={parsedData.transactions}
+                        items={items}
+                        state={cardState}
+                        onChange={(next) => {
+                          setAccountCardStates((prev) => {
+                            const m = new Map(prev);
+                            m.set(key, next);
+                            return m;
+                          });
+                        }}
+                        apiBase={API_BASE}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {step === 2 && !parsedData && (
+              <div className="flex flex-col gap-4">
+                <h3
+                  className="text-2xl font-medium"
+                  style={{ color: ACTIVE_TEXT_DARK }}
+                >
+                  Счета
+                </h3>
+                <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
+                  Парсинг для выбранного источника пока не поддерживается.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Кнопки */}
@@ -248,9 +513,10 @@ export function ImportAccountsOperationsModal({
                   fontWeight: 400,
                 } as React.CSSProperties
               }
-              onClick={handleNext}
+              onClick={() => void handleNext()}
+              disabled={isParsing}
             >
-              {isLastStep ? "Завершить импорт" : "Далее"}
+              {isParsing ? "Обработка…" : isLastStep ? "Завершить импорт" : "Далее"}
             </Button>
           </div>
         </div>

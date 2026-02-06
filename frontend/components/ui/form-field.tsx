@@ -20,7 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 
 interface FormFieldProps {
-  label: string;
+  label?: string;
   required?: boolean;
   error?: string;
   className?: string;
@@ -29,11 +29,13 @@ interface FormFieldProps {
 
 export function FormField({ label, required, error, className, children }: FormFieldProps) {
   return (
-    <div className={cn("grid gap-2 min-w-0", className)}>
-      <Label style={{ color: ACTIVE_TEXT_DARK }}>
-        {label}
-        {required && <span style={{ color: "#FB4C4F" }}> *</span>}
-      </Label>
+    <div className={cn("grid min-w-0", label ? "gap-2" : "gap-0", className)}>
+      {label ? (
+        <Label style={{ color: ACTIVE_TEXT_DARK }}>
+          {label}
+          {required && <span style={{ color: "#FB4C4F" }}> *</span>}
+        </Label>
+      ) : null}
       {children}
       {error && (
         <p className="text-xs" style={{ color: "#FB4C4F" }}>
@@ -45,7 +47,7 @@ export function FormField({ label, required, error, className, children }: FormF
 }
 
 interface TextFieldProps extends Omit<React.ComponentProps<"input">, "prefix"> {
-  label: string;
+  label?: string;
   required?: boolean;
   error?: string;
   prefix?: React.ReactNode;
@@ -60,7 +62,7 @@ export function TextField({
   ...props 
 }: TextFieldProps) {
   return (
-    <FormField label={label} required={required} error={error}>
+    <FormField label={label ?? ""} required={required} error={error}>
       <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
         <AuthInput
           {...props}
@@ -121,7 +123,7 @@ interface SelectFieldOption {
 }
 
 interface SelectFieldProps {
-  label: string;
+  label?: string;
   value: string;
   onValueChange: (value: string) => void;
   options: SelectFieldOption[];
@@ -132,7 +134,7 @@ interface SelectFieldProps {
 }
 
 export function SelectField({
-  label,
+  label = "",
   value,
   onValueChange,
   options,

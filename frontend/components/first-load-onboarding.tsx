@@ -392,6 +392,7 @@ export function FirstLoadOnboarding() {
     <ImportAccountsOperationsModal
       open={importServiceModalOpen}
       onOpenChange={setImportServiceModalOpen}
+      importSource={importSource ?? undefined}
       onFinish={() => {
         setImportStepSkipped(true);
         setStep(4);

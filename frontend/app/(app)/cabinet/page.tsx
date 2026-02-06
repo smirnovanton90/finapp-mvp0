@@ -488,6 +488,7 @@ export default function CabinetPage() {
         <ImportAccountsOperationsModal
           open={importServiceModalOpen}
           onOpenChange={setImportServiceModalOpen}
+          importSource={importSource ?? undefined}
         />
 
         {/* Информация */}

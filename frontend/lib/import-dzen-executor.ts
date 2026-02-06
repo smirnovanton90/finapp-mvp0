@@ -1,0 +1,297 @@
+/**
+ * Исполнение импорта данных Дзен-мани: создание/связывание счетов,
+ * категорий, контрагентов и транзакций.
+ */
+
+import { parseRubToCents } from "@/lib/format-rub";
+import { buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
+import { getTypeOptionsForKind } from "@/lib/item-type-options";
+import {
+  createItem,
+  createCategory,
+  createCounterparty,
+  createTransaction,
+  fetchUserMe,
+  setAccountingStartDate,
+} from "@/lib/api";
+import type { DzenParsedData, DzenParsedTransaction } from "@/lib/dzen-csv-parser";
+import type { ImportAccountCardState } from "@/components/import-account-card";
+import type { ImportCategoryCardState } from "@/components/import-category-card";
+import type { ImportCounterpartyCardState } from "@/components/import-counterparty-card";
+import type { CategoryNode } from "@/lib/categories";
+
+function calcInitialFromTransactions(
+  accountName: string,
+  accountCurrency: string,
+  transactions: DzenParsedTransaction[],
+  currentBalance: number
+): { initial: number; earliestDate: string } {
+  let incomeSum = 0;
+  let outcomeSum = 0;
+  let earliestDate = new Date().toISOString().slice(0, 10);
+
+  for (const tx of transactions) {
+    const isOutcome =
+      tx.outcomeAccountName === accountName &&
+      tx.outcomeCurrency === accountCurrency;
+    const isIncome =
+      tx.incomeAccountName === accountName &&
+      tx.incomeCurrency === accountCurrency;
+
+    if (isOutcome && tx.outcome != null) {
+      outcomeSum += tx.outcome;
+      if (tx.date < earliestDate) earliestDate = tx.date;
+    }
+    if (isIncome && tx.income != null) {
+      incomeSum += tx.income;
+      if (tx.date < earliestDate) earliestDate = tx.date;
+    }
+  }
+
+  const initial = currentBalance - incomeSum + outcomeSum;
+  return { initial, earliestDate };
+}
+
+export type ImportDzenParams = {
+  parsedData: DzenParsedData;
+  accountCardStates: Map<string, ImportAccountCardState>;
+  categoryCardStates: Map<string, ImportCategoryCardState>;
+  counterpartyCardStates: Map<string, ImportCounterpartyCardState>;
+  categoryNodes: CategoryNode[];
+};
+
+export type ImportDzenResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function executeImportDzen(
+  params: ImportDzenParams
+): Promise<ImportDzenResult> {
+  const {
+    parsedData,
+    accountCardStates,
+    categoryCardStates,
+    counterpartyCardStates,
+    categoryNodes,
+  } = params;
+
+  const accountKeyToItemId = new Map<string, number>();
+  const categoryNameToId = new Map<string, number>();
+  const counterpartyNameToId = new Map<string, number>();
+  const categoryLookup = buildCategoryLookup(categoryNodes);
+
+  try {
+    // 0. Установить дату начала учёта по самой ранней дате импорта, если не задана
+    const transactions = parsedData.transactions ?? [];
+    let earliestDate: string | null = null;
+    for (const tx of transactions) {
+      const d = tx.date;
+      if (d && (!earliestDate || d < earliestDate)) earliestDate = d;
+    }
+    if (!earliestDate && (parsedData.accounts ?? []).length > 0) {
+      for (const acc of parsedData.accounts ?? []) {
+        const key = `${acc.name}|${acc.currency}`;
+        const state = accountCardStates.get(key);
+        if (!state || state.linkEnabled) continue;
+        const { earliestDate: accEarliest } = calcInitialFromTransactions(
+          acc.name,
+          acc.currency,
+          transactions,
+          Number.isFinite(parseRubToCents(state.balanceStr) / 100)
+            ? parseRubToCents(state.balanceStr) / 100
+            : 0
+        );
+        if (!earliestDate || accEarliest < earliestDate) earliestDate = accEarliest;
+      }
+    }
+    if (earliestDate) {
+      const me = await fetchUserMe();
+      if (!me.accounting_start_date) {
+        await setAccountingStartDate({
+          accounting_start_date: earliestDate,
+        });
+      }
+    }
+
+    // 1. Создать категории (новые) — сначала без родителя, затем с родителем
+    const catsToCreate = (parsedData.categories ?? []).filter(
+      (cat) => categoryCardStates.has(cat.name)
+    );
+    const sortedCats = [...catsToCreate].sort((a, b) => {
+      const sa = categoryCardStates.get(a.name)!;
+      const sb = categoryCardStates.get(b.name)!;
+      const aHasParent = !!sa.parentPath?.l1?.trim();
+      const bHasParent = !!sb.parentPath?.l1?.trim();
+      return (aHasParent ? 1 : 0) - (bHasParent ? 1 : 0);
+    });
+    for (const cat of sortedCats) {
+      const state = categoryCardStates.get(cat.name)!;
+      if (state.linkEnabled && state.linkedPath) {
+        const key = makeCategoryPathKey(
+          state.linkedPath.l1,
+          state.linkedPath.l2,
+          state.linkedPath.l3
+        );
+        const id = categoryLookup.pathToId.get(key);
+        if (id != null) categoryNameToId.set(cat.name, id);
+      } else {
+        const parentId = (() => {
+          if (!state.parentPath?.l1?.trim()) return null;
+          const key = makeCategoryPathKey(
+            state.parentPath.l1,
+            state.parentPath.l2,
+            state.parentPath.l3
+          );
+          return (
+            categoryLookup.pathToId.get(key) ??
+            categoryNameToId.get(state.parentPath.l1) ??
+            null
+          );
+        })();
+        const created = await createCategory({
+          name: (state.name || cat.name).trim(),
+          parent_id: parentId,
+          scope: state.scope,
+          icon_name: state.iconName || null,
+        });
+        categoryNameToId.set(cat.name, created.id);
+      }
+    }
+
+    // 2. Создать контрагентов (новых)
+    for (const cp of parsedData.counterparties ?? []) {
+      const state = counterpartyCardStates.get(cp.name);
+      if (!state) continue;
+
+      if (state.linkEnabled && state.linkedCounterpartyId != null) {
+        counterpartyNameToId.set(cp.name, state.linkedCounterpartyId);
+      } else {
+        const payload =
+          state.entityType === "LEGAL"
+            ? {
+                entity_type: "LEGAL" as const,
+                name: (state.name || cp.name).trim() || null,
+              }
+            : {
+                entity_type: "PERSON" as const,
+                last_name: state.lastName?.trim() || null,
+                first_name: state.firstName?.trim() || null,
+                middle_name: state.middleName?.trim() || null,
+              };
+        const created = await createCounterparty(payload);
+        counterpartyNameToId.set(cp.name, created.id);
+      }
+    }
+
+    // 3. Создать счета (новые)
+    for (const acc of parsedData.accounts ?? []) {
+      const key = `${acc.name}|${acc.currency}`;
+      const state = accountCardStates.get(key);
+      if (!state) continue;
+
+      if (state.linkEnabled && state.linkedItemId != null) {
+        accountKeyToItemId.set(key, state.linkedItemId);
+      } else {
+        const typeOptions = getTypeOptionsForKind(state.kind);
+        const typeCode =
+          state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
+            ? state.typeCode
+            : typeOptions[0]?.code ?? "cash";
+
+        const balanceCents = parseRubToCents(state.balanceStr);
+        const currentBalance = Number.isFinite(balanceCents)
+          ? balanceCents / 100
+          : 0;
+        const { initial, earliestDate } = calcInitialFromTransactions(
+          acc.name,
+          acc.currency,
+          parsedData.transactions ?? [],
+          currentBalance
+        );
+        const initialValueCents = Math.round(initial * 100);
+
+        const created = await createItem({
+          kind: state.kind,
+          type_code: typeCode,
+          name: (state.name || acc.name).trim(),
+          currency_code: acc.currency || "RUB",
+          open_date: earliestDate,
+          initial_value_rub: initialValueCents,
+          counterparty_id: state.counterpartyId ?? null,
+        });
+        accountKeyToItemId.set(key, created.id);
+      }
+    }
+
+    // 4. Создать транзакции
+    for (const tx of parsedData.transactions ?? []) {
+      let primaryItemId: number | null = null;
+      let direction: "INCOME" | "EXPENSE" | "TRANSFER" = "EXPENSE";
+      let amountRub = 0;
+
+      if (tx.type === "expense" && tx.outcome != null && tx.outcome > 0) {
+        const key = `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
+        primaryItemId = accountKeyToItemId.get(key) ?? null;
+        direction = "EXPENSE";
+        amountRub = Math.round(tx.outcome * 100);
+      } else if (tx.type === "income" && tx.income != null && tx.income > 0) {
+        const key = `${tx.incomeAccountName}|${tx.incomeCurrency}`;
+        primaryItemId = accountKeyToItemId.get(key) ?? null;
+        direction = "INCOME";
+        amountRub = Math.round(tx.income * 100);
+      } else if (tx.type === "transfer") {
+        if (tx.outcome != null && tx.outcome > 0) {
+          const key = `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
+          primaryItemId = accountKeyToItemId.get(key) ?? null;
+          direction = "EXPENSE";
+          amountRub = Math.round(tx.outcome * 100);
+        }
+      }
+
+      if (primaryItemId == null || amountRub <= 0) continue;
+
+      const categoryId = categoryNameToId.get(tx.categoryName) ?? null;
+      const counterpartyId = tx.counterparty
+        ? (counterpartyNameToId.get(tx.counterparty) ?? null)
+        : null;
+
+      await createTransaction({
+        transaction_date: tx.date,
+        primary_item_id: primaryItemId,
+        counterparty_id: counterpartyId,
+        amount_rub: amountRub,
+        direction,
+        transaction_type: "ACTUAL",
+        status: "CONFIRMED",
+        category_id: categoryId,
+        comment: tx.comment || null,
+      });
+
+      // Для трансфера — создать вторую транзакцию (приход на другой счёт)
+      if (tx.type === "transfer" && tx.income != null && tx.income > 0) {
+        const incomeKey = `${tx.incomeAccountName}|${tx.incomeCurrency}`;
+        const incomeItemId = accountKeyToItemId.get(incomeKey) ?? null;
+        if (incomeItemId != null) {
+          await createTransaction({
+            transaction_date: tx.date,
+            primary_item_id: incomeItemId,
+            counterparty_id: counterpartyId,
+            amount_rub: Math.round(tx.income * 100),
+            direction: "INCOME",
+            transaction_type: "ACTUAL",
+            status: "CONFIRMED",
+            category_id: categoryId,
+            comment: tx.comment || null,
+          });
+        }
+      }
+    }
+
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Не удалось выполнить импорт.",
+    };
+  }
+}

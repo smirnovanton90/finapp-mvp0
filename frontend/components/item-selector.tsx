@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import {
   useCallback,
   useEffect,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/item-utils";
 import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
+import { useSelectorDropdownPortalContainer } from "@/components/selector-dropdown-portal-context";
 
 type ItemSelectorProps = {
   items: ItemOut[];
@@ -72,6 +74,7 @@ export function ItemSelector({
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const [dropdownStyle, setDropdownStyle] = useState<CSSProperties | null>(null);
+  const portalContainer = useSelectorDropdownPortalContainer();
 
   useEffect(() => {
     if (resetSignal === undefined) return;
@@ -158,28 +161,23 @@ export function ItemSelector({
     const anchor = anchorRef.current;
     if (!anchor) return;
     const rect = anchor.getBoundingClientRect();
-    const container = anchor.closest("[data-slot=\"dialog-content\"]");
-    const containerRect = container?.getBoundingClientRect();
-    const containerTop = containerRect ? containerRect.top : 0;
-    const containerBottom = containerRect
-      ? containerRect.bottom
-      : window.innerHeight;
     const padding = 8;
     const maxHeight = 256;
-    const spaceBelow = containerBottom - rect.bottom - padding;
-    const spaceAbove = rect.top - containerTop - padding;
+    const spaceBelow = window.innerHeight - rect.bottom - padding;
+    const spaceAbove = rect.top - padding;
     const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
     const availableSpace = Math.max(0, openUp ? spaceAbove : spaceBelow);
     const height = Math.min(maxHeight, availableSpace);
     const resolvedHeight = height > 0 ? height : maxHeight;
     setDropdownStyle({
-      position: "absolute",
-      top: openUp ? "auto" : "calc(100% + 4px)",
-      bottom: openUp ? "calc(100% + 4px)" : "auto",
-      left: 0,
-      right: 0,
+      position: "fixed",
+      left: rect.left,
+      width: rect.width,
+      ...(openUp
+        ? { bottom: window.innerHeight - rect.top + 4 }
+        : { top: rect.bottom + 4 }),
       maxHeight: resolvedHeight,
-      zIndex: 50,
+      zIndex: 9999,
     });
   }, []);
 
@@ -201,12 +199,12 @@ export function ItemSelector({
 
 
   const resolvedDropdownStyle: CSSProperties = dropdownStyle ?? {
-    position: "absolute",
-    top: "calc(100% + 4px)",
+    position: "fixed",
     left: 0,
-    right: 0,
+    top: 0,
+    width: 200,
     maxHeight: 256,
-    zIndex: 50,
+    zIndex: 9999,
   };
 
   return (
@@ -268,11 +266,13 @@ export function ItemSelector({
             }
           }}
         />
-        {open && (
-          <div
-            className="selector-dropdown absolute z-50 mt-1 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
-            style={resolvedDropdownStyle}
-          >
+        {open &&
+          createPortal(
+            <div
+              data-selector-dropdown
+              className="selector-dropdown fixed z-[9999] mt-1 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
+              style={resolvedDropdownStyle}
+            >
             {/* Gradient border wrapper */}
             <div className="relative rounded-lg">
               {/* Stroke layer */}
@@ -302,8 +302,10 @@ export function ItemSelector({
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = "transparent";
                 }}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={clearSelection}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  clearSelection();
+                }}
               >
                 {clearLabel}
               </button>
@@ -364,8 +366,10 @@ export function ItemSelector({
                         e.currentTarget.style.backgroundColor = "transparent";
                       }
                     }}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => applySelection(item.id)}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      applySelection(item.id);
+                    }}
                   >
                     <div className={`h-6 w-6 shrink-0 rounded-sm overflow-hidden ${logoToneClass}`}>
                       <AssetItemIcon
@@ -414,8 +418,9 @@ export function ItemSelector({
             )}
               </div>
             </div>
-          </div>
-        )}
+          </div>,
+            portalContainer ?? document.body
+          )}
       </div>
       {showChips && selectionMode === "multi" && selectedItems.length > 0 && (
         <div className="flex flex-wrap gap-2">

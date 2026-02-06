@@ -14,6 +14,7 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { Switch } from "@/components/ui/switch";
 import { TextField, SelectField } from "@/components/ui/form-field";
 import { ItemSelector } from "@/components/item-selector";
+import { CounterpartySelector } from "@/components/counterparty-selector";
 import { getItemTypeLabel } from "@/lib/item-types";
 import {
   getTypeOptionsForKind,
@@ -21,10 +22,25 @@ import {
 } from "@/lib/item-type-options";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import type { DzenParsedAccount, DzenParsedTransaction } from "@/lib/dzen-csv-parser";
-import type { ItemOut, CounterpartyOut } from "@/lib/api";
+import type { ItemOut, CounterpartyOut, CounterpartyIndustryOut } from "@/lib/api";
 
 const NAME_BLOCK_WIDTH = 150;
 const TOGGLES_BLOCK_WIDTH = 80;
+
+const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set([
+  "bank_account",
+  "bank_card",
+  "deposit",
+  "savings_account",
+  "consumer_loan",
+  "mortgage",
+  "car_loan",
+  "education_loan",
+  "loan_to_third_party",
+  "third_party_receivables",
+  "private_loan",
+  "third_party_payables",
+]);
 
 const CURRENCY_BADGE_CLASSES: Record<string, string> = {
   RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
@@ -82,25 +98,23 @@ function calcInitialFromTransactions(
 }
 
 export type ImportAccountCardState = {
-  checked: boolean;
-  importEnabled: boolean;
   linkEnabled: boolean;
   kind: ItemKind;
   typeCode: string;
   name: string;
   balanceStr: string;
   linkedItemId: number | null;
+  counterpartyId: number | null;
 };
 
 const defaultState: ImportAccountCardState = {
-  checked: true,
-  importEnabled: true,
   linkEnabled: false,
   kind: "ASSET",
   typeCode: "",
   name: "",
   balanceStr: "",
   linkedItemId: null,
+  counterpartyId: null,
 };
 
 export type ImportAccountCardProps = {
@@ -110,6 +124,8 @@ export type ImportAccountCardProps = {
   state: ImportAccountCardState;
   onChange: (state: ImportAccountCardState) => void;
   apiBase: string;
+  counterparties?: CounterpartyOut[];
+  industries?: CounterpartyIndustryOut[];
   getCounterpartyForItemId?: (id: number) => CounterpartyOut | null;
 };
 
@@ -120,10 +136,16 @@ export function ImportAccountCard({
   state,
   onChange,
   apiBase,
+  counterparties = [],
+  industries = [],
   getCounterpartyForItemId,
 }: ImportAccountCardProps) {
   const typeOptions = getTypeOptionsForKind(state.kind);
-  const stripeColor = state.kind === "ASSET" ? GREEN_TRANSACTION : RED;
+  const effectiveKind =
+    state.linkEnabled && state.linkedItemId
+      ? items.find((i) => i.id === state.linkedItemId)?.kind ?? state.kind
+      : state.kind;
+  const stripeColor = effectiveKind === "ASSET" ? GREEN_TRANSACTION : RED;
 
   const balanceCents = React.useMemo(() => {
     const parsed = parseRubToCents(state.balanceStr);
@@ -153,38 +175,9 @@ export function ImportAccountCard({
         style={{ backgroundColor: stripeColor }}
       />
 
-      {/* Контент: чекбокс | название | тугглы | блок с полями */}
+      {/* Контент: название | туггл Связать | блок с полями */}
       <div className="flex flex-row items-center flex-1 min-w-0 gap-3 py-6 pr-6 pl-0">
-        {/* 1. Чекбокс */}
-        <button
-          type="button"
-          role="checkbox"
-          aria-checked={state.checked}
-          className="flex items-center justify-center w-12 h-12 shrink-0 rounded-full p-2 border-0 bg-transparent cursor-pointer hover:opacity-80"
-          onClick={() => update({ checked: !state.checked })}
-        >
-          <div
-            className="w-[18px] h-[18px] rounded-sm flex items-center justify-center box-border"
-            style={{
-              border: `2px solid ${state.checked ? ACCENT : PLACEHOLDER_COLOR_DARK}`,
-              backgroundColor: state.checked ? ACCENT_FILL_LIGHT : "transparent",
-            }}
-          >
-            {state.checked && (
-              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                <path
-                  d="M1 4L4 7L9 1"
-                  stroke={ACCENT}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-          </div>
-        </button>
-
-        {/* 2. Блок с названием и шильдиком валюты — 150px, по центру, перенос */}
+        {/* 1. Блок с названием и шильдиком валюты — 150px, по центру, перенос */}
         <div
           className="flex flex-col items-center justify-center shrink-0 gap-0.5 text-center"
           style={{ width: NAME_BLOCK_WIDTH }}
@@ -204,41 +197,21 @@ export function ImportAccountCard({
           </span>
         </div>
 
-        {/* 3. Блок с тугглами — 80px */}
+        {/* 2. Туггл Связать — 80px */}
         <div
-          className="flex flex-col items-center justify-center gap-3 shrink-0"
-          style={{ width: TOGGLES_BLOCK_WIDTH }}
+          className="flex flex-col items-center justify-center gap-1.5 shrink-0"
+          style={{ width: TOGGLES_BLOCK_WIDTH, color: PLACEHOLDER_COLOR_DARK }}
         >
-          <div
-            className="flex flex-col items-center gap-1.5"
-            style={{ color: PLACEHOLDER_COLOR_DARK }}
-          >
-            <span className="text-[14px] font-normal leading-4">Импорт</span>
-            <Switch
-              checked={state.importEnabled}
-              onCheckedChange={(v) =>
-                update({ importEnabled: v, linkEnabled: v ? state.linkEnabled : false })
-              }
-              className="h-[26px] w-[46px]"
-            />
-          </div>
-          <div
-            className="flex flex-col items-center gap-1.5"
-            style={{ color: PLACEHOLDER_COLOR_DARK }}
-          >
-            <span className="text-[14px] font-normal leading-4">Связать</span>
-            <Switch
-              checked={state.linkEnabled}
-              onCheckedChange={(v) => update({ linkEnabled: v })}
-              disabled={!state.importEnabled}
-              className="h-[26px] w-[46px]"
-            />
-          </div>
+          <span className="text-[14px] font-normal leading-4">Связать</span>
+          <Switch
+            checked={state.linkEnabled}
+            onCheckedChange={(v) => update({ linkEnabled: v })}
+            className="h-[26px] w-[46px]"
+          />
         </div>
 
-        {/* 4. Блок с полями — оставшаяся ширина, 2 столбца поровну */}
-        {state.importEnabled && (
-          <div className="flex-1 min-w-0 flex flex-col">
+        {/* 3. Блок с полями — оставшаяся ширина, 2 столбца поровну */}
+        <div className="flex-1 min-w-0 flex flex-col">
             {state.linkEnabled ? (
               <ItemSelector
                 items={items}
@@ -249,84 +222,128 @@ export function ImportAccountCard({
                 getItemTypeLabel={getItemTypeLabel}
               />
             ) : (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
-                {/* Строка 1: Актив/Обязательство | Остаток */}
-                <div className="min-w-0">
-                  <SegmentedSelector
-                    options={[
-                      { value: "ASSET", label: "Актив", colorScheme: "green" },
-                      { value: "LIABILITY", label: "Обязательство", colorScheme: "red" },
-                    ]}
-                    value={state.kind}
-                    onChange={(v) => {
-                      update({
-                        kind: v as ItemKind,
-                        typeCode: "",
-                      });
-                    }}
-                  />
-                </div>
-                <div className="min-w-0">
-                  <TextField
-                    value={state.balanceStr}
-                    onChange={(e) =>
-                      update({ balanceStr: formatRubInput(e.target.value) })
-                    }
-                    onBlur={() =>
-                      update({
-                        balanceStr: normalizeRubOnBlur(state.balanceStr),
-                      })
-                    }
-                    placeholder="Укажите сумму"
-                    inputMode="decimal"
-                  />
-                </div>
-                {/* Строка 2: Вид | Сумма на дату */}
-                <div className="min-w-0">
-                  <SelectField
-                    value={
-                      state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
-                        ? state.typeCode
-                        : typeOptions[0]?.code ?? ""
-                    }
-                    onValueChange={(v) => update({ typeCode: v })}
-                    options={typeOptions.map((t) => ({
-                      value: t.code,
-                      label: t.label,
-                    }))}
-                    placeholder="Выберите вид"
-                  />
-                </div>
-                <div
-                  className="min-w-0 flex flex-col justify-center"
-                  style={{ color: ACTIVE_TEXT_DARK }}
-                >
-                  <span className="text-base font-normal">
-                    {earliestDate
-                      ? `Сумма на ${formatShortDate(earliestDate)}`
-                      : "Начальная сумма"}
-                  </span>
-                </div>
-                {/* Строка 3: Название | начальная сумма */}
-                <div className="min-w-0">
-                  <TextField
-                    value={displayName}
-                    onChange={(e) => update({ name: e.target.value })}
-                    placeholder="Например: Кошелек / Ипотека"
-                  />
-                </div>
-                <div
-                  className="min-w-0 flex flex-col justify-center"
-                  style={{ color: ACTIVE_TEXT_DARK }}
-                >
-                  <span className="text-base font-normal">
-                    {formatAmount(initial)}
-                  </span>
-                </div>
-              </div>
+              (() => {
+                const effectiveType =
+                  state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
+                    ? state.typeCode
+                    : typeOptions[0]?.code ?? "";
+                const showCounterpartyField =
+                  MANDATORY_COUNTERPARTY_TYPE_CODES.has(effectiveType);
+                const bankIndustryId = industries.find(
+                  (ind) => ind.name === "Банки"
+                )?.id;
+                const isBankType =
+                  ["bank_account", "bank_card", "deposit", "savings_account"].includes(
+                    effectiveType
+                  );
+
+                return (
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
+                    {/* Строка 1: Актив/Обязательство | Банк/Контрагент (наверху) или Остаток */}
+                    <div className="min-w-0">
+                      <SegmentedSelector
+                        options={[
+                          { value: "ASSET", label: "Актив", colorScheme: "green" },
+                          { value: "LIABILITY", label: "Обязательство", colorScheme: "red" },
+                        ]}
+                        value={state.kind}
+                        onChange={(v) => {
+                          update({
+                            kind: v as ItemKind,
+                            typeCode: "",
+                          });
+                        }}
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      {showCounterpartyField ? (
+                        <CounterpartySelector
+                          counterparties={counterparties}
+                          selectedIds={state.counterpartyId ? [state.counterpartyId] : []}
+                          onChange={(ids) =>
+                            update({ counterpartyId: ids[0] ?? null })
+                          }
+                          selectionMode="single"
+                          placeholder={
+                            isBankType
+                              ? "Начните вводить название банка"
+                              : "Начните вводить название"
+                          }
+                          industries={industries}
+                          apiBase={apiBase}
+                          filterByIndustryId={
+                            isBankType ? bankIndustryId ?? null : null
+                          }
+                          showChips={false}
+                        />
+                      ) : (
+                        <TextField
+                          value={state.balanceStr}
+                          onChange={(e) =>
+                            update({ balanceStr: formatRubInput(e.target.value) })
+                          }
+                          onBlur={() =>
+                            update({
+                              balanceStr: normalizeRubOnBlur(state.balanceStr),
+                            })
+                          }
+                          placeholder="Укажите сумму"
+                          inputMode="decimal"
+                        />
+                      )}
+                    </div>
+                    {/* Строка 2: Вид | Остаток (если показан контрагент) */}
+                    <div className="min-w-0">
+                      <SelectField
+                        value={effectiveType}
+                        onValueChange={(v) => update({ typeCode: v })}
+                        options={typeOptions.map((t) => ({
+                          value: t.code,
+                          label: t.label,
+                        }))}
+                        placeholder="Выберите вид"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      {showCounterpartyField ? (
+                        <TextField
+                          value={state.balanceStr}
+                          onChange={(e) =>
+                            update({ balanceStr: formatRubInput(e.target.value) })
+                          }
+                          onBlur={() =>
+                            update({
+                              balanceStr: normalizeRubOnBlur(state.balanceStr),
+                            })
+                          }
+                          placeholder="Укажите сумму"
+                          inputMode="decimal"
+                        />
+                      ) : null}
+                    </div>
+                    {/* Строка 3: Название | Сумма на дату и сумма в одну строку */}
+                    <div className="min-w-0">
+                      <TextField
+                        value={displayName}
+                        onChange={(e) => update({ name: e.target.value })}
+                        placeholder="Например: Кошелек / Ипотека"
+                      />
+                    </div>
+                    <div
+                      className="min-w-0 flex flex-col justify-center"
+                      style={{ color: ACTIVE_TEXT_DARK }}
+                    >
+                      <span className="text-base font-normal">
+                        {earliestDate
+                          ? `Сумма на ${formatShortDate(earliestDate)}: ${formatAmount(initial)}`
+                          : `Начальная сумма: ${formatAmount(initial)}`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </div>
-        )}
       </div>
     </div>
   );

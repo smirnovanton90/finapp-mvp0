@@ -62,6 +62,7 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
     node("Проценты по вкладам и накопительным счетам", "INCOME", [
       node("Проценты по вкладам", "INCOME"),
       node("Проценты по накопительным счетам", "INCOME"),
+      node("Проценты по займам", "INCOME"),
     ]),
     node("Доход от финансовых инструментов", "INCOME", [
       node("Купонный доход от облигаций", "INCOME"),
@@ -81,9 +82,10 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
     node("Налоговые вычеты", "INCOME"),
     node("Прочие доходы", "INCOME"),
   ]),
-  node("Автомобиль", "EXPENSE", [
+  node("Личный транспорт", "EXPENSE", [
     node("Бензин", "EXPENSE"),
     node("Мойка", "EXPENSE"),
+    node("Запчасти", "EXPENSE"),
     node("Обслуживание и ремонт автомобиля", "EXPENSE"),
     node("Парковка", "EXPENSE", [
       node("Городские парковки", "EXPENSE"),
@@ -94,10 +96,14 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
     node("Штрафы", "EXPENSE"),
   ]),
   node("Недвижимость", "EXPENSE", [
+    node("Аренда жилья", "EXPENSE"),
     node("ЖКУ", "EXPENSE", [
       node("Коммунальные услуги", "EXPENSE"),
+      node("Квартплата", "EXPENSE"),
+      node("Охрана", "EXPENSE"),
       node("Электричество", "EXPENSE"),
-      node("Оплата ремонта и обслуживания жилья", "EXPENSE"),
+      node("Ремонт и обслуживание недвижимости", "EXPENSE"),
+      node("Ремонт", "EXPENSE"),
     ]),
   ]),
   node("Услуги", "EXPENSE", [
@@ -105,7 +111,6 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
     node("Химчистка", "EXPENSE"),
     node("Психолог", "EXPENSE"),
     node("Тренер", "EXPENSE"),
-    node("Банковское обслуживание", "EXPENSE"),
   ]),
   node("Благотворительность", "EXPENSE"),
   node("Хобби и увлечения", "EXPENSE", [
@@ -127,6 +132,8 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
     node("Питание домашних животных", "EXPENSE"),
     node("Наполнитель для туалета", "EXPENSE"),
     node("Груминг", "EXPENSE"),
+    node("Одежда для домашних животных", "EXPENSE"),
+    node("Ветеринар", "EXPENSE"),
   ]),
   node("Кредиты", "EXPENSE", [
     node("Оплата плановых процентов по кредитам", "EXPENSE"),
@@ -134,7 +141,7 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
   ]),
   node("Здоровье", "EXPENSE", [
     node("Лекарственные препараты", "EXPENSE"),
-    node("Посещение врачей", "EXPENSE"),
+    node("Прием у врачей", "EXPENSE"),
     node("Сдача анализов", "EXPENSE"),
     node("Стоматология", "EXPENSE"),
   ]),
@@ -165,7 +172,7 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
     node("Концерты", "EXPENSE"),
     node("Музеи", "EXPENSE"),
   ]),
-  node("Отпуска", "EXPENSE", [
+  node("Путешествия", "EXPENSE", [
     node("Авиабилеты", "EXPENSE"),
     node("Размещение", "EXPENSE"),
   ]),
@@ -181,6 +188,7 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
   ]),
   node("Подписки", "EXPENSE"),
   node("Подарки", "EXPENSE"),
+  node("Алименты оплаченные", "EXPENSE"),
   node("Страхование", "EXPENSE", [
     node("Ипотечное страхование", "EXPENSE"),
     node("ОСАГО", "EXPENSE"),
@@ -190,7 +198,12 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
   ]),
   node("Транспорт", "EXPENSE", [
     node("Метро", "EXPENSE"),
-    node("Городской транспорт", "EXPENSE"),
+    node("Городской транспорт", "EXPENSE", [
+      node("Автобус", "EXPENSE"),
+      node("Троллейбус", "EXPENSE"),
+      node("Трамвай", "EXPENSE"),
+      node("Маршрутка", "EXPENSE"),
+    ]),
     node("Междугородний транспорт", "EXPENSE"),
     node("Такси", "EXPENSE"),
   ]),
@@ -198,16 +211,21 @@ export const DEFAULT_CATEGORIES: CategoryNode[] = [
     node("БАДы", "EXPENSE"),
     node("Косметические процедуры", "EXPENSE"),
     node("Косметические средства", "EXPENSE"),
+    node("Парикмахерская", "EXPENSE"),
     node("Солярий", "EXPENSE"),
   ]),
   node("Хозяйственные расходы", "EXPENSE", [
     node("Средства для уборки", "EXPENSE"),
   ]),
-  node("Электроника", "EXPENSE"),
   node("Прочие расходы", "EXPENSE", [
     node("Расходы от переоценки активов", "EXPENSE"),
     node("Расходы от актуализации счетов", "EXPENSE"),
     node("Прочие расходы", "EXPENSE"),
+  ]),
+  node("Комиссии", "EXPENSE", [
+    node("Комиссии от торговли на финансовом рынке", "EXPENSE"),
+    node("Банковские комиссии", "EXPENSE"),
+    node("Прочие комиссии", "EXPENSE"),
   ]),
 ];
 

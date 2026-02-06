@@ -108,7 +108,7 @@ def fetch_category(
 def list_categories(
     request: Request,
     response: Response,
-    include_archived: bool = True,
+    include_archived: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

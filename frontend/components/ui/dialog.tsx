@@ -6,6 +6,7 @@ import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { IconButton } from "@/components/ui/icon-button"
+import { SelectorDropdownPortalProvider } from "@/components/selector-dropdown-portal-context"
 
 function Dialog({
   ...props
@@ -55,7 +56,20 @@ const DialogContent = React.forwardRef<
     /** Заголовок для скринридеров (обязателен для доступности). Скрыт визуально. */
     title?: string;
   }
->(({ className, children, showCloseButton = true, overlayClassName, title = "Диалог", ...props }, ref) => {
+>(({ className, children, showCloseButton = true, overlayClassName, title = "Диалог", onPointerDownOutside, onInteractOutside, ...props }, ref) => {
+  const selectorPortalRef = React.useRef<HTMLDivElement>(null);
+  const handlePointerDownOutside = (e: Event) => {
+    if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
+      e.preventDefault();
+    }
+    onPointerDownOutside?.(e as unknown as React.PointerEvent);
+  };
+  const handleInteractOutside = (e: Event) => {
+    if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
+      e.preventDefault();
+    }
+    onInteractOutside?.(e as unknown as React.FocusEvent);
+  };
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay className={overlayClassName} />
@@ -70,24 +84,29 @@ const DialogContent = React.forwardRef<
               className
             )}
             {...props}
+            onPointerDownOutside={handlePointerDownOutside}
+            onInteractOutside={handleInteractOutside}
           >
-            <DialogPrimitive.Title className="sr-only">
-              {title}
-            </DialogPrimitive.Title>
-            {children}
-            {showCloseButton && (
-              <DialogPrimitive.Close
-                data-slot="dialog-close"
-                asChild
-              >
-                <IconButton
-                  className="absolute top-4 right-4"
-                  aria-label="Закрыть модальное окно"
+            <SelectorDropdownPortalProvider value={selectorPortalRef}>
+              <DialogPrimitive.Title className="sr-only">
+                {title}
+              </DialogPrimitive.Title>
+              {children}
+              <div ref={selectorPortalRef} className="relative" aria-hidden />
+              {showCloseButton && (
+                <DialogPrimitive.Close
+                  data-slot="dialog-close"
+                  asChild
                 >
-                  <XIcon />
-                </IconButton>
-              </DialogPrimitive.Close>
-            )}
+                  <IconButton
+                    className="absolute top-4 right-4"
+                    aria-label="Закрыть модальное окно"
+                  >
+                    <XIcon />
+                  </IconButton>
+                </DialogPrimitive.Close>
+              )}
+            </SelectorDropdownPortalProvider>
           </DialogPrimitive.Content>
         </div>
       </div>

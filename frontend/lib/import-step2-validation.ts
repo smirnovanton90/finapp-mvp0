@@ -7,6 +7,21 @@ import { getTypeOptionsForKind } from "@/lib/item-type-options";
 import type { DzenParsedAccount, DzenParsedTransaction } from "@/lib/dzen-csv-parser";
 import type { ImportAccountCardState } from "@/components/import-account-card";
 
+const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set([
+  "bank_account",
+  "bank_card",
+  "deposit",
+  "savings_account",
+  "consumer_loan",
+  "mortgage",
+  "car_loan",
+  "education_loan",
+  "loan_to_third_party",
+  "third_party_receivables",
+  "private_loan",
+  "third_party_payables",
+]);
+
 function calcInitial(
   account: DzenParsedAccount,
   transactions: DzenParsedTransaction[],
@@ -89,8 +104,6 @@ export function validateStep2(
     const state = accountCardStates.get(key);
     if (!state) continue;
 
-    if (!state.importEnabled) continue;
-
     if (state.linkEnabled) {
       if (state.linkedItemId == null) {
         return {
@@ -112,6 +125,16 @@ export function validateStep2(
       return {
         valid: false,
         error: `Для счёта «${account.name}» укажите вид актива/обязательства.`,
+      };
+    }
+
+    if (
+      MANDATORY_COUNTERPARTY_TYPE_CODES.has(effectiveType) &&
+      !state.counterpartyId
+    ) {
+      return {
+        valid: false,
+        error: `Для счёта «${account.name}» выберите банк/контрагента.`,
       };
     }
 

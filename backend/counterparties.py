@@ -184,8 +184,6 @@ def normalize_payload(data: CounterpartyCreate | CounterpartyUpdate) -> dict:
     middle_name = normalize_text(data.middle_name)
 
     if entity_type == "LEGAL":
-        if industry_id is None:
-            raise HTTPException(status_code=400, detail="Укажите отрасль контрагента.")
         if not name:
             raise HTTPException(status_code=400, detail="Укажите название контрагента.")
         if legal_form and legal_form not in LEGAL_FORM_CODES:

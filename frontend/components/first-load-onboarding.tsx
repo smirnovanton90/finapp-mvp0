@@ -48,7 +48,7 @@ type Step = 1 | 2 | 3 | 4;
 
 export function FirstLoadOnboarding() {
   const router = useRouter();
-  const { accountingStartDate, setAccountingStartDate } = useAccountingStart();
+  const { accountingStartDate, setAccountingStartDate, refresh } = useAccountingStart();
   const [step, setStep] = useState<Step>(1);
   const [importStepSkipped, setImportStepSkipped] = useState(false);
   const [importSource, setImportSource] = useState<ImportSourceKey>(null);
@@ -125,7 +125,10 @@ export function FirstLoadOnboarding() {
 
   return (
     <>
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog
+      open={open && !importServiceModalOpen}
+      onOpenChange={handleOpenChange}
+    >
       <DialogContent
         showCloseButton={true}
         title="Первоначальная настройка"
@@ -393,9 +396,11 @@ export function FirstLoadOnboarding() {
       open={importServiceModalOpen}
       onOpenChange={setImportServiceModalOpen}
       importSource={importSource ?? undefined}
-      onFinish={() => {
-        setImportStepSkipped(true);
-        setStep(4);
+      onFinish={async () => {
+        setImportServiceModalOpen(false);
+        await refresh();
+        setOpen(false);
+        router.push("/assets");
       }}
     />
     </>

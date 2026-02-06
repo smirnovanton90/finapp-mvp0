@@ -424,10 +424,6 @@ export default function CounterpartiesPage() {
 
   const validateForm = () => {
     if (entityType === "LEGAL") {
-      if (!industryId) {
-        setFormError("Укажите отрасль контрагента.");
-        return false;
-      }
       if (!name.trim()) {
         setFormError("Укажите название контрагента.");
         return false;

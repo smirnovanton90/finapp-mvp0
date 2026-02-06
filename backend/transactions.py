@@ -593,7 +593,26 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
 
     status_value = data.status or "CONFIRMED"
 
-    category = resolve_category_or_400(db, user, data.category_id)
+    category_id = data.category_id
+    if category_id is None and data.direction in ("INCOME", "EXPENSE"):
+        scope_filter = "INCOME" if data.direction == "INCOME" else "EXPENSE"
+        default_cat = (
+            db.query(Category)
+            .filter(
+                Category.archived_at.is_(None),
+                or_(Category.owner_user_id.is_(None), Category.owner_user_id == user.id),
+                or_(Category.scope == scope_filter, Category.scope == "BOTH"),
+            )
+            .first()
+        )
+        if default_cat:
+            category_id = default_cat.id
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Нет доступной категории. Создайте категорию или укажите category_id.",
+            )
+    category = resolve_category_or_400(db, user, category_id)
 
     tx = Transaction(
         user_id=user.id,

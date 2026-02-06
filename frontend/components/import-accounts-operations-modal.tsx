@@ -17,6 +17,7 @@ import {
   MODAL_BG,
   PLACEHOLDER_COLOR_DARK,
 } from "@/lib/colors";
+import { PINK_GRADIENT } from "@/lib/gradients";
 import { cn } from "@/lib/utils";
 import type { ImportSourceKey } from "@/components/import-history-modal-content";
 import {
@@ -28,8 +29,27 @@ import {
   getInitialAccountCardState,
   type ImportAccountCardState,
 } from "@/components/import-account-card";
-import { fetchItems, API_BASE } from "@/lib/api";
+import {
+  ImportCategoryCard,
+  getInitialCategoryCardState,
+  type ImportCategoryCardState,
+} from "@/components/import-category-card";
+import {
+  ImportCounterpartyCard,
+  getInitialCounterpartyCardState,
+  type ImportCounterpartyCardState,
+} from "@/components/import-counterparty-card";
+import {
+  fetchItems,
+  fetchCategories,
+  fetchCounterparties,
+  fetchCounterpartyIndustries,
+  API_BASE,
+} from "@/lib/api";
 import { validateStep2 } from "@/lib/import-step2-validation";
+import { validateStep3 } from "@/lib/import-step3-validation";
+import { validateStep4 } from "@/lib/import-step4-validation";
+import { executeImportDzen } from "@/lib/import-dzen-executor";
 
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
@@ -87,11 +107,28 @@ export function ImportAccountsOperationsModal({
   const [parsedData, setParsedData] = React.useState<DzenParsedData | null>(null);
   const [parseError, setParseError] = React.useState<string | null>(null);
   const [step2Error, setStep2Error] = React.useState<string | null>(null);
+  const [step3Error, setStep3Error] = React.useState<string | null>(null);
+  const [step4Error, setStep4Error] = React.useState<string | null>(null);
+  const [step5Error, setStep5Error] = React.useState<string | null>(null);
   const [isParsing, setIsParsing] = React.useState(false);
+  const [isImporting, setIsImporting] = React.useState(false);
   const [accountCardStates, setAccountCardStates] = React.useState<
     Map<string, ImportAccountCardState>
   >(new Map());
+  const [categoryCardStates, setCategoryCardStates] = React.useState<
+    Map<string, ImportCategoryCardState>
+  >(new Map());
+  const [counterpartyCardStates, setCounterpartyCardStates] = React.useState<
+    Map<string, ImportCounterpartyCardState>
+  >(new Map());
   const [items, setItems] = React.useState<Awaited<ReturnType<typeof fetchItems>>>([]);
+  const [counterparties, setCounterparties] = React.useState<
+    Awaited<ReturnType<typeof fetchCounterparties>>
+  >([]);
+  const [industries, setIndustries] = React.useState<
+    Awaited<ReturnType<typeof fetchCounterpartyIndustries>>
+  >([]);
+  const [categories, setCategories] = React.useState<Awaited<ReturnType<typeof fetchCategories>>>([]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const acceptedTypes =
@@ -117,7 +154,12 @@ export function ImportAccountsOperationsModal({
       setParsedData(null);
       setParseError(null);
       setStep2Error(null);
+      setStep3Error(null);
+      setStep4Error(null);
+      setStep5Error(null);
       setAccountCardStates(new Map());
+      setCategoryCardStates(new Map());
+      setCounterpartyCardStates(new Map());
     }
   }, [open]);
 
@@ -134,9 +176,57 @@ export function ImportAccountsOperationsModal({
 
   React.useEffect(() => {
     if (parsedData && step === 2) {
-      fetchItems()
-        .then(setItems)
-        .catch(() => setItems([]));
+      Promise.all([
+        fetchItems(),
+        fetchCounterparties(),
+        fetchCounterpartyIndustries(),
+      ])
+        .then(([itemsData, counterpartiesData, industriesData]) => {
+          setItems(itemsData);
+          setCounterparties(counterpartiesData);
+          setIndustries(industriesData);
+        })
+        .catch(() => {
+          setItems([]);
+          setCounterparties([]);
+          setIndustries([]);
+        });
+    }
+  }, [parsedData, step]);
+
+  React.useEffect(() => {
+    if (parsedData?.categories?.length) {
+      const next = new Map<string, ImportCategoryCardState>();
+      for (const cat of parsedData.categories) {
+        next.set(cat.name, getInitialCategoryCardState(cat));
+      }
+      setCategoryCardStates(next);
+    }
+  }, [parsedData?.categories]);
+
+  React.useEffect(() => {
+    if (parsedData?.counterparties?.length) {
+      const next = new Map<string, ImportCounterpartyCardState>();
+      for (const cp of parsedData.counterparties) {
+        next.set(cp.name, getInitialCounterpartyCardState(cp));
+      }
+      setCounterpartyCardStates(next);
+    }
+  }, [parsedData?.counterparties]);
+
+  React.useEffect(() => {
+    if (parsedData && step === 3) {
+      fetchCategories({ includeArchived: false })
+        .then(setCategories)
+        .catch(() => setCategories([]));
+    }
+  }, [parsedData, step]);
+
+  React.useEffect(() => {
+    if (parsedData && step === 4) {
+      fetchCounterparties()
+        .then(setCounterparties)
+        .catch(() => setCounterparties([]));
     }
   }, [parsedData, step]);
 
@@ -182,9 +272,66 @@ export function ImportAccountsOperationsModal({
       }
     }
 
+    if (step === 3 && parsedData) {
+      setStep3Error(null);
+      const result = validateStep3(
+        parsedData.categories ?? [],
+        categoryCardStates,
+        categories
+      );
+      if (!result.valid) {
+        setStep3Error(result.error);
+        return;
+      }
+    }
+
+    if (step === 4 && parsedData) {
+      setStep4Error(null);
+      const result = validateStep4(
+        parsedData.counterparties ?? [],
+        counterpartyCardStates,
+        counterparties
+      );
+      if (!result.valid) {
+        setStep4Error(result.error);
+        return;
+      }
+    }
+
     if (step < 5) {
       setStep((s) => (s + 1) as ImportStep);
-    } else {
+      return;
+    }
+
+    // Step 5: выполнить импорт
+    if (step === 5 && parsedData && importSource === "dzen") {
+      setStep5Error(null);
+      setIsImporting(true);
+      try {
+        const result = await executeImportDzen({
+          parsedData,
+          accountCardStates,
+          categoryCardStates,
+          counterpartyCardStates,
+          categoryNodes: categories,
+        });
+        if (result.success) {
+          onFinish?.();
+          onOpenChange(false);
+        } else {
+          setStep5Error(result.error);
+        }
+      } catch (err) {
+        setStep5Error(
+          err instanceof Error ? err.message : "Не удалось выполнить импорт."
+        );
+      } finally {
+        setIsImporting(false);
+      }
+      return;
+    }
+
+    if (step === 5) {
       onFinish?.();
       onOpenChange(false);
     }
@@ -193,6 +340,9 @@ export function ImportAccountsOperationsModal({
   const handleBack = () => {
     if (step > 1) {
       setStep2Error(null);
+      setStep3Error(null);
+      setStep4Error(null);
+      setStep5Error(null);
       setStep((s) => (s - 1) as ImportStep);
     }
   };
@@ -204,9 +354,19 @@ export function ImportAccountsOperationsModal({
   const isLastStep = step === 5;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
       <DialogContent
         title="Импорт счетов и операций"
+        onInteractOutside={(e) => {
+          if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
+            e.preventDefault();
+          }
+        }}
+        onPointerDownOutside={(e) => {
+          if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
+            e.preventDefault();
+          }
+        }}
         className={cn(
           "w-full max-w-[calc(100%-2rem)] h-[920px] max-h-[min(920px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
           "border-0 rounded-[9px]"
@@ -326,7 +486,7 @@ export function ImportAccountsOperationsModal({
 
           {/* Блок контента */}
           <div
-            className="flex-1 min-h-0 overflow-auto px-6 py-6"
+            className="flex-1 min-h-0 overflow-auto overscroll-contain px-6 py-6"
             style={{
               color: ACTIVE_TEXT_DARK,
               fontSize: 18,
@@ -482,6 +642,8 @@ export function ImportAccountsOperationsModal({
                           });
                         }}
                         apiBase={API_BASE}
+                        counterparties={counterparties}
+                        industries={industries}
                       />
                     );
                   })}
@@ -499,6 +661,350 @@ export function ImportAccountsOperationsModal({
                 <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
                   Парсинг для выбранного источника пока не поддерживается.
                 </p>
+              </div>
+            )}
+            {step === 3 && parsedData && (
+              <div className="flex flex-col gap-4">
+                <div
+                  className="shrink-0 text-center"
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 400,
+                    color: ACTIVE_TEXT_DARK,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <p className="mb-2">
+                    Выберите, какие категории импортировать, укажите тип,
+                    родителя, название и иконку.
+                  </p>
+                  <p>
+                    Также Вы можете связать импортируемую категорию с уже
+                    имеющейся — для этого включите движок «Связать».
+                  </p>
+                </div>
+                {step3Error && (
+                  <p
+                    className="text-base shrink-0"
+                    style={{ color: "#FB4C4F" }}
+                  >
+                    {step3Error}
+                  </p>
+                )}
+                <div className="flex flex-col gap-4 overflow-auto min-w-0">
+                  {parsedData.categories.map((category) => {
+                    const key = category.name;
+                    const cardState =
+                      categoryCardStates.get(key) ?? getInitialCategoryCardState(category);
+                    return (
+                      <ImportCategoryCard
+                        key={key}
+                        category={category}
+                        categoryNodes={categories}
+                        state={cardState}
+                        onChange={(next) => {
+                          setCategoryCardStates((prev) => {
+                            const m = new Map(prev);
+                            m.set(key, next);
+                            return m;
+                          });
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {step === 3 && !parsedData && (
+              <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
+                Сначала загрузите файл на шаге 1.
+              </p>
+            )}
+            {step === 4 && parsedData && (parsedData.counterparties?.length ?? 0) > 0 && (
+              <div className="flex flex-col gap-4">
+                <div
+                  className="shrink-0 text-center"
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 400,
+                    color: ACTIVE_TEXT_DARK,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <p className="mb-2">
+                    Выберите, какие контрагенты импортировать, укажите тип
+                    (ЮЛ/ИП или ФЛ) и необходимые данные.
+                  </p>
+                  <p>
+                    Также Вы можете связать импортируемого контрагента с уже
+                    имеющимся — для этого включите движок «Связать».
+                  </p>
+                </div>
+                {step4Error && (
+                  <p
+                    className="text-base shrink-0"
+                    style={{ color: "#FB4C4F" }}
+                  >
+                    {step4Error}
+                  </p>
+                )}
+                <div className="flex flex-col gap-4 overflow-auto min-w-0">
+                  {parsedData.counterparties!.map((cp) => {
+                    const key = cp.name;
+                    const cardState =
+                      counterpartyCardStates.get(key) ??
+                      getInitialCounterpartyCardState(cp);
+                    return (
+                      <ImportCounterpartyCard
+                        key={key}
+                        counterparty={cp}
+                        counterparties={counterparties}
+                        state={cardState}
+                        onChange={(next) => {
+                          setCounterpartyCardStates((prev) => {
+                            const m = new Map(prev);
+                            m.set(key, next);
+                            return m;
+                          });
+                        }}
+                        apiBase={API_BASE}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {step === 4 &&
+              (parsedData?.counterparties?.length ?? 0) === 0 &&
+              parsedData && (
+                <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
+                  В выгрузке не найдено контрагентов. Перейдите к следующему
+                  шагу.
+                </p>
+              )}
+            {step === 4 && !parsedData && (
+              <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
+                Сначала загрузите файл на шаге 1.
+              </p>
+            )}
+            {step === 5 && (
+              <div className="flex flex-col gap-6">
+                {step5Error && (
+                  <p
+                    className="text-base shrink-0"
+                    style={{ color: "#FB4C4F" }}
+                  >
+                    {step5Error}
+                  </p>
+                )}
+                <div
+                  className="shrink-0 text-center"
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 400,
+                    color: ACTIVE_TEXT_DARK,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <p className="mb-2">Настройка импорта завершена!</p>
+                  <p>Будут импортированы</p>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  {(() => {
+                    const accountsTotal = (parsedData?.accounts ?? []).filter(
+                      (a) => {
+                        const key = `${a.name}|${a.currency}`;
+                        return !!accountCardStates.get(key);
+                      }
+                    ).length;
+                    const accountsLinked = (parsedData?.accounts ?? []).filter(
+                      (a) => {
+                        const key = `${a.name}|${a.currency}`;
+                        const s = accountCardStates.get(key);
+                        return !!s && s.linkEnabled;
+                      }
+                    ).length;
+                    const categoriesTotal = (
+                      parsedData?.categories ?? []
+                    ).filter((c) => !!categoryCardStates.get(c.name)).length;
+                    const categoriesLinked = (
+                      parsedData?.categories ?? []
+                    ).filter((c) => {
+                      const s = categoryCardStates.get(c.name);
+                      return !!s && s.linkEnabled;
+                    }).length;
+                    const counterpartiesTotal = (
+                      parsedData?.counterparties ?? []
+                    ).filter((c) => !!counterpartyCardStates.get(c.name)).length;
+                    const counterpartiesLinked = (
+                      parsedData?.counterparties ?? []
+                    ).filter((c) => {
+                      const s = counterpartyCardStates.get(c.name);
+                      return !!s && s.linkEnabled;
+                    }).length;
+
+                    return (
+                      <>
+                        <div
+                          className="rounded-lg p-6 flex flex-col items-center justify-center"
+                          style={{
+                            backgroundColor: BACKGROUND_DT,
+                          }}
+                        >
+                          <span
+                            className="mb-2"
+                            style={{
+                              fontSize: 32,
+                              fontWeight: 500,
+                              color: ACTIVE_TEXT_DARK,
+                            }}
+                          >
+                            Счета
+                          </span>
+                          <span
+                            className="font-semibold"
+                            style={{
+                              fontSize: 96,
+                              fontWeight: 600,
+                              background: PINK_GRADIENT,
+                              WebkitBackgroundClip: "text",
+                              WebkitTextFillColor: "transparent",
+                              backgroundClip: "text",
+                            }}
+                          >
+                            {accountsTotal}
+                          </span>
+                          <span
+                            className="mt-1 px-3 py-1"
+                            style={{
+                              fontSize: 18,
+                              fontWeight: 400,
+                              color: ACTIVE_TEXT_DARK,
+                              backgroundColor: MODAL_BG,
+                              borderRadius: 9,
+                            }}
+                          >
+                            Связанных — {accountsLinked}
+                          </span>
+                        </div>
+                        <div
+                          className="rounded-lg p-6 flex flex-col items-center justify-center"
+                          style={{
+                            backgroundColor: BACKGROUND_DT,
+                          }}
+                        >
+                          <span
+                            className="mb-2"
+                            style={{
+                              fontSize: 32,
+                              fontWeight: 500,
+                              color: ACTIVE_TEXT_DARK,
+                            }}
+                          >
+                            Категории
+                          </span>
+                          <span
+                            className="font-semibold"
+                            style={{
+                              fontSize: 96,
+                              fontWeight: 600,
+                              background: PINK_GRADIENT,
+                              WebkitBackgroundClip: "text",
+                              WebkitTextFillColor: "transparent",
+                              backgroundClip: "text",
+                            }}
+                          >
+                            {categoriesTotal}
+                          </span>
+                          <span
+                            className="mt-1 px-3 py-1"
+                            style={{
+                              fontSize: 18,
+                              fontWeight: 400,
+                              color: ACTIVE_TEXT_DARK,
+                              backgroundColor: MODAL_BG,
+                              borderRadius: 9,
+                            }}
+                          >
+                            Связанных — {categoriesLinked}
+                          </span>
+                        </div>
+                        <div
+                          className="rounded-lg p-6 flex flex-col items-center justify-center"
+                          style={{
+                            backgroundColor: BACKGROUND_DT,
+                          }}
+                        >
+                          <span
+                            className="mb-2"
+                            style={{
+                              fontSize: 32,
+                              fontWeight: 500,
+                              color: ACTIVE_TEXT_DARK,
+                            }}
+                          >
+                            Контрагенты
+                          </span>
+                          <span
+                            className="font-semibold"
+                            style={{
+                              fontSize: 96,
+                              fontWeight: 600,
+                              background: PINK_GRADIENT,
+                              WebkitBackgroundClip: "text",
+                              WebkitTextFillColor: "transparent",
+                              backgroundClip: "text",
+                            }}
+                          >
+                            {counterpartiesTotal}
+                          </span>
+                          <span
+                            className="mt-1 px-3 py-1"
+                            style={{
+                              fontSize: 18,
+                              fontWeight: 400,
+                              color: ACTIVE_TEXT_DARK,
+                              backgroundColor: MODAL_BG,
+                              borderRadius: 9,
+                            }}
+                          >
+                            Связанных — {counterpartiesLinked}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+                <div
+                  className="rounded-lg p-6 flex flex-col items-center justify-center"
+                  style={{
+                    backgroundColor: BACKGROUND_DT,
+                  }}
+                >
+                  <span
+                    className="mb-2"
+                    style={{
+                      fontSize: 32,
+                      fontWeight: 500,
+                      color: ACTIVE_TEXT_DARK,
+                    }}
+                  >
+                    Транзакции
+                  </span>
+                  <span
+                    className="font-semibold"
+                    style={{
+                      fontSize: 96,
+                      fontWeight: 600,
+                      background: PINK_GRADIENT,
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      backgroundClip: "text",
+                    }}
+                  >
+                    {parsedData?.transactions?.length ?? 0}
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -551,9 +1057,15 @@ export function ImportAccountsOperationsModal({
                 } as React.CSSProperties
               }
               onClick={() => void handleNext()}
-              disabled={isParsing}
+              disabled={isParsing || isImporting}
             >
-              {isParsing ? "Обработка…" : isLastStep ? "Завершить импорт" : "Далее"}
+              {isParsing
+                ? "Обработка…"
+                : isImporting
+                ? "Импорт…"
+                : isLastStep
+                ? "Завершить импорт"
+                : "Далее"}
             </Button>
           </div>
         </div>

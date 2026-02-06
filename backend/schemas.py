@@ -389,9 +389,6 @@ class TransactionBase(BaseModel):
         if self.direction == "TRANSFER":
             if self.category_id is not None:
                 raise ValueError("category_id is not allowed for TRANSFER")
-        else:
-            if self.category_id is None:
-                raise ValueError("category_id is required for INCOME/EXPENSE")
         return self
 
 class TransactionCreate(TransactionBase):

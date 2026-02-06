@@ -241,7 +241,7 @@ export const CATEGORY_ICON_BY_L1: Record<string, CategoryIcon> = {
   "Прочие доходы": Coins,
   "Социальные выплаты": Landmark,
   "Алименты полученные": HandCoins,
-  "Автомобиль": Car,
+  "Личный транспорт": Car,
   "Недвижимость": Building,
   "Услуги": Wrench,
   "Благотворительность": Heart,
@@ -255,7 +255,7 @@ export const CATEGORY_ICON_BY_L1: Record<string, CategoryIcon> = {
   "Налоги": Receipt,
   "Одежда и обувь": Shirt,
   "Отдых и развлечения": Popcorn,
-  "Отпуска": Plane,
+  "Путешествия": Plane,
   "Вредные привычки": Cigarette,
   "Питание": Utensils,
   "Подписки": CalendarSync,
@@ -265,8 +265,8 @@ export const CATEGORY_ICON_BY_L1: Record<string, CategoryIcon> = {
   "Транспорт": Bus,
   "Уход за собой": Scissors,
   "Хозяйственные расходы": Home,
-  "Электроника": Laptop,
   "Прочие расходы": MoreVertical,
+  "Комиссии": Receipt,
 };
 
 const CATEGORY_ICON_NAME_BY_COMPONENT = new Map<CategoryIcon, string>(

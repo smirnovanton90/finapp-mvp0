@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -171,6 +172,7 @@ export function ChainSelector({
     onChange?.(opt.chainId);
     setQuery("");
     setOpen(false);
+    anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
   };
 
   const clearSelection = () => {
@@ -178,6 +180,7 @@ export function ChainSelector({
     onChange?.(null);
     setQuery("");
     setOpen(false);
+    anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
   };
 
   const updateDropdownPosition = useCallback(() => {
@@ -236,14 +239,17 @@ export function ChainSelector({
 
   const showPrefix = Boolean(selectedChainId && !query && selectedIcon);
   const IconNode = selectedIcon;
+  const inputId = useId();
 
   return (
     <div className="space-y-3">
-      <div
-        className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal"
+      <label
+        htmlFor={inputId}
+        className="relative block cursor-text [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal"
         ref={anchorRef}
       >
         <AuthInput
+          id={inputId}
           type="text"
           aria-label={ariaLabel}
           placeholder={placeholder}
@@ -407,7 +413,7 @@ export function ChainSelector({
             </div>
           </div>
         )}
-      </div>
+      </label>
     </div>
   );
 }

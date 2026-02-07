@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -255,6 +256,7 @@ export function CategorySelector({
       setQuery("");
       setOpen(false);
     }
+    anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
   };
 
   const clearSelection = () => {
@@ -264,6 +266,7 @@ export function CategorySelector({
       setQuery("");
       setOpen(false);
     }
+    anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
   };
 
   const selectedPathsSet = selectionMode === "multi" ? selectedPathKeys || new Set<string>() : null;
@@ -334,11 +337,17 @@ export function CategorySelector({
   };
 
   const showPrefix = selectionMode === "single" && selectedPath && !query && selectedCategoryId != null;
+  const inputId = useId();
 
   return (
     <div className="space-y-3">
-      <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal" ref={anchorRef}>
+      <label
+        htmlFor={inputId}
+        className="relative block cursor-text [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal"
+        ref={anchorRef}
+      >
         <AuthInput
+          id={inputId}
           type="text"
           aria-label={ariaLabel}
           placeholder={placeholder}
@@ -539,7 +548,7 @@ export function CategorySelector({
           </div>,
             portalContainer ?? document.body
           )}
-      </div>
+      </label>
       {showChips && selectionMode === "multi" && selectedPathsOptions.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {selectedPathsOptions.map((path) => {

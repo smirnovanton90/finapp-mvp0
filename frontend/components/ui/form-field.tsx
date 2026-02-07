@@ -146,6 +146,7 @@ export function SelectField({
   const [isFocused, setIsFocused] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
   const [isOpen, setIsOpen] = React.useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
 
   // Background color based on state
   const backgroundColor = isFocused || isHovered || isOpen ? ACCENT_FILL_MEDIUM : ACCENT_FILL_LIGHT;
@@ -175,8 +176,16 @@ export function SelectField({
             boxShadow,
           }}
         >
-          {/* Inner container: h-10 to match TextField/AuthInput height */}
-          <div className="relative flex items-center px-4 h-10 z-10">
+          {/* Inner container: h-10 to match TextField/AuthInput height; whole area opens select */}
+          <div
+            className="relative flex items-center px-4 h-10 z-10 cursor-pointer"
+            onClick={(e) => {
+              if (disabled) return;
+              if (!triggerRef.current?.contains(e.target as Node)) {
+                triggerRef.current?.click();
+              }
+            }}
+          >
             <Select 
               value={value} 
               onValueChange={onValueChange} 
@@ -187,6 +196,7 @@ export function SelectField({
               }}
             >
               <SelectTrigger 
+                ref={triggerRef}
                 className="!w-full !h-auto !min-h-0 !border-0 !bg-transparent dark:!bg-transparent dark:hover:!bg-transparent !shadow-none !p-0 !px-0 !py-0 !rounded-none !focus:ring-0 !focus:outline-none !data-[state=open]:ring-0 [&_[data-slot=select-value]]:line-clamp-1 [&_[data-slot=select-value]]:truncate"
                 style={{
                   color: value ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,

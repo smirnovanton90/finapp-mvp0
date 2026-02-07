@@ -112,9 +112,10 @@ function AuthInput({
 
   return (
     <div 
-      className="relative w-full"
+      className="relative w-full cursor-text"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onClick={() => inputRef.current?.focus()}
     >
       {/* Container with background, border and shadow */}
       <div 

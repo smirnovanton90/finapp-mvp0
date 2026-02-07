@@ -31,12 +31,23 @@ export type CreateCounterpartyModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: (created: CounterpartyOut) => void;
+  /** Pre-select this industry when opening (e.g. "Банки" when adding bank from import). */
+  initialIndustryId?: number | null;
+  /** For nested modal: e.g. "z-[100]" to appear above parent. */
+  overlayClassName?: string;
+  containerClassName?: string;
+  /** When false, no focus trap — use when opening from another modal so parent stays open. */
+  modal?: boolean;
 };
 
 export function CreateCounterpartyModal({
   open,
   onOpenChange,
   onSuccess,
+  initialIndustryId,
+  overlayClassName,
+  containerClassName,
+  modal = true,
 }: CreateCounterpartyModalProps) {
   const [industries, setIndustries] = useState<CounterpartyIndustryOut[]>([]);
   const [legalForms, setLegalForms] = useState<LegalFormOut[]>([]);
@@ -67,6 +78,13 @@ export function CreateCounterpartyModal({
       })
       .catch(() => {});
   }, [open]);
+
+  useEffect(() => {
+    if (open && initialIndustryId != null && industries.length > 0) {
+      const exists = industries.some((ind) => ind.id === initialIndustryId);
+      if (exists) setIndustryId(String(initialIndustryId));
+    }
+  }, [open, initialIndustryId, industries]);
 
   const handleLogoChange = useCallback((file: File | null) => {
     setLogoError(null);
@@ -273,6 +291,9 @@ export function CreateCounterpartyModal({
       open={open}
       onOpenChange={handleOpenChange}
       title="Добавить контрагента"
+      overlayClassName={overlayClassName}
+      containerClassName={containerClassName}
+      modal={modal}
       icon={<Users className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
       formError={formError}
       onSubmit={handleSubmit}

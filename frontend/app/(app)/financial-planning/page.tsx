@@ -39,8 +39,6 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { CreateCategoryModal } from "@/components/create-category-modal";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
-import { AddEditItemModal } from "@/components/add-edit-item-modal";
-import { ASSET_TYPE_CODES } from "@/lib/asset-item-form-constants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -288,8 +286,6 @@ export default function FinancialPlanningPage() {
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
   const [createCounterpartyTarget, setCreateCounterpartyTarget] = useState<"main">("main");
-  const [createItemOpen, setCreateItemOpen] = useState(false);
-  const [createItemTarget, setCreateItemTarget] = useState<"primary" | "counterparty" | "related">("primary");
 
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [items, setItems] = useState<ItemOut[]>([]);
@@ -1595,7 +1591,7 @@ export default function FinancialPlanningPage() {
           <div className="w-[900px] mx-auto">
             <FormModal
               open={isDialogOpen}
-              modal={!createItemOpen}
+              modal
               onOpenChange={(open) => {
                 setIsDialogOpen(open);
                 if (!open) resetForm();
@@ -1725,7 +1721,6 @@ export default function FinancialPlanningPage() {
                   getBankName={itemBankName}
                   getItemBalance={getItemDisplayBalanceCents}
                   itemCounts={itemTxCounts}
-                  onAddNew={() => { setCreateItemTarget("primary"); setCreateItemOpen(true); }}
                 />
               </div>
               {isTransfer && (
@@ -1745,7 +1740,6 @@ export default function FinancialPlanningPage() {
                     getBankName={itemBankName}
                     getItemBalance={getItemDisplayBalanceCents}
                     itemCounts={itemTxCounts}
-                    onAddNew={() => { setCreateItemTarget("counterparty"); setCreateItemOpen(true); }}
                   />
                 </div>
               )}
@@ -1839,7 +1833,6 @@ export default function FinancialPlanningPage() {
                   getItemBalance={getItemDisplayBalanceCents}
                   itemCounts={itemTxCounts}
                   ariaLabel="Связь с активом/обязательством"
-                  onAddNew={() => { setCreateItemTarget("related"); setCreateItemOpen(true); }}
                 />
               </div>
               <TextField
@@ -1979,20 +1972,6 @@ export default function FinancialPlanningPage() {
           await loadItemsCategoriesCounterparties();
           setCounterpartyId(created.id);
         }}
-      />
-      <AddEditItemModal
-        open={createItemOpen}
-        onOpenChange={setCreateItemOpen}
-        onSuccess={async (created) => {
-          await loadItemsCategoriesCounterparties();
-          if (createItemTarget === "counterparty") setCounterpartyItemId(created.id);
-          else if (createItemTarget === "related") setRelatedItemId(created.id);
-          else setPrimaryItemId(created.id);
-        }}
-        editingItem={null}
-        onClearEditingItem={() => {}}
-        initialCreateOptions={{ kind: "ASSET", typeCodes: ASSET_TYPE_CODES, general: true }}
-        askConfirm={(_, message) => Promise.resolve(window.confirm(message))}
       />
       <ConfirmModal
         open={deleteTarget !== null}

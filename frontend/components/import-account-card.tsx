@@ -128,6 +128,8 @@ export type ImportAccountCardProps = {
   statementAccountingStartDate?: string | null;
   /** Дата последней транзакции по выписке — для подписи поля остатка «Остаток на …» */
   statementLastTransactionDate?: string | null;
+  /** When set, shows "Добавить" in bank/counterparty selector; on click calls this. */
+  onAddCounterparty?: () => void;
 };
 
 export function ImportAccountCard({
@@ -142,6 +144,7 @@ export function ImportAccountCard({
   getCounterpartyForItemId,
   statementAccountingStartDate,
   statementLastTransactionDate,
+  onAddCounterparty,
 }: ImportAccountCardProps) {
   const typeOptions = getTypeOptionsForKind(state.kind);
   const effectiveKind =
@@ -283,6 +286,7 @@ export function ImportAccountCard({
                             isBankType ? bankIndustryId ?? null : null
                           }
                           showChips={false}
+                          onAddCounterparty={onAddCounterparty}
                         />
                       ) : (
                         <TextField

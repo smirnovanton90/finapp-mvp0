@@ -117,8 +117,6 @@ import {
 import { ConfirmModal } from "@/components/confirm-modal";
 import { CreateCategoryModal } from "@/components/create-category-modal";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
-import { AddEditItemModal } from "@/components/add-edit-item-modal";
-import { ASSET_TYPE_CODES } from "@/lib/asset-item-form-constants";
 import {
   createTransaction,
   createDebtsTransaction,
@@ -1911,8 +1909,6 @@ function TransactionsView({
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
   const [createCounterpartyTarget, setCreateCounterpartyTarget] = useState<"main" | "debtPayFor" | "wherePaid">("main");
-  const [createItemOpen, setCreateItemOpen] = useState(false);
-  const [createItemTarget, setCreateItemTarget] = useState<"primary" | "counterparty" | "related">("primary");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -5031,7 +5027,7 @@ function TransactionsView({
             {/* Dialog for creating/editing transactions. Когда открыта модалка актива — modal={false}, чтобы фокус и ввод шли в модалку актива. */}
             <FormModal
               open={isDialogOpen}
-              modal={!createItemOpen}
+              modal
               onOpenChange={(open) => {
                 if (open) {
                   if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
@@ -5478,7 +5474,6 @@ function TransactionsView({
                           getItemBalance={getItemDisplayBalanceCents}
                           itemCounts={itemTxCounts}
                           disabled={isImportFormDisabled}
-                          onAddNew={() => { setCreateItemTarget("primary"); setCreateItemOpen(true); }}
                         />
                       </FormField>
                       <FormField label="Куда">
@@ -5500,7 +5495,6 @@ function TransactionsView({
                           getBankName={itemBankName}
                           getItemBalance={getItemDisplayBalanceCents}
                           itemCounts={itemTxCounts}
-                          onAddNew={() => { setCreateItemTarget("counterparty"); setCreateItemOpen(true); }}
                         />
                       </FormField>
                     </div>
@@ -5535,7 +5529,6 @@ function TransactionsView({
                         getItemBalance={getItemDisplayBalanceCents}
                         itemCounts={itemTxCounts}
                         disabled={isImportFormDisabled}
-                        onAddNew={() => { setCreateItemTarget("primary"); setCreateItemOpen(true); }}
                       />
                     </FormField>
                     )}
@@ -5566,7 +5559,6 @@ function TransactionsView({
                           getBankName={itemBankName}
                           getItemBalance={getItemDisplayBalanceCents}
                           itemCounts={itemTxCounts}
-                          onAddNew={() => { setCreateItemTarget("counterparty"); setCreateItemOpen(true); }}
                         />
                       </FormField>
                     )}
@@ -5900,7 +5892,6 @@ function TransactionsView({
                         itemCounts={itemTxCounts}
                         disabled={isImportFormDisabled}
                         ariaLabel="Связь с активом/обязательством"
-                        onAddNew={() => { setCreateItemTarget("related"); setCreateItemOpen(true); }}
                       />
                     </FormField>
 
@@ -5960,7 +5951,6 @@ function TransactionsView({
                     getBankName={itemBankName}
                     getItemBalance={getItemDisplayBalanceCents}
                     itemCounts={itemTxCounts}
-                    onAddNew={() => { setCreateItemTarget("primary"); setCreateItemOpen(true); }}
                   />
                 </FormField>
                 <FormField label="Обязательство">
@@ -5978,7 +5968,6 @@ function TransactionsView({
                     getBankName={itemBankName}
                     getItemBalance={getItemDisplayBalanceCents}
                     itemCounts={itemTxCounts}
-                    onAddNew={() => { setCreateItemTarget("counterparty"); setCreateItemOpen(true); }}
                   />
                 </FormField>
                 <TextField
@@ -6041,7 +6030,7 @@ function TransactionsView({
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <Dialog
                 open={isDialogOpen}
-                modal={!createItemOpen}
+                modal
                 onOpenChange={(open) => {
                   if (open) {
                     if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
@@ -6266,20 +6255,6 @@ function TransactionsView({
           else if (createCounterpartyTarget === "wherePaid") setWherePaidCounterpartyId(created.id);
           else setCounterpartyId(created.id);
         }}
-      />
-      <AddEditItemModal
-        open={createItemOpen}
-        onOpenChange={setCreateItemOpen}
-        onSuccess={async (created) => {
-          await loadItems();
-          if (createItemTarget === "counterparty") setCounterpartyItemId(created.id);
-          else if (createItemTarget === "related") setRelatedItemId(created.id);
-          else setPrimaryItemId(created.id);
-        }}
-        editingItem={null}
-        onClearEditingItem={() => {}}
-        initialCreateOptions={{ kind: "ASSET", typeCodes: ASSET_TYPE_CODES, general: true }}
-        askConfirm={(_, message) => Promise.resolve(window.confirm(message))}
       />
       <ConfirmModal
         open={isBulkEditConfirmOpen}

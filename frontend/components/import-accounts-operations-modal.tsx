@@ -29,6 +29,7 @@ import {
   getInitialAccountCardState,
   type ImportAccountCardState,
 } from "@/components/import-account-card";
+import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import {
   ImportCategoryCard,
   getInitialCategoryCardState,
@@ -50,6 +51,7 @@ import { validateStep2 } from "@/lib/import-step2-validation";
 import { validateStep3 } from "@/lib/import-step3-validation";
 import { validateStep4 } from "@/lib/import-step4-validation";
 import { executeImportDzen, getStatementAccountingStartDate, getStatementLastTransactionDate } from "@/lib/import-dzen-executor";
+import { getTypeOptionsForKind } from "@/lib/item-type-options";
 
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
@@ -129,6 +131,8 @@ export function ImportAccountsOperationsModal({
     Awaited<ReturnType<typeof fetchCounterpartyIndustries>>
   >([]);
   const [categories, setCategories] = React.useState<Awaited<ReturnType<typeof fetchCategories>>>([]);
+  const [addCounterpartyModalOpen, setAddCounterpartyModalOpen] = React.useState(false);
+  const [addCounterpartyForAccountKey, setAddCounterpartyForAccountKey] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const acceptedTypes =
@@ -375,16 +379,19 @@ export function ImportAccountsOperationsModal({
   const isLastStep = step === 5;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
       <DialogContent
         title="Импорт счетов и операций"
         onInteractOutside={(e) => {
-          if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
+          const target = e.target as HTMLElement;
+          if (target.closest?.("[data-selector-dropdown]") || target.closest?.(".import-add-counterparty-modal")) {
             e.preventDefault();
           }
         }}
         onPointerDownOutside={(e) => {
-          if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
+          const target = e.target as HTMLElement;
+          if (target.closest?.("[data-selector-dropdown]") || target.closest?.(".import-add-counterparty-modal")) {
             e.preventDefault();
           }
         }}
@@ -886,6 +893,10 @@ export function ImportAccountsOperationsModal({
                         statementLastTransactionDate={getStatementLastTransactionDate(
                           parsedData
                         )}
+                        onAddCounterparty={() => {
+                          setAddCounterpartyForAccountKey(key);
+                          setAddCounterpartyModalOpen(true);
+                        }}
                       />
                     );
                   })}
@@ -1313,5 +1324,41 @@ export function ImportAccountsOperationsModal({
         </div>
       </DialogContent>
     </Dialog>
+    <CreateCounterpartyModal
+      open={addCounterpartyModalOpen}
+      onOpenChange={(next) => {
+        setAddCounterpartyModalOpen(next);
+        if (!next) setAddCounterpartyForAccountKey(null);
+      }}
+      onSuccess={(created) => {
+        setCounterparties((prev) => [...prev, created]);
+        if (addCounterpartyForAccountKey) {
+          setAccountCardStates((prev) => {
+            const m = new Map(prev);
+            const state = m.get(addCounterpartyForAccountKey);
+            if (state) {
+              m.set(addCounterpartyForAccountKey, { ...state, counterpartyId: created.id });
+            }
+            return m;
+          });
+        }
+        setAddCounterpartyModalOpen(false);
+        setAddCounterpartyForAccountKey(null);
+      }}
+      initialIndustryId={(() => {
+        if (!addCounterpartyForAccountKey) return undefined;
+        const cardState = accountCardStates.get(addCounterpartyForAccountKey);
+        if (!cardState) return undefined;
+        const typeOptions = getTypeOptionsForKind(cardState.kind);
+        const effectiveType = cardState.typeCode && typeOptions.some((o) => o.code === cardState.typeCode)
+          ? cardState.typeCode
+          : typeOptions[0]?.code ?? "";
+        const isBankType = ["bank_account", "bank_card", "deposit", "savings_account"].includes(effectiveType);
+        return isBankType ? industries.find((ind) => ind.name === "Банки")?.id ?? undefined : undefined;
+      })()}
+      overlayClassName="z-[100] import-add-counterparty-modal"
+      containerClassName="z-[100] import-add-counterparty-modal"
+    />
+    </>
   );
 }

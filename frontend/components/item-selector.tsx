@@ -18,7 +18,6 @@ import {
   normalizeItemSearch,
   sortItemsByTransactionCount,
 } from "@/lib/item-utils";
-import { CirclePlus } from "lucide-react";
 import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
 import { useSelectorDropdownPortalContainer } from "@/components/selector-dropdown-portal-context";
@@ -44,8 +43,6 @@ type ItemSelectorProps = {
   resetSignal?: number | string;
   showChips?: boolean;
   ariaLabel?: string;
-  /** When set, shows "Добавить" as first option; on click calls this and closes dropdown. */
-  onAddNew?: () => void;
 };
 
 const DEFAULT_EMPTY_MESSAGE = "Нет активов или обязательств.";
@@ -72,7 +69,6 @@ export function ItemSelector({
   resetSignal,
   showChips = true,
   ariaLabel,
-  onAddNew,
 }: ItemSelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -312,28 +308,6 @@ export function ItemSelector({
                 }}
               >
                 {clearLabel}
-              </button>
-            )}
-            {onAddNew && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
-                style={{ color: SIDEBAR_TEXT_ACTIVE }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "transparent";
-                }}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  onAddNew();
-                  setOpen(false);
-                }}
-                aria-label="Добавить новый актив или обязательство"
-              >
-                <CirclePlus className="h-5 w-5 shrink-0" />
-                <span>Добавить</span>
               </button>
             )}
             {sortedItems.length === 0 ? (

@@ -204,11 +204,12 @@ export default function CounterpartiesPage() {
     };
   }, [logoPreview, photoPreview]);
 
-  // Открыть форму создания с предзаполненным ИНН при переходе с транзакций (распознавание чека)
+  // Открыть форму создания при переходе с чека с ИНН
   useEffect(() => {
     const create = searchParams.get("create");
     const innFromUrl = searchParams.get("inn");
-    if (create === "1" && innFromUrl?.trim()) {
+    if (create !== "1") return;
+    if (innFromUrl?.trim()) {
       setEntityType("LEGAL");
       setInn(innFromUrl.trim());
       setEditing(null);

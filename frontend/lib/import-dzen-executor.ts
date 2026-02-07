@@ -52,6 +52,49 @@ function calcInitialFromTransactions(
   return { initial, earliestDate };
 }
 
+/** Дата начала учёта по выписке — одинаковая для всех счетов импорта */
+export function getStatementAccountingStartDate(
+  parsedData: { accounts?: Array<{ name: string; currency: string }>; transactions?: Array<{ date: string }> },
+  accountCardStates: Map<string, { balanceStr: string; linkEnabled: boolean }>
+): string | null {
+  const transactions = parsedData.transactions ?? [];
+  let earliest: string | null = null;
+  for (const tx of transactions) {
+    const d = tx.date;
+    if (d && (!earliest || d < earliest)) earliest = d;
+  }
+  if (!earliest && (parsedData.accounts ?? []).length > 0) {
+    for (const acc of parsedData.accounts ?? []) {
+      const key = `${acc.name}|${acc.currency}`;
+      const state = accountCardStates.get(key);
+      if (!state || state.linkEnabled) continue;
+      const balanceCents = parseRubToCents(state.balanceStr);
+      const currentBalance = Number.isFinite(balanceCents) ? balanceCents / 100 : 0;
+      const { earliestDate: accEarliest } = calcInitialFromTransactions(
+        acc.name,
+        acc.currency,
+        transactions,
+        currentBalance
+      );
+      if (!earliest || accEarliest < earliest) earliest = accEarliest;
+    }
+  }
+  return earliest;
+}
+
+/** Дата последней транзакции по выписке — для подписи поля «Остаток на …» на шаге «Счета» */
+export function getStatementLastTransactionDate(
+  parsedData: { transactions?: Array<{ date: string }> }
+): string | null {
+  const transactions = parsedData.transactions ?? [];
+  let latest: string | null = null;
+  for (const tx of transactions) {
+    const d = tx.date;
+    if (d && (!latest || d > latest)) latest = d;
+  }
+  return latest;
+}
+
 export type ImportDzenParams = {
   parsedData: DzenParsedData;
   accountCardStates: Map<string, ImportAccountCardState>;

@@ -49,7 +49,7 @@ import {
 import { validateStep2 } from "@/lib/import-step2-validation";
 import { validateStep3 } from "@/lib/import-step3-validation";
 import { validateStep4 } from "@/lib/import-step4-validation";
-import { executeImportDzen } from "@/lib/import-dzen-executor";
+import { executeImportDzen, getStatementAccountingStartDate, getStatementLastTransactionDate } from "@/lib/import-dzen-executor";
 
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
@@ -140,6 +140,35 @@ export function ImportAccountsOperationsModal({
     setParseError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  // Парсинг файла при выборе (для Дзен) — чтобы показать параметры выписки на шаге 1
+  React.useEffect(() => {
+    if (importSource !== "dzen" || !selectedFile) {
+      setParsedData(null);
+      setParseError(null);
+      return;
+    }
+    let cancelled = false;
+    setIsParsing(true);
+    setParseError(null);
+    parseDzenCSVFile(selectedFile)
+      .then((data) => {
+        if (!cancelled) setParsedData(data);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setParseError(
+            err instanceof Error ? err.message : "Не удалось распознать файл."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsParsing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [importSource, selectedFile]);
 
   const step1Content =
     importSource && importSource in STEP1_CONTENT
@@ -232,23 +261,15 @@ export function ImportAccountsOperationsModal({
 
   const handleNext = async () => {
     if (step === 1 && importSource === "dzen") {
-      setParseError(null);
       if (!selectedFile) {
         setParseError("Выберите файл для импорта.");
         return;
       }
-      setIsParsing(true);
-      try {
-        const data = await parseDzenCSVFile(selectedFile);
-        setParsedData(data);
-        setStep(2);
-      } catch (err) {
-        setParseError(
-          err instanceof Error ? err.message : "Не удалось обработать файл."
-        );
-      } finally {
-        setIsParsing(false);
+      if (!parsedData) {
+        if (parseError) return;
+        return; // ещё идёт парсинг
       }
+      setStep(2);
       return;
     }
 
@@ -493,7 +514,7 @@ export function ImportAccountsOperationsModal({
               fontWeight: 400,
             }}
           >
-            {parseError && (
+            {step === 1 && parseError && !selectedFile && (
               <p
                 className="text-base shrink-0"
                 style={{ color: "#FB4C4F" }}
@@ -591,6 +612,220 @@ export function ImportAccountsOperationsModal({
                       handleFileSelect(e.target.files?.[0] ?? null);
                     }}
                   />
+                  {/* Параметры выписки или ошибка — только для Дзен после выбора файла */}
+                  {importSource === "dzen" && selectedFile && (
+                    <div className="flex flex-col gap-4">
+                      <p
+                        className="text-base"
+                        style={{ color: ACTIVE_TEXT_DARK }}
+                      >
+                        Параметры выбранной выписки:
+                      </p>
+                      {isParsing && (
+                        <div
+                          className="p-4"
+                          style={{
+                            backgroundColor: BACKGROUND_DT,
+                            borderRadius: 9,
+                          }}
+                        >
+                          <p
+                            className="text-base"
+                            style={{ color: PLACEHOLDER_COLOR_DARK }}
+                          >
+                            Обработка файла…
+                          </p>
+                        </div>
+                      )}
+                      {!isParsing && parseError && (
+                        <div
+                          className="p-4"
+                          style={{
+                            backgroundColor: BACKGROUND_DT,
+                            borderRadius: 9,
+                          }}
+                        >
+                          <p className="text-base" style={{ color: "#FB4C4F" }}>
+                            {parseError}
+                          </p>
+                        </div>
+                      )}
+                      {!isParsing && parsedData && !parseError && (
+                        <>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div
+                              className="flex flex-col gap-2 p-4 items-center text-center"
+                              style={{
+                                backgroundColor: BACKGROUND_DT,
+                                borderRadius: 9,
+                              }}
+                            >
+                              <span
+                                className="text-base"
+                                style={{ color: ACTIVE_TEXT_DARK }}
+                              >
+                                Дата первой операции
+                              </span>
+                              <div
+                                className="w-full px-3 py-2 text-base box-border"
+                                style={{
+                                  color: ACTIVE_TEXT_DARK,
+                                  backgroundColor: MODAL_BG,
+                                  borderRadius: 9,
+                                }}
+                              >
+                                {parsedData.transactions.length > 0
+                                  ? (() => {
+                                      const dates = parsedData.transactions.map(
+                                        (t) => t.date
+                                      );
+                                      const first = [...dates].sort()[0];
+                                      const [y, m, d] = first.split("-");
+                                      return `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y}`;
+                                    })()
+                                  : "—"}
+                              </div>
+                            </div>
+                            <div
+                              className="flex flex-col gap-2 p-4 items-center text-center"
+                              style={{
+                                backgroundColor: BACKGROUND_DT,
+                                borderRadius: 9,
+                              }}
+                            >
+                              <span
+                                className="text-base"
+                                style={{ color: ACTIVE_TEXT_DARK }}
+                              >
+                                Дата последней операции
+                              </span>
+                              <div
+                                className="w-full px-3 py-2 text-base box-border"
+                                style={{
+                                  color: ACTIVE_TEXT_DARK,
+                                  backgroundColor: MODAL_BG,
+                                  borderRadius: 9,
+                                }}
+                              >
+                                {parsedData.transactions.length > 0
+                                  ? (() => {
+                                      const dates = parsedData.transactions.map(
+                                        (t) => t.date
+                                      );
+                                      const last = [...dates].sort().reverse()[0];
+                                      const [y, m, d] = last.split("-");
+                                      return `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y}`;
+                                    })()
+                                  : "—"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-4 gap-4">
+                            <div
+                              className="flex items-center justify-between gap-2 p-4"
+                              style={{
+                                backgroundColor: BACKGROUND_DT,
+                                borderRadius: 9,
+                              }}
+                            >
+                              <span
+                                className="text-base"
+                                style={{ color: ACTIVE_TEXT_DARK }}
+                              >
+                                Счетов
+                              </span>
+                              <div
+                                className="px-3 py-1.5 text-base shrink-0"
+                                style={{
+                                  color: ACTIVE_TEXT_DARK,
+                                  backgroundColor: MODAL_BG,
+                                  borderRadius: 9,
+                                }}
+                              >
+                                {parsedData.accounts.length}
+                              </div>
+                            </div>
+                            <div
+                              className="flex items-center justify-between gap-2 p-4"
+                              style={{
+                                backgroundColor: BACKGROUND_DT,
+                                borderRadius: 9,
+                              }}
+                            >
+                              <span
+                                className="text-base"
+                                style={{ color: ACTIVE_TEXT_DARK }}
+                              >
+                                Категорий
+                              </span>
+                              <div
+                                className="px-3 py-1.5 text-base shrink-0"
+                                style={{
+                                  color: ACTIVE_TEXT_DARK,
+                                  backgroundColor: MODAL_BG,
+                                  borderRadius: 9,
+                                }}
+                              >
+                                {parsedData.categories.length}
+                              </div>
+                            </div>
+                            <div
+                              className="flex items-center justify-between gap-2 p-4"
+                              style={{
+                                backgroundColor: BACKGROUND_DT,
+                                borderRadius: 9,
+                              }}
+                            >
+                              <span
+                                className="text-base"
+                                style={{ color: ACTIVE_TEXT_DARK }}
+                              >
+                                Контрагентов
+                              </span>
+                              <div
+                                className="px-3 py-1.5 text-base shrink-0"
+                                style={{
+                                  color: ACTIVE_TEXT_DARK,
+                                  backgroundColor: MODAL_BG,
+                                  borderRadius: 9,
+                                }}
+                              >
+                                {parsedData.counterparties.length.toLocaleString(
+                                  "ru-RU"
+                                )}
+                              </div>
+                            </div>
+                            <div
+                              className="flex items-center justify-between gap-2 p-4"
+                              style={{
+                                backgroundColor: BACKGROUND_DT,
+                                borderRadius: 9,
+                              }}
+                            >
+                              <span
+                                className="text-base"
+                                style={{ color: ACTIVE_TEXT_DARK }}
+                              >
+                                Транзакций
+                              </span>
+                              <div
+                                className="px-3 py-1.5 text-base shrink-0"
+                                style={{
+                                  color: ACTIVE_TEXT_DARK,
+                                  backgroundColor: MODAL_BG,
+                                  borderRadius: 9,
+                                }}
+                              >
+                                {parsedData.transactions.length.toLocaleString(
+                                  "ru-RU"
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -644,6 +879,13 @@ export function ImportAccountsOperationsModal({
                         apiBase={API_BASE}
                         counterparties={counterparties}
                         industries={industries}
+                        statementAccountingStartDate={getStatementAccountingStartDate(
+                          parsedData,
+                          accountCardStates
+                        )}
+                        statementLastTransactionDate={getStatementLastTransactionDate(
+                          parsedData
+                        )}
                       />
                     );
                   })}

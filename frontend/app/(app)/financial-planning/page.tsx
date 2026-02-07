@@ -34,9 +34,13 @@ import {
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 import { ConfirmModal } from "@/components/confirm-modal";
+import { CreateCategoryModal } from "@/components/create-category-modal";
+import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
+import { AddEditItemModal } from "@/components/add-edit-item-modal";
+import { ASSET_TYPE_CODES } from "@/lib/asset-item-form-constants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -276,8 +280,16 @@ export default function FinancialPlanningPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { activeStep, isWizardOpen } = useOnboarding();
   const { isCollapsed, filtersSlotId } = useSidebar();
+
+  const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
+  const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
+  const [createCounterpartyTarget, setCreateCounterpartyTarget] = useState<"main">("main");
+  const [createItemOpen, setCreateItemOpen] = useState(false);
+  const [createItemTarget, setCreateItemTarget] = useState<"primary" | "counterparty" | "related">("primary");
 
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [items, setItems] = useState<ItemOut[]>([]);
@@ -286,6 +298,7 @@ export default function FinancialPlanningPage() {
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
   const [deletedTxs, setDeletedTxs] = useState<TransactionOut[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -533,6 +546,25 @@ export default function FinancialPlanningPage() {
     setTxs(txData);
     setDeletedTxs(deletedData);
   };
+
+  const loadItemsCategoriesCounterparties = useCallback(async () => {
+    try {
+      const [itemsData, categoriesData, counterpartiesData, industriesData] = await Promise.all([
+        fetchItems(),
+        fetchCategories(),
+        fetchCounterparties({ include_deleted: true }),
+        fetchCounterpartyIndustries(),
+      ]);
+      setItems(itemsData);
+      setCategoryNodes(categoriesData);
+      setCounterparties(counterpartiesData);
+      setIndustries(industriesData);
+    } catch (e: unknown) {
+      const msg = e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : "";
+      setCounterpartyError(msg || "Не удалось загрузить контрагентов.");
+      setError(msg || "Не удалось загрузить данные.");
+    }
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -1563,6 +1595,7 @@ export default function FinancialPlanningPage() {
           <div className="w-[900px] mx-auto">
             <FormModal
               open={isDialogOpen}
+              modal={!createItemOpen}
               onOpenChange={(open) => {
                 setIsDialogOpen(open);
                 if (!open) resetForm();
@@ -1692,6 +1725,7 @@ export default function FinancialPlanningPage() {
                   getBankName={itemBankName}
                   getItemBalance={getItemDisplayBalanceCents}
                   itemCounts={itemTxCounts}
+                  onAddNew={() => { setCreateItemTarget("primary"); setCreateItemOpen(true); }}
                 />
               </div>
               {isTransfer && (
@@ -1711,6 +1745,7 @@ export default function FinancialPlanningPage() {
                     getBankName={itemBankName}
                     getItemBalance={getItemDisplayBalanceCents}
                     itemCounts={itemTxCounts}
+                    onAddNew={() => { setCreateItemTarget("counterparty"); setCreateItemOpen(true); }}
                   />
                 </div>
               )}
@@ -1726,6 +1761,7 @@ export default function FinancialPlanningPage() {
                   disabled={counterpartyLoading}
                   counterpartyCounts={counterpartyTxCounts}
                   apiBase={API_BASE}
+                  onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
                 />
                 {counterpartyError && (
                   <p className="text-xs" style={{ color: "#FB4C4F" }}>
@@ -1782,6 +1818,7 @@ export default function FinancialPlanningPage() {
                     placeholder="Начните вводить категорию"
                     direction={direction}
                     disabled={isSubmitting}
+                    onAddCategory={() => setCreateCategoryOpen(true)}
                   />
                 </div>
               )}
@@ -1802,6 +1839,7 @@ export default function FinancialPlanningPage() {
                   getItemBalance={getItemDisplayBalanceCents}
                   itemCounts={itemTxCounts}
                   ariaLabel="Связь с активом/обязательством"
+                  onAddNew={() => { setCreateItemTarget("related"); setCreateItemOpen(true); }}
                 />
               </div>
               <TextField
@@ -1922,6 +1960,40 @@ export default function FinancialPlanningPage() {
           </div>
         </div>
 
+      <CreateCategoryModal
+        open={createCategoryOpen}
+        onOpenChange={setCreateCategoryOpen}
+        onSuccess={async (created) => {
+          await loadItemsCategoriesCounterparties();
+          try {
+            applyCategorySelection(created.name, "", "");
+          } catch {
+            // ignore
+          }
+        }}
+      />
+      <CreateCounterpartyModal
+        open={createCounterpartyOpen}
+        onOpenChange={setCreateCounterpartyOpen}
+        onSuccess={async (created) => {
+          await loadItemsCategoriesCounterparties();
+          setCounterpartyId(created.id);
+        }}
+      />
+      <AddEditItemModal
+        open={createItemOpen}
+        onOpenChange={setCreateItemOpen}
+        onSuccess={async (created) => {
+          await loadItemsCategoriesCounterparties();
+          if (createItemTarget === "counterparty") setCounterpartyItemId(created.id);
+          else if (createItemTarget === "related") setRelatedItemId(created.id);
+          else setPrimaryItemId(created.id);
+        }}
+        editingItem={null}
+        onClearEditingItem={() => {}}
+        initialCreateOptions={{ kind: "ASSET", typeCodes: ASSET_TYPE_CODES, general: true }}
+        askConfirm={(_, message) => Promise.resolve(window.confirm(message))}
+      />
       <ConfirmModal
         open={deleteTarget !== null}
         onOpenChange={(open) => {

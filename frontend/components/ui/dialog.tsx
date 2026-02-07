@@ -53,27 +53,29 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean;
     overlayClassName?: string;
+    /** Класс для контейнера (fixed inset-0). Например z-[100] для вложенной модалки. */
+    containerClassName?: string;
     /** Заголовок для скринридеров (обязателен для доступности). Скрыт визуально. */
     title?: string;
   }
->(({ className, children, showCloseButton = true, overlayClassName, title = "Диалог", onPointerDownOutside, onInteractOutside, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, overlayClassName, containerClassName, title = "Диалог", onPointerDownOutside, onInteractOutside, ...props }, ref) => {
   const selectorPortalRef = React.useRef<HTMLDivElement>(null);
   const handlePointerDownOutside = (e: Event) => {
     if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
       e.preventDefault();
     }
-    onPointerDownOutside?.(e as unknown as React.PointerEvent);
+    onPointerDownOutside?.(e as never);
   };
   const handleInteractOutside = (e: Event) => {
     if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
       e.preventDefault();
     }
-    onInteractOutside?.(e as unknown as React.FocusEvent);
+    onInteractOutside?.(e as never);
   };
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay className={overlayClassName} />
-      <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden overscroll-contain">
+      <div className={cn("fixed inset-0 z-50 overflow-y-auto overflow-x-hidden overscroll-contain", containerClassName)}>
         <div className="min-h-full flex flex-col items-center py-6">
           <DialogPrimitive.Content
             ref={ref}

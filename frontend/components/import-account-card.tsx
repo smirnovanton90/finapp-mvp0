@@ -16,13 +16,10 @@ import { TextField, SelectField } from "@/components/ui/form-field";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { getItemTypeLabel } from "@/lib/item-types";
-import {
-  getTypeOptionsForKind,
-  type ItemKind,
-} from "@/lib/item-type-options";
+import { getTypeOptionsForKind } from "@/lib/item-type-options";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import type { DzenParsedAccount, DzenParsedTransaction } from "@/lib/dzen-csv-parser";
-import type { ItemOut, CounterpartyOut, CounterpartyIndustryOut } from "@/lib/api";
+import type { ItemOut, CounterpartyOut, CounterpartyIndustryOut, ItemKind } from "@/lib/api";
 
 const NAME_BLOCK_WIDTH = 150;
 const TOGGLES_BLOCK_WIDTH = 80;
@@ -127,6 +124,10 @@ export type ImportAccountCardProps = {
   counterparties?: CounterpartyOut[];
   industries?: CounterpartyIndustryOut[];
   getCounterpartyForItemId?: (id: number) => CounterpartyOut | null;
+  /** Дата начала учёта по выписке — одинаковая для всех карточек при импорте */
+  statementAccountingStartDate?: string | null;
+  /** Дата последней транзакции по выписке — для подписи поля остатка «Остаток на …» */
+  statementLastTransactionDate?: string | null;
 };
 
 export function ImportAccountCard({
@@ -139,6 +140,8 @@ export function ImportAccountCard({
   counterparties = [],
   industries = [],
   getCounterpartyForItemId,
+  statementAccountingStartDate,
+  statementLastTransactionDate,
 }: ImportAccountCardProps) {
   const typeOptions = getTypeOptionsForKind(state.kind);
   const effectiveKind =
@@ -163,6 +166,11 @@ export function ImportAccountCard({
   };
 
   const displayName = state.name || account.name;
+
+  const balancePlaceholder =
+    statementLastTransactionDate
+      ? `Остаток на ${formatShortDate(statementLastTransactionDate)}`
+      : "Укажите сумму";
 
   return (
     <div
@@ -287,7 +295,7 @@ export function ImportAccountCard({
                               balanceStr: normalizeRubOnBlur(state.balanceStr),
                             })
                           }
-                          placeholder="Укажите сумму"
+                          placeholder={balancePlaceholder}
                           inputMode="decimal"
                         />
                       )}
@@ -316,7 +324,7 @@ export function ImportAccountCard({
                               balanceStr: normalizeRubOnBlur(state.balanceStr),
                             })
                           }
-                          placeholder="Укажите сумму"
+                          placeholder={balancePlaceholder}
                           inputMode="decimal"
                         />
                       ) : null}
@@ -333,10 +341,16 @@ export function ImportAccountCard({
                       className="min-w-0 flex flex-col justify-center"
                       style={{ color: ACTIVE_TEXT_DARK }}
                     >
-                      <span className="text-base font-normal">
-                        {earliestDate
-                          ? `Сумма на ${formatShortDate(earliestDate)}: ${formatAmount(initial)}`
-                          : `Начальная сумма: ${formatAmount(initial)}`}
+                      <span
+                        className="font-normal"
+                        style={{ fontSize: 14, fontWeight: 400 }}
+                      >
+                        {(() => {
+                          const displayDate = statementAccountingStartDate ?? earliestDate;
+                          return displayDate
+                            ? `Остаток на ${formatShortDate(displayDate)}: ${formatAmount(initial)}`
+                            : `Начальная сумма: ${formatAmount(initial)}`;
+                        })()}
                       </span>
                     </div>
                   </div>

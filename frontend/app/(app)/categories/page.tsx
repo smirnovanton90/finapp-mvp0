@@ -629,7 +629,7 @@ export default function CategoriesPage() {
     setFormError(null);
     setSyncing(true);
     try {
-      await createCategory({
+      const created = await createCategory({
         name: trimmed,
         parent_id: addParentId,
         scope: newScope,

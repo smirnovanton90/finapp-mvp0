@@ -7,6 +7,8 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { Gauge, Plus } from "lucide-react";
 
 import { ConfirmModal } from "@/components/confirm-modal";
+import { CreateCategoryModal } from "@/components/create-category-modal";
+import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CategorySelector } from "@/components/category-selector";
@@ -150,6 +152,9 @@ export default function GoalsPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
+
+  const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
+  const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
 
   const [goals, setGoals] = useState<GoalOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
@@ -635,6 +640,7 @@ export default function GoalsPage() {
             }}
             placeholder="Выберите категорию"
             disabled={isSubmitting}
+            onAddCategory={() => setCreateCategoryOpen(true)}
           />
         </div>
 
@@ -648,6 +654,26 @@ export default function GoalsPage() {
         />
       </FormModal>
 
+      <CreateCategoryModal
+        open={createCategoryOpen}
+        onOpenChange={setCreateCategoryOpen}
+        onSuccess={async (created) => {
+          await loadAll();
+          try {
+            applyCategorySelection(created.name, "", "");
+          } catch {
+            // ignore
+          }
+        }}
+      />
+      <CreateCounterpartyModal
+        open={createCounterpartyOpen}
+        onOpenChange={setCreateCounterpartyOpen}
+        onSuccess={async (created) => {
+          await loadAll();
+          setFilterCounterpartyIds([created.id]);
+        }}
+      />
       <ConfirmModal
         open={deleteTarget !== null}
         onOpenChange={(open) => {
@@ -787,6 +813,7 @@ export default function GoalsPage() {
               emptyMessage="Нет контрагентов"
               noResultsMessage="Ничего не найдено"
               apiBase={API_BASE}
+              onAddCounterparty={() => setCreateCounterpartyOpen(true)}
             />
           </FilterSection>
 

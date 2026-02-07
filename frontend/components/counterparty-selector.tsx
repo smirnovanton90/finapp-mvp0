@@ -20,6 +20,7 @@ import {
   buildCounterpartySearchText,
   sortCounterpartiesByTransactionCount,
 } from "@/lib/counterparty-utils";
+import { CirclePlus } from "lucide-react";
 import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
 import { useSelectorDropdownPortalContainer } from "@/components/selector-dropdown-portal-context";
@@ -42,6 +43,8 @@ type CounterpartySelectorProps = {
   industries?: CounterpartyIndustryOut[];
   counterpartyCounts?: Map<number, number> | Record<number, number>;
   apiBase: string;
+  /** When set, shows "Добавить" as first option; on click calls this and closes dropdown. */
+  onAddCounterparty?: () => void;
 };
 
 const DEFAULT_EMPTY_MESSAGE = "Нет контрагентов.";
@@ -65,6 +68,7 @@ export function CounterpartySelector({
   industries = [],
   counterpartyCounts,
   apiBase,
+  onAddCounterparty,
 }: CounterpartySelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -314,6 +318,28 @@ export function CounterpartySelector({
                     }}
                   >
                     {clearLabel}
+                  </button>
+                )}
+                {onAddCounterparty && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                    style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      onAddCounterparty();
+                      setOpen(false);
+                    }}
+                    aria-label="Добавить контрагента"
+                  >
+                    <CirclePlus className="h-5 w-5 shrink-0" />
+                    <span>Добавить</span>
                   </button>
                 )}
                 {counterparties.length === 0 ? (

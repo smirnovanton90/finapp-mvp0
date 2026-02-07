@@ -12,6 +12,7 @@ import {
   type ComponentType,
 } from "react";
 
+import { CirclePlus } from "lucide-react";
 import { CategoryNode, buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
 import {
   CATEGORY_ICON_BY_NAME,
@@ -52,6 +53,8 @@ type CategorySelectorProps = {
   /** Макс. глубина (1, 2 или 3). При 2 не показываем категории 3-го уровня. */
   maxDepth?: number;
   showChips?: boolean;
+  /** When set, shows "Добавить" as first option; on click calls this and closes dropdown. */
+  onAddCategory?: () => void;
 };
 
 const DEFAULT_EMPTY_MESSAGE = "Нет категорий.";
@@ -184,6 +187,7 @@ export function CategorySelector({
   includeDisabled = false,
   maxDepth,
   showChips = true,
+  onAddCategory,
 }: CategorySelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -430,6 +434,28 @@ export function CategorySelector({
                     }}
                   >
                     {clearLabel}
+                  </button>
+                )}
+                {onAddCategory && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                    style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      onAddCategory();
+                      setOpen(false);
+                    }}
+                    aria-label="Добавить категорию"
+                  >
+                    <CirclePlus className="h-5 w-5 shrink-0" />
+                    <span>Добавить</span>
                   </button>
                 )}
                 {categoryPaths.length === 0 ? (

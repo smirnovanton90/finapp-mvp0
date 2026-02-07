@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useAccountingStart } from "@/components/accounting-start-context";
-import { useSearchParams } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
 import {
@@ -115,6 +115,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmModal } from "@/components/confirm-modal";
+import { CreateCategoryModal } from "@/components/create-category-modal";
+import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
+import { AddEditItemModal } from "@/components/add-edit-item-modal";
+import { ASSET_TYPE_CODES } from "@/lib/asset-item-form-constants";
 import {
   createTransaction,
   createDebtsTransaction,
@@ -183,6 +187,7 @@ type BulkEditBaseline = {
   primaryItemId: number | null;
   counterpartyItemId: number | null;
   counterpartyId: number | null;
+  relatedItemId: number | null;
   amountStr: string;
   amountCounterpartyStr: string;
   primaryQuantityLots: string;
@@ -1902,8 +1907,15 @@ function TransactionsView({
 }: {
   view?: TransactionsViewMode;
 }) {
-  const searchParams = useSearchParams();
   const { data: session } = useSession();
+  const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
+  const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
+  const [createCounterpartyTarget, setCreateCounterpartyTarget] = useState<"main" | "debtPayFor" | "wherePaid">("main");
+  const [createItemOpen, setCreateItemOpen] = useState(false);
+  const [createItemTarget, setCreateItemTarget] = useState<"primary" | "counterparty" | "related">("primary");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
   const { isCollapsed, filtersSlotId } = useSidebar();
@@ -2102,6 +2114,16 @@ function TransactionsView({
     }
   }, [isWizardOpen]);
 
+  const loadCategories = useCallback(async () => {
+    try {
+      const data = await fetchCategories();
+      setCategoryNodes(data);
+    } catch (err: unknown) {
+      const msg = err && typeof err === "object" && "message" in err ? String((err as { message: string }).message) : "Не удалось загрузить категории.";
+      setError(msg);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     fetchCategories()
@@ -2131,7 +2153,6 @@ function TransactionsView({
       cancelled = true;
     };
   }, []);
-
 
   const normalizeCategoryValue = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -5007,9 +5028,10 @@ function TransactionsView({
               </DialogContent>
             </Dialog>
             
-            {/* Dialog for creating/editing transactions - shared between collapsed and expanded states */}
+            {/* Dialog for creating/editing transactions. Когда открыта модалка актива — modal={false}, чтобы фокус и ввод шли в модалку актива. */}
             <FormModal
               open={isDialogOpen}
+              modal={!createItemOpen}
               onOpenChange={(open) => {
                 if (open) {
                   if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
@@ -5456,6 +5478,7 @@ function TransactionsView({
                           getItemBalance={getItemDisplayBalanceCents}
                           itemCounts={itemTxCounts}
                           disabled={isImportFormDisabled}
+                          onAddNew={() => { setCreateItemTarget("primary"); setCreateItemOpen(true); }}
                         />
                       </FormField>
                       <FormField label="Куда">
@@ -5477,6 +5500,7 @@ function TransactionsView({
                           getBankName={itemBankName}
                           getItemBalance={getItemDisplayBalanceCents}
                           itemCounts={itemTxCounts}
+                          onAddNew={() => { setCreateItemTarget("counterparty"); setCreateItemOpen(true); }}
                         />
                       </FormField>
                     </div>
@@ -5511,6 +5535,7 @@ function TransactionsView({
                         getItemBalance={getItemDisplayBalanceCents}
                         itemCounts={itemTxCounts}
                         disabled={isImportFormDisabled}
+                        onAddNew={() => { setCreateItemTarget("primary"); setCreateItemOpen(true); }}
                       />
                     </FormField>
                     )}
@@ -5541,6 +5566,7 @@ function TransactionsView({
                           getBankName={itemBankName}
                           getItemBalance={getItemDisplayBalanceCents}
                           itemCounts={itemTxCounts}
+                          onAddNew={() => { setCreateItemTarget("counterparty"); setCreateItemOpen(true); }}
                         />
                       </FormField>
                     )}
@@ -5560,6 +5586,7 @@ function TransactionsView({
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
+                            onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
                           />
                         </FormField>
                         <FormField label="За кого платите">
@@ -5573,6 +5600,7 @@ function TransactionsView({
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
+                            onAddCounterparty={() => { setCreateCounterpartyTarget("debtPayFor"); setCreateCounterpartyOpen(true); }}
                           />
                         </FormField>
                       </div>
@@ -5590,6 +5618,7 @@ function TransactionsView({
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
+                            onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
                           />
                         </FormField>
                         <FormField label="Где платит">
@@ -5603,6 +5632,7 @@ function TransactionsView({
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
+                            onAddCounterparty={() => { setCreateCounterpartyTarget("wherePaid"); setCreateCounterpartyOpen(true); }}
                           />
                         </FormField>
                       </div>
@@ -5629,6 +5659,7 @@ function TransactionsView({
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
+                            onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
                           />
                           {receiptMessage && (
                             <div className="flex flex-wrap items-center gap-2">
@@ -5744,6 +5775,7 @@ function TransactionsView({
                             placeholder="Поиск категории"
                             direction="EXPENSE"
                             disabled={false}
+                            onAddCategory={() => setCreateCategoryOpen(true)}
                           />
                         </FormField>
                       </>
@@ -5846,6 +5878,7 @@ function TransactionsView({
                           placeholder="Поиск категории"
                           direction={isDebts && debtDirection === "THEY_PAID_FOR_ME" ? "EXPENSE" : direction === "TRANSFER" ? undefined : direction}
                           disabled={false}
+                          onAddCategory={() => setCreateCategoryOpen(true)}
                         />
                       </FormField>
                     ) : null}
@@ -5867,6 +5900,7 @@ function TransactionsView({
                         itemCounts={itemTxCounts}
                         disabled={isImportFormDisabled}
                         ariaLabel="Связь с активом/обязательством"
+                        onAddNew={() => { setCreateItemTarget("related"); setCreateItemOpen(true); }}
                       />
                     </FormField>
 
@@ -5926,6 +5960,7 @@ function TransactionsView({
                     getBankName={itemBankName}
                     getItemBalance={getItemDisplayBalanceCents}
                     itemCounts={itemTxCounts}
+                    onAddNew={() => { setCreateItemTarget("primary"); setCreateItemOpen(true); }}
                   />
                 </FormField>
                 <FormField label="Обязательство">
@@ -5943,6 +5978,7 @@ function TransactionsView({
                     getBankName={itemBankName}
                     getItemBalance={getItemDisplayBalanceCents}
                     itemCounts={itemTxCounts}
+                    onAddNew={() => { setCreateItemTarget("counterparty"); setCreateItemOpen(true); }}
                   />
                 </FormField>
                 <TextField
@@ -5988,6 +6024,7 @@ function TransactionsView({
                     placeholder="Поиск категории"
                     direction="EXPENSE"
                     disabled={false}
+                    onAddCategory={() => setCreateCategoryOpen(true)}
                   />
                 </FormField>
                 <TextField
@@ -6004,6 +6041,7 @@ function TransactionsView({
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <Dialog
                 open={isDialogOpen}
+                modal={!createItemOpen}
                 onOpenChange={(open) => {
                   if (open) {
                     if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
@@ -6207,6 +6245,42 @@ function TransactionsView({
           </div>
         </div>
 
+      <CreateCategoryModal
+        open={createCategoryOpen}
+        onOpenChange={setCreateCategoryOpen}
+        onSuccess={async (created) => {
+          await loadCategories();
+          try {
+            applyCategorySelection(created.name, "", "");
+          } catch {
+            // ignore
+          }
+        }}
+      />
+      <CreateCounterpartyModal
+        open={createCounterpartyOpen}
+        onOpenChange={setCreateCounterpartyOpen}
+        onSuccess={async (created) => {
+          await loadCounterparties();
+          if (createCounterpartyTarget === "debtPayFor") setDebtPayForCounterpartyId(created.id);
+          else if (createCounterpartyTarget === "wherePaid") setWherePaidCounterpartyId(created.id);
+          else setCounterpartyId(created.id);
+        }}
+      />
+      <AddEditItemModal
+        open={createItemOpen}
+        onOpenChange={setCreateItemOpen}
+        onSuccess={async (created) => {
+          await loadItems();
+          if (createItemTarget === "counterparty") setCounterpartyItemId(created.id);
+          else if (createItemTarget === "related") setRelatedItemId(created.id);
+          else setPrimaryItemId(created.id);
+        }}
+        editingItem={null}
+        onClearEditingItem={() => {}}
+        initialCreateOptions={{ kind: "ASSET", typeCodes: ASSET_TYPE_CODES, general: true }}
+        askConfirm={(_, message) => Promise.resolve(window.confirm(message))}
+      />
       <ConfirmModal
         open={isBulkEditConfirmOpen}
         onOpenChange={setIsBulkEditConfirmOpen}

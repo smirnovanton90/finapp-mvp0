@@ -33,6 +33,11 @@ export interface FormModalProps {
   className?: string;
   /** Optional onCloseAutoFocus for DialogContent (e.g. refocus last active element). */
   onCloseAutoFocus?: (event: Event) => void;
+  /** When false, Radix Dialog uses modal={false} (no focus trap / no inert). Use when opening this modal from another modal. */
+  modal?: boolean;
+  /** Класс для оверлея и контейнера (например z-[100] для вложенной модалки). */
+  overlayClassName?: string;
+  containerClassName?: string;
   children: React.ReactNode;
 }
 
@@ -57,13 +62,18 @@ export function FormModal({
   contentRef,
   className,
   onCloseAutoFocus,
+  modal = true,
+  overlayClassName,
+  containerClassName,
   children,
 }: FormModalProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} modal={modal}>
       <DialogContent
         ref={contentRef}
         onCloseAutoFocus={onCloseAutoFocus}
+        overlayClassName={overlayClassName}
+        containerClassName={containerClassName}
         className={cn(sizeStyles[size], "gap-4")}
         style={
           size === "wide"

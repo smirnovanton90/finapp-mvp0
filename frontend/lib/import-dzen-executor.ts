@@ -268,7 +268,7 @@ export async function executeImportDzen(
           kind: state.kind,
           type_code: typeCode,
           name: (state.name || acc.name).trim(),
-          currency_code: acc.currency || "RUB",
+          currency_code: (state.currency ?? acc.currency) || "RUB",
           open_date: earliestDate,
           initial_value_rub: initialValueCents,
           counterparty_id: state.counterpartyId ?? null,

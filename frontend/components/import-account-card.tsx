@@ -92,6 +92,8 @@ function calcInitialFromTransactions(
   return { initial, earliestDate };
 }
 
+const COMMON_CURRENCY_CODES = ["RUB", "USD", "EUR", "GBP", "CHF", "JPY", "CNY", "KZT", "UAH", "BYN", "GEL"];
+
 export type ImportAccountCardState = {
   linkEnabled: boolean;
   kind: ItemKind;
@@ -100,6 +102,8 @@ export type ImportAccountCardState = {
   balanceStr: string;
   linkedItemId: number | null;
   counterpartyId: number | null;
+  /** Переопределённая валюта; при отсутствии используется account.currency */
+  currency?: string;
 };
 
 const defaultState: ImportAccountCardState = {
@@ -167,6 +171,16 @@ export function ImportAccountCard({
   };
 
   const [isEditingName, setIsEditingName] = React.useState(false);
+  const [isEditingCurrency, setIsEditingCurrency] = React.useState(false);
+
+  const effectiveCurrency = state.currency ?? account.currency;
+  const currencyOptions = React.useMemo(() => {
+    const codes = [...COMMON_CURRENCY_CODES];
+    if (effectiveCurrency && !codes.includes(effectiveCurrency)) {
+      codes.unshift(effectiveCurrency);
+    }
+    return codes.map((code) => ({ value: code, label: code }));
+  }, [effectiveCurrency]);
 
   const balancePlaceholder =
     statementLastTransactionDate
@@ -186,7 +200,7 @@ export function ImportAccountCard({
 
       {/* Контент: первая строка — название, валюта, кнопки; вторая — блок с полями */}
       <div className="flex flex-col flex-1 min-w-0 py-6 pr-6 pl-4 gap-4">
-        {/* Первая строка: лэйбл валюты | название (18px) | IconButton (pencil) | [поле нового названия] | IconButton (link), по центру */}
+        {/* Первая строка: валюта (слева — из выписки) | название | link; pencil-off справа от поля */}
         <div className="flex flex-row items-center flex-wrap justify-center gap-2 min-w-0">
           <span
             className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase shrink-0 ${
@@ -195,32 +209,65 @@ export function ImportAccountCard({
           >
             {account.currency}
           </span>
-          <span
-            className="shrink-0"
-            style={{ color: ACTIVE_TEXT_DARK, fontSize: 18, fontWeight: 400 }}
-          >
-            {account.name}
-          </span>
-          <IconButton
-            onClick={() => setIsEditingName((v) => !v)}
-            aria-label={isEditingName ? "Закончить редактирование названия" : "Изменить название"}
-          >
-            {isEditingName ? (
-              <PencilOff className="h-4 w-4" />
-            ) : (
+          {!isEditingCurrency ? (
+            <IconButton
+              onClick={() => setIsEditingCurrency(true)}
+              aria-label="Изменить валюту"
+            >
               <Pencil className="h-4 w-4" />
-            )}
-          </IconButton>
-          {isEditingName && (
-            <div className="min-w-[200px] flex-1 max-w-md">
-              <TextField
-                value={state.name}
-                onChange={(e) => update({ name: e.target.value })}
-                placeholder="Начните вводить название"
-                onBlur={() => setIsEditingName(false)}
-                autoFocus
-              />
-            </div>
+            </IconButton>
+          ) : (
+            <>
+              <div className="min-w-[100px] shrink-0">
+                <SelectField
+                  label=""
+                  value={effectiveCurrency}
+                  onValueChange={(v) => update({ currency: v })}
+                  options={currencyOptions}
+                  placeholder="Валюта"
+                />
+              </div>
+              <IconButton
+                onClick={() => setIsEditingCurrency(false)}
+                aria-label="Закончить редактирование валюты"
+              >
+                <PencilOff className="h-4 w-4" />
+              </IconButton>
+            </>
+          )}
+          {!isEditingName ? (
+            <>
+              <span
+                className="shrink-0"
+                style={{ color: ACTIVE_TEXT_DARK, fontSize: 18, fontWeight: 400 }}
+              >
+                {state.name || account.name}
+              </span>
+              <IconButton
+                onClick={() => setIsEditingName(true)}
+                aria-label="Изменить название"
+              >
+                <Pencil className="h-4 w-4" />
+              </IconButton>
+            </>
+          ) : (
+            <>
+              <div className="min-w-[200px] flex-1 max-w-md">
+                <TextField
+                  value={state.name}
+                  onChange={(e) => update({ name: e.target.value })}
+                  placeholder="Начните вводить название"
+                  onBlur={() => setIsEditingName(false)}
+                  autoFocus
+                />
+              </div>
+              <IconButton
+                onClick={() => setIsEditingName(false)}
+                aria-label="Закончить редактирование названия"
+              >
+                <PencilOff className="h-4 w-4" />
+              </IconButton>
+            </>
           )}
           <IconButton
             onClick={() => update({ linkEnabled: !state.linkEnabled })}

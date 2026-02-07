@@ -3,6 +3,7 @@
  * Формат: date, categoryName, payee, comment, outcomeAccountName, outcome,
  * outcomeCurrencyShortTitle, incomeAccountName, income, incomeCurrencyShortTitle,
  * createdDate, changedDate
+ * Дата может быть "YYYY-MM-DD" или "YYYY-MM-DDTHH:mm:ss"; время можно взять из колонки time или createdDate.
  */
 
 export type DzenParsedAccount = {
@@ -22,6 +23,8 @@ export type DzenTransactionType = "expense" | "income" | "transfer";
 
 export type DzenParsedTransaction = {
   date: string;
+  /** Время в формате HH:mm или HH:mm:ss; при отсутствии — "00:00:00" */
+  time: string;
   categoryName: string;
   counterparty: string;
   comment: string;
@@ -34,6 +37,24 @@ export type DzenParsedTransaction = {
   type: DzenTransactionType;
   amount: number;
 };
+
+/** Нормализует время до HH:mm:ss для сортировки и API */
+function normalizeTime(s: string): string {
+  const t = (s ?? "").trim();
+  if (!t) return "00:00:00";
+  const parts = t.split(/[T\s]/);
+  const timePart = parts.find((p) => /^\d{1,2}:\d{2}/.test(p)) ?? t;
+  const [h, m, sec] = timePart.split(":");
+  const hh = String(Number(h) || 0).padStart(2, "0");
+  const mm = String(Number(m) || 0).padStart(2, "0");
+  const ss = sec != null ? String(Number(sec) || 0).padStart(2, "0") : "00";
+  return `${hh}:${mm}:${ss}`;
+}
+
+/** Ключ для хронологической сортировки и для API: YYYY-MM-DDTHH:mm:ss */
+export function getTransactionDateTimeSortKey(tx: DzenParsedTransaction): string {
+  return `${tx.date}T${normalizeTime(tx.time)}`;
+}
 
 export type DzenParsedData = {
   accounts: DzenParsedAccount[];
@@ -119,7 +140,21 @@ export function parseDzenCSV(text: string): DzenParsedData {
       return idx >= 0 ? (cells[idx] ?? "").trim() : "";
     };
 
-    const date = getCol("date");
+    let date = getCol("date");
+    let timeStr = "00:00:00";
+    if (date.includes("T")) {
+      const [d, t] = date.split("T");
+      if (d) date = d;
+      if (t) timeStr = normalizeTime(t);
+    } else {
+      const timeCol = getCol("time");
+      const createdDate = getCol("createdDate");
+      if (timeCol) timeStr = normalizeTime(timeCol);
+      else if (createdDate && createdDate.includes("T")) {
+        const t = createdDate.split("T")[1];
+        if (t) timeStr = normalizeTime(t);
+      }
+    }
     const categoryName = getCol("categoryName");
     const payee = getCol("payee");
     const comment = getCol("comment");
@@ -173,6 +208,7 @@ export function parseDzenCSV(text: string): DzenParsedData {
 
     transactions.push({
       date,
+      time: timeStr,
       categoryName,
       counterparty: payee,
       comment,

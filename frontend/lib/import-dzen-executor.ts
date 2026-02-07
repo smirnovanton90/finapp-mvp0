@@ -18,6 +18,7 @@ import {
   type DzenParsedData,
   type DzenParsedTransaction,
   isDzenDebtsAccount,
+  getTransactionDateTimeSortKey,
 } from "@/lib/dzen-csv-parser";
 import type { ImportAccountCardState } from "@/components/import-account-card";
 import type { ImportCategoryCardState } from "@/components/import-category-card";
@@ -287,8 +288,11 @@ export async function executeImportDzen(
         makeCategoryPathKey("Прочие расходы", "Прочие расходы", "")
       ) ?? null;
 
-    // 4. Создать транзакции
-    for (const tx of parsedData.transactions ?? []) {
+    // 4. Создать транзакции (в хронологическом порядке по дате и времени)
+    const sortedTransactions = [...(parsedData.transactions ?? [])].sort((a, b) =>
+      getTransactionDateTimeSortKey(a).localeCompare(getTransactionDateTimeSortKey(b))
+    );
+    for (const tx of sortedTransactions) {
       const outcomeIsDebts = isDzenDebtsAccount({ name: tx.outcomeAccountName });
       const incomeIsDebts = isDzenDebtsAccount({ name: tx.incomeAccountName });
 
@@ -302,7 +306,7 @@ export async function executeImportDzen(
               ? (counterpartyNameToId.get(tx.counterparty) ?? null)
               : null;
             await createTransaction({
-              transaction_date: tx.date,
+              transaction_date: getTransactionDateTimeSortKey(tx),
               primary_item_id: incomeItemId,
               counterparty_id: counterpartyId,
               amount_rub: Math.round(tx.income * 100),
@@ -321,7 +325,7 @@ export async function executeImportDzen(
               ? (counterpartyNameToId.get(tx.counterparty) ?? null)
               : null;
             await createTransaction({
-              transaction_date: tx.date,
+              transaction_date: getTransactionDateTimeSortKey(tx),
               primary_item_id: outcomeItemId,
               counterparty_id: counterpartyId,
               amount_rub: Math.round(tx.outcome * 100),
@@ -367,7 +371,7 @@ export async function executeImportDzen(
         : null;
 
       await createTransaction({
-        transaction_date: tx.date,
+        transaction_date: getTransactionDateTimeSortKey(tx),
         primary_item_id: primaryItemId,
         counterparty_id: counterpartyId,
         amount_rub: amountRub,
@@ -384,7 +388,7 @@ export async function executeImportDzen(
         const incomeItemId = accountKeyToItemId.get(incomeKey) ?? null;
         if (incomeItemId != null) {
           await createTransaction({
-            transaction_date: tx.date,
+            transaction_date: getTransactionDateTimeSortKey(tx),
             primary_item_id: incomeItemId,
             counterparty_id: counterpartyId,
             amount_rub: Math.round(tx.income * 100),

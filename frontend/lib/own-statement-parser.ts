@@ -10,15 +10,13 @@ import type {
   DzenTransactionType,
 } from "@/lib/dzen-csv-parser";
 
-/** Назначение столбца в маппинге */
+/** Назначение столбца в маппинге (date = дата и время транзакции из одного столбца) */
 export type OwnColumnRole =
   | ""
   | "date"
   | "amount_signed"
-  | "amount_outcome"
-  | "amount_income"
   | "account"
-  | "operation_type"
+  | "account_transfer"
   | "currency"
   | "category"
   | "category_l1"
@@ -30,16 +28,13 @@ export type OwnColumnRole =
 /** Маппинг: индекс столбца → роль */
 export type OwnColumnMapping = Map<number, OwnColumnRole>;
 
-/** Варианты назначения для UI (включая «Сумма прихода» как синоним дохода) */
+/** Варианты назначения для UI */
 export type ColumnMappingKey =
   | ""
   | "transaction_date"
   | "amount"
-  | "expense_amount"
-  | "income_amount"
-  | "receipt_amount"
   | "account"
-  | "operation_type"
+  | "account_transfer"
   | "currency"
   | "category"
   | "category_l1"
@@ -52,13 +47,10 @@ export type ColumnMapping = Record<number, ColumnMappingKey>;
 
 export const COLUMN_MAPPING_OPTIONS: { value: ColumnMappingKey; label: string }[] = [
   { value: "", label: "Не использовать" },
-  { value: "transaction_date", label: "Дата транзакции" },
-  { value: "amount", label: "Сумма транзакции" },
-  { value: "expense_amount", label: "Сумма расхода" },
-  { value: "income_amount", label: "Сумма дохода" },
-  { value: "receipt_amount", label: "Сумма прихода" },
-  { value: "account", label: "Счет" },
-  { value: "operation_type", label: "Тип операции" },
+  { value: "transaction_date", label: "Дата и время транзакции" },
+  { value: "amount", label: "Сумма операции" },
+  { value: "account", label: "Счет операции" },
+  { value: "account_transfer", label: "Счет перевода" },
   { value: "currency", label: "Валюта" },
   { value: "category", label: "Категория транзакции" },
   { value: "category_l1", label: "Категория транзакции (уровень 1)" },
@@ -72,11 +64,8 @@ function columnKeyToOwnRole(key: ColumnMappingKey): OwnColumnRole {
   const map: Record<string, OwnColumnRole> = {
     transaction_date: "date",
     amount: "amount_signed",
-    expense_amount: "amount_outcome",
-    income_amount: "amount_income",
-    receipt_amount: "amount_income",
     account: "account",
-    operation_type: "operation_type",
+    account_transfer: "account_transfer",
     currency: "currency",
     category: "category",
     category_l1: "category_l1",
@@ -127,18 +116,6 @@ function isFilled(value: string): boolean {
   return (value?.trim() ?? "").length > 0;
 }
 
-/** Парсит тип операции из столбца «Тип операции»: Доход/Расход/Перевод */
-function parseOperationType(value: string): DzenTransactionType | null {
-  const s = (value ?? "").trim().toLowerCase();
-  if (/^расход/.test(s)) return "expense";
-  if (/^доход/.test(s)) return "income";
-  if (/^перевод/.test(s)) return "transfer";
-  if (/^expense/.test(s)) return "expense";
-  if (/^income/.test(s)) return "income";
-  if (/^transfer/.test(s)) return "transfer";
-  return null;
-}
-
 function formatExcelSerialAsDate(serial: number): string | null {
   try {
     const date = XLSX.SSF.parse_date_code(serial);
@@ -151,6 +128,50 @@ function formatExcelSerialAsDate(serial: number): string | null {
     // ignore
   }
   return null;
+}
+
+/** Из дробной части Excel serial (0..1 = 00:00..24:00) получаем HH:mm:ss */
+function formatExcelSerialAsTime(serial: number): string {
+  const fractional = serial - Math.floor(serial);
+  const totalSeconds = Math.round(fractional * 86400) % 86400;
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/** Нормализует строку времени до HH:mm:ss */
+function normalizeTimeString(s: string): string {
+  const t = (s ?? "").trim();
+  if (!t) return "00:00:00";
+  const timePart = t.split(/[T\s]/).find((p) => /^\d{1,2}:\d{2}/.test(p)) ?? t;
+  const [h, m, sec] = timePart.split(":");
+  return `${String(Number(h) || 0).padStart(2, "0")}:${String(Number(m) || 0).padStart(2, "0")}:${sec != null ? String(Number(sec) || 0).padStart(2, "0") : "00"}`;
+}
+
+/** Извлекает время из того же сырого значения, что и дата (Excel serial с дробной частью, Date, строка с временем) */
+function normalizeTimeFromRaw(value: unknown): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const h = value.getUTCHours();
+    const m = value.getUTCMinutes();
+    const s = value.getUTCSeconds();
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  if (typeof value === "number") {
+    const fractional = value - Math.floor(value);
+    if (fractional > 0 || value % 1 !== 0) return formatExcelSerialAsTime(value);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const timeMatch = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(trimmed);
+    if (timeMatch) return normalizeTimeString(trimmed);
+    const tMatch = /T(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(trimmed);
+    if (tMatch) {
+      const [, h, m, s] = tMatch;
+      return `${String(Number(h)).padStart(2, "0")}:${String(Number(m)).padStart(2, "0")}:${s != null ? String(Number(s)).padStart(2, "0") : "00"}`;
+    }
+  }
+  return "00:00:00";
 }
 
 function normalizeDate(value: unknown): string {
@@ -282,8 +303,6 @@ export function buildDzenParsedDataFromMapping(
     return -1;
   };
 
-  const idxOutcome = getColIndex("amount_outcome");
-  const idxIncome = getColIndex("amount_income");
   const idxSigned = getColIndex("amount_signed");
 
   for (const row of rows) {
@@ -293,66 +312,45 @@ export function buildDzenParsedDataFromMapping(
       : "";
     if (!date) continue;
 
-    let outcome: number | null = null;
-    let income: number | null = null;
+    const timeStr = normalizeTimeFromRaw(dateRaw);
 
-    if (idxOutcome >= 0 && idxIncome >= 0) {
-      const outVal = parseAmount(row[idxOutcome]);
-      const inVal = parseAmount(row[idxIncome]);
-      if (outVal != null && outVal !== 0) outcome = Math.abs(outVal);
-      if (inVal != null && inVal !== 0) income = Math.abs(inVal);
-    } else if (idxSigned >= 0) {
-      const val = parseAmount(row[idxSigned]);
-      if (val != null && val !== 0) {
-        if (val < 0) outcome = Math.abs(val);
-        else income = val;
-      }
-    } else if (idxOutcome >= 0) {
-      const val = parseAmount(row[idxOutcome]);
-      if (val != null && val !== 0) outcome = Math.abs(val);
-    } else if (idxIncome >= 0) {
-      const val = parseAmount(row[idxIncome]);
-      if (val != null && val !== 0) income = Math.abs(val);
-    }
+    if (idxSigned < 0) continue;
+    const val = parseAmount(row[idxSigned]);
+    if (val == null || val === 0) continue;
 
-    if ((outcome == null || outcome === 0) && (income == null || income === 0)) continue;
+    const accountName = getCol(row, "account").trim();
+    if (!accountName) continue;
 
-    const accountName = getCol(row, "account");
     const currencyStr = getCol(row, "currency") || DEFAULT_CURRENCY;
     const currency = currencyStr.trim() || DEFAULT_CURRENCY;
-    const operationTypeStr = getCol(row, "operation_type");
-    const parsedType = operationTypeStr ? parseOperationType(operationTypeStr) : null;
+    const transferAccountName = getCol(row, "account_transfer").trim();
 
     let type: DzenTransactionType;
     let amount: number;
-    let outAcc = "";
-    let inAcc = "";
-    if (parsedType != null) {
-      type = parsedType;
-      amount = outcome ?? income ?? 0;
-      if (amount === 0) continue;
-      const acc = accountName.trim();
-      if (type === "transfer") {
-        outAcc = acc;
-        inAcc = acc;
-      } else if (type === "expense") {
-        outAcc = acc;
-      } else {
-        inAcc = acc;
-      }
-    } else if (outcome != null && outcome > 0 && income != null && income > 0) {
+    let outAcc: string;
+    let inAcc: string;
+
+    if (transferAccountName) {
       type = "transfer";
-      amount = outcome;
-      outAcc = accountName.trim();
-      inAcc = accountName.trim();
-    } else if (outcome != null && outcome > 0) {
-      type = "expense";
-      amount = outcome;
-      outAcc = accountName.trim();
+      amount = Math.abs(val);
+      if (val < 0) {
+        outAcc = accountName;
+        inAcc = transferAccountName;
+      } else {
+        outAcc = transferAccountName;
+        inAcc = accountName;
+      }
     } else {
-      type = "income";
-      amount = income ?? 0;
-      inAcc = accountName.trim();
+      amount = Math.abs(val);
+      if (val < 0) {
+        type = "expense";
+        outAcc = accountName;
+        inAcc = "";
+      } else {
+        type = "income";
+        outAcc = "";
+        inAcc = accountName;
+      }
     }
 
     if (isFilled(outAcc)) {
@@ -376,6 +374,7 @@ export function buildDzenParsedDataFromMapping(
 
     transactions.push({
       date,
+      time: timeStr,
       categoryName: categoryName.trim(),
       counterparty: counterparty.trim(),
       comment: getCol(row, "comment").trim(),
@@ -451,27 +450,23 @@ export function validateColumnMapping(
 ): { valid: true } | { valid: false; error: string } {
   const m = mappingToOwn(mapping);
   const hasDate = Array.from(m.values()).includes("date");
-  const hasAmount =
-    Array.from(m.values()).some((r) =>
-      ["amount_signed", "amount_outcome", "amount_income"].includes(r)
-    );
+  const hasAmount = Array.from(m.values()).includes("amount_signed");
   const hasAccount = Array.from(m.values()).includes("account");
 
   if (!hasDate) {
-    return { valid: false, error: "Укажите столбец «Дата транзакции»." };
+    return { valid: false, error: "Укажите столбец «Дата и время транзакции»." };
   }
   if (!hasAmount) {
     return {
       valid: false,
-      error:
-        "Укажите хотя бы один столбец с суммой (Сумма транзакции, Сумма расхода, Сумма дохода или Сумма прихода).",
+      error: "Укажите столбец «Сумма операции».",
     };
   }
   if (!hasAccount) {
     return {
       valid: false,
       error:
-        "Укажите столбец «Счет».",
+        "Укажите столбец «Счет операции».",
     };
   }
   return { valid: true };

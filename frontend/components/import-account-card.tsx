@@ -166,7 +166,6 @@ export function ImportAccountCard({
     onChange({ ...state, ...patch });
   };
 
-  const displayName = state.name || account.name;
   const [isEditingName, setIsEditingName] = React.useState(false);
 
   const balancePlaceholder =
@@ -200,7 +199,7 @@ export function ImportAccountCard({
             className="shrink-0"
             style={{ color: ACTIVE_TEXT_DARK, fontSize: 18, fontWeight: 400 }}
           >
-            {displayName}
+            {account.name}
           </span>
           <IconButton
             onClick={() => setIsEditingName((v) => !v)}

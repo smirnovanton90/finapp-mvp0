@@ -2,17 +2,16 @@
 
 import * as React from "react";
 import {
-  ACCENT,
-  ACCENT_FILL_LIGHT,
   ACTIVE_TEXT_DARK,
   BACKGROUND_DT,
   GREEN_TRANSACTION,
   PLACEHOLDER_COLOR_DARK,
   RED,
 } from "@/lib/colors";
+import { Pencil, PencilOff, Link, Unlink } from "lucide-react";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
-import { Switch } from "@/components/ui/switch";
 import { TextField, SelectField } from "@/components/ui/form-field";
+import { IconButton } from "@/components/ui/icon-button";
 import { CategorySelector } from "@/components/category-selector";
 import { CATEGORY_ICON_OPTIONS } from "@/lib/category-icons";
 import {
@@ -22,9 +21,6 @@ import {
   type CategoryScope,
 } from "@/lib/categories";
 import type { DzenParsedCategory } from "@/lib/dzen-csv-parser";
-
-const NAME_BLOCK_WIDTH = 150;
-const TOGGLES_BLOCK_WIDTH = 80;
 
 function getScopeStripeColor(scope: CategoryScope): string {
   if (scope === "INCOME") return GREEN_TRANSACTION;
@@ -58,6 +54,8 @@ export type ImportCategoryCardProps = {
   categoryNodes: CategoryNode[];
   state: ImportCategoryCardState;
   onChange: (state: ImportCategoryCardState) => void;
+  /** When set, shows "Добавить" in parent category selector; on click calls this. */
+  onAddCategory?: () => void;
 };
 
 export function ImportCategoryCard({
@@ -65,6 +63,7 @@ export function ImportCategoryCard({
   categoryNodes,
   state,
   onChange,
+  onAddCategory,
 }: ImportCategoryCardProps) {
   const effectiveScope = (() => {
     if (!state.linkEnabled || !state.linkedPath) return state.scope;
@@ -79,7 +78,7 @@ export function ImportCategoryCard({
     return scope ?? state.scope;
   })();
   const stripeColor = getScopeStripeColor(effectiveScope);
-  const displayName = state.name || category.name;
+  const [isEditingName, setIsEditingName] = React.useState(false);
 
   const update = (patch: Partial<ImportCategoryCardState>) => {
     onChange({ ...state, ...patch });
@@ -87,7 +86,7 @@ export function ImportCategoryCard({
 
   return (
     <div
-      className="flex flex-row items-center rounded-[10px] overflow-hidden"
+      className="flex flex-row items-stretch rounded-[10px] overflow-hidden"
       style={{ backgroundColor: BACKGROUND_DT }}
     >
       <div
@@ -95,49 +94,83 @@ export function ImportCategoryCard({
         style={{ backgroundColor: stripeColor }}
       />
 
-      <div className="flex flex-row items-center flex-1 min-w-0 gap-3 py-6 pr-6 pl-0">
-        {/* 1. Блок с названием — 150px, по центру, перенос */}
-        <div
-          className="flex flex-col items-center justify-center shrink-0 gap-0.5 text-center"
-          style={{ width: NAME_BLOCK_WIDTH }}
-        >
+      <div className="flex flex-col flex-1 min-w-0 py-6 pr-6 pl-4 gap-4">
+        {/* Первая строка: название (18px) | IconButton (pencil) | [поле названия] | IconButton (link), по центру */}
+        <div className="flex flex-row items-center flex-wrap justify-center gap-2 min-w-0">
           <span
-            className="text-base font-normal leading-[18px] break-words w-full"
-            style={{ color: ACTIVE_TEXT_DARK }}
+            className="shrink-0"
+            style={{ color: ACTIVE_TEXT_DARK, fontSize: 18, fontWeight: 400 }}
           >
             {category.name}
           </span>
-        </div>
-
-        {/* 2. Туггл Связать — 80px */}
-        <div
-          className="flex flex-col items-center justify-center gap-1.5 shrink-0"
-          style={{ width: TOGGLES_BLOCK_WIDTH, color: PLACEHOLDER_COLOR_DARK }}
-        >
-          <span className="text-[14px] font-normal leading-4">Связать</span>
-          <Switch
-            checked={state.linkEnabled}
-            onCheckedChange={(v) => update({ linkEnabled: v })}
-            className="h-[26px] w-[46px]"
-          />
-        </div>
-
-        {/* 3. Блок с полями */}
-          <div className="flex-1 min-w-0 flex flex-col">
-            {state.linkEnabled ? (
-              <CategorySelector
-                categoryNodes={categoryNodes}
-                selectedPath={state.linkedPath}
-                onChange={(path) => update({ linkedPath: path })}
-                selectionMode="single"
-                placeholder="Начните вводить категорию"
-                emptyMessage="Нет категорий."
-                showChips={false}
-              />
+          <IconButton
+            onClick={() => setIsEditingName((v) => !v)}
+            aria-label={isEditingName ? "Закончить редактирование названия" : "Изменить название"}
+          >
+            {isEditingName ? (
+              <PencilOff className="h-4 w-4" />
             ) : (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
-                {/* Строка 1: Тип (Доход/Расход/Оба) | Родитель (импортируемая категория) */}
-                <div className="min-w-0">
+              <Pencil className="h-4 w-4" />
+            )}
+          </IconButton>
+          {isEditingName && (
+            <div className="min-w-[200px] flex-1 max-w-md">
+              <TextField
+                value={state.name}
+                onChange={(e) => update({ name: e.target.value })}
+                placeholder="Начните вводить название"
+                onBlur={() => setIsEditingName(false)}
+                autoFocus
+              />
+            </div>
+          )}
+          <IconButton
+            onClick={() => update({ linkEnabled: !state.linkEnabled })}
+            aria-label={state.linkEnabled ? "Выключить связь с категорией" : "Связать с категорией"}
+          >
+            {state.linkEnabled ? (
+              <Unlink className="h-4 w-4" />
+            ) : (
+              <Link className="h-4 w-4" />
+            )}
+          </IconButton>
+        </div>
+
+        {/* Вторая строка: блок с полями */}
+        <div className="flex flex-col min-w-0">
+          {state.linkEnabled ? (
+            <div className="flex flex-row items-center gap-2 w-full min-w-0">
+              <span
+                className="font-normal min-w-0 flex-1 break-words"
+                style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+              >
+                Выберите имеющуюся категорию, к которой будут привязаны операции по этой строке
+              </span>
+              <div className="w-[400px] shrink-0">
+                <CategorySelector
+                  categoryNodes={categoryNodes}
+                  selectedPath={state.linkedPath}
+                  onChange={(path) => update({ linkedPath: path })}
+                  selectionMode="single"
+                  placeholder="Начните вводить категорию"
+                  emptyMessage="Нет категорий."
+                  showChips={false}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
+              {/* Строка 1: Тип | Родительская категория */}
+              <div className="min-w-0 flex flex-row items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <span
+                    className="font-normal break-words"
+                    style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                  >
+                    Тип
+                  </span>
+                </div>
+                <div className="w-[300px] shrink-0">
                   <SegmentedSelector
                     options={[
                       { value: "INCOME", label: "Доход", colorScheme: "green" },
@@ -148,7 +181,17 @@ export function ImportCategoryCard({
                     onChange={(v) => update({ scope: v as CategoryScope })}
                   />
                 </div>
-                <div className="min-w-0">
+              </div>
+              <div className="min-w-0 flex flex-row items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <span
+                    className="font-normal break-words"
+                    style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                  >
+                    Родительская категория
+                  </span>
+                </div>
+                <div className="w-[300px] shrink-0">
                   <CategorySelector
                     categoryNodes={categoryNodes}
                     selectedPath={state.parentPath}
@@ -158,19 +201,22 @@ export function ImportCategoryCard({
                     emptyMessage="Нет категорий."
                     maxDepth={2}
                     showChips={false}
+                    onAddCategory={onAddCategory}
                   />
                 </div>
-                {/* Строка 2: Название | Иконка */}
-                <div className="min-w-0">
-                  <TextField
-                    value={displayName}
-                    onChange={(e) => update({ name: e.target.value })}
-                    placeholder="Например, Продукты"
-                  />
+              </div>
+              {/* Строка 2: Иконка */}
+              <div className="min-w-0 flex flex-row items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <span
+                    className="font-normal break-words"
+                    style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                  >
+                    Иконка
+                  </span>
                 </div>
-                <div className="min-w-0">
+                <div className="w-[300px] shrink-0">
                   <SelectField
-                    label=""
                     value={state.iconName || "none"}
                     onValueChange={(v) =>
                       update({ iconName: v === "none" ? "" : v })
@@ -193,8 +239,9 @@ export function ImportCategoryCard({
                   />
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -14,12 +14,21 @@ import {
   fetchUserMe,
   setAccountingStartDate,
 } from "@/lib/api";
-import type { DzenParsedData, DzenParsedTransaction } from "@/lib/dzen-csv-parser";
+import {
+  type DzenParsedData,
+  type DzenParsedTransaction,
+  isDzenDebtsAccount,
+} from "@/lib/dzen-csv-parser";
 import type { ImportAccountCardState } from "@/components/import-account-card";
 import type { ImportCategoryCardState } from "@/components/import-category-card";
 import type { ImportCounterpartyCardState } from "@/components/import-counterparty-card";
 import type { CategoryNode } from "@/lib/categories";
 
+/**
+ * Начальный остаток и дата первой операции по счёту.
+ * Учитываются все операции из выписки по этому счёту: расходы, доходы и переводы,
+ * в которых счёт — исходящий или входящий (в т.ч. переводы с активом «Долги» с другой стороны).
+ */
 function calcInitialFromTransactions(
   accountName: string,
   accountCurrency: string,
@@ -40,11 +49,11 @@ function calcInitialFromTransactions(
 
     if (isOutcome && tx.outcome != null) {
       outcomeSum += tx.outcome;
-      if (tx.date < earliestDate) earliestDate = tx.date;
+      if (tx.date && tx.date < earliestDate) earliestDate = tx.date;
     }
     if (isIncome && tx.income != null) {
       incomeSum += tx.income;
-      if (tx.date < earliestDate) earliestDate = tx.date;
+      if (tx.date && tx.date < earliestDate) earliestDate = tx.date;
     }
   }
 
@@ -226,8 +235,10 @@ export async function executeImportDzen(
       }
     }
 
-    // 3. Создать счета (новые)
+    // 3. Создать счета (новые). Счёт «Долги» не импортируется.
+    // open_date каждого счёта = самая ранняя дата операций по этому счёту (все операции выписки, включая переводы и переводы с «Долги»).
     for (const acc of parsedData.accounts ?? []) {
+      if (isDzenDebtsAccount(acc)) continue;
       const key = `${acc.name}|${acc.currency}`;
       const state = accountCardStates.get(key);
       if (!state) continue;
@@ -266,8 +277,65 @@ export async function executeImportDzen(
       }
     }
 
+    // Категории по умолчанию для операций счёта «Долги» (второй уровень)
+    const otherIncomeCategoryId =
+      categoryLookup.pathToId.get(
+        makeCategoryPathKey("Прочие доходы", "Прочие доходы", "")
+      ) ?? null;
+    const otherExpenseCategoryId =
+      categoryLookup.pathToId.get(
+        makeCategoryPathKey("Прочие расходы", "Прочие расходы", "")
+      ) ?? null;
+
     // 4. Создать транзакции
     for (const tx of parsedData.transactions ?? []) {
+      const outcomeIsDebts = isDzenDebtsAccount({ name: tx.outcomeAccountName });
+      const incomeIsDebts = isDzenDebtsAccount({ name: tx.incomeAccountName });
+
+      // Трансфер с участием счёта «Долги» — один доход или расход с категорией по умолчанию
+      if (tx.type === "transfer" && (outcomeIsDebts || incomeIsDebts)) {
+        if (outcomeIsDebts && !incomeIsDebts && tx.income != null && tx.income > 0) {
+          const incomeKey = `${tx.incomeAccountName}|${tx.incomeCurrency}`;
+          const incomeItemId = accountKeyToItemId.get(incomeKey) ?? null;
+          if (incomeItemId != null) {
+            const counterpartyId = tx.counterparty
+              ? (counterpartyNameToId.get(tx.counterparty) ?? null)
+              : null;
+            await createTransaction({
+              transaction_date: tx.date,
+              primary_item_id: incomeItemId,
+              counterparty_id: counterpartyId,
+              amount_rub: Math.round(tx.income * 100),
+              direction: "INCOME",
+              transaction_type: "ACTUAL",
+              status: "CONFIRMED",
+              category_id: otherIncomeCategoryId,
+              comment: tx.comment || null,
+            });
+          }
+        } else if (incomeIsDebts && !outcomeIsDebts && tx.outcome != null && tx.outcome > 0) {
+          const outcomeKey = `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
+          const outcomeItemId = accountKeyToItemId.get(outcomeKey) ?? null;
+          if (outcomeItemId != null) {
+            const counterpartyId = tx.counterparty
+              ? (counterpartyNameToId.get(tx.counterparty) ?? null)
+              : null;
+            await createTransaction({
+              transaction_date: tx.date,
+              primary_item_id: outcomeItemId,
+              counterparty_id: counterpartyId,
+              amount_rub: Math.round(tx.outcome * 100),
+              direction: "EXPENSE",
+              transaction_type: "ACTUAL",
+              status: "CONFIRMED",
+              category_id: otherExpenseCategoryId,
+              comment: tx.comment || null,
+            });
+          }
+        }
+        continue;
+      }
+
       let primaryItemId: number | null = null;
       let direction: "INCOME" | "EXPENSE" | "TRANSFER" = "EXPENSE";
       let amountRub = 0;

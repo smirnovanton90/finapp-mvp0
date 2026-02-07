@@ -42,6 +42,13 @@ export type DzenParsedData = {
   transactions: DzenParsedTransaction[];
 };
 
+/** Имя счёта «Долги» в выгрузке Дзен-мани — такой счёт не импортируется, операции с ним обрабатываются отдельно */
+export const DZEN_DEBTS_ACCOUNT_NAME = "Долги";
+
+export function isDzenDebtsAccount(account: { name: string }): boolean {
+  return (account.name ?? "").trim() === DZEN_DEBTS_ACCOUNT_NAME;
+}
+
 /** Парсит строку CSV с учётом кавычек и escaped-кавычек */
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];

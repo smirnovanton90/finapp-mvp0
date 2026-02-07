@@ -3,20 +3,16 @@
 import * as React from "react";
 import {
   ACCENT,
-  ACCENT_FILL_LIGHT,
   ACTIVE_TEXT_DARK,
   BACKGROUND_DT,
-  PLACEHOLDER_COLOR_DARK,
 } from "@/lib/colors";
+import { Link, Unlink } from "lucide-react";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
-import { Switch } from "@/components/ui/switch";
 import { TextField } from "@/components/ui/form-field";
+import { IconButton } from "@/components/ui/icon-button";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import type { DzenParsedCounterparty } from "@/lib/dzen-csv-parser";
 import type { CounterpartyOut } from "@/lib/api";
-
-const NAME_BLOCK_WIDTH = 150;
-const TOGGLES_BLOCK_WIDTH = 80;
 
 export type CounterpartyEntityType = "LEGAL" | "PERSON";
 
@@ -73,7 +69,7 @@ export function ImportCounterpartyCard({
 
   return (
     <div
-      className="flex flex-row items-center rounded-[10px] overflow-hidden"
+      className="flex flex-row items-stretch rounded-[10px] overflow-hidden"
       style={{ backgroundColor: BACKGROUND_DT }}
     >
       <div
@@ -81,64 +77,69 @@ export function ImportCounterpartyCard({
         style={{ backgroundColor: stripeColor }}
       />
 
-      <div className="flex flex-row items-center flex-1 min-w-0 gap-3 py-6 pr-6 pl-0">
-        {/* 1. Блок с названием — 150px */}
-        <div
-          className="flex flex-col items-center justify-center shrink-0 gap-0.5 text-center"
-          style={{ width: NAME_BLOCK_WIDTH }}
-        >
+      <div className="flex flex-col flex-1 min-w-0 py-6 pr-6 pl-4 gap-4">
+        {/* Первая строка: название (18px) | IconButton (link), по центру */}
+        <div className="flex flex-row items-center flex-wrap justify-center gap-2 min-w-0">
           <span
-            className="text-base font-normal leading-[18px] break-words w-full"
-            style={{ color: ACTIVE_TEXT_DARK }}
+            className="shrink-0"
+            style={{ color: ACTIVE_TEXT_DARK, fontSize: 18, fontWeight: 400 }}
           >
             {counterparty.name}
           </span>
-        </div>
-
-        {/* 2. Туггл Связать — 80px */}
-        <div
-          className="flex flex-col items-center justify-center gap-1.5 shrink-0"
-          style={{ width: TOGGLES_BLOCK_WIDTH, color: PLACEHOLDER_COLOR_DARK }}
-        >
-          <span className="text-[14px] font-normal leading-4">Связать</span>
-          <Switch
-            checked={state.linkEnabled}
-            onCheckedChange={(v) => update({ linkEnabled: v })}
-            className="h-[26px] w-[46px]"
-          />
-        </div>
-
-        {/* 3. Блок с полями */}
-          <div className="flex-1 min-w-0 flex flex-col">
+          <IconButton
+            onClick={() => update({ linkEnabled: !state.linkEnabled })}
+            aria-label={state.linkEnabled ? "Выключить связь с контрагентом" : "Связать с контрагентом"}
+          >
             {state.linkEnabled ? (
-              <CounterpartySelector
-                counterparties={counterparties}
-                selectedIds={state.linkedCounterpartyId ? [state.linkedCounterpartyId] : []}
-                onChange={(ids) =>
-                  update({ linkedCounterpartyId: ids[0] ?? null })
-                }
-                selectionMode="single"
-                placeholder="Начните вводить название / ФИО контрагента"
-                emptyMessage="Нет контрагентов."
-                showChips={false}
-                apiBase={apiBase}
-              />
+              <Unlink className="h-4 w-4" />
             ) : (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
-                {/* Столбец 1: ЮЛ/ИП или ФЛ */}
-                <div className="min-w-0">
+              <Link className="h-4 w-4" />
+            )}
+          </IconButton>
+        </div>
+
+        {/* Вторая строка: блок с полями */}
+        <div className="flex flex-col min-w-0">
+          {state.linkEnabled ? (
+            <div className="flex flex-row items-center gap-2 w-full min-w-0">
+              <span
+                className="font-normal min-w-0 flex-1 break-words"
+                style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+              >
+                Выберите имеющегося контрагента, к которому будут привязаны операции по этой строке
+              </span>
+              <div className="w-[400px] shrink-0">
+                <CounterpartySelector
+                  counterparties={counterparties}
+                  selectedIds={state.linkedCounterpartyId ? [state.linkedCounterpartyId] : []}
+                  onChange={(ids) =>
+                    update({ linkedCounterpartyId: ids[0] ?? null })
+                  }
+                  selectionMode="single"
+                  placeholder="Начните вводить название / ФИО контрагента"
+                  emptyMessage="Нет контрагентов."
+                  showChips={false}
+                  apiBase={apiBase}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
+              {/* Строка 1: Тип контрагента | Название или Фамилия */}
+              <div className="min-w-0 flex flex-row items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <span
+                    className="font-normal break-words"
+                    style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                  >
+                    Тип контрагента
+                  </span>
+                </div>
+                <div className="w-[300px] shrink-0">
                   <SegmentedSelector
                     options={[
-                      {
-                        value: "LEGAL",
-                        label: "ЮЛ/ИП",
-                        colorScheme: "purple",
-                      },
-                      {
-                        value: "PERSON",
-                        label: "ФЛ",
-                        colorScheme: "purple",
-                      },
+                      { value: "LEGAL", label: "ЮЛ/ИП", colorScheme: "purple" },
+                      { value: "PERSON", label: "ФЛ", colorScheme: "purple" },
                     ]}
                     value={state.entityType}
                     onChange={(v) =>
@@ -146,39 +147,79 @@ export function ImportCounterpartyCard({
                     }
                   />
                 </div>
-                {/* Столбец 2: Название (ЮЛ/ИП) или ФИО (ФЛ) — друг под другом */}
-                {state.entityType === "LEGAL" ? (
-                  <div className="min-w-0 flex flex-col gap-3">
+              </div>
+              <div className="min-w-0 flex flex-row items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <span
+                    className="font-normal break-words"
+                    style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                  >
+                    {state.entityType === "LEGAL" ? "Название" : "Фамилия"}
+                  </span>
+                </div>
+                <div className="w-[300px] shrink-0">
+                  {state.entityType === "LEGAL" ? (
                     <TextField
                       value={displayName}
                       onChange={(e) => update({ name: e.target.value })}
                       placeholder="Название"
                     />
-                  </div>
-                ) : (
-                  <div className="min-w-0 flex flex-col gap-3">
+                  ) : (
                     <TextField
                       value={state.lastName}
                       onChange={(e) => update({ lastName: e.target.value })}
                       placeholder="Фамилия"
                     />
-                    <TextField
-                      value={state.firstName}
-                      onChange={(e) => update({ firstName: e.target.value })}
-                      placeholder="Имя"
-                    />
-                    <TextField
-                      value={state.middleName}
-                      onChange={(e) =>
-                        update({ middleName: e.target.value })
-                      }
-                      placeholder="Отчество"
-                    />
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+              {/* Строка 2: для ФЛ — Имя | Отчество, для ЮЛ/ИП — пусто */}
+              {state.entityType === "PERSON" ? (
+                <>
+                  <div className="min-w-0 flex flex-row items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <span
+                        className="font-normal break-words"
+                        style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                      >
+                        Имя
+                      </span>
+                    </div>
+                    <div className="w-[300px] shrink-0">
+                      <TextField
+                        value={state.firstName}
+                        onChange={(e) => update({ firstName: e.target.value })}
+                        placeholder="Имя"
+                      />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex flex-row items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <span
+                        className="font-normal break-words"
+                        style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                      >
+                        Отчество
+                      </span>
+                    </div>
+                    <div className="w-[300px] shrink-0">
+                      <TextField
+                        value={state.middleName}
+                        onChange={(e) => update({ middleName: e.target.value })}
+                        placeholder="Отчество"
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="min-w-0 flex flex-row items-center gap-2" />
+                  <div className="min-w-0 flex flex-row items-center gap-2" />
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

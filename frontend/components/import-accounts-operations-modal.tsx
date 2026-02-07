@@ -23,6 +23,7 @@ import type { ImportSourceKey } from "@/components/import-history-modal-content"
 import {
   parseDzenCSVFile,
   type DzenParsedData,
+  isDzenDebtsAccount,
 } from "@/lib/dzen-csv-parser";
 import {
   ImportAccountCard,
@@ -30,6 +31,7 @@ import {
   type ImportAccountCardState,
 } from "@/components/import-account-card";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
+import { CreateCategoryModal } from "@/components/create-category-modal";
 import {
   ImportCategoryCard,
   getInitialCategoryCardState,
@@ -133,6 +135,7 @@ export function ImportAccountsOperationsModal({
   const [categories, setCategories] = React.useState<Awaited<ReturnType<typeof fetchCategories>>>([]);
   const [addCounterpartyModalOpen, setAddCounterpartyModalOpen] = React.useState(false);
   const [addCounterpartyForAccountKey, setAddCounterpartyForAccountKey] = React.useState<string | null>(null);
+  const [createCategoryOpen, setCreateCategoryOpen] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const acceptedTypes =
@@ -199,13 +202,17 @@ export function ImportAccountsOperationsModal({
   React.useEffect(() => {
     if (parsedData?.accounts?.length) {
       const next = new Map<string, ImportAccountCardState>();
-      for (const acc of parsedData.accounts) {
+      const accountsToInit =
+        importSource === "dzen"
+          ? parsedData.accounts.filter((acc) => !isDzenDebtsAccount(acc))
+          : parsedData.accounts;
+      for (const acc of accountsToInit) {
         const key = `${acc.name}|${acc.currency}`;
         next.set(key, getInitialAccountCardState(acc));
       }
       setAccountCardStates(next);
     }
-  }, [parsedData?.accounts]);
+  }, [parsedData?.accounts, importSource]);
 
   React.useEffect(() => {
     if (parsedData && step === 2) {
@@ -331,6 +338,33 @@ export function ImportAccountsOperationsModal({
     // Step 5: выполнить импорт
     if (step === 5 && parsedData && importSource === "dzen") {
       setStep5Error(null);
+      // Проверка: дата транзакции не может быть раньше даты начала действия связанного актива/обязательства
+      for (const [key, state] of accountCardStates) {
+        if (!state.linkEnabled || state.linkedItemId == null) continue;
+        const item = items.find((i) => i.id === state.linkedItemId);
+        if (!item?.open_date) continue;
+        const [accountName, accountCurrency] = key.split("|");
+        let minTxDate: string | null = null;
+        for (const tx of parsedData.transactions) {
+          const isOut =
+            tx.outcomeAccountName === accountName &&
+            tx.outcomeCurrency === accountCurrency;
+          const isIn =
+            tx.incomeAccountName === accountName &&
+            tx.incomeCurrency === accountCurrency;
+          if ((isOut || isIn) && tx.date) {
+            if (!minTxDate || tx.date < minTxDate) minTxDate = tx.date;
+          }
+        }
+        if (minTxDate != null && minTxDate < item.open_date) {
+          const d = (s: string) =>
+            s ? `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}` : "";
+          setStep5Error(
+            `По счёту «${accountName}» в выписке есть операции с ${d(minTxDate)}, что раньше даты начала действия связанного актива/обязательства (${d(item.open_date)}). Свяжите счёт с другим активом или создайте новый.`
+          );
+          return;
+        }
+      }
       setIsImporting(true);
       try {
         const result = await executeImportDzen({
@@ -851,10 +885,18 @@ export function ImportAccountsOperationsModal({
                     Выберите, какие счета вы хотите импортировать, с каким
                     типом, названием, а также укажите текущий остаток
                   </p>
-                  <p>
+                  <p className="mb-2">
                     Также Вы можете связать импортируемый счет с уже имеющимся
                     активом/обязательством — для этого включите движок «Связать»
                   </p>
+                  {importSource === "dzen" && (
+                    <p style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      Счёт «Долги» из выписки не импортируется. Операции
+                      перевода на него и с него будут загружены как расходы или
+                      доходы с категориями «Прочие расходы» и «Прочие доходы»
+                      соответственно.
+                    </p>
+                  )}
                 </div>
                 {step2Error && (
                   <p
@@ -865,7 +907,10 @@ export function ImportAccountsOperationsModal({
                   </p>
                 )}
                 <div className="flex flex-col gap-4 overflow-auto min-w-0">
-                  {parsedData.accounts.map((account) => {
+                  {(importSource === "dzen"
+                    ? parsedData.accounts.filter((acc) => !isDzenDebtsAccount(acc))
+                    : parsedData.accounts
+                  ).map((account) => {
                     const key = `${account.name}|${account.currency}`;
                     const cardState =
                       accountCardStates.get(key) ?? getInitialAccountCardState(account);
@@ -962,6 +1007,7 @@ export function ImportAccountsOperationsModal({
                             return m;
                           });
                         }}
+                        onAddCategory={() => setCreateCategoryOpen(true)}
                       />
                     );
                   })}
@@ -1324,6 +1370,16 @@ export function ImportAccountsOperationsModal({
         </div>
       </DialogContent>
     </Dialog>
+    <CreateCategoryModal
+      open={createCategoryOpen}
+      onOpenChange={setCreateCategoryOpen}
+      onSuccess={() => {
+        fetchCategories({ includeArchived: false })
+          .then(setCategories)
+          .catch(() => setCategories([]));
+        setCreateCategoryOpen(false);
+      }}
+    />
     <CreateCounterpartyModal
       open={addCounterpartyModalOpen}
       onOpenChange={(next) => {

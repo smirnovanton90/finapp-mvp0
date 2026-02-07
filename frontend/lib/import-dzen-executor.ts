@@ -63,7 +63,7 @@ function calcInitialFromTransactions(
 
 /** Дата начала учёта по выписке — одинаковая для всех счетов импорта */
 export function getStatementAccountingStartDate(
-  parsedData: { accounts?: Array<{ name: string; currency: string }>; transactions?: Array<{ date: string }> },
+  parsedData: { accounts?: Array<{ name: string; currency: string }>; transactions?: DzenParsedTransaction[] },
   accountCardStates: Map<string, { balanceStr: string; linkEnabled: boolean }>
 ): string | null {
   const transactions = parsedData.transactions ?? [];

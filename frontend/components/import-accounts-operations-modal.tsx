@@ -54,6 +54,13 @@ import { validateStep3 } from "@/lib/import-step3-validation";
 import { validateStep4 } from "@/lib/import-step4-validation";
 import { executeImportDzen, getStatementAccountingStartDate, getStatementLastTransactionDate } from "@/lib/import-dzen-executor";
 import { getTypeOptionsForKind } from "@/lib/item-type-options";
+import {
+  readFileToHeadersAndRows,
+  applyMappingToDzenParsedData,
+  validateColumnMapping,
+  type ColumnMapping,
+} from "@/lib/own-statement-parser";
+import { ImportOwnColumnMapping } from "@/components/import-own-column-mapping";
 
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
@@ -80,7 +87,7 @@ const STEP1_CONTENT: Record<
   },
 };
 
-const STEPS = [
+const STEPS_DZEN = [
   { key: 1, label: "Выбор файла" },
   { key: 2, label: "Счета" },
   { key: 3, label: "Категории" },
@@ -88,7 +95,16 @@ const STEPS = [
   { key: 5, label: "Подтверждение" },
 ] as const;
 
-type ImportStep = (typeof STEPS)[number]["key"];
+const STEPS_OWN = [
+  { key: 1, label: "Выбор файла" },
+  { key: 2, label: "Определение данных" },
+  { key: 3, label: "Счета" },
+  { key: 4, label: "Категории" },
+  { key: 5, label: "Контрагенты" },
+  { key: 6, label: "Подтверждение" },
+] as const;
+
+type ImportStep = 1 | 2 | 3 | 4 | 5 | 6;
 
 export type ImportAccountsOperationsModalProps = {
   open: boolean;
@@ -136,7 +152,27 @@ export function ImportAccountsOperationsModal({
   const [addCounterpartyModalOpen, setAddCounterpartyModalOpen] = React.useState(false);
   const [addCounterpartyForAccountKey, setAddCounterpartyForAccountKey] = React.useState<string | null>(null);
   const [createCategoryOpen, setCreateCategoryOpen] = React.useState(false);
+  const [columnMapping, setColumnMapping] = React.useState<ColumnMapping>({});
+  const [parsedFileData, setParsedFileData] = React.useState<{
+    headers: string[];
+    rows: (string | number | boolean | Date)[][];
+  } | null>(null);
+  const [step2MappingError, setStep2MappingError] = React.useState<string | null>(null);
+  const [isReadingFile, setIsReadingFile] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const contentScrollRef = React.useRef<HTMLDivElement>(null);
+
+  const STEPS = importSource === "own" ? STEPS_OWN : STEPS_DZEN;
+
+  React.useEffect(() => {
+    if (contentScrollRef.current) contentScrollRef.current.scrollTop = 0;
+  }, [step]);
+  const stepLineWidth = importSource === "own" ? 100 : 130;
+  const stepAccounts = importSource === "own" ? 3 : 2;
+  const stepCategories = importSource === "own" ? 4 : 3;
+  const stepCounterparties = importSource === "own" ? 5 : 4;
+  const stepConfirm = importSource === "own" ? 6 : 5;
+  const isLastStep = step === stepConfirm;
 
   const acceptedTypes =
     importSource === "own" ? ".csv,.xlsx,.xls" : ".csv";
@@ -193,6 +229,9 @@ export function ImportAccountsOperationsModal({
       setStep3Error(null);
       setStep4Error(null);
       setStep5Error(null);
+      setStep2MappingError(null);
+      setColumnMapping({});
+      setParsedFileData(null);
       setAccountCardStates(new Map());
       setCategoryCardStates(new Map());
       setCounterpartyCardStates(new Map());
@@ -215,7 +254,7 @@ export function ImportAccountsOperationsModal({
   }, [parsedData?.accounts, importSource]);
 
   React.useEffect(() => {
-    if (parsedData && step === 2) {
+    if (parsedData && step === stepAccounts) {
       Promise.all([
         fetchItems(),
         fetchCounterparties(),
@@ -232,7 +271,7 @@ export function ImportAccountsOperationsModal({
           setIndustries([]);
         });
     }
-  }, [parsedData, step]);
+  }, [parsedData, step, stepAccounts]);
 
   React.useEffect(() => {
     if (parsedData?.categories?.length) {
@@ -255,20 +294,35 @@ export function ImportAccountsOperationsModal({
   }, [parsedData?.counterparties]);
 
   React.useEffect(() => {
-    if (parsedData && step === 3) {
+    if (parsedData && step === stepCategories) {
       fetchCategories({ includeArchived: false })
         .then(setCategories)
         .catch(() => setCategories([]));
     }
-  }, [parsedData, step]);
+  }, [parsedData, step, stepCategories]);
 
   React.useEffect(() => {
-    if (parsedData && step === 4) {
+    if (parsedData && step === stepCounterparties) {
       fetchCounterparties()
         .then(setCounterparties)
         .catch(() => setCounterparties([]));
     }
-  }, [parsedData, step]);
+  }, [parsedData, step, stepCounterparties]);
+
+  const ownMappingPreview = React.useMemo((): DzenParsedData | null => {
+    if (importSource !== "own" || !parsedFileData) return null;
+    const validation = validateColumnMapping(parsedFileData.headers, columnMapping);
+    if (!validation.valid) return null;
+    try {
+      return applyMappingToDzenParsedData(
+        parsedFileData.headers,
+        parsedFileData.rows,
+        columnMapping
+      );
+    } catch {
+      return null;
+    }
+  }, [importSource, parsedFileData, columnMapping]);
 
   const handleNext = async () => {
     if (step === 1 && importSource === "dzen") {
@@ -284,14 +338,73 @@ export function ImportAccountsOperationsModal({
       return;
     }
 
-    if (step === 1 && (importSource === "coinkeeper" || importSource === "own")) {
+    if (step === 1 && importSource === "coinkeeper") {
       setParseError(null);
       setParsedData(null);
       setStep(2);
       return;
     }
 
-    if (step === 2 && parsedData) {
+    if (step === 1 && importSource === "own") {
+      setParseError(null);
+      setStep2MappingError(null);
+      if (!selectedFile) {
+        setParseError("Выберите файл для импорта.");
+        return;
+      }
+      setIsReadingFile(true);
+      try {
+        const { headers, rows } = await readFileToHeadersAndRows(selectedFile);
+        if (!headers.length) {
+          setParseError("Файл не содержит заголовков столбцов.");
+          return;
+        }
+        setParsedFileData({ headers, rows });
+        setColumnMapping({});
+        setStep(2);
+      } catch (err) {
+        setParseError(
+          err instanceof Error ? err.message : "Не удалось прочитать файл."
+        );
+      } finally {
+        setIsReadingFile(false);
+      }
+      return;
+    }
+
+    if (step === 2 && importSource === "own" && parsedFileData) {
+      setStep2MappingError(null);
+      const validation = validateColumnMapping(
+        parsedFileData.headers,
+        columnMapping
+      );
+      if (!validation.valid) {
+        setStep2MappingError(validation.error);
+        return;
+      }
+      try {
+        const data = applyMappingToDzenParsedData(
+          parsedFileData.headers,
+          parsedFileData.rows,
+          columnMapping
+        );
+        if (data.transactions.length === 0) {
+          setStep2MappingError(
+            "По указанному маппингу не найдено ни одной операции. Проверьте назначение столбцов."
+          );
+          return;
+        }
+        setParsedData(data);
+        setStep(3);
+      } catch (err) {
+        setStep2MappingError(
+          err instanceof Error ? err.message : "Не удалось обработать данные."
+        );
+      }
+      return;
+    }
+
+    if (step === stepAccounts && parsedData) {
       setStep2Error(null);
       const result = validateStep2(
         parsedData.accounts,
@@ -304,7 +417,7 @@ export function ImportAccountsOperationsModal({
       }
     }
 
-    if (step === 3 && parsedData) {
+    if (step === stepCategories && parsedData) {
       setStep3Error(null);
       const result = validateStep3(
         parsedData.categories ?? [],
@@ -317,7 +430,7 @@ export function ImportAccountsOperationsModal({
       }
     }
 
-    if (step === 4 && parsedData) {
+    if (step === stepCounterparties && parsedData) {
       setStep4Error(null);
       const result = validateStep4(
         parsedData.counterparties ?? [],
@@ -330,13 +443,13 @@ export function ImportAccountsOperationsModal({
       }
     }
 
-    if (step < 5) {
+    if (step < stepConfirm) {
       setStep((s) => (s + 1) as ImportStep);
       return;
     }
 
-    // Step 5: выполнить импорт
-    if (step === 5 && parsedData && importSource === "dzen") {
+    // Финальный шаг: выполнить импорт
+    if (step === stepConfirm && parsedData && (importSource === "dzen" || importSource === "own")) {
       setStep5Error(null);
       // Проверка: дата транзакции не может быть раньше даты начала действия связанного актива/обязательства
       for (const [key, state] of accountCardStates) {
@@ -390,7 +503,7 @@ export function ImportAccountsOperationsModal({
       return;
     }
 
-    if (step === 5) {
+    if (step === stepConfirm) {
       onFinish?.();
       onOpenChange(false);
     }
@@ -410,8 +523,6 @@ export function ImportAccountsOperationsModal({
     onOpenChange(false);
   };
 
-  const isLastStep = step === 5;
-
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
@@ -419,13 +530,21 @@ export function ImportAccountsOperationsModal({
         title="Импорт счетов и операций"
         onInteractOutside={(e) => {
           const target = e.target as HTMLElement;
-          if (target.closest?.("[data-selector-dropdown]") || target.closest?.(".import-add-counterparty-modal")) {
+          if (
+            target.closest?.("[data-selector-dropdown]") ||
+            target.closest?.(".selector-dropdown") ||
+            target.closest?.(".import-add-counterparty-modal")
+          ) {
             e.preventDefault();
           }
         }}
         onPointerDownOutside={(e) => {
           const target = e.target as HTMLElement;
-          if (target.closest?.("[data-selector-dropdown]") || target.closest?.(".import-add-counterparty-modal")) {
+          if (
+            target.closest?.("[data-selector-dropdown]") ||
+            target.closest?.(".selector-dropdown") ||
+            target.closest?.(".import-add-counterparty-modal")
+          ) {
             e.preventDefault();
           }
         }}
@@ -490,11 +609,11 @@ export function ImportAccountsOperationsModal({
                           {key}
                         </span>
                       </div>
-                      {/* Линия — 130px, соединяет квадраты */}
+                      {/* Линия, соединяет квадраты (100px для own, 130px для остальных) */}
                       {idx < STEPS.length - 1 && (
                         <div
                           className="flex items-center shrink-0"
-                          style={{ width: 130, height: 50 }}
+                          style={{ width: stepLineWidth, height: 50 }}
                         >
                           <div
                             className="w-full"
@@ -509,7 +628,7 @@ export function ImportAccountsOperationsModal({
                   );
                 })}
               </div>
-              {/* Ряд 2: подписи по центру под квадратами */}
+              {/* Ряд 2: подписи — центр 120px блока точно под центром квадрата 50px */}
               <div className="flex flex-row justify-center items-start w-full gap-0 mt-6">
                 {STEPS.map(({ key, label }, idx) => {
                   const isPassed = step > key;
@@ -523,21 +642,24 @@ export function ImportAccountsOperationsModal({
                         style={{ width: 50 }}
                       >
                         <span
-                          className="text-center whitespace-nowrap"
+                          className="text-center block"
                           style={{
                             color: isFilled
                               ? ACTIVE_TEXT_DARK
                               : PLACEHOLDER_COLOR_DARK,
-                            fontSize: 18,
+                            fontSize: 14,
                             fontWeight: 400,
                             lineHeight: "20px",
+                            width: 120,
+                            maxWidth: 120,
+                            overflowWrap: "break-word",
                           }}
                         >
                           {label}
                         </span>
                       </div>
                       {idx < STEPS.length - 1 && (
-                        <div className="shrink-0" style={{ width: 130 }} />
+                        <div className="shrink-0" style={{ width: stepLineWidth }} />
                       )}
                     </React.Fragment>
                   );
@@ -548,6 +670,7 @@ export function ImportAccountsOperationsModal({
 
           {/* Блок контента */}
           <div
+            ref={contentScrollRef}
             className="flex-1 min-h-0 overflow-auto overscroll-contain px-6 py-6"
             style={{
               color: ACTIVE_TEXT_DARK,
@@ -653,6 +776,46 @@ export function ImportAccountsOperationsModal({
                       handleFileSelect(e.target.files?.[0] ?? null);
                     }}
                   />
+                  {/* Требования к файлу для «своей» выписки */}
+                  {importSource === "own" && (
+                    <div
+                      className="p-4"
+                      style={{
+                        backgroundColor: BACKGROUND_DT,
+                        borderRadius: 9,
+                      }}
+                    >
+                      <p
+                        className="text-base mb-2"
+                        style={{ color: ACTIVE_TEXT_DARK }}
+                      >
+                        Импортируемые файлы должны быть в формате{" "}
+                        <strong>Excel (.xlsx, .xls)</strong> или{" "}
+                        <strong>CSV</strong> (в т.ч. экспорт из Google Sheets).
+                      </p>
+                      <p
+                        className="text-base mb-2"
+                        style={{ color: ACTIVE_TEXT_DARK }}
+                      >
+                        Файл должен представлять собой{" "}
+                        <strong>список операций</strong> (одна строка — одна
+                        операция).
+                      </p>
+                      <p
+                        className="text-base mb-2"
+                        style={{ color: ACTIVE_TEXT_DARK }}
+                      >
+                        Должен содержать <strong>один лист</strong> (для Excel).
+                      </p>
+                      <p
+                        className="text-base"
+                        style={{ color: ACTIVE_TEXT_DARK }}
+                      >
+                        В <strong>первой строке</strong> должны быть{" "}
+                        <strong>заголовки столбцов</strong>.
+                      </p>
+                    </div>
+                  )}
                   {/* Параметры выписки или ошибка — только для Дзен после выбора файла */}
                   {importSource === "dzen" && selectedFile && (
                     <div className="flex flex-col gap-4">
@@ -870,7 +1033,193 @@ export function ImportAccountsOperationsModal({
                 </div>
               </div>
             )}
-            {step === 2 && parsedData && (
+            {step === 2 && importSource === "own" && parsedFileData && (
+              <div className="flex flex-col gap-4">
+                <h3
+                  className="text-2xl font-medium"
+                  style={{ color: ACTIVE_TEXT_DARK }}
+                >
+                  Определение данных
+                </h3>
+                <ImportOwnColumnMapping
+                  headers={parsedFileData.headers}
+                  mapping={columnMapping}
+                  onChange={setColumnMapping}
+                  error={step2MappingError}
+                />
+                {ownMappingPreview && (
+                  <div className="flex flex-col gap-4">
+                    <p
+                      className="text-base"
+                      style={{ color: ACTIVE_TEXT_DARK }}
+                    >
+                      По текущему маппингу обнаружено:
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div
+                        className="flex flex-col gap-2 p-4 items-center text-center"
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderRadius: 9,
+                        }}
+                      >
+                        <span
+                          className="text-base"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          Дата первой операции
+                        </span>
+                        <div
+                          className="w-full px-3 py-2 text-base box-border"
+                          style={{
+                            color: ACTIVE_TEXT_DARK,
+                            backgroundColor: MODAL_BG,
+                            borderRadius: 9,
+                          }}
+                        >
+                          {(() => {
+                            const dates = ownMappingPreview.transactions.map((t) => t.date).filter(Boolean);
+                            const first = dates.length ? [...dates].sort()[0] : null;
+                            if (!first) return "—";
+                            const [y, m, d] = first.split("-");
+                            return `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y}`;
+                          })()}
+                        </div>
+                      </div>
+                      <div
+                        className="flex flex-col gap-2 p-4 items-center text-center"
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderRadius: 9,
+                        }}
+                      >
+                        <span
+                          className="text-base"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          Дата последней операции
+                        </span>
+                        <div
+                          className="w-full px-3 py-2 text-base box-border"
+                          style={{
+                            color: ACTIVE_TEXT_DARK,
+                            backgroundColor: MODAL_BG,
+                            borderRadius: 9,
+                          }}
+                        >
+                          {(() => {
+                            const dates = ownMappingPreview.transactions.map((t) => t.date).filter(Boolean);
+                            const last = dates.length ? [...dates].sort().reverse()[0] : null;
+                            if (!last) return "—";
+                            const [y, m, d] = last.split("-");
+                            return `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y}`;
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div
+                        className="flex items-center justify-between gap-2 p-4"
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderRadius: 9,
+                        }}
+                      >
+                        <span
+                          className="text-base"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          Счетов
+                        </span>
+                        <div
+                          className="px-3 py-1.5 text-base shrink-0"
+                          style={{
+                            color: ACTIVE_TEXT_DARK,
+                            backgroundColor: MODAL_BG,
+                            borderRadius: 9,
+                          }}
+                        >
+                          {ownMappingPreview.accounts.length}
+                        </div>
+                      </div>
+                      <div
+                        className="flex items-center justify-between gap-2 p-4"
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderRadius: 9,
+                        }}
+                      >
+                        <span
+                          className="text-base"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          Категорий
+                        </span>
+                        <div
+                          className="px-3 py-1.5 text-base shrink-0"
+                          style={{
+                            color: ACTIVE_TEXT_DARK,
+                            backgroundColor: MODAL_BG,
+                            borderRadius: 9,
+                          }}
+                        >
+                          {ownMappingPreview.categories.length}
+                        </div>
+                      </div>
+                      <div
+                        className="flex items-center justify-between gap-2 p-4"
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderRadius: 9,
+                        }}
+                      >
+                        <span
+                          className="text-base"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          Контрагентов
+                        </span>
+                        <div
+                          className="px-3 py-1.5 text-base shrink-0"
+                          style={{
+                            color: ACTIVE_TEXT_DARK,
+                            backgroundColor: MODAL_BG,
+                            borderRadius: 9,
+                          }}
+                        >
+                          {ownMappingPreview.counterparties.length.toLocaleString("ru-RU")}
+                        </div>
+                      </div>
+                      <div
+                        className="flex items-center justify-between gap-2 p-4"
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderRadius: 9,
+                        }}
+                      >
+                        <span
+                          className="text-base"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          Транзакций
+                        </span>
+                        <div
+                          className="px-3 py-1.5 text-base shrink-0"
+                          style={{
+                            color: ACTIVE_TEXT_DARK,
+                            backgroundColor: MODAL_BG,
+                            borderRadius: 9,
+                          }}
+                        >
+                          {ownMappingPreview.transactions.length.toLocaleString("ru-RU")}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {step === stepAccounts && parsedData && (
               <div className="flex flex-col gap-4">
                 <div
                   className="shrink-0 text-center"
@@ -948,7 +1297,7 @@ export function ImportAccountsOperationsModal({
                 </div>
               </div>
             )}
-            {step === 2 && !parsedData && (
+            {step === stepAccounts && !parsedData && (
               <div className="flex flex-col gap-4">
                 <h3
                   className="text-2xl font-medium"
@@ -961,7 +1310,7 @@ export function ImportAccountsOperationsModal({
                 </p>
               </div>
             )}
-            {step === 3 && parsedData && (
+            {step === stepCategories && parsedData && (
               <div className="flex flex-col gap-4">
                 <div
                   className="shrink-0 text-center"
@@ -1014,12 +1363,12 @@ export function ImportAccountsOperationsModal({
                 </div>
               </div>
             )}
-            {step === 3 && !parsedData && (
+            {step === stepCategories && !parsedData && (
               <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
                 Сначала загрузите файл на шаге 1.
               </p>
             )}
-            {step === 4 && parsedData && (parsedData.counterparties?.length ?? 0) > 0 && (
+            {step === stepCounterparties && parsedData && (parsedData.counterparties?.length ?? 0) > 0 && (
               <div className="flex flex-col gap-4">
                 <div
                   className="shrink-0 text-center"
@@ -1073,7 +1422,7 @@ export function ImportAccountsOperationsModal({
                 </div>
               </div>
             )}
-            {step === 4 &&
+            {step === stepCounterparties &&
               (parsedData?.counterparties?.length ?? 0) === 0 &&
               parsedData && (
                 <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
@@ -1081,12 +1430,12 @@ export function ImportAccountsOperationsModal({
                   шагу.
                 </p>
               )}
-            {step === 4 && !parsedData && (
+            {step === stepCounterparties && !parsedData && (
               <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
                 Сначала загрузите файл на шаге 1.
               </p>
             )}
-            {step === 5 && (
+            {step === stepConfirm && (
               <div className="flex flex-col gap-6">
                 {step5Error && (
                   <p
@@ -1356,9 +1705,9 @@ export function ImportAccountsOperationsModal({
                 } as React.CSSProperties
               }
               onClick={() => void handleNext()}
-              disabled={isParsing || isImporting}
+              disabled={isParsing || isImporting || isReadingFile}
             >
-              {isParsing
+              {isParsing || isReadingFile
                 ? "Обработка…"
                 : isImporting
                 ? "Импорт…"
@@ -1386,6 +1735,7 @@ export function ImportAccountsOperationsModal({
         setAddCounterpartyModalOpen(next);
         if (!next) setAddCounterpartyForAccountKey(null);
       }}
+      modal={false}
       onSuccess={(created) => {
         setCounterparties((prev) => [...prev, created]);
         if (addCounterpartyForAccountKey) {

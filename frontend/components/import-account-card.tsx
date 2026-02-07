@@ -10,9 +10,10 @@ import {
   PLACEHOLDER_COLOR_DARK,
   RED,
 } from "@/lib/colors";
+import { Pencil, PencilOff, Link, Unlink } from "lucide-react";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
-import { Switch } from "@/components/ui/switch";
 import { TextField, SelectField } from "@/components/ui/form-field";
+import { IconButton } from "@/components/ui/icon-button";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { getItemTypeLabel } from "@/lib/item-types";
@@ -20,9 +21,6 @@ import { getTypeOptionsForKind } from "@/lib/item-type-options";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import type { DzenParsedAccount, DzenParsedTransaction } from "@/lib/dzen-csv-parser";
 import type { ItemOut, CounterpartyOut, CounterpartyIndustryOut, ItemKind } from "@/lib/api";
-
-const NAME_BLOCK_WIDTH = 150;
-const TOGGLES_BLOCK_WIDTH = 80;
 
 const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set([
   "bank_account",
@@ -169,15 +167,16 @@ export function ImportAccountCard({
   };
 
   const displayName = state.name || account.name;
+  const [isEditingName, setIsEditingName] = React.useState(false);
 
   const balancePlaceholder =
     statementLastTransactionDate
       ? `Остаток на ${formatShortDate(statementLastTransactionDate)}`
-      : "Укажите сумму";
+      : "Текущий остаток";
 
   return (
     <div
-      className="flex flex-row items-center rounded-[10px] overflow-hidden"
+      className="flex flex-row items-stretch rounded-[10px] overflow-hidden"
       style={{ backgroundColor: BACKGROUND_DT }}
     >
       {/* Подсветка */}
@@ -186,72 +185,106 @@ export function ImportAccountCard({
         style={{ backgroundColor: stripeColor }}
       />
 
-      {/* Контент: название | туггл Связать | блок с полями */}
-      <div className="flex flex-row items-center flex-1 min-w-0 gap-3 py-6 pr-6 pl-0">
-        {/* 1. Блок с названием и шильдиком валюты — 150px, по центру, перенос */}
-        <div
-          className="flex flex-col items-center justify-center shrink-0 gap-0.5 text-center"
-          style={{ width: NAME_BLOCK_WIDTH }}
-        >
+      {/* Контент: первая строка — название, валюта, кнопки; вторая — блок с полями */}
+      <div className="flex flex-col flex-1 min-w-0 py-6 pr-6 pl-4 gap-4">
+        {/* Первая строка: лэйбл валюты | название (18px) | IconButton (pencil) | [поле нового названия] | IconButton (link), по центру */}
+        <div className="flex flex-row items-center flex-wrap justify-center gap-2 min-w-0">
           <span
-            className="text-base font-normal leading-[18px] break-words w-full"
-            style={{ color: ACTIVE_TEXT_DARK }}
-          >
-            {account.name}
-          </span>
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase w-fit ${
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase shrink-0 ${
               getCurrencyBadgeClass(account.currency)
             }`}
           >
             {account.currency}
           </span>
-        </div>
-
-        {/* 2. Туггл Связать — 80px */}
-        <div
-          className="flex flex-col items-center justify-center gap-1.5 shrink-0"
-          style={{ width: TOGGLES_BLOCK_WIDTH, color: PLACEHOLDER_COLOR_DARK }}
-        >
-          <span className="text-[14px] font-normal leading-4">Связать</span>
-          <Switch
-            checked={state.linkEnabled}
-            onCheckedChange={(v) => update({ linkEnabled: v })}
-            className="h-[26px] w-[46px]"
-          />
-        </div>
-
-        {/* 3. Блок с полями — оставшаяся ширина, 2 столбца поровну */}
-        <div className="flex-1 min-w-0 flex flex-col">
-            {state.linkEnabled ? (
-              <ItemSelector
-                items={items}
-                selectedIds={state.linkedItemId ? [state.linkedItemId] : []}
-                onChange={(ids) => update({ linkedItemId: ids[0] ?? null })}
-                selectionMode="single"
-                placeholder="Начните вводить название актива/обязательства"
-                getItemTypeLabel={getItemTypeLabel}
-              />
+          <span
+            className="shrink-0"
+            style={{ color: ACTIVE_TEXT_DARK, fontSize: 18, fontWeight: 400 }}
+          >
+            {displayName}
+          </span>
+          <IconButton
+            onClick={() => setIsEditingName((v) => !v)}
+            aria-label={isEditingName ? "Закончить редактирование названия" : "Изменить название"}
+          >
+            {isEditingName ? (
+              <PencilOff className="h-4 w-4" />
             ) : (
-              (() => {
-                const effectiveType =
-                  state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
-                    ? state.typeCode
-                    : typeOptions[0]?.code ?? "";
-                const showCounterpartyField =
-                  MANDATORY_COUNTERPARTY_TYPE_CODES.has(effectiveType);
-                const bankIndustryId = industries.find(
-                  (ind) => ind.name === "Банки"
-                )?.id;
-                const isBankType =
-                  ["bank_account", "bank_card", "deposit", "savings_account"].includes(
-                    effectiveType
-                  );
+              <Pencil className="h-4 w-4" />
+            )}
+          </IconButton>
+          {isEditingName && (
+            <div className="min-w-[200px] flex-1 max-w-md">
+              <TextField
+                value={state.name}
+                onChange={(e) => update({ name: e.target.value })}
+                placeholder="Начните вводить название"
+                onBlur={() => setIsEditingName(false)}
+                autoFocus
+              />
+            </div>
+          )}
+          <IconButton
+            onClick={() => update({ linkEnabled: !state.linkEnabled })}
+            aria-label={state.linkEnabled ? "Выключить связь с активом" : "Связать с активом"}
+          >
+            {state.linkEnabled ? (
+              <Unlink className="h-4 w-4" />
+            ) : (
+              <Link className="h-4 w-4" />
+            )}
+          </IconButton>
+        </div>
 
-                return (
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
-                    {/* Строка 1: Актив/Обязательство | Банк/Контрагент (наверху) или Остаток */}
-                    <div className="min-w-0">
+        {/* Вторая строка: блок с полями */}
+        <div className="flex flex-col min-w-0">
+          {state.linkEnabled ? (
+            <div className="flex flex-row items-center gap-2 w-full min-w-0">
+              <span
+                className="font-normal min-w-0 flex-1 break-words"
+                style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+              >
+                Выберите имеющийся актив/обязательство, к которому будут привязаны транзакции по этому счету
+              </span>
+              <div className="w-[400px] shrink-0">
+                <ItemSelector
+                  items={items}
+                  selectedIds={state.linkedItemId ? [state.linkedItemId] : []}
+                  onChange={(ids) => update({ linkedItemId: ids[0] ?? null })}
+                  selectionMode="single"
+                  placeholder="Начните вводить название"
+                  getItemTypeLabel={getItemTypeLabel}
+                />
+              </div>
+            </div>
+          ) : (
+            (() => {
+              const effectiveType =
+                state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
+                  ? state.typeCode
+                  : typeOptions[0]?.code ?? "";
+              const showCounterpartyField =
+                MANDATORY_COUNTERPARTY_TYPE_CODES.has(effectiveType);
+              const bankIndustryId = industries.find(
+                (ind) => ind.name === "Банки"
+              )?.id;
+              const isBankType =
+                ["bank_account", "bank_card", "deposit", "savings_account"].includes(
+                  effectiveType
+                );
+
+              return (
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
+                  {/* Строка 1: Тип счета | Банк */}
+                  <div className="min-w-0 flex flex-row items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <span
+                        className="font-normal break-words"
+                        style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                      >
+                        Тип счета
+                      </span>
+                    </div>
+                    <div className="w-[300px] shrink-0">
                       <SegmentedSelector
                         options={[
                           { value: "ASSET", label: "Актив", colorScheme: "green" },
@@ -266,46 +299,76 @@ export function ImportAccountCard({
                         }}
                       />
                     </div>
-                    <div className="min-w-0">
-                      {showCounterpartyField ? (
-                        <CounterpartySelector
-                          counterparties={counterparties}
-                          selectedIds={state.counterpartyId ? [state.counterpartyId] : []}
-                          onChange={(ids) =>
-                            update({ counterpartyId: ids[0] ?? null })
-                          }
-                          selectionMode="single"
-                          placeholder={
-                            isBankType
-                              ? "Начните вводить название банка"
-                              : "Начните вводить название"
-                          }
-                          industries={industries}
-                          apiBase={apiBase}
-                          filterByIndustryId={
-                            isBankType ? bankIndustryId ?? null : null
-                          }
-                          showChips={false}
-                          onAddCounterparty={onAddCounterparty}
-                        />
-                      ) : (
-                        <TextField
-                          value={state.balanceStr}
-                          onChange={(e) =>
-                            update({ balanceStr: formatRubInput(e.target.value) })
-                          }
-                          onBlur={() =>
-                            update({
-                              balanceStr: normalizeRubOnBlur(state.balanceStr),
-                            })
-                          }
-                          placeholder={balancePlaceholder}
-                          inputMode="decimal"
-                        />
-                      )}
+                  </div>
+                  <div className="min-w-0 flex flex-row items-center gap-2">
+                    {showCounterpartyField ? (
+                      <>
+                        <div className="flex-1 min-w-0">
+                          <span
+                            className="font-normal break-words"
+                            style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                          >
+                            Банк, в котором открыт счет
+                          </span>
+                        </div>
+                        <div className="w-[300px] shrink-0">
+                          <CounterpartySelector
+                            counterparties={counterparties}
+                            selectedIds={state.counterpartyId ? [state.counterpartyId] : []}
+                            onChange={(ids) =>
+                              update({ counterpartyId: ids[0] ?? null })
+                            }
+                            selectionMode="single"
+                            placeholder="Начните вводить название банка"
+                            industries={industries}
+                            apiBase={apiBase}
+                            filterByIndustryId={
+                              isBankType ? bankIndustryId ?? null : null
+                            }
+                            showChips={false}
+                            onAddCounterparty={onAddCounterparty}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex-1 min-w-0">
+                          <span
+                            className="font-normal break-words"
+                            style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                          >
+                            Текущий остаток
+                          </span>
+                        </div>
+                        <div className="w-[300px] shrink-0">
+                          <TextField
+                            value={state.balanceStr}
+                            onChange={(e) =>
+                              update({ balanceStr: formatRubInput(e.target.value) })
+                            }
+                            onBlur={() =>
+                              update({
+                                balanceStr: normalizeRubOnBlur(state.balanceStr),
+                              })
+                            }
+                            placeholder={balancePlaceholder}
+                            inputMode="decimal"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {/* Строка 2: Вид счета | Текущий остаток */}
+                  <div className="min-w-0 flex flex-row items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <span
+                        className="font-normal break-words"
+                        style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                      >
+                        Вид счета
+                      </span>
                     </div>
-                    {/* Строка 2: Вид | Остаток (если показан контрагент) */}
-                    <div className="min-w-0">
+                    <div className="w-[300px] shrink-0">
                       <SelectField
                         value={effectiveType}
                         onValueChange={(v) => update({ typeCode: v })}
@@ -313,55 +376,44 @@ export function ImportAccountCard({
                           value: t.code,
                           label: t.label,
                         }))}
-                        placeholder="Выберите вид"
+                        placeholder="Вид"
                       />
-                    </div>
-                    <div className="min-w-0">
-                      {showCounterpartyField ? (
-                        <TextField
-                          value={state.balanceStr}
-                          onChange={(e) =>
-                            update({ balanceStr: formatRubInput(e.target.value) })
-                          }
-                          onBlur={() =>
-                            update({
-                              balanceStr: normalizeRubOnBlur(state.balanceStr),
-                            })
-                          }
-                          placeholder={balancePlaceholder}
-                          inputMode="decimal"
-                        />
-                      ) : null}
-                    </div>
-                    {/* Строка 3: Название | Сумма на дату и сумма в одну строку */}
-                    <div className="min-w-0">
-                      <TextField
-                        value={displayName}
-                        onChange={(e) => update({ name: e.target.value })}
-                        placeholder="Например: Кошелек / Ипотека"
-                      />
-                    </div>
-                    <div
-                      className="min-w-0 flex flex-col justify-center"
-                      style={{ color: ACTIVE_TEXT_DARK }}
-                    >
-                      <span
-                        className="font-normal"
-                        style={{ fontSize: 14, fontWeight: 400 }}
-                      >
-                        {(() => {
-                          const displayDate = statementAccountingStartDate ?? earliestDate;
-                          return displayDate
-                            ? `Остаток на ${formatShortDate(displayDate)}: ${formatAmount(initial)}`
-                            : `Начальная сумма: ${formatAmount(initial)}`;
-                        })()}
-                      </span>
                     </div>
                   </div>
-                );
-              })()
-            )}
-          </div>
+                  <div className="min-w-0 flex flex-row items-center gap-2">
+                    {showCounterpartyField ? (
+                      <>
+                        <div className="flex-1 min-w-0">
+                          <span
+                            className="font-normal break-words"
+                            style={{ color: ACTIVE_TEXT_DARK, fontSize: 14, fontWeight: 400 }}
+                          >
+                            Текущий остаток
+                          </span>
+                        </div>
+                        <div className="w-[300px] shrink-0">
+                          <TextField
+                            value={state.balanceStr}
+                            onChange={(e) =>
+                              update({ balanceStr: formatRubInput(e.target.value) })
+                            }
+                            onBlur={() =>
+                              update({
+                                balanceStr: normalizeRubOnBlur(state.balanceStr),
+                              })
+                            }
+                            placeholder="Текущий остаток"
+                            inputMode="decimal"
+                          />
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })()
+          )}
+        </div>
       </div>
     </div>
   );

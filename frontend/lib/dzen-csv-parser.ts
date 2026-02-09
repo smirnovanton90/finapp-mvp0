@@ -199,11 +199,14 @@ export function parseDzenCSV(text: string): DzenParsedData {
         accountsMap.set(key, { name: incomeAccountName, currency: incomeCurrency });
       }
     }
-    if (isFilled(categoryName)) {
-      categoriesSet.add(categoryName);
-    }
-    if (isFilled(payee)) {
-      counterpartiesSet.add(payee);
+    // Категорию и контрагента по переводам не выводим на шагах маппинга
+    if (type !== "transfer") {
+      if (isFilled(categoryName)) {
+        categoriesSet.add(categoryName);
+      }
+      if (isFilled(payee)) {
+        counterpartiesSet.add(payee);
+      }
     }
 
     transactions.push({

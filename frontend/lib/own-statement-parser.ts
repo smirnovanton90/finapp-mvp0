@@ -367,10 +367,12 @@ export function buildDzenParsedDataFromMapping(
       getCol(row, "category_l1") ||
       getCol(row, "category_l2") ||
       getCol(row, "category_l3");
-    if (isFilled(categoryName)) categoriesSet.add(categoryName.trim());
-
     const counterparty = getCol(row, "counterparty");
-    if (isFilled(counterparty)) counterpartiesSet.add(counterparty.trim());
+    // Категорию и контрагента по переводам не выводим на шагах маппинга
+    if (type !== "transfer") {
+      if (isFilled(categoryName)) categoriesSet.add(categoryName.trim());
+      if (isFilled(counterparty)) counterpartiesSet.add(counterparty.trim());
+    }
 
     transactions.push({
       date,

@@ -52,7 +52,7 @@ import {
 import { validateStep2 } from "@/lib/import-step2-validation";
 import { validateStep3 } from "@/lib/import-step3-validation";
 import { validateStep4 } from "@/lib/import-step4-validation";
-import { executeImportDzen, getStatementAccountingStartDate, getStatementLastTransactionDate } from "@/lib/import-dzen-executor";
+import { executeImportDzen, getStatementAccountingStartDate, getStatementLastTransactionDate, getEarliestStatementTransactionDate } from "@/lib/import-dzen-executor";
 import { getTypeOptionsForKind } from "@/lib/item-type-options";
 import {
   readFileToHeadersAndRows,
@@ -61,6 +61,12 @@ import {
   type ColumnMapping,
 } from "@/lib/own-statement-parser";
 import { ImportOwnColumnMapping } from "@/components/import-own-column-mapping";
+import { useAccountingStart } from "@/components/accounting-start-context";
+import {
+  findMatchingCategoryPath,
+  findMatchingCounterpartyId,
+  findMatchingItemId,
+} from "@/lib/import-match-helpers";
 
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
@@ -115,12 +121,19 @@ export type ImportAccountsOperationsModalProps = {
   onFinish?: () => void;
 };
 
+function formatShortDateDisplay(dateKey: string): string {
+  if (!dateKey || dateKey.length < 10) return dateKey;
+  const [y, m, d] = [dateKey.slice(0, 4), dateKey.slice(5, 7), dateKey.slice(8, 10)];
+  return `${d}.${m}.${y}`;
+}
+
 export function ImportAccountsOperationsModal({
   open,
   onOpenChange,
   importSource = "dzen",
   onFinish,
 }: ImportAccountsOperationsModalProps) {
+  const { accountingStartDate } = useAccountingStart();
   const [step, setStep] = React.useState<ImportStep>(1);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [isDragOver, setIsDragOver] = React.useState(false);
@@ -161,6 +174,9 @@ export function ImportAccountsOperationsModal({
   const [isReadingFile, setIsReadingFile] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const contentScrollRef = React.useRef<HTMLDivElement>(null);
+  const accountsStepAutoLinkApplied = React.useRef(false);
+  const categoriesStepAutoLinkApplied = React.useRef(false);
+  const counterpartiesStepAutoLinkApplied = React.useRef(false);
 
   const STEPS = importSource === "own" ? STEPS_OWN : STEPS_DZEN;
 
@@ -235,6 +251,9 @@ export function ImportAccountsOperationsModal({
       setAccountCardStates(new Map());
       setCategoryCardStates(new Map());
       setCounterpartyCardStates(new Map());
+      accountsStepAutoLinkApplied.current = false;
+      categoriesStepAutoLinkApplied.current = false;
+      counterpartiesStepAutoLinkApplied.current = false;
     }
   }, [open]);
 
@@ -294,6 +313,24 @@ export function ImportAccountsOperationsModal({
   }, [parsedData?.counterparties]);
 
   React.useEffect(() => {
+    if (step !== stepAccounts) {
+      accountsStepAutoLinkApplied.current = false;
+    }
+  }, [step, stepAccounts]);
+
+  React.useEffect(() => {
+    if (step !== stepCategories) {
+      categoriesStepAutoLinkApplied.current = false;
+    }
+  }, [step, stepCategories]);
+
+  React.useEffect(() => {
+    if (step !== stepCounterparties) {
+      counterpartiesStepAutoLinkApplied.current = false;
+    }
+  }, [step, stepCounterparties]);
+
+  React.useEffect(() => {
     if (parsedData && step === stepCategories) {
       fetchCategories({ includeArchived: false })
         .then(setCategories)
@@ -308,6 +345,93 @@ export function ImportAccountsOperationsModal({
         .catch(() => setCounterparties([]));
     }
   }, [parsedData, step, stepCounterparties]);
+
+  // Авто-сопряжение счетов: при совпадении названия с существующим активом/обязательством включаем режим привязки и выбираем его.
+  React.useEffect(() => {
+    if (
+      step !== stepAccounts ||
+      items.length === 0 ||
+      accountCardStates.size === 0 ||
+      accountsStepAutoLinkApplied.current
+    ) {
+      return;
+    }
+    accountsStepAutoLinkApplied.current = true;
+    setAccountCardStates((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [key, state] of next) {
+        if (state.linkEnabled) continue;
+        const accountName = key.includes("|") ? key.split("|")[0] : key;
+        const matchId = findMatchingItemId(state.name || accountName, items);
+        if (matchId != null) {
+          next.set(key, {
+            ...state,
+            linkEnabled: true,
+            linkedItemId: matchId,
+          });
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [step, stepAccounts, items, accountCardStates.size]);
+
+  // Авто-сопряжение категорий: при совпадении (полном или частичном) с существующей включаем режим связи и выбираем категорию (поиск от листа к корню).
+  React.useEffect(() => {
+    if (
+      step !== stepCategories ||
+      categories.length === 0 ||
+      categoryCardStates.size === 0 ||
+      categoriesStepAutoLinkApplied.current
+    ) {
+      return;
+    }
+    categoriesStepAutoLinkApplied.current = true;
+    setCategoryCardStates((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [key, state] of next) {
+        if (state.linkEnabled) continue;
+        const match = findMatchingCategoryPath(state.name || key, categories);
+        if (match) {
+          next.set(key, { ...state, linkEnabled: true, linkedPath: match });
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [step, stepCategories, categories, categoryCardStates.size]);
+
+  // Авто-сопряжение контрагентов: при совпадении названия (полном или частичном) включаем режим связи и выбираем контрагента.
+  React.useEffect(() => {
+    if (
+      step !== stepCounterparties ||
+      counterparties.length === 0 ||
+      counterpartyCardStates.size === 0 ||
+      counterpartiesStepAutoLinkApplied.current
+    ) {
+      return;
+    }
+    counterpartiesStepAutoLinkApplied.current = true;
+    setCounterpartyCardStates((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [key, state] of next) {
+        if (state.linkEnabled) continue;
+        const matchId = findMatchingCounterpartyId(key, counterparties);
+        if (matchId != null) {
+          next.set(key, {
+            ...state,
+            linkEnabled: true,
+            linkedCounterpartyId: matchId,
+          });
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [step, stepCounterparties, counterparties, counterpartyCardStates.size]);
 
   const ownMappingPreview = React.useMemo((): DzenParsedData | null => {
     if (importSource !== "own" || !parsedFileData) return null;
@@ -1026,6 +1150,24 @@ export function ImportAccountsOperationsModal({
                               </div>
                             </div>
                           </div>
+                          {accountingStartDate && (() => {
+                            const earliest = getEarliestStatementTransactionDate(parsedData);
+                            if (!earliest || accountingStartDate <= earliest) return null;
+                            return (
+                              <div
+                                className="mt-4 p-4 rounded-lg border"
+                                style={{
+                                  backgroundColor: "rgba(251, 76, 79, 0.1)",
+                                  borderColor: "#FB4C4F",
+                                  color: ACTIVE_TEXT_DARK,
+                                }}
+                              >
+                                <p className="text-base">
+                                  В выписке есть операции раньше установленной даты начала учета ({formatShortDateDisplay(accountingStartDate)}). Будут импортированы только транзакции начиная с {formatShortDateDisplay(accountingStartDate)}. Дата начала действия импортируемых счетов будет установлена на {formatShortDateDisplay(accountingStartDate)}.
+                                </p>
+                              </div>
+                            );
+                          })()}
                         </>
                       )}
                     </div>
@@ -1215,6 +1357,24 @@ export function ImportAccountsOperationsModal({
                         </div>
                       </div>
                     </div>
+                    {accountingStartDate && (() => {
+                      const earliest = getEarliestStatementTransactionDate(ownMappingPreview);
+                      if (!earliest || accountingStartDate <= earliest) return null;
+                      return (
+                        <div
+                          className="mt-4 p-4 rounded-lg border"
+                          style={{
+                            backgroundColor: "rgba(251, 76, 79, 0.1)",
+                            borderColor: "#FB4C4F",
+                            color: ACTIVE_TEXT_DARK,
+                          }}
+                        >
+                          <p className="text-base">
+                            В выписке есть операции раньше установленной даты начала учета ({formatShortDateDisplay(accountingStartDate)}). Будут импортированы только транзакции начиная с {formatShortDateDisplay(accountingStartDate)}. Дата начала действия импортируемых счетов будет установлена на {formatShortDateDisplay(accountingStartDate)}.
+                          </p>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

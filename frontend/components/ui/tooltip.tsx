@@ -4,6 +4,8 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 
 import { cn } from "@/lib/utils"
+import { useTheme } from "@/components/theme-provider"
+import { BACKGROUND_DT, PLACEHOLDER_COLOR_DARK } from "@/lib/colors"
 
 type TooltipSide = "top" | "right" | "bottom" | "left" | "top-right"
 
@@ -30,7 +32,9 @@ function Tooltip({
   contentClassName,
   children,
 }: TooltipProps) {
+  const { theme } = useTheme()
   const triggerRef = React.useRef<HTMLSpanElement>(null)
+  const isDark = theme === "dark"
   const [mounted, setMounted] = React.useState(false)
   const [isOpen, setIsOpen] = React.useState(false)
   const [coords, setCoords] = React.useState({ x: 0, y: 0 })
@@ -117,12 +121,21 @@ function Tooltip({
           <span
             role="tooltip"
             className={cn(
-              "pointer-events-none fixed z-[70] w-max max-w-[320px] rounded-md border border-border/70 bg-white px-3 py-2 text-xs leading-snug text-muted-foreground shadow-lg",
+              "pointer-events-none fixed z-[70] w-max max-w-[320px] rounded-md border px-3 py-2 text-xs leading-snug shadow-lg",
               "whitespace-normal break-words text-left",
               sideTransforms[side],
+              !isDark && "border-border/70 bg-white text-muted-foreground",
               contentClassName
             )}
-            style={{ left: coords.x, top: coords.y }}
+            style={{
+              left: coords.x,
+              top: coords.y,
+              ...(isDark && {
+                backgroundColor: BACKGROUND_DT,
+                color: PLACEHOLDER_COLOR_DARK,
+                borderColor: "rgba(255, 255, 255, 0.1)",
+              }),
+            }}
           >
             {content}
           </span>,

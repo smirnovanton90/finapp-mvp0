@@ -190,6 +190,9 @@ export function ImportAccountsOperationsModal({
   const stepCounterparties = importSource === "own" ? 5 : 4;
   const stepConfirm = importSource === "own" ? 6 : 5;
   const isLastStep = step === stepConfirm;
+  /** На шагах с активами, категориями и контрагентами степпер прокручивается вместе с контентом */
+  const stepperScrollsWithContent =
+    step === stepAccounts || step === stepCategories || step === stepCounterparties;
 
   const acceptedTypes =
     importSource === "own" ? ".csv,.xlsx,.xls" : ".csv";
@@ -643,6 +646,92 @@ export function ImportAccountsOperationsModal({
     onOpenChange(false);
   };
 
+  const stepperBox = (
+    <div
+      className="flex flex-col w-full"
+      style={{
+        backgroundColor: BACKGROUND_DT,
+        borderRadius: 9,
+        padding: "48px 24px 24px",
+      }}
+    >
+      <div className="flex flex-row justify-center items-center w-full gap-0">
+        {STEPS.map(({ key, label }, idx) => {
+          const isPassed = step > key;
+          const isCurrent = step === key;
+          const isFilled = isPassed || isCurrent;
+          return (
+            <React.Fragment key={key}>
+              <div
+                className="flex items-center justify-center shrink-0 box-border"
+                style={{
+                  width: 50,
+                  height: 50,
+                  backgroundColor: isFilled ? ACCENT2 : "transparent",
+                  border: `2px solid ${ACCENT2}`,
+                  borderRadius: 9,
+                  boxShadow: isCurrent ? `0px 0px 50px ${ACCENT}` : undefined,
+                }}
+              >
+                <span
+                  style={{
+                    color: ACTIVE_TEXT_DARK,
+                    fontSize: 24,
+                    fontWeight: 500,
+                    lineHeight: "27px",
+                  }}
+                >
+                  {key}
+                </span>
+              </div>
+              {idx < STEPS.length - 1 && (
+                <div
+                  className="flex items-center shrink-0"
+                  style={{ width: stepLineWidth, height: 50 }}
+                >
+                  <div
+                    className="w-full"
+                    style={{ height: 0, borderTop: `2px solid ${ACCENT2}` }}
+                  />
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+      <div className="flex flex-row justify-center items-start w-full gap-0 mt-6">
+        {STEPS.map(({ key, label }, idx) => {
+          const isPassed = step > key;
+          const isCurrent = step === key;
+          const isFilled = isPassed || isCurrent;
+          return (
+            <React.Fragment key={key}>
+              <div className="flex justify-center shrink-0" style={{ width: 50 }}>
+                <span
+                  className="text-center block"
+                  style={{
+                    color: isFilled ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,
+                    fontSize: 14,
+                    fontWeight: 400,
+                    lineHeight: "20px",
+                    width: 120,
+                    maxWidth: 120,
+                    overflowWrap: "break-word",
+                  }}
+                >
+                  {label}
+                </span>
+              </div>
+              {idx < STEPS.length - 1 && (
+                <div className="shrink-0" style={{ width: stepLineWidth }} />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
@@ -685,108 +774,10 @@ export function ImportAccountsOperationsModal({
             </DialogTitle>
           </DialogHeader>
 
-          {/* Степпер — квадраты и линии в одной строке, labels ниже */}
-          <div className="shrink-0 px-6 pb-6">
-            <div
-              className="flex flex-col w-full"
-              style={{
-                backgroundColor: BACKGROUND_DT,
-                borderRadius: 9,
-                padding: "48px 24px 24px",
-              }}
-            >
-              {/* Ряд 1: квадраты и линии — линии касаются квадратов, всё по центру */}
-              <div className="flex flex-row justify-center items-center w-full gap-0">
-                {STEPS.map(({ key, label }, idx) => {
-                  const isPassed = step > key;
-                  const isCurrent = step === key;
-                  const isFilled = isPassed || isCurrent;
-
-                  return (
-                    <React.Fragment key={key}>
-                      {/* Квадрат 50×50 */}
-                      <div
-                        className="flex items-center justify-center shrink-0 box-border"
-                        style={{
-                          width: 50,
-                          height: 50,
-                          backgroundColor: isFilled ? ACCENT2 : "transparent",
-                          border: `2px solid ${ACCENT2}`,
-                          borderRadius: 9,
-                          boxShadow: isCurrent
-                            ? `0px 0px 50px ${ACCENT}`
-                            : undefined,
-                        }}
-                      >
-                        <span
-                          style={{
-                            color: ACTIVE_TEXT_DARK,
-                            fontSize: 24,
-                            fontWeight: 500,
-                            lineHeight: "27px",
-                          }}
-                        >
-                          {key}
-                        </span>
-                      </div>
-                      {/* Линия, соединяет квадраты (100px для own, 130px для остальных) */}
-                      {idx < STEPS.length - 1 && (
-                        <div
-                          className="flex items-center shrink-0"
-                          style={{ width: stepLineWidth, height: 50 }}
-                        >
-                          <div
-                            className="w-full"
-                            style={{
-                              height: 0,
-                              borderTop: `2px solid ${ACCENT2}`,
-                            }}
-                          />
-                        </div>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-              {/* Ряд 2: подписи — центр 120px блока точно под центром квадрата 50px */}
-              <div className="flex flex-row justify-center items-start w-full gap-0 mt-6">
-                {STEPS.map(({ key, label }, idx) => {
-                  const isPassed = step > key;
-                  const isCurrent = step === key;
-                  const isFilled = isPassed || isCurrent;
-
-                  return (
-                    <React.Fragment key={key}>
-                      <div
-                        className="flex justify-center shrink-0"
-                        style={{ width: 50 }}
-                      >
-                        <span
-                          className="text-center block"
-                          style={{
-                            color: isFilled
-                              ? ACTIVE_TEXT_DARK
-                              : PLACEHOLDER_COLOR_DARK,
-                            fontSize: 14,
-                            fontWeight: 400,
-                            lineHeight: "20px",
-                            width: 120,
-                            maxWidth: 120,
-                            overflowWrap: "break-word",
-                          }}
-                        >
-                          {label}
-                        </span>
-                      </div>
-                      {idx < STEPS.length - 1 && (
-                        <div className="shrink-0" style={{ width: stepLineWidth }} />
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          {/* Степпер — фиксирован только когда не на шагах с карточками (счета/категории/контрагенты) */}
+          {!stepperScrollsWithContent && (
+            <div className="shrink-0 px-6 pb-6">{stepperBox}</div>
+          )}
 
           {/* Блок контента */}
           <div
@@ -798,6 +789,9 @@ export function ImportAccountsOperationsModal({
               fontWeight: 400,
             }}
           >
+            {stepperScrollsWithContent && (
+              <div className="pb-6">{stepperBox}</div>
+            )}
             {step === 1 && parseError && !selectedFile && (
               <p
                 className="text-base shrink-0"

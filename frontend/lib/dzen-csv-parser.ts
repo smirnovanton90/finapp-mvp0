@@ -70,8 +70,8 @@ export function isDzenDebtsAccount(account: { name: string }): boolean {
   return (account.name ?? "").trim() === DZEN_DEBTS_ACCOUNT_NAME;
 }
 
-/** Парсит строку CSV с учётом кавычек и escaped-кавычек */
-function parseCSVLine(line: string): string[] {
+/** Парсит строку CSV с учётом кавычек и escaped-кавычек; разделитель — запятая или точка с запятой */
+function parseCSVLine(line: string, delimiter: "," | ";" = ","): string[] {
   const result: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -84,7 +84,7 @@ function parseCSVLine(line: string): string[] {
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (c === "," && !inQuotes) {
+    } else if (c === delimiter && !inQuotes) {
       result.push(current);
       current = "";
     } else {
@@ -119,15 +119,31 @@ export function parseDzenCSV(text: string): DzenParsedData {
 
   let headerLineIndex = -1;
   let headerColumns: string[] = [];
+  let delimiter: "," | ";" = ",";
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim()) continue;
 
-    const cells = parseCSVLine(line);
+    let cells: string[];
+    if (headerLineIndex < 0) {
+      const bySemicolon = parseCSVLine(line, ";");
+      const isHeaderSemicolon =
+        bySemicolon.length >= 10 &&
+        bySemicolon[0]?.trim() === "date" &&
+        bySemicolon[1]?.trim() === "categoryName";
+      if (isHeaderSemicolon) {
+        delimiter = ";";
+        cells = bySemicolon;
+      } else {
+        cells = parseCSVLine(line, ",");
+      }
+    } else {
+      cells = parseCSVLine(line, delimiter);
+    }
     if (cells.length < 10) continue;
 
-    if (cells[0] === "date" && cells[1] === "categoryName") {
+    if (cells[0]?.trim() === "date" && cells[1]?.trim() === "categoryName") {
       headerLineIndex = i;
       headerColumns = cells;
       continue;

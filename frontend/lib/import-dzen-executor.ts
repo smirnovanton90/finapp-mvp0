@@ -399,7 +399,15 @@ export async function executeImportDzen(
 
       if (primaryItemId == null || amountRub <= 0) continue;
 
-      const categoryId = categoryNameToId.get(tx.categoryName) ?? null;
+      const hasCategoryName = (tx.categoryName ?? "").trim().length > 0;
+      const categoryId =
+        hasCategoryName
+          ? categoryNameToId.get(tx.categoryName) ?? null
+          : tx.type === "income"
+            ? otherIncomeCategoryId
+            : tx.type === "expense"
+              ? otherExpenseCategoryId
+              : null;
       const counterpartyId = tx.counterparty
         ? (counterpartyNameToId.get(tx.counterparty) ?? null)
         : null;

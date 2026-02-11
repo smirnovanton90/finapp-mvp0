@@ -25,6 +25,7 @@ import {
   type DzenParsedData,
   isDzenDebtsAccount,
 } from "@/lib/dzen-csv-parser";
+import { parseCoinKeeperCSVFile } from "@/lib/coinkeeper-csv-parser";
 import {
   ImportAccountCard,
   getInitialAccountCardState,
@@ -200,9 +201,9 @@ export function ImportAccountsOperationsModal({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Парсинг файла при выборе (для Дзен) — чтобы показать параметры выписки на шаге 1
+  // Парсинг файла при выборе (для Дзен и CoinKeeper) — чтобы показать параметры выписки на шаге 1
   React.useEffect(() => {
-    if (importSource !== "dzen" || !selectedFile) {
+    if ((importSource !== "dzen" && importSource !== "coinkeeper") || !selectedFile) {
       setParsedData(null);
       setParseError(null);
       return;
@@ -210,7 +211,9 @@ export function ImportAccountsOperationsModal({
     let cancelled = false;
     setIsParsing(true);
     setParseError(null);
-    parseDzenCSVFile(selectedFile)
+    const parseFile =
+      importSource === "coinkeeper" ? parseCoinKeeperCSVFile : parseDzenCSVFile;
+    parseFile(selectedFile)
       .then((data) => {
         if (!cancelled) setParsedData(data);
       })
@@ -449,7 +452,7 @@ export function ImportAccountsOperationsModal({
   }, [importSource, parsedFileData, columnMapping]);
 
   const handleNext = async () => {
-    if (step === 1 && importSource === "dzen") {
+    if (step === 1 && (importSource === "dzen" || importSource === "coinkeeper")) {
       if (!selectedFile) {
         setParseError("Выберите файл для импорта.");
         return;
@@ -458,13 +461,6 @@ export function ImportAccountsOperationsModal({
         if (parseError) return;
         return; // ещё идёт парсинг
       }
-      setStep(2);
-      return;
-    }
-
-    if (step === 1 && importSource === "coinkeeper") {
-      setParseError(null);
-      setParsedData(null);
       setStep(2);
       return;
     }
@@ -573,7 +569,7 @@ export function ImportAccountsOperationsModal({
     }
 
     // Финальный шаг: выполнить импорт
-    if (step === stepConfirm && parsedData && (importSource === "dzen" || importSource === "own")) {
+    if (step === stepConfirm && parsedData && (importSource === "dzen" || importSource === "coinkeeper" || importSource === "own")) {
       setStep5Error(null);
       // Проверка: дата транзакции не может быть раньше даты начала действия связанного актива/обязательства
       for (const [key, state] of accountCardStates) {
@@ -940,8 +936,8 @@ export function ImportAccountsOperationsModal({
                       </p>
                     </div>
                   )}
-                  {/* Параметры выписки или ошибка — только для Дзен после выбора файла */}
-                  {importSource === "dzen" && selectedFile && (
+                  {/* Параметры выписки или ошибка — для Дзен и CoinKeeper после выбора файла */}
+                  {(importSource === "dzen" || importSource === "coinkeeper") && selectedFile && (
                     <div className="flex flex-col gap-4">
                       <p
                         className="text-base"

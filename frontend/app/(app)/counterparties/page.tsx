@@ -35,6 +35,7 @@ import { CounterpartyCard } from "@/components/counterparty-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
 import { ACCENT, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
+import { EmptyState } from "@/components/empty-state";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const MAX_LOGO_DIM = 1024;
@@ -943,9 +944,7 @@ export default function CounterpartiesPage() {
             </Button>
           </div>
             {filteredCounterparties.length === 0 && !loading ? (
-              <div className="text-center py-12 text-muted-foreground">
-                По выбранным фильтрам контрагентов нет.
-              </div>
+              <EmptyState />
             ) : (
               <>
                 <div

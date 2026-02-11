@@ -109,6 +109,7 @@ import {
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
 } from "@/lib/colors";
+import { EmptyState } from "@/components/empty-state";
 import { PINK_GRADIENT as PINK_GRADIENT_CONST } from "@/lib/gradients";
 import { useOnboarding } from "@/components/onboarding-context";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
@@ -1853,9 +1854,7 @@ export default function FinancialPlanningPage() {
               </Button>
             </div>
             {visibleChains.length === 0 && !loading ? (
-              <div className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
-                Пока нет цепочек плановых транзакций.
-              </div>
+              <EmptyState />
             ) : (
               <div
                 className="space-y-4"

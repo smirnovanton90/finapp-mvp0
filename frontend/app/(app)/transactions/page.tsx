@@ -115,6 +115,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmModal } from "@/components/confirm-modal";
+import { EmptyState } from "@/components/empty-state";
 import { CreateCategoryModal } from "@/components/create-category-modal";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import {
@@ -6166,12 +6167,7 @@ function TransactionsView({
                 )}
               </div>
             {sortedTxs.length === 0 ? (
-              <div
-                className="rounded-lg border border-dashed p-6 text-center text-sm bg-transparent"
-                style={{ borderColor: ACCENT_FILL_MEDIUM, color: ACTIVE_TEXT_DARK }}
-              >
-                Нет транзакций.
-              </div>
+              <EmptyState />
             ) : (
               <div
                 className="space-y-3"

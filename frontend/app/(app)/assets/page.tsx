@@ -33,6 +33,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormModal } from "@/components/form-modal";
 import { ConfirmModal } from "@/components/confirm-modal";
+import { EmptyState } from "@/components/empty-state";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -5316,9 +5317,7 @@ export default function Page() {
             </Button>
           </div>
             {visibleItems.length === 0 && !loading ? (
-              <div className="text-center py-12 text-muted-foreground">
-                Нет активов или обязательств
-              </div>
+              <EmptyState />
             ) : (
               <div className="relative">
                 {/* Разделы с карточками: каждая карточка сама управляет своей opacity при загрузке изображений */}

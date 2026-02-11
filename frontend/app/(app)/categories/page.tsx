@@ -52,6 +52,7 @@ import {
   GREEN_TRANSACTION,
   RED,
 } from "@/lib/colors";
+import { EmptyState } from "@/components/empty-state";
 
 const ALLOWED_ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_ICON_BYTES = 2 * 1024 * 1024;
@@ -1118,9 +1119,7 @@ export default function CategoriesPage() {
             </div>
           )}
           {visibleCategories.length === 0 && !loading ? (
-            <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-              По выбранным фильтрам категорий нет.
-            </div>
+            <EmptyState />
           ) : (
             <div
               style={{

@@ -16,6 +16,7 @@ import { CounterpartySelector } from "@/components/counterparty-selector";
 import { FormModal } from "@/components/form-modal";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
+import { EmptyState } from "@/components/empty-state";
 import {
   buildCategoryDescendants,
   buildCategoryLookup,
@@ -874,12 +875,7 @@ export default function GoalsPage() {
             )}
 
             {visibleGoals.length === 0 && !loading ? (
-              <div
-                className="rounded-lg border border-dashed p-6 text-center text-sm"
-                style={{ borderColor: PLACEHOLDER_COLOR_DARK, color: PLACEHOLDER_COLOR_DARK }}
-              >
-                Нет целей по заданным фильтрам.
-              </div>
+              <EmptyState />
             ) : (
               <div
                 className="columns-1 md:columns-2 xl:columns-3 gap-4"

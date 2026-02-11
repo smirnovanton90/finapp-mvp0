@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
@@ -48,8 +48,8 @@ type Step = 1 | 2 | 3 | 4;
 
 export function FirstLoadOnboarding() {
   const router = useRouter();
-  const { accountingStartDate, setAccountingStartDate, refresh } = useAccountingStart();
-  const [step, setStep] = useState<Step>(1);
+  const { accountingStartDate, setAccountingStartDate, refresh, pendingDateConfirmation, setPendingDateConfirmation, setDateSetupComplete } = useAccountingStart();
+  const [step, setStep] = useState<Step>(() => (pendingDateConfirmation ? 4 : 1));
   const [importStepSkipped, setImportStepSkipped] = useState(false);
   const [importSource, setImportSource] = useState<ImportSourceKey>(null);
   const [choiceToday, setChoiceToday] = useState(true);
@@ -83,16 +83,26 @@ export function FirstLoadOnboarding() {
       setLocalError("Дата начала учета не может быть позже сегодняшней даты.");
       return;
     }
+    if (accountingStartDate && dateToSave > accountingStartDate) {
+      setLocalError("Дата не может быть позднее ранее установленной.");
+      return;
+    }
     setSaving(true);
+    setPendingDateConfirmation(false);
+    setDateSetupComplete(true);
     try {
-      await setAccountingStartDate(dateToSave);
+      sessionStorage.setItem("finapp-date-setup-complete", "1");
+      await setAccountingStartDate(dateToSave, { skipLoading: true });
       router.push("/assets");
     } catch {
+      sessionStorage.removeItem("finapp-date-setup-complete");
+      setDateSetupComplete(false);
+      setPendingDateConfirmation(true);
       setLocalError("Не удалось сохранить дату.");
     } finally {
       setSaving(false);
     }
-  }, [choiceToday, todayKey, customDate, setAccountingStartDate, router]);
+  }, [choiceToday, todayKey, customDate, accountingStartDate, setAccountingStartDate, setPendingDateConfirmation, setDateSetupComplete, router]);
 
   const textStyle = useMemo(
     () => ({ color: ACTIVE_TEXT_DARK } as const),
@@ -106,12 +116,16 @@ export function FirstLoadOnboarding() {
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (nextOpen === false && !accountingStartDate) {
+        setImportStepSkipped(true);
         setStep(4);
         return;
       }
+      if (nextOpen === false && accountingStartDate) {
+        setPendingDateConfirmation(false);
+      }
       setOpen(nextOpen);
     },
-    [accountingStartDate]
+    [accountingStartDate, setPendingDateConfirmation]
   );
 
   const onImportLater = useCallback(() => {
@@ -122,6 +136,22 @@ export function FirstLoadOnboarding() {
   const onStartImport = useCallback(() => {
     if (importSource) setImportServiceModalOpen(true);
   }, [importSource]);
+
+  const dateAlreadySet = Boolean(accountingStartDate);
+
+  useEffect(() => {
+    if (pendingDateConfirmation) {
+      setStep(4);
+      setImportStepSkipped(true);
+    }
+  }, [pendingDateConfirmation]);
+
+  useEffect(() => {
+    if (step === 4 && accountingStartDate) {
+      setChoiceToday(false);
+      setCustomDate(accountingStartDate);
+    }
+  }, [step, accountingStartDate]);
 
   return (
     <>
@@ -258,122 +288,183 @@ export function FirstLoadOnboarding() {
           />
         )}
 
-        {/* Шаг 4: Выбор даты начала учета (только если импорт пропущен) */}
-        {step === 4 && importStepSkipped && (
+        {/* Шаг 4: Выбор даты начала учета */}
+        {step === 4 && (
           <div
             key="step4"
             className="flex flex-col w-full h-full min-h-0 px-6 py-8 sm:px-10 sm:py-10 animate-in fade-in duration-300"
           >
-            <p
-              className="text-[32px] font-medium leading-snug mb-6 max-w-2xl shrink-0"
-              style={textStyle}
-            >
-              Для начала нужно определиться с{" "}
-              <span style={{ color: ACCENT }}>датой начала учета</span>
-            </p>
+            {dateAlreadySet ? (
+              <>
+                <p
+                  className="text-[32px] font-medium leading-snug mb-6 max-w-2xl shrink-0"
+                  style={textStyle}
+                >
+                  Проверьте{" "}
+                  <span style={{ color: ACCENT }}>дату начала учета</span>
+                </p>
+                <div className="grid grid-cols-1 flex-1 min-h-0 mb-6">
+                  <div
+                    className="rounded-2xl p-6 flex flex-col items-center justify-center text-center min-h-0 w-full"
+                    style={{
+                      backgroundColor: MODAL_BG,
+                      borderBottomWidth: 4,
+                      borderBottomStyle: "solid",
+                      borderBottomColor: ACCENT2,
+                      borderRadius: 9,
+                      boxShadow: `inset 0 -26px 41px -28px ${ACCENT2}, inset 0 -2px 0 0 ${ACCENT2}`,
+                    }}
+                  >
+                    <div
+                      className="mb-4 flex justify-center shrink-0"
+                      style={{ width: 400 }}
+                      onClick={(e) => e.stopPropagation()}
+                      role="presentation"
+                    >
+                      <DateField
+                        label=""
+                        value={customDate || accountingStartDate || ""}
+                        max={accountingStartDate ?? undefined}
+                        onChange={(e) => setCustomDate(e.target.value)}
+                      />
+                    </div>
+                    <p
+                      className="font-normal max-w-2xl mb-2"
+                      style={{ fontSize: 18, color: ACTIVE_TEXT_DARK }}
+                    >
+                      На текущий момент установлена указанная дата. Если вы
+                      хотите начать вести учет в более раннюю дату, измените ее
+                    </p>
+                    <p
+                      className="text-[14px] font-normal max-w-2xl"
+                      style={placeholderStyle}
+                    >
+                      Остатки по счетам, стоимость имущества, задолженность по
+                      кредитам нужно будет указать на выбранную дату. Доходы и
+                      расходы также нужно будет внести с этой даты (можно
+                      сделать через импорт выписок)
+                    </p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <p
+                  className="text-[32px] font-medium leading-snug mb-6 max-w-2xl shrink-0"
+                  style={textStyle}
+                >
+                  Для начала нужно определиться с{" "}
+                  <span style={{ color: ACCENT }}>датой начала учета</span>
+                </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 flex-1 min-h-0 mb-6">
-              {/* Сегодня */}
-              <button
-                type="button"
-                onClick={() => setChoiceToday(true)}
-                className="rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all border-0 border-b-[4px] border-solid min-h-0"
-                style={{
-                  backgroundColor: choiceToday ? MODAL_BG : "transparent",
-                  borderBottomColor: choiceToday ? ACCENT2 : "transparent",
-                  borderRadius: "9px",
-                  boxShadow: choiceToday
-                    ? `inset 0 -26px 41px -28px ${ACCENT2}, inset 0 -2px 0 0 ${ACCENT2}`
-                    : undefined,
-                }}
-              >
-                <div
-                  className="text-[48px] font-semibold leading-tight mb-2"
-                  style={textStyle}
-                >
-                  Сегодня
-                </div>
-                <div
-                  className="text-[32px] font-medium mb-3"
-                  style={textStyle}
-                >
-                  {displayToday}
-                </div>
-                <p
-                  className="text-[18px] font-normal mb-2 max-w-sm"
-                  style={textStyle}
-                >
-                  Подойдет тем, кто впервые начинает учет своих финансов
-                </p>
-                <p
-                  className="text-[14px] font-normal max-w-sm"
-                  style={placeholderStyle}
-                >
-                  Остатки по счетам, стоимость имущества, задолженность по
-                  кредитам укажете на сегодняшнюю дату. История доходов и расходов
-                  начнется с сегодняшнего дня
-                </p>
-              </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 flex-1 min-h-0 mb-6">
+                  {/* Сегодня */}
+                  <button
+                    type="button"
+                    onClick={() => setChoiceToday(true)}
+                    className="rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all border-0 border-b-[4px] border-solid min-h-0"
+                    style={{
+                      backgroundColor: choiceToday ? MODAL_BG : "transparent",
+                      borderBottomColor: choiceToday ? ACCENT2 : "transparent",
+                      borderRadius: "9px",
+                      boxShadow: choiceToday
+                        ? `inset 0 -26px 41px -28px ${ACCENT2}, inset 0 -2px 0 0 ${ACCENT2}`
+                        : undefined,
+                    }}
+                  >
+                    <div
+                      className="text-[48px] font-semibold leading-tight mb-2"
+                      style={textStyle}
+                    >
+                      Сегодня
+                    </div>
+                    <div
+                      className="text-[32px] font-medium mb-3"
+                      style={textStyle}
+                    >
+                      {displayToday}
+                    </div>
+                    <p
+                      className="text-[18px] font-normal mb-2 max-w-sm"
+                      style={textStyle}
+                    >
+                      Подойдет тем, кто впервые начинает учет своих финансов
+                    </p>
+                    <p
+                      className="text-[14px] font-normal max-w-sm"
+                      style={placeholderStyle}
+                    >
+                      Остатки по счетам, стоимость имущества, задолженность по
+                      кредитам укажете на сегодняшнюю дату. История доходов и
+                      расходов начнется с сегодняшнего дня
+                    </p>
+                  </button>
 
-              {/* Другая дата */}
-              <button
-                type="button"
-                onClick={() => setChoiceToday(false)}
-                className="rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all border-0 border-b-[4px] border-solid min-h-0"
-                style={{
-                  backgroundColor: !choiceToday ? MODAL_BG : "transparent",
-                  borderBottomColor: !choiceToday ? ACCENT2 : "transparent",
-                  borderRadius: "9px",
-                  boxShadow: !choiceToday
-                    ? `inset 0 -26px 41px -28px ${ACCENT2}, inset 0 -2px 0 0 ${ACCENT2}`
-                    : undefined,
-                }}
-              >
-                <div
-                  className="text-[48px] font-semibold leading-tight mb-4"
-                  style={textStyle}
-                >
-                  Другая дата
+                  {/* Другая дата */}
+                  <button
+                    type="button"
+                    onClick={() => setChoiceToday(false)}
+                    className="rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all border-0 border-b-[4px] border-solid min-h-0"
+                    style={{
+                      backgroundColor: !choiceToday ? MODAL_BG : "transparent",
+                      borderBottomColor: !choiceToday ? ACCENT2 : "transparent",
+                      borderRadius: "9px",
+                      boxShadow: !choiceToday
+                        ? `inset 0 -26px 41px -28px ${ACCENT2}, inset 0 -2px 0 0 ${ACCENT2}`
+                        : undefined,
+                    }}
+                  >
+                    <div
+                      className="text-[48px] font-semibold leading-tight mb-4"
+                      style={textStyle}
+                    >
+                      Другая дата
+                    </div>
+                    <div
+                      className="mb-4 w-full max-w-[240px]"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setChoiceToday(false);
+                      }}
+                      role="presentation"
+                    >
+                      <DateField
+                        label=""
+                        value={customDate}
+                        max={todayKey}
+                        onChange={(e) => setCustomDate(e.target.value)}
+                        onFocus={() => setChoiceToday(false)}
+                      />
+                    </div>
+                    <p
+                      className="text-[18px] font-normal mb-2 max-w-sm"
+                      style={textStyle}
+                    >
+                      Подойдет тем, кто уже вел ранее учет финансов и хочет
+                      перейти на ПРОСТОФИН
+                    </p>
+                    <p
+                      className="text-[14px] font-normal max-w-sm"
+                      style={placeholderStyle}
+                    >
+                      Остатки по счетам, стоимость имущества, задолженность по
+                      кредитам нужно будет указать на выбранную дату. Доходы и
+                      расходы также нужно будет внести с этой даты (можно сделать
+                      через импорт выписок)
+                    </p>
+                  </button>
                 </div>
-                <div
-                  className="mb-4 w-full max-w-[240px]"
-                  onClick={(e) => e.stopPropagation()}
-                  role="presentation"
-                >
-                  <DateField
-                    label=""
-                    value={customDate}
-                    max={todayKey}
-                    onChange={(e) => setCustomDate(e.target.value)}
-                  />
-                </div>
-                <p
-                  className="text-[18px] font-normal mb-2 max-w-sm"
-                  style={textStyle}
-                >
-                  Подойдет тем, кто уже вел ранее учет финансов и хочет перейти на
-                  ПРОСТОФИН
-                </p>
-                <p
-                  className="text-[14px] font-normal max-w-sm"
-                  style={placeholderStyle}
-                >
-                  Остатки по счетам, стоимость имущества, задолженность по кредитам
-                  нужно будет указать на выбранную дату. Доходы и расходы также
-                  нужно будет внести с этой даты (можно сделать через импорт
-                  выписок)
-                </p>
-              </button>
-            </div>
+              </>
+            )}
 
             {localError && (
               <p className="text-sm text-red-400 mb-4 shrink-0">{localError}</p>
             )}
 
-            <div className="flex justify-end shrink-0">
+            <div className={cn("flex shrink-0", dateAlreadySet ? "w-full" : "justify-end")}>
               <Button
                 variant="authPrimary"
-                className="h-12 text-base font-bold rounded-lg border-0 px-8"
+                className={cn("h-12 text-base font-bold rounded-lg border-0 px-8", dateAlreadySet && "w-full")}
                 style={
                   {
                     "--auth-primary-bg":
@@ -385,7 +476,7 @@ export function FirstLoadOnboarding() {
                 onClick={onNext}
                 disabled={saving}
               >
-                {saving ? "Сохранение…" : "Далее"}
+                {saving ? "Сохранение…" : "Установить дату"}
               </Button>
             </div>
           </div>
@@ -394,13 +485,24 @@ export function FirstLoadOnboarding() {
     </Dialog>
     <ImportAccountsOperationsModal
       open={importServiceModalOpen}
-      onOpenChange={setImportServiceModalOpen}
+      onOpenChange={(next) => {
+        if (!next) {
+          setImportServiceModalOpen(false);
+          if (!accountingStartDate) {
+            setImportStepSkipped(true);
+            setStep(4);
+          }
+        } else {
+          setImportServiceModalOpen(next);
+        }
+      }}
       importSource={importSource ?? undefined}
       onFinish={async () => {
         setImportServiceModalOpen(false);
+        setPendingDateConfirmation(true);
         await refresh();
-        setOpen(false);
-        router.push("/assets");
+        setImportStepSkipped(true);
+        setStep(4);
       }}
     />
     </>

@@ -621,12 +621,15 @@ def set_accounting_start_date(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.accounting_start_date is not None:
-        raise HTTPException(status_code=400, detail="Accounting start date is already set.")
     if payload.accounting_start_date > date_type.today():
         raise HTTPException(
             status_code=400,
             detail="Accounting start date cannot be later than today.",
+        )
+    if user.accounting_start_date is not None and payload.accounting_start_date > user.accounting_start_date:
+        raise HTTPException(
+            status_code=400,
+            detail="Accounting start date cannot be later than the currently set date.",
         )
     user.accounting_start_date = payload.accounting_start_date
     db.add(user)

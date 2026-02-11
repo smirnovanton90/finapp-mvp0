@@ -10,7 +10,12 @@ type AccountingStartContextType = {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  setAccountingStartDate: (date: string) => Promise<void>;
+  setAccountingStartDate: (date: string, options?: { skipLoading?: boolean }) => Promise<void>;
+  /** Истина, когда импорт завершён и нужно показать модалку подтверждения даты (шаг 4) */
+  pendingDateConfirmation: boolean;
+  setPendingDateConfirmation: (v: boolean) => void;
+  dateSetupComplete: boolean;
+  setDateSetupComplete: (v: boolean) => void;
 };
 
 const AccountingStartContext = createContext<AccountingStartContextType | undefined>(
@@ -22,12 +27,18 @@ export function AccountingStartProvider({ children }: { children: React.ReactNod
   const [accountingStartDate, setAccountingStartDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDateConfirmation, setPendingDateConfirmation] = useState(false);
+  const [dateSetupComplete, setDateSetupComplete] = useState(false);
 
   const refresh = useCallback(async () => {
     if (status !== "authenticated") {
       setAccountingStartDate(null);
       setLoading(false);
       setError(null);
+      setDateSetupComplete(false);
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("finapp-date-setup-complete");
+      }
       return;
     }
 
@@ -47,8 +58,8 @@ export function AccountingStartProvider({ children }: { children: React.ReactNod
     refresh();
   }, [refresh]);
 
-  const setDate = useCallback(async (date: string) => {
-    setLoading(true);
+  const setDate = useCallback(async (date: string, options?: { skipLoading?: boolean }) => {
+    if (!options?.skipLoading) setLoading(true);
     setError(null);
     try {
       const me = await setAccountingStartDateApi({ accounting_start_date: date });
@@ -57,7 +68,7 @@ export function AccountingStartProvider({ children }: { children: React.ReactNod
       setError(err instanceof Error ? err.message : "Failed to set accounting start date.");
       throw err;
     } finally {
-      setLoading(false);
+      if (!options?.skipLoading) setLoading(false);
     }
   }, []);
 
@@ -69,6 +80,10 @@ export function AccountingStartProvider({ children }: { children: React.ReactNod
         error,
         refresh,
         setAccountingStartDate: setDate,
+        pendingDateConfirmation,
+        setPendingDateConfirmation,
+        dateSetupComplete,
+        setDateSetupComplete,
       }}
     >
       {children}

@@ -259,7 +259,8 @@ export async function executeImportDzen(
     }
 
     // 3. Создать счета (новые). Счёт «Долги» не импортируется.
-    // open_date каждого счёта = самая ранняя дата операций по этому счёту (все операции выписки, включая переводы и переводы с «Долги»).
+    // Дата появления: если на дату начала учёта по выписке сальдо ненулевое — open_date = дата начала учёта; иначе — дата самой ранней транзакции по счёту.
+    const statementAccountingStartDate = effectiveImportStartDate ?? earliestDate;
     for (const acc of parsedData.accounts ?? []) {
       if (isDzenDebtsAccount(acc)) continue;
       const key = `${acc.name}|${acc.currency}`;
@@ -279,15 +280,29 @@ export async function executeImportDzen(
         const currentBalance = Number.isFinite(balanceCents)
           ? balanceCents / 100
           : 0;
-        const { initial, earliestDate: accountEarliest } = calcInitialFromTransactions(
+        const transactions = parsedData.transactions ?? [];
+        const { initial: balanceAtStart } = calcInitialFromTransactions(
           acc.name,
           acc.currency,
-          parsedData.transactions ?? [],
+          transactions,
           currentBalance,
-          effectiveImportStartDate
+          statementAccountingStartDate ?? undefined
         );
-        const initialValueCents = Math.round(initial * 100);
-        const accountOpenDate = effectiveImportStartDate ?? accountEarliest;
+        const { initial, earliestDate: earliestTxForAccount } = calcInitialFromTransactions(
+          acc.name,
+          acc.currency,
+          transactions,
+          currentBalance,
+          null
+        );
+        const hasNonZeroBalanceAtStart = balanceAtStart !== 0;
+        const accountOpenDate =
+          statementAccountingStartDate && hasNonZeroBalanceAtStart
+            ? statementAccountingStartDate
+            : earliestTxForAccount;
+        const initialValueCents = Math.round(
+          (hasNonZeroBalanceAtStart ? balanceAtStart : initial) * 100
+        );
 
         const created = await createItem({
           kind: state.kind,

@@ -40,6 +40,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
+import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterSection } from "@/components/filter-panel";
@@ -653,6 +654,7 @@ export default function Page() {
   const [sectionId, setSectionId] = useState("");
 
   const [closeItemDialogOpen, setCloseItemDialogOpen] = useState(false);
+  const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
   const [closingItem, setClosingItem] = useState<ItemOut | null>(null);
   const [closingDate, setClosingDate] = useState(() => getTodayDateKey());
   const [closeTransferItemId, setCloseTransferItemId] = useState<string>("");
@@ -4215,6 +4217,7 @@ export default function Page() {
                           ? industries.find((ind) => ind.name === "Банки")?.id ?? null
                           : null
                       }
+                      onAddCounterparty={() => setCreateCounterpartyOpen(true)}
                     />
                     {counterpartyError && (
                       <p className="text-xs text-red-600">{counterpartyError}</p>
@@ -5008,6 +5011,15 @@ export default function Page() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <CreateCounterpartyModal
+        open={createCounterpartyOpen}
+        onOpenChange={setCreateCounterpartyOpen}
+        onSuccess={async (created) => {
+          await loadCounterparties();
+          setCounterpartyId(created.id);
+        }}
+      />
 
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 

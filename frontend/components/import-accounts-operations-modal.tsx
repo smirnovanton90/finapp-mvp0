@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import {
   ACTIVE_TEXT_DARK,
@@ -165,6 +166,7 @@ export function ImportAccountsOperationsModal({
   const [categories, setCategories] = React.useState<Awaited<ReturnType<typeof fetchCategories>>>([]);
   const [addCounterpartyModalOpen, setAddCounterpartyModalOpen] = React.useState(false);
   const [addCounterpartyForAccountKey, setAddCounterpartyForAccountKey] = React.useState<string | null>(null);
+  const [confirmCloseOpen, setConfirmCloseOpen] = React.useState(false);
   const [createCategoryOpen, setCreateCategoryOpen] = React.useState(false);
   const [columnMapping, setColumnMapping] = React.useState<ColumnMapping>({});
   const [parsedFileData, setParsedFileData] = React.useState<{
@@ -257,6 +259,7 @@ export function ImportAccountsOperationsModal({
       setAccountCardStates(new Map());
       setCategoryCardStates(new Map());
       setCounterpartyCardStates(new Map());
+      setConfirmCloseOpen(false);
       accountsStepAutoLinkApplied.current = false;
       categoriesStepAutoLinkApplied.current = false;
       counterpartiesStepAutoLinkApplied.current = false;
@@ -642,8 +645,22 @@ export function ImportAccountsOperationsModal({
     }
   };
 
-  const handleCancel = () => {
+  const hasProgress = step > 1 || selectedFile != null || parsedFileData != null;
+
+  const handleRequestClose = () => {
+    if (hasProgress) {
+      setConfirmCloseOpen(true);
+    } else {
+      onOpenChange(false);
+    }
+  };
+
+  const handleConfirmClose = () => {
     onOpenChange(false);
+  };
+
+  const handleCancel = () => {
+    handleRequestClose();
   };
 
   const stepperBox = (
@@ -734,7 +751,17 @@ export function ImportAccountsOperationsModal({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next === false) {
+          handleRequestClose();
+        } else {
+          onOpenChange(next);
+        }
+      }}
+      modal={false}
+    >
       <DialogContent
         title="Импорт счетов и операций"
         onInteractOutside={(e) => {
@@ -1869,6 +1896,16 @@ export function ImportAccountsOperationsModal({
         </div>
       </DialogContent>
     </Dialog>
+    <ConfirmModal
+      open={confirmCloseOpen}
+      onOpenChange={setConfirmCloseOpen}
+      title="Закрыть импорт?"
+      description="Прогресс импорта будет потерян."
+      onConfirm={handleConfirmClose}
+      confirmLabel="Закрыть"
+      cancelLabel="Отмена"
+      variant="primary"
+    />
     <CreateCategoryModal
       open={createCategoryOpen}
       onOpenChange={setCreateCategoryOpen}

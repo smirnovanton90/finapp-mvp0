@@ -119,6 +119,7 @@ export type CounterpartyOut = {
   first_name: string | null;
   last_name: string | null;
   middle_name: string | null;
+  synonyms: string[];
   license_status: string | null;
   logo_url: string | null;
   photo_url: string | null;
@@ -153,6 +154,7 @@ export type CounterpartyCreate = {
   first_name?: string | null;
   last_name?: string | null;
   middle_name?: string | null;
+  synonyms?: string[];
 };
 
 export type CounterpartyUpdate = CounterpartyCreate;

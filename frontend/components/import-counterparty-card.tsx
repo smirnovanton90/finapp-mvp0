@@ -9,12 +9,15 @@ import {
 import { Link, Unlink } from "lucide-react";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { TextField } from "@/components/ui/form-field";
-import { IconButton } from "@/components/ui/icon-button";
+import { ChipsInput } from "@/components/ui/chips-input";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import type { DzenParsedCounterparty } from "@/lib/dzen-csv-parser";
 import type { CounterpartyOut } from "@/lib/api";
 
 export type CounterpartyEntityType = "LEGAL" | "PERSON";
+
+const MAX_SYNONYMS = 50;
+const MAX_SYNONYM_LENGTH = 300;
 
 export type ImportCounterpartyCardState = {
   linkEnabled: boolean;
@@ -27,6 +30,8 @@ export type ImportCounterpartyCardState = {
   firstName: string;
   /** Отчество (для ФЛ) */
   middleName: string;
+  /** Синонимы (при создании нового контрагента) */
+  synonyms: string[];
   linkedCounterpartyId: number | null;
 };
 
@@ -37,6 +42,7 @@ const defaultState: ImportCounterpartyCardState = {
   lastName: "",
   firstName: "",
   middleName: "",
+  synonyms: [],
   linkedCounterpartyId: null,
 };
 
@@ -217,6 +223,18 @@ export function ImportCounterpartyCard({
                   <div className="min-w-0 flex flex-row items-center gap-2" />
                 </>
               )}
+              {/* Синонимы (при создании нового контрагента) */}
+              <div className="col-span-2 space-y-2">
+                <ChipsInput
+                  label="Синонимы"
+                  labelHint="Добавьте альтернативные названия контрагента. При импорте транзакций из банков контрагент будет подбираться не только по основному названию или ФИО, но и по указанным в этом поле синонимам."
+                  value={state.synonyms}
+                  onChange={(synonyms) => update({ synonyms })}
+                  placeholder="Введите синоним и нажмите Enter"
+                  maxItems={MAX_SYNONYMS}
+                  maxLengthPerItem={MAX_SYNONYM_LENGTH}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -231,5 +249,6 @@ export function getInitialCounterpartyCardState(
   return {
     ...defaultState,
     name: counterparty.name,
+    synonyms: [],
   };
 }

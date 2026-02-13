@@ -163,6 +163,7 @@ import {
   buildCategoryMaps,
   CategoryNode,
 } from "@/lib/categories";
+import { findExactMatchingCounterpartyId } from "@/lib/import-match-helpers";
 import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
@@ -3697,7 +3698,11 @@ function TransactionsView({
             );
           }
 
-          const commentValue = String(rawDescription ?? "").trim();
+          const description = String(rawDescription ?? "").trim();
+          const matchedCounterpartyId = findExactMatchingCounterpartyId(
+            description,
+            counterparties
+          );
 
           rowsToImport.push({
             rowNumber,
@@ -3709,7 +3714,8 @@ function TransactionsView({
               transaction_type: importTxType,
               status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
               category_id: categoryId,
-              comment: commentValue ? commentValue : null,
+              counterparty_id: matchedCounterpartyId ?? null,
+              comment: matchedCounterpartyId ? null : (description || null),
             },
           });
         }

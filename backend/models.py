@@ -16,6 +16,7 @@ from sqlalchemy import (
     Index,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db import Base
 from datetime import datetime, date
@@ -225,6 +226,9 @@ class Counterparty(Base):
     )
     industry_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("counterparty_industries.id"), nullable=True
+    )
+    synonyms: Mapped[list] = mapped_column(
+        JSONB, default=list, nullable=False, server_default="[]"
     )
 
     created_at: Mapped[DateTime] = mapped_column(

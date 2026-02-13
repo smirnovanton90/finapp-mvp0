@@ -241,7 +241,12 @@ export async function executeImportDzen(
       if (state.linkEnabled && state.linkedCounterpartyId != null) {
         counterpartyNameToId.set(cp.name, state.linkedCounterpartyId);
       } else {
-        const payload =
+        const synonymsList = (state.synonyms ?? [])
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0)
+          .slice(0, 50)
+          .filter((s) => s.length <= 300);
+        const basePayload =
           state.entityType === "LEGAL"
             ? {
                 entity_type: "LEGAL" as const,
@@ -253,6 +258,10 @@ export async function executeImportDzen(
                 first_name: state.firstName?.trim() || null,
                 middle_name: state.middleName?.trim() || null,
               };
+        const payload = {
+          ...basePayload,
+          synonyms: synonymsList.length > 0 ? synonymsList : undefined,
+        };
         const created = await createCounterparty(payload);
         counterpartyNameToId.set(cp.name, created.id);
       }

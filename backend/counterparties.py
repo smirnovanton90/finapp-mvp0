@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
 from PIL import Image
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
@@ -54,6 +54,41 @@ def build_photo_url(counterparty_id: int) -> str:
 def apply_photo_url(counterparty: Counterparty) -> None:
     counterparty.photo_url = (
         build_photo_url(counterparty.id) if counterparty.photo_data else None
+    )
+
+
+def _safe_synonyms(value: object) -> list:
+    """Привести synonyms к списку строк (на случай отсутствия колонки или неверного типа из БД)."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if isinstance(x, str) and x.strip()]
+    return []
+
+
+def counterparty_to_out(cp: Counterparty) -> CounterpartyOut:
+    """Собрать CounterpartyOut из ORM-объекта, гарантируя корректное поле synonyms."""
+    apply_logo_url(cp)
+    apply_photo_url(cp)
+    synonyms = _safe_synonyms(getattr(cp, "synonyms", None))
+    return CounterpartyOut(
+        id=cp.id,
+        entity_type=cp.entity_type,
+        industry_id=cp.industry_id,
+        name=cp.name or "",
+        full_name=cp.full_name,
+        legal_form=cp.legal_form,
+        inn=cp.inn,
+        first_name=cp.first_name,
+        last_name=cp.last_name,
+        middle_name=cp.middle_name,
+        synonyms=synonyms,
+        license_status=cp.license_status,
+        logo_url=cp.logo_url,
+        photo_url=cp.photo_url,
+        owner_user_id=cp.owner_user_id,
+        created_at=cp.created_at,
+        deleted_at=cp.deleted_at,
     )
 
 
@@ -108,6 +143,50 @@ def build_person_name(last_name: str, first_name: str, middle_name: str | None) 
     if middle_name:
         parts.append(middle_name)
     return " ".join(parts)
+
+
+def _counterparty_display_name(cp: Counterparty) -> str:
+    if cp.entity_type == "LEGAL":
+        return (cp.name or "").strip()
+    parts = [cp.last_name, cp.first_name, cp.middle_name]
+    return " ".join((p or "").strip() for p in parts).strip()
+
+
+def _normalize_synonym_key(s: str) -> str:
+    return s.strip().lower()
+
+
+def ensure_synonyms_unique(
+    db: Session,
+    user: User,
+    synonyms: list[str],
+    exclude_id: int | None = None,
+) -> None:
+    """Проверяет, что ни один нормализованный синоним не занят другим контрагентом."""
+    if not synonyms:
+        return
+    stmt = select(Counterparty).where(
+        or_(Counterparty.owner_user_id.is_(None), Counterparty.owner_user_id == user.id),
+        Counterparty.deleted_at.is_(None),
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Counterparty.id != exclude_id)
+    occupied = set()
+    for cp in db.execute(stmt).scalars().all():
+        name_key = _normalize_synonym_key(_counterparty_display_name(cp))
+        if name_key:
+            occupied.add(name_key)
+        for syn in cp.synonyms or []:
+            key = _normalize_synonym_key(syn)
+            if key:
+                occupied.add(key)
+    for syn in synonyms:
+        key = _normalize_synonym_key(syn)
+        if key and key in occupied:
+            raise HTTPException(
+                status_code=400,
+                detail="Один из синонимов уже используется другим контрагентом.",
+            )
 
 
 def ensure_unique_counterparty(
@@ -182,6 +261,7 @@ def normalize_payload(data: CounterpartyCreate | CounterpartyUpdate) -> dict:
     first_name = normalize_text(data.first_name)
     last_name = normalize_text(data.last_name)
     middle_name = normalize_text(data.middle_name)
+    synonyms = data.synonyms if data.synonyms is not None else []
 
     if entity_type == "LEGAL":
         if not name:
@@ -199,6 +279,7 @@ def normalize_payload(data: CounterpartyCreate | CounterpartyUpdate) -> dict:
             "first_name": None,
             "last_name": None,
             "middle_name": None,
+            "synonyms": synonyms,
         }
 
     if not first_name or not last_name:
@@ -213,6 +294,7 @@ def normalize_payload(data: CounterpartyCreate | CounterpartyUpdate) -> dict:
         "first_name": first_name,
         "last_name": last_name,
         "middle_name": middle_name,
+        "synonyms": synonyms,
     }
 
 
@@ -233,11 +315,16 @@ def list_counterparties(
     elif not include_deleted:
         stmt = stmt.where(Counterparty.deleted_at.is_(None))
     stmt = stmt.order_by(Counterparty.name.asc(), Counterparty.id.asc())
-    rows = list(db.execute(stmt).scalars())
-    for row in rows:
-        apply_logo_url(row)
-        apply_photo_url(row)
-    return rows
+    try:
+        rows = list(db.execute(stmt).scalars().all())
+    except (OperationalError, ProgrammingError) as e:
+        if "synonyms" in str(e).lower() or "column" in str(e).lower():
+            raise HTTPException(
+                status_code=500,
+                detail="Колонка counterparties.synonyms отсутствует. Выполните миграцию: cd backend && .venv\\Scripts\\python -m alembic upgrade head",
+            ) from e
+        raise
+    return [counterparty_to_out(row) for row in rows]
 
 
 @router.get("/page", response_model=CounterpartyPageOut)
@@ -297,20 +384,31 @@ def list_counterparties_page(
         except ValueError:
             pass
     stmt = stmt.order_by(Counterparty.id.desc()).limit(limit + 1)
-    rows = list(db.execute(stmt).scalars())
+    try:
+        rows = list(db.execute(stmt).scalars().all())
+    except (OperationalError, ProgrammingError) as e:
+        if "synonyms" in str(e).lower() or "column" in str(e).lower():
+            raise HTTPException(
+                status_code=500,
+                detail="Колонка counterparties.synonyms отсутствует. Выполните миграцию: cd backend && .venv\\Scripts\\python -m alembic upgrade head",
+            ) from e
+        raise
     has_more = len(rows) > limit
     if has_more:
         rows = rows[:limit]
-    next_cursor = None
-    if rows:
-        last = rows[-1]
-        apply_logo_url(last)
-        apply_photo_url(last)
-        next_cursor = str(last.id)
-    for row in rows:
-        apply_logo_url(row)
-        apply_photo_url(row)
-    return CounterpartyPageOut(items=rows, next_cursor=next_cursor, has_more=has_more)
+    next_cursor = str(rows[-1].id) if rows else None
+    try:
+        items = [counterparty_to_out(row) for row in rows]
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка сериализации контрагентов: {type(e).__name__}: {e}",
+        ) from e
+    return CounterpartyPageOut(
+        items=items,
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 @router.get("/legal-forms", response_model=list[LegalFormOut])
@@ -350,6 +448,7 @@ def create_counterparty(
         legal_form=normalized["legal_form"],
         full_name=normalized["full_name"],
     )
+    ensure_synonyms_unique(db=db, user=user, synonyms=normalized["synonyms"], exclude_id=None)
 
     counterparty = Counterparty(
         owner_user_id=user.id,
@@ -371,9 +470,7 @@ def create_counterparty(
             raise HTTPException(status_code=400, detail="Контрагент с таким ИНН уже существует.")
         raise HTTPException(status_code=400, detail="Контрагент с такими реквизитами уже существует.")
     db.refresh(counterparty)
-    apply_logo_url(counterparty)
-    apply_photo_url(counterparty)
-    return counterparty
+    return counterparty_to_out(counterparty)
 
 
 @router.patch("/{counterparty_id}", response_model=CounterpartyOut)
@@ -407,6 +504,9 @@ def update_counterparty(
         full_name=normalized["full_name"],
         exclude_id=counterparty.id,
     )
+    ensure_synonyms_unique(
+        db=db, user=user, synonyms=normalized["synonyms"], exclude_id=counterparty.id
+    )
 
     counterparty.entity_type = normalized["entity_type"]
     counterparty.name = normalized["name"]
@@ -417,6 +517,7 @@ def update_counterparty(
     counterparty.last_name = normalized["last_name"]
     counterparty.middle_name = normalized["middle_name"]
     counterparty.industry_id = normalized["industry_id"]
+    counterparty.synonyms = normalized["synonyms"]
 
     try:
         db.commit()
@@ -430,9 +531,7 @@ def update_counterparty(
             raise HTTPException(status_code=400, detail="Контрагент с таким ИНН уже существует.")
         raise HTTPException(status_code=400, detail="Контрагент с такими реквизитами уже существует.")
     db.refresh(counterparty)
-    apply_logo_url(counterparty)
-    apply_photo_url(counterparty)
-    return counterparty
+    return counterparty_to_out(counterparty)
 
 
 @router.delete("/{counterparty_id}")
@@ -507,11 +606,9 @@ async def upload_counterparty_logo(
 
     counterparty.logo_mime = FORMAT_TO_MIME[image.format]
     counterparty.logo_data = data
-    apply_logo_url(counterparty)
     db.commit()
     db.refresh(counterparty)
-    apply_logo_url(counterparty)
-    return counterparty
+    return counterparty_to_out(counterparty)
 
 
 @router.get("/{counterparty_id}/photo")
@@ -569,8 +666,6 @@ async def upload_counterparty_photo(
 
     counterparty.photo_mime = FORMAT_TO_MIME[image.format]
     counterparty.photo_data = data
-    apply_photo_url(counterparty)
     db.commit()
     db.refresh(counterparty)
-    apply_photo_url(counterparty)
-    return counterparty
+    return counterparty_to_out(counterparty)

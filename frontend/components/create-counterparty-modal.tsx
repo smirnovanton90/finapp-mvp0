@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Camera, Upload, Users } from "lucide-react";
 import { FormModal } from "@/components/form-modal";
 import { TextField, SelectField } from "@/components/ui/form-field";
+import { ChipsInput } from "@/components/ui/chips-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import {
   CounterpartyCreate,
@@ -22,6 +23,8 @@ import { ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const MAX_LOGO_DIM = 1024;
 const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_SYNONYMS = 50;
+const MAX_SYNONYM_LENGTH = 300;
 
 function formatSize(bytes: number) {
   return `${Math.round(bytes / (1024 * 1024))} МБ`;
@@ -60,6 +63,7 @@ export function CreateCounterpartyModal({
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [middleName, setMiddleName] = useState("");
+  const [synonyms, setSynonyms] = useState<string[]>([]);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -184,6 +188,7 @@ export function CreateCounterpartyModal({
     setFirstName("");
     setLastName("");
     setMiddleName("");
+    setSynonyms([]);
     if (logoPreview?.startsWith("blob:")) URL.revokeObjectURL(logoPreview);
     setLogoFile(null);
     setLogoPreview(null);
@@ -231,6 +236,18 @@ export function CreateCounterpartyModal({
     setFormError(null);
     if (!validateForm()) return;
 
+    const synonymsList = synonyms.map((s) => s.trim()).filter((s) => s.length > 0);
+    if (synonymsList.length > MAX_SYNONYMS) {
+      setFormError(`Не более ${MAX_SYNONYMS} синонимов.`);
+      return;
+    }
+    for (const s of synonymsList) {
+      if (s.length > MAX_SYNONYM_LENGTH) {
+        setFormError(`Каждый синоним не более ${MAX_SYNONYM_LENGTH} символов.`);
+        return;
+      }
+    }
+
     const payload: CounterpartyCreate = {
       entity_type: entityType,
       industry_id: entityType === "LEGAL" && industryId ? Number(industryId) : null,
@@ -241,6 +258,7 @@ export function CreateCounterpartyModal({
       first_name: entityType === "PERSON" ? firstName.trim() : null,
       last_name: entityType === "PERSON" ? lastName.trim() : null,
       middle_name: entityType === "PERSON" ? middleName.trim() || null : null,
+      synonyms: synonymsList.length > 0 ? synonymsList : undefined,
     };
 
     setIsSubmitting(true);
@@ -276,10 +294,15 @@ export function CreateCounterpartyModal({
         msg === "Failed to fetch" ||
         msg === "NetworkError when attempting to fetch resource" ||
         msg === "Load failed";
+      const synonymConflict =
+        typeof msg === "string" &&
+        (msg.includes("синоним") || msg.includes("уже используется"));
       setFormError(
         isNetworkError
           ? "Не удалось связаться с сервером."
-          : msg || "Не удалось сохранить контрагента."
+          : synonymConflict
+            ? "Один из синонимов уже используется другим контрагентом."
+            : msg || "Не удалось сохранить контрагента."
       );
     } finally {
       setIsSubmitting(false);
@@ -445,6 +468,17 @@ export function CreateCounterpartyModal({
             />
           </>
         )}
+        <div className="space-y-2">
+          <ChipsInput
+            label="Синонимы"
+            labelHint="Добавьте альтернативные названия контрагента. При импорте транзакций из банков контрагент будет подбираться не только по основному названию или ФИО, но и по указанным в этом поле синонимам."
+            value={synonyms}
+            onChange={setSynonyms}
+            placeholder="Введите синоним и нажмите Enter"
+            maxItems={MAX_SYNONYMS}
+            maxLengthPerItem={MAX_SYNONYM_LENGTH}
+          />
+        </div>
       </div>
     </FormModal>
   );

@@ -78,14 +78,13 @@ export function findMatchingCategoryPath(
 }
 
 /**
- * Ищет существующего контрагента, чьё название (или ФИО) полностью или частично совпадает с импортируемым.
+ * Ищет существующего контрагента, чьё название (или ФИО) либо любой из синонимов полностью или частично совпадает с импортируемым.
  */
 export function findMatchingCounterpartyId(
   importedName: string,
   existingCounterparties: CounterpartyOut[]
 ): number | null {
   if (!importedName?.trim() || !existingCounterparties?.length) return null;
-  const nameNorm = norm(importedName);
   for (const cp of existingCounterparties) {
     if (cp.deleted_at) continue;
     if (cp.entity_type === "LEGAL") {
@@ -99,6 +98,51 @@ export function findMatchingCounterpartyId(
       if (fullName && namesMatch(importedName, fullName)) return cp.id;
       if (lastName && namesMatch(importedName, lastName)) return cp.id;
       if (firstName && namesMatch(importedName, firstName)) return cp.id;
+    }
+    const synonyms = cp.synonyms ?? [];
+    for (const syn of synonyms) {
+      const s = (syn ?? "").trim();
+      if (s && namesMatch(importedName, s)) return cp.id;
+    }
+  }
+  return null;
+}
+
+/**
+ * Нормализация для точного совпадения (trim + toLowerCase).
+ */
+export function normalizeExactKey(s: string): string {
+  return (s ?? "").trim().toLowerCase();
+}
+
+/**
+ * Ищет контрагента по точному совпадению (без учёта регистра после trim) импортируемой строки
+ * с отображаемым названием контрагента или любым из его синонимов.
+ */
+export function findExactMatchingCounterpartyId(
+  importedName: string,
+  existingCounterparties: CounterpartyOut[]
+): number | null {
+  const key = normalizeExactKey(importedName);
+  if (!key) return null;
+  for (const cp of existingCounterparties) {
+    if (cp.deleted_at) continue;
+    let displayName: string;
+    if (cp.entity_type === "LEGAL") {
+      displayName = (cp.name ?? "").trim();
+    } else {
+      const parts = [
+        cp.last_name,
+        cp.first_name,
+        cp.middle_name,
+      ].filter(Boolean) as string[];
+      displayName = parts.map((p) => (p ?? "").trim()).join(" ");
+    }
+    if (displayName && normalizeExactKey(displayName) === key) return cp.id;
+    const synonyms = cp.synonyms ?? [];
+    for (const syn of synonyms) {
+      const s = (syn ?? "").trim();
+      if (s && normalizeExactKey(s) === key) return cp.id;
     }
   }
   return null;

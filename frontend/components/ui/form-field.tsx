@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { Info } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { Tooltip } from "@/components/ui/tooltip";
 import { AuthInput } from "@/components/ui/auth-input";
 import { 
   Select,
@@ -21,19 +23,31 @@ import { cn } from "@/lib/utils";
 
 interface FormFieldProps {
   label?: string;
+  /** Текст всплывающей подсказки; рядом с названием показывается иконка (i) */
+  labelHint?: string;
   required?: boolean;
   error?: string;
   className?: string;
   children: React.ReactNode;
 }
 
-export function FormField({ label, required, error, className, children }: FormFieldProps) {
+export function FormField({ label, labelHint, required, error, className, children }: FormFieldProps) {
   return (
     <div className={cn("grid min-w-0", label ? "gap-2" : "gap-0", className)}>
       {label ? (
-        <Label style={{ color: ACTIVE_TEXT_DARK }}>
-          {label}
-          {required && <span style={{ color: "#FB4C4F" }}> *</span>}
+        <Label style={{ color: ACTIVE_TEXT_DARK }} className="flex flex-wrap items-center gap-x-1.5 gap-y-0">
+          <span>{label}{required && <span style={{ color: "#FB4C4F" }}> *</span>}</span>
+          {labelHint ? (
+            <Tooltip content={labelHint} side="top" className="inline-flex items-center">
+              <span
+                className="inline-flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 cursor-help"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+                tabIndex={0}
+              >
+                <Info className="w-4 h-4" />
+              </span>
+            </Tooltip>
+          ) : null}
         </Label>
       ) : null}
       {children}

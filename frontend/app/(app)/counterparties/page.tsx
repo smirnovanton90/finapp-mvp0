@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { FormModal } from "@/components/form-modal";
 import { TextField, SelectField } from "@/components/ui/form-field";
+import { ChipsInput } from "@/components/ui/chips-input";
 import {
   CounterpartyCreate,
   CounterpartyIndustryOut,
@@ -101,6 +102,7 @@ export default function CounterpartiesPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [middleName, setMiddleName] = useState("");
+  const [synonyms, setSynonyms] = useState<string[]>([]);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -268,6 +270,9 @@ export default function CounterpartiesPage() {
     loadAll();
   }, [session, loadAll]);
 
+  const MAX_SYNONYMS = 50;
+  const MAX_SYNONYM_LENGTH = 300;
+
   const resetForm = () => {
     setEntityType("LEGAL");
     setIndustryId("");
@@ -278,6 +283,7 @@ export default function CounterpartiesPage() {
     setFirstName("");
     setLastName("");
     setMiddleName("");
+    setSynonyms([]);
     setLogoFile(null);
     setLogoError(null);
     setLogoPreview(null);
@@ -305,6 +311,7 @@ export default function CounterpartiesPage() {
     setFirstName(editing.first_name ?? "");
     setLastName(editing.last_name ?? "");
     setMiddleName(editing.middle_name ?? "");
+    setSynonyms(editing.synonyms ?? []);
     setLogoFile(null);
     setLogoError(null);
     setLogoPreview(editing.logo_url ?? null);
@@ -324,6 +331,7 @@ export default function CounterpartiesPage() {
     setEntityType("LEGAL");
     setIndustryId(String(industries[0].id));
     setName("Магазин у дома");
+    setSynonyms([]);
   }, [activeStep?.key, industries, isWizardOpen]);
 
   const handleLogoChange = async (file: File | null) => {
@@ -454,6 +462,20 @@ export default function CounterpartiesPage() {
 
     if (!validateForm()) return;
 
+    const synonymsList = synonyms
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (synonymsList.length > MAX_SYNONYMS) {
+      setFormError(`Не более ${MAX_SYNONYMS} синонимов.`);
+      return;
+    }
+    for (const s of synonymsList) {
+      if (s.length > MAX_SYNONYM_LENGTH) {
+        setFormError(`Каждый синоним не более ${MAX_SYNONYM_LENGTH} символов.`);
+        return;
+      }
+    }
+
     const industryValue =
       entityType === "LEGAL" && industryId ? Number(industryId) : null;
     const payload: CounterpartyCreate = {
@@ -466,6 +488,7 @@ export default function CounterpartiesPage() {
       first_name: entityType === "PERSON" ? firstName.trim() : null,
       last_name: entityType === "PERSON" ? lastName.trim() : null,
       middle_name: entityType === "PERSON" ? middleName.trim() || null : null,
+      synonyms: synonymsList.length > 0 ? synonymsList : undefined,
     };
 
     setIsSubmitting(true);
@@ -511,10 +534,15 @@ export default function CounterpartiesPage() {
         msg === "Failed to fetch" ||
         msg === "NetworkError when attempting to fetch resource" ||
         msg === "Load failed";
+      const synonymConflict =
+        typeof msg === "string" &&
+        (msg.includes("синоним") || msg.includes("уже используется"));
       setFormError(
         isNetworkError
           ? "Не удалось связаться с сервером. Убедитесь, что бэкенд запущен (например, uvicorn в папке backend)."
-          : msg || "Не удалось сохранить контрагента. Проверьте данные и попробуйте снова."
+          : synonymConflict
+            ? "Один из синонимов уже используется другим контрагентом."
+            : msg || "Не удалось сохранить контрагента. Проверьте данные и попробуйте снова."
       );
     } finally {
       setIsSubmitting(false);
@@ -789,6 +817,18 @@ export default function CounterpartiesPage() {
               />
             </>
           )}
+
+          <div className="space-y-2">
+            <ChipsInput
+              label="Синонимы"
+              labelHint="Добавьте альтернативные названия контрагента. При импорте транзакций из банков контрагент будет подбираться не только по основному названию или ФИО, но и по указанным в этом поле синонимам."
+              value={synonyms}
+              onChange={setSynonyms}
+              placeholder="Введите синоним и нажмите Enter"
+              maxItems={MAX_SYNONYMS}
+              maxLengthPerItem={MAX_SYNONYM_LENGTH}
+            />
+          </div>
         </div>
       </FormModal>
 

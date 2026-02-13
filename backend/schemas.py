@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, date
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
@@ -716,6 +717,10 @@ class CounterpartyIndustryOut(BaseModel):
         from_attributes = True
 
 
+MAX_SYNONYM_LENGTH = 300
+MAX_SYNONYMS_COUNT = 50
+
+
 class CounterpartyBase(BaseModel):
     entity_type: CounterpartyType
     industry_id: int | None = Field(default=None, ge=1)
@@ -726,6 +731,7 @@ class CounterpartyBase(BaseModel):
     first_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)
     middle_name: str | None = Field(default=None, max_length=100)
+    synonyms: list[str] | None = Field(default=None, max_length=MAX_SYNONYMS_COUNT)
 
     @field_validator(
         "name",
@@ -746,6 +752,34 @@ class CounterpartyBase(BaseModel):
             return cleaned or None
         return value
 
+    @field_validator("synonyms", mode="before")
+    @classmethod
+    def normalize_synonyms(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except Exception:
+                return []
+        if not isinstance(value, list):
+            return []
+        result = []
+        for item in value:
+            if isinstance(item, str):
+                s = item.strip()
+                if s:
+                    if len(s) > MAX_SYNONYM_LENGTH:
+                        raise ValueError(
+                            f"Каждый синоним не должен превышать {MAX_SYNONYM_LENGTH} символов."
+                        )
+                    result.append(s)
+        if len(result) > MAX_SYNONYMS_COUNT:
+            raise ValueError(
+                f"Не более {MAX_SYNONYMS_COUNT} синонимов на контрагента."
+            )
+        return result
+
 
 class CounterpartyCreate(CounterpartyBase):
     pass
@@ -763,6 +797,22 @@ class CounterpartyOut(CounterpartyBase):
     owner_user_id: int | None
     created_at: datetime
     deleted_at: datetime | None
+
+    @field_validator("synonyms", mode="before")
+    @classmethod
+    def ensure_synonyms_list(cls, value: object) -> list[str]:
+        """При чтении из ORM гарантировать список (на случай None или строки из БД)."""
+        if value is None:
+            return []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+        if isinstance(value, list):
+            return value
+        return []
 
     class Config:
         from_attributes = True

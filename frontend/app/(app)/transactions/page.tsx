@@ -3819,6 +3819,13 @@ function TransactionsView({
       return;
     }
 
+    // Создаём транзакции в хронологическом порядке (от старых к новым), чтобы не возникало ошибки отрицательного сальдо
+    rowsToImport.sort((a, b) =>
+      (a.payload.transaction_date ?? "").localeCompare(
+        b.payload.transaction_date ?? ""
+      )
+    );
+
     setIsImporting(true);
     try {
       for (const row of rowsToImport) {

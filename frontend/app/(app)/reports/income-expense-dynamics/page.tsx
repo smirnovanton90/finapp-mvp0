@@ -600,24 +600,25 @@ export default function IncomeExpenseDynamicsPage() {
   const [ratesLoading, setRatesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-useEffect(() => {
-  if (!session) return;
-  let active = true;
-  setLoading(true);
-  setError(null);
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
+    setLoading(true);
+    setError(null);
 
-  Promise.all([fetchItems(), fetchTransactions(), fetchCategories()])
-    .then(([itemsData, txData, categoryData]) => {
-      if (!active) return;
-      setItems(itemsData);
-      setTransactions(txData);
-      setCategoryNodes(categoryData);
-    })
-      .catch((e: any) => {
+    Promise.all([fetchItems(), fetchTransactions(), fetchCategories()])
+      .then(([itemsData, txData, categoryData]) => {
+        if (!active) return;
+        setItems(itemsData);
+        setTransactions(txData);
+        setCategoryNodes(categoryData);
+      })
+      .catch((e: unknown) => {
         if (!active) return;
         setError(
-          e?.message ??
-            "Не удалось загрузить транзакции и справочник активов."
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: string }).message)
+            : "Не удалось загрузить транзакции и справочник активов."
         );
       })
       .finally(() => {
@@ -633,6 +634,7 @@ useEffect(() => {
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
+
   const categoryIndex = useMemo(
     () => buildCategoryIndex(categoryNodes),
     [categoryNodes]
@@ -777,8 +779,7 @@ const expenseMatrix = useMemo(
             Динамика доходов и расходов по категориям
           </h1>
           <p className="text-sm text-muted-foreground">
-            Свод по фактическим транзакциям с пересчетом в рубли по курсу даты
-            операции.
+            Свод по фактическим транзакциям с пересчётом в рубли по курсу даты операции.
           </p>
         </div>
 

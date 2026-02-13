@@ -340,11 +340,10 @@ export function CategorySelector({
   const inputId = useId();
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" ref={anchorRef}>
       <label
         htmlFor={inputId}
         className="relative block cursor-text [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal"
-        ref={anchorRef}
       >
         <AuthInput
           id={inputId}

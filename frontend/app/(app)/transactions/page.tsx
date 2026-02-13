@@ -2989,17 +2989,12 @@ function TransactionsView({
     setFormError(null);
     setEditingTx(tx);
     setRealizeSource(null);
-    setFormMode("STANDARD");
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setDialogMode("edit");
     setDate(getDateKey(tx.transaction_date));
-    setDirection(tx.direction);
     setFormTransactionType(tx.transaction_type);
-    setPrimaryItemId(getDisplayPrimaryItemId(tx));
-    setCounterpartyItemId(getDisplayCounterpartyItemId(tx));
-    setCounterpartyId(tx.counterparty_id);
     setAmountStr(formatCentsForInput(tx.amount_rub));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
@@ -3017,6 +3012,36 @@ function TransactionsView({
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
     setRelatedItemId(tx.related_item_id ?? null);
+
+    const primaryItem = itemsById.get(tx.primary_item_id);
+    const counterpartyItem = tx.counterparty_item_id
+      ? itemsById.get(tx.counterparty_item_id)
+      : null;
+    const isDebtsTx =
+      tx.direction === "TRANSFER" &&
+      (primaryItem?.type_code === "counterparty_settlements" ||
+        counterpartyItem?.type_code === "counterparty_settlements");
+
+    if (isDebtsTx) {
+      setFormMode("DEBTS");
+      setDebtDirection(
+        primaryItem?.type_code === "counterparty_settlements" ? "THEY_PAID" : "I_PAID"
+      );
+      setDirection("TRANSFER");
+      const assetItemId =
+        primaryItem?.type_code === "counterparty_settlements"
+          ? getDisplayCounterpartyItemId(tx)
+          : getDisplayPrimaryItemId(tx);
+      setPrimaryItemId(assetItemId);
+      setCounterpartyItemId(null);
+      setCounterpartyId(tx.counterparty_id);
+    } else {
+      setFormMode("STANDARD");
+      setDirection(tx.direction);
+      setPrimaryItemId(getDisplayPrimaryItemId(tx));
+      setCounterpartyItemId(getDisplayCounterpartyItemId(tx));
+      setCounterpartyId(tx.counterparty_id);
+    }
   };
 
   const openCreateFromDialog = (
@@ -5128,6 +5153,117 @@ function TransactionsView({
                       return;
                     }
 
+                    if (isEditMode && editingTx && isLoanRepayment) {
+                      if (!primaryItemId) {
+                        setFormError("Выберите актив, с которого производится погашение.");
+                        return;
+                      }
+                      if (!counterpartyItemId) {
+                        setFormError("Выберите обязательство.");
+                        return;
+                      }
+                      const primaryIsMoex = isMoexItem(itemsById.get(primaryItemId) ?? null);
+                      const counterpartyIsMoex = isMoexItem(itemsById.get(counterpartyItemId) ?? null);
+                      if (primaryIsMoex || counterpartyIsMoex) {
+                        setFormError("Операции погашения не поддерживают MOEX инструменты.");
+                        return;
+                      }
+                      const primaryMeta = getEffectiveItemMeta(primaryItemId);
+                      const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
+                      if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+                        setFormError(
+                          "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
+                        );
+                        return;
+                      }
+                      if (counterpartyMeta?.minDate && date < counterpartyMeta.minDate) {
+                        setFormError(
+                          "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
+                        );
+                        return;
+                      }
+                      if (
+                        primaryMeta?.currencyCode &&
+                        counterpartyMeta?.currencyCode &&
+                        primaryMeta.currencyCode !== counterpartyMeta.currencyCode
+                      ) {
+                        setFormError(
+                          "Для погашения кредита выберите актив и обязательство в одной валюте."
+                        );
+                        return;
+                      }
+                      if (!loanTotalStr.trim()) {
+                        setFormError("Укажите общую сумму платежа.");
+                        return;
+                      }
+                      const totalCents = parseRubToCents(loanTotalStr);
+                      if (!Number.isFinite(totalCents) || totalCents < 0) {
+                        setFormError(
+                          "Введите корректную общую сумму платежа в формате 1234,56."
+                        );
+                        return;
+                      }
+                      if (!loanInterestStr.trim()) {
+                        setFormError("Укажите сумму в погашение процентов.");
+                        return;
+                      }
+                      const interestCents = parseRubToCents(loanInterestStr);
+                      if (!Number.isFinite(interestCents) || interestCents < 0) {
+                        setFormError(
+                          "Введите корректную сумму в погашение процентов в формате 1234,56."
+                        );
+                        return;
+                      }
+                      const principalCents = totalCents - interestCents;
+                      if (principalCents < 0) {
+                        setFormError(
+                          "Сумма в погашение процентов не может превышать общую сумму платежа."
+                        );
+                        return;
+                      }
+                      const expenseCategoryId = resolveCategoryId(cat1, cat2, cat3);
+                      if (!expenseCategoryId) {
+                        setFormError("Выберите категорию из списка.");
+                        return;
+                      }
+                      try {
+                        await deleteTransaction(editingTx.id);
+                        const transactionDate = mergeDateWithTime(date, editingTx.transaction_date);
+                        const basePayload = {
+                          transaction_date: transactionDate,
+                          primary_item_id: primaryItemId,
+                          counterparty_id: counterpartyId ?? null,
+                          transaction_type: formTransactionType,
+                          comment: comment || null,
+                        };
+                        await Promise.all([
+                          createTransaction({
+                            ...basePayload,
+                            counterparty_item_id: null,
+                            amount_rub: interestCents,
+                            amount_counterparty: null,
+                            direction: "EXPENSE",
+                            category_id: expenseCategoryId,
+                          }),
+                          createTransaction({
+                            ...basePayload,
+                            counterparty_item_id: counterpartyItemId,
+                            amount_rub: principalCents,
+                            amount_counterparty: null,
+                            direction: "TRANSFER",
+                            category_id: null,
+                          }),
+                        ]);
+                        closeDialog();
+                        await loadAll();
+                      } catch (err: unknown) {
+                        setFormError(
+                          (err as Error)?.message ?? "Не удалось превратить транзакцию в погашение кредита."
+                        );
+                      }
+                      return;
+                    }
+
                     if (isDebts && debtDirection === "THEY_PAID_FOR_ME") {
                       if (!counterpartyId) {
                         setFormError("Выберите, кто платит.");
@@ -5156,6 +5292,9 @@ function TransactionsView({
                           ? mergeDateWithTime(date, editingTx.transaction_date)
                           : date;
                       try {
+                        if (isEditMode && editingTx) {
+                          await deleteTransaction(editingTx.id);
+                        }
                         await createTheyPaidForMeTransaction({
                           who_paid_counterparty_id: counterpartyId,
                           where_paid_counterparty_id: wherePaidCounterpartyId,
@@ -5219,6 +5358,9 @@ function TransactionsView({
                           ? mergeDateWithTime(date, editingTx.transaction_date)
                           : date;
                       try {
+                        if (isEditMode && editingTx) {
+                          await deleteTransaction(editingTx.id);
+                        }
                         if (expenseCents > 0) {
                           await createTransaction({
                             transaction_date: transactionDate,
@@ -5292,6 +5434,9 @@ function TransactionsView({
                           isEditMode && editingTx
                             ? mergeDateWithTime(date, editingTx.transaction_date)
                             : date;
+                        if (isEditMode && editingTx) {
+                          await deleteTransaction(editingTx.id);
+                        }
                         await createDebtsTransaction({
                           debt_direction: debtDirection,
                           counterparty_id: counterpartyId,
@@ -5483,6 +5628,28 @@ function TransactionsView({
                       </FormField>
                     )}
 
+                    {isEditMode && !isBulkEdit && (
+                      <FormField label="Вид транзакции">
+                        <SegmentedSelector
+                          options={[
+                            { value: "STANDARD", label: "Доход / Расход / Перевод", colorScheme: "purple" },
+                            { value: "LOAN_REPAYMENT", label: "Погашение кредита", colorScheme: "orange" },
+                            { value: "DEBTS", label: "Долги", colorScheme: "green" },
+                          ]}
+                          value={formMode}
+                          onChange={(v) => {
+                            setFormMode(v as TransactionFormMode);
+                            if (v === "DEBTS") setDebtDirection("I_PAID");
+                            if (v === "STANDARD") setDirection(editingTx?.direction ?? "EXPENSE");
+                            if (v === "LOAN_REPAYMENT" && editingTx) {
+                              setLoanTotalStr(formatCentsForInput(editingTx.amount_rub));
+                              setLoanInterestStr("");
+                            }
+                          }}
+                        />
+                      </FormField>
+                    )}
+
                     {isDebts ? (
                       <FormField label="Направление">
                         <SegmentedSelector
@@ -5500,7 +5667,7 @@ function TransactionsView({
                           onChange={(v) => setDebtDirection(v as DebtDirection)}
                         />
                       </FormField>
-                    ) : (
+                    ) : isLoanRepayment ? null : (
                     <FormField label="Характер транзакции">
                       <SegmentedSelector
                         options={[
@@ -5924,7 +6091,7 @@ function TransactionsView({
                         </div>
                       )}
 
-                    {(!isTransfer && !isDebts) || (isDebts && debtDirection === "THEY_PAID_FOR_ME") ? (
+                    {(!isTransfer && !isDebts) || (isDebts && debtDirection === "THEY_PAID_FOR_ME") || isLoanRepayment ? (
                       <FormField label="Категория">
                         <CategorySelector
                           categoryNodes={categoryNodes}
@@ -5937,7 +6104,7 @@ function TransactionsView({
                             }
                           }}
                           placeholder="Поиск категории"
-                          direction={isDebts && debtDirection === "THEY_PAID_FOR_ME" ? "EXPENSE" : direction === "TRANSFER" ? undefined : direction}
+                          direction={isLoanRepayment || (isDebts && debtDirection === "THEY_PAID_FOR_ME") ? "EXPENSE" : direction === "TRANSFER" ? undefined : direction}
                           disabled={false}
                           onAddCategory={() => setCreateCategoryOpen(true)}
                         />

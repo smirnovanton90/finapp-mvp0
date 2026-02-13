@@ -155,9 +155,14 @@ export default function ReportsPage() {
             description="Отчет, в котором можно отследить стоимость одного или нескольких активов / обязательств"
           />
           <ReportCard
+            href="/reports/income-expense-by-period"
+            title="Динамика по периодам"
+            description="График доходов или расходов по выбранному периоду (день/неделя/месяц/год) с фильтрами в боковой панели"
+          />
+          <ReportCard
             href="/reports/income-expense-dynamics"
-            title="Динамика доходов и расходов по категориям"
-            description="Свод по фактическим транзакциям с пересчетом в рубли по курсу даты операции"
+            title="Доходы и расходы по категориям"
+            description="Таблица фактических доходов и расходов по категориям с помесячной разбивкой"
           />
           <ReportCard
             href="/reports/counterparty-settlements"

@@ -16,6 +16,8 @@ from schemas import (
     CategoryIconUpdate,
     CategoryOut,
     CategoryScopeUpdate,
+    CategorySynonymsAdd,
+    CategorySynonymsUpdate,
     CategoryVisibilityUpdate,
 )
 
@@ -60,6 +62,51 @@ def normalize_icon(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _safe_category_synonyms(value: object) -> list:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(s).strip() for s in value if isinstance(s, str) and str(s).strip()]
+    return []
+
+
+def _normalize_synonym_key(s: str) -> str:
+    return s.strip().lower()
+
+
+def ensure_category_synonyms_unique(
+    db: Session,
+    user: User,
+    synonyms: list[str],
+    exclude_category_id: int | None = None,
+) -> None:
+    """Проверяет, что ни один нормализованный синоним не занят другой категорией у пользователя."""
+    if not synonyms:
+        return
+    stmt = select(Category).where(
+        or_(Category.owner_user_id.is_(None), Category.owner_user_id == user.id),
+        Category.archived_at.is_(None),
+    )
+    if exclude_category_id is not None:
+        stmt = stmt.where(Category.id != exclude_category_id)
+    occupied = set()
+    for cat in db.execute(stmt).scalars().all():
+        name_key = _normalize_synonym_key(cat.name)
+        if name_key:
+            occupied.add(name_key)
+        for syn in _safe_category_synonyms(getattr(cat, "synonyms", None)):
+            key = _normalize_synonym_key(syn)
+            if key:
+                occupied.add(key)
+    for syn in synonyms:
+        key = _normalize_synonym_key(syn)
+        if key and key in occupied:
+            raise HTTPException(
+                status_code=400,
+                detail="Один из синонимов уже используется другой категорией.",
+            )
+
+
 def build_category_out(category: Category, state: UserCategoryState | None) -> CategoryOut:
     if category.owner_user_id is None:
         icon_name = (
@@ -70,6 +117,7 @@ def build_category_out(category: Category, state: UserCategoryState | None) -> C
     else:
         icon_name = category.icon_name
     enabled = state.enabled if state else True
+    synonyms = _safe_category_synonyms(getattr(category, "synonyms", None))
     return CategoryOut(
         id=category.id,
         name=category.name,
@@ -80,6 +128,7 @@ def build_category_out(category: Category, state: UserCategoryState | None) -> C
         enabled=enabled,
         archived_at=category.archived_at,
         children=[],
+        synonyms=synonyms,
     )
 
 
@@ -201,6 +250,9 @@ def create_category(
     if existing:
         raise HTTPException(status_code=400, detail="Category with same name already exists")
 
+    synonyms_list = getattr(payload, "synonyms", None) or []
+    ensure_category_synonyms_unique(db, user, synonyms_list, exclude_category_id=None)
+
     icon_name = normalize_icon(payload.icon_name)
     category = Category(
         name=name,
@@ -208,6 +260,7 @@ def create_category(
         parent_id=payload.parent_id,
         owner_user_id=user.id,
         icon_name=icon_name,
+        synonyms=synonyms_list,
     )
     db.add(category)
     db.commit()
@@ -341,6 +394,76 @@ def update_category_icon(
 
     db.commit()
     db.refresh(category)
+    invalidate_category_cache(user.id)
+    return build_category_out(category, state)
+
+
+@router.patch("/{category_id}/synonyms", response_model=CategoryOut)
+def update_category_synonyms(
+    category_id: int,
+    payload: CategorySynonymsUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    category = fetch_category(db, user, category_id)
+    ensure_category_synonyms_unique(
+        db, user, payload.synonyms, exclude_category_id=category_id
+    )
+    category.synonyms = payload.synonyms
+    db.commit()
+    db.refresh(category)
+    state = db.execute(
+        select(UserCategoryState).where(
+            UserCategoryState.user_id == user.id,
+            UserCategoryState.category_id == category_id,
+        )
+    ).scalar_one_or_none()
+    invalidate_category_cache(user.id)
+    return build_category_out(category, state)
+
+
+@router.post("/{category_id}/synonyms", response_model=CategoryOut)
+def add_category_synonyms(
+    category_id: int,
+    payload: CategorySynonymsAdd,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    category = fetch_category(db, user, category_id)
+    current = _safe_category_synonyms(getattr(category, "synonyms", None))
+    key_seen = {_normalize_synonym_key(s) for s in current}
+    to_add = []
+    for s in payload.add:
+        key = _normalize_synonym_key(s)
+        if key and key not in key_seen:
+            to_add.append(s.strip())
+            key_seen.add(key)
+    if not to_add:
+        state = db.execute(
+            select(UserCategoryState).where(
+                UserCategoryState.user_id == user.id,
+                UserCategoryState.category_id == category_id,
+            )
+        ).scalar_one_or_none()
+        return build_category_out(category, state)
+    ensure_category_synonyms_unique(
+        db, user, to_add, exclude_category_id=category_id
+    )
+    new_list = current + to_add
+    if len(new_list) > 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Не более 50 синонимов у категории.",
+        )
+    category.synonyms = new_list
+    db.commit()
+    db.refresh(category)
+    state = db.execute(
+        select(UserCategoryState).where(
+            UserCategoryState.user_id == user.id,
+            UserCategoryState.category_id == category_id,
+        )
+    ).scalar_one_or_none()
     invalidate_category_cache(user.id)
     return build_category_out(category, state)
 

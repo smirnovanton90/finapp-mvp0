@@ -27,6 +27,7 @@ from config import settings
 from schemas import (
     ItemCreate,
     ItemOut,
+    ItemSynonymsAdd,
     CurrencyOut,
     FxRateOut,
     BankOut,
@@ -1018,11 +1019,13 @@ def create_item(
         0 if will_create_opening_tx else payload.initial_value_rub
     )
 
+    synonyms_list = getattr(payload, "synonyms", None) or []
     item = Item(
         user_id=user.id,
         kind=item_kind,
         type_code=payload.type_code,
         name=payload.name,
+        synonyms=synonyms_list,
         currency_code=currency_code,
         counterparty_id=counterparty_id,
         open_date=payload.open_date,
@@ -1393,6 +1396,7 @@ def update_item(
     item.opening_counterparty_item_id = (
         opening_counterparty.id if opening_counterparty else None
     )
+    item.synonyms = getattr(payload, "synonyms", None) or []
 
     settings = upsert_plan_settings(db, item, payload.plan_settings)
     is_plan_enabled = settings.enabled if settings else False
@@ -1440,6 +1444,44 @@ def update_item(
     db.refresh(item)
     _apply_item_photo_url(item)
     return item
+
+
+@app.post("/items/{item_id}/synonyms", response_model=ItemOut)
+def add_item_synonyms(
+    item_id: int,
+    payload: ItemSynonymsAdd,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if item.archived_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot edit archived item")
+    current = getattr(item, "synonyms", None) or []
+    if not isinstance(current, list):
+        current = []
+    key_seen = {str(s).strip().lower() for s in current if isinstance(s, str) and str(s).strip()}
+    to_add = []
+    for s in payload.add:
+        t = s.strip()
+        key = t.lower()
+        if key and key not in key_seen:
+            to_add.append(t)
+            key_seen.add(key)
+    if to_add:
+        new_list = current + to_add
+        if len(new_list) > 50:
+            raise HTTPException(
+                status_code=400,
+                detail="Не более 50 синонимов у актива/обязательства.",
+            )
+        item.synonyms = new_list
+        db.commit()
+        db.refresh(item)
+    _apply_item_photo_url(item)
+    return item
+
 
 @app.patch("/items/{item_id}/archive", response_model=ItemOut)
 def archive_item(

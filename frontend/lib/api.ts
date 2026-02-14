@@ -28,6 +28,7 @@ export type ItemOut = {
   kind: ItemKind;
   type_code: string;
   name: string;
+  synonyms: string[];
   currency_code: string;
   counterparty_id: number | null;
   open_date: string;
@@ -89,6 +90,7 @@ export type ItemCreate = {
   commission_payment_item_id?: number | null;
   initial_value_rub: number;
   plan_settings?: ItemPlanSettings | null;
+  synonyms?: string[];
 };
 
 export type BankOut = {
@@ -238,6 +240,7 @@ export type CategoryNode = {
   enabled: boolean;
   archived_at: string | null;
   children?: CategoryNode[];
+  synonyms?: string[];
 };
 
 export type CategoryCreate = {
@@ -245,6 +248,7 @@ export type CategoryCreate = {
   parent_id?: number | null;
   scope: CategoryScope;
   icon_name?: string | null;
+  synonyms?: string[];
 };
 
 export type TransactionDirection = "INCOME" | "EXPENSE" | "TRANSFER";
@@ -864,6 +868,30 @@ export async function updateCategoryIcon(
   return res.json();
 }
 
+export async function updateCategorySynonyms(
+  id: number,
+  synonyms: string[]
+): Promise<CategoryNode> {
+  const res = await authFetch(`${API_BASE}/categories/${id}/synonyms`, {
+    method: "PATCH",
+    body: JSON.stringify({ synonyms }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function addCategorySynonyms(
+  id: number,
+  add: string[]
+): Promise<CategoryNode> {
+  const res = await authFetch(`${API_BASE}/categories/${id}/synonyms`, {
+    method: "POST",
+    body: JSON.stringify({ add }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function deleteCategory(
   id: number,
   options?: { cascade?: boolean }
@@ -903,6 +931,18 @@ export async function updateItem(
   const res = await authFetch(`${API_BASE}/items/${id}${qs ? `?${qs}` : ""}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function addItemSynonyms(
+  itemId: number,
+  add: string[]
+): Promise<ItemOut> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}/synonyms`, {
+    method: "POST",
+    body: JSON.stringify({ add }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

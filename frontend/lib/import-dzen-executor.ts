@@ -8,6 +8,8 @@ import { parseRubToCents } from "@/lib/format-rub";
 import { buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
 import { getTypeOptionsForKind } from "@/lib/item-type-options";
 import {
+  addCategorySynonyms,
+  addItemSynonyms,
   createItem,
   createCategory,
   createCounterparty,
@@ -472,6 +474,42 @@ export async function executeImportDzen(
         category_id: categoryId,
         comment: tx.comment || null,
       });
+    }
+
+    // При ручной привязке добавить название из выписки в синонимы актива/обязательства и категории
+    for (const acc of parsedData.accounts ?? []) {
+      if (isDzenDebtsAccount(acc)) continue;
+      const key = `${acc.name}|${acc.currency}`;
+      const state = accountCardStates.get(key);
+      if (state?.linkEnabled && state.linkedItemId != null) {
+        const nameToAdd = (state.name || acc.name).trim();
+        if (nameToAdd) {
+          try {
+            await addItemSynonyms(state.linkedItemId, [nameToAdd]);
+          } catch {
+            // Игнорируем ошибку добавления синонима (например, лимит или дубликат)
+          }
+        }
+      }
+    }
+    for (const cat of parsedData.categories ?? []) {
+      const state = categoryCardStates.get(cat.name);
+      if (state?.linkEnabled && state.linkedPath != null) {
+        const key = makeCategoryPathKey(
+          state.linkedPath.l1,
+          state.linkedPath.l2,
+          state.linkedPath.l3
+        );
+        const categoryId = categoryLookup.pathToId.get(key);
+        const nameToAdd = cat.name.trim();
+        if (categoryId != null && nameToAdd) {
+          try {
+            await addCategorySynonyms(categoryId, [nameToAdd]);
+          } catch {
+            // Игнорируем ошибку (например, синоним уже используется другой категорией)
+          }
+        }
+      }
     }
 
     return { success: true };

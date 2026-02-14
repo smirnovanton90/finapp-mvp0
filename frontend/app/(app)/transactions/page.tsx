@@ -163,7 +163,10 @@ import {
   buildCategoryMaps,
   CategoryNode,
 } from "@/lib/categories";
-import { findExactMatchingCounterpartyId } from "@/lib/import-match-helpers";
+import {
+  findCategoryIdByExactNameOrSynonym,
+  findExactMatchingCounterpartyId,
+} from "@/lib/import-match-helpers";
 import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
@@ -172,6 +175,7 @@ import {
 import { categoryIconPath, transferIconPath } from "@/lib/image-paths";
 import { resolveApiImageUrl } from "@/lib/api-image-url";
 import { getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
+import { buildCategoryPaths } from "@/components/category-selector";
 import { useOnboarding } from "@/components/onboarding-context";
 import { useImagePreloader } from "@/hooks/use-image-preloader";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
@@ -2169,33 +2173,14 @@ function TransactionsView({
   }, [categoryNodes, direction]);
 
 
-  const filterCategoryPaths = useMemo(() => {
-    const paths: CategoryPathOption[] = [];
-    const addPath = (l1: string, l2: string, l3: string) => {
-      const label = formatCategoryPath(l1, l2, l3);
-      if (!label) return;
-      paths.push({
-        l1,
-        l2,
-        l3,
-        label,
-        searchKey: normalizeCategory(label),
-      });
-    };
-
-    categoryMaps.l1.forEach((l1) => {
-      addPath(l1, CATEGORY_PLACEHOLDER, CATEGORY_PLACEHOLDER);
-      const l2List = categoryMaps.l2[l1] ?? [];
-      l2List.forEach((l2) => {
-        addPath(l1, l2, CATEGORY_PLACEHOLDER);
-        const l3List = categoryMaps.l3[l2] ?? [];
-        l3List.forEach((l3) => {
-          addPath(l1, l2, l3);
-        });
-      });
-    });
-    return paths;
-  }, [categoryMaps]);
+  const filterCategoryPaths = useMemo(
+    () =>
+      buildCategoryPaths(
+        categoryNodes,
+        direction === "TRANSFER" ? undefined : direction
+      ),
+    [categoryNodes, direction]
+  );
 
 
   const categoryFilterPathByKey = useMemo(() => {
@@ -3706,17 +3691,21 @@ function TransactionsView({
           if (!categoryValue) {
             throw new Error(`Строка ${rowNumber}: категория не заполнена.`);
           }
-          const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
-          if (!categoryL1) {
-            throw new Error(
-              `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
+          let categoryId =
+            findCategoryIdByExactNameOrSynonym(categoryValue, categoryNodes) ?? null;
+          if (categoryId == null) {
+            const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
+            if (!categoryL1) {
+              throw new Error(
+                `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
+              );
+            }
+            categoryId = resolveCategoryId(
+              categoryL1,
+              CATEGORY_PLACEHOLDER,
+              CATEGORY_PLACEHOLDER
             );
           }
-          const categoryId = resolveCategoryId(
-            categoryL1,
-            CATEGORY_PLACEHOLDER,
-            CATEGORY_PLACEHOLDER
-          );
           if (!categoryId) {
             throw new Error(
               `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
@@ -3803,17 +3792,21 @@ function TransactionsView({
           if (!categoryValue) {
             throw new Error(`Строка ${rowNumber}: не удалось распознать категорию.`);
           }
-          const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
-          if (!categoryL1) {
-            throw new Error(
-              `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
+          let categoryId =
+            findCategoryIdByExactNameOrSynonym(categoryValue, categoryNodes) ?? null;
+          if (categoryId == null) {
+            const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
+            if (!categoryL1) {
+              throw new Error(
+                `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
+              );
+            }
+            categoryId = resolveCategoryId(
+              categoryL1,
+              CATEGORY_PLACEHOLDER,
+              CATEGORY_PLACEHOLDER
             );
           }
-          const categoryId = resolveCategoryId(
-            categoryL1,
-            CATEGORY_PLACEHOLDER,
-            CATEGORY_PLACEHOLDER
-          );
           if (!categoryId) {
             throw new Error(
               `Строка ${rowNumber}: не удалось сопоставить категорию операции.`

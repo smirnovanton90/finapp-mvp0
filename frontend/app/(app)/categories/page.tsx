@@ -36,6 +36,7 @@ import {
   fetchCategories,
   updateCategoryIcon,
   updateCategoryScope,
+  updateCategorySynonyms,
   updateCategoryVisibility,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
@@ -53,6 +54,7 @@ import {
   RED,
 } from "@/lib/colors";
 import { EmptyState } from "@/components/empty-state";
+import { ChipsInput } from "@/components/ui/chips-input";
 
 const ALLOWED_ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_ICON_BYTES = 2 * 1024 * 1024;
@@ -71,6 +73,7 @@ type EditTarget = {
   ownerUserId: number | null | undefined;
   scope: CategoryScope;
   iconName: string | null | undefined;
+  synonyms: string[];
 };
 
 const MAX_DEPTH = 3;
@@ -412,6 +415,7 @@ export default function CategoriesPage() {
   const [addParentDepth, setAddParentDepth] = useState(0);
   const [newName, setNewName] = useState("");
   const [newScope, setNewScope] = useState<CategoryScope>("BOTH");
+  const [newSynonyms, setNewSynonyms] = useState<string[]>([]);
   const [newIcon, setNewIcon] = useState("");
   const [newIconImage, setNewIconImage] = useState<File | null>(null);
   const [newIconImagePreview, setNewIconImagePreview] = useState<string | null>(null);
@@ -424,6 +428,7 @@ export default function CategoriesPage() {
   const [deleteCascade, setDeleteCascade] = useState(true);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [editScope, setEditScope] = useState<CategoryScope>("BOTH");
+  const [editSynonyms, setEditSynonyms] = useState<string[]>([]);
   const [editIcon, setEditIcon] = useState("");
   const [editIconImage, setEditIconImage] = useState<File | null>(null);
   const [editIconImagePreview, setEditIconImagePreview] = useState<string | null>(null);
@@ -598,8 +603,10 @@ export default function CategoriesPage() {
       ownerUserId: node.owner_user_id,
       scope: node.scope,
       iconName: node.icon_name,
+      synonyms: node.synonyms ?? [],
     });
     setEditScope(node.scope);
+    setEditSynonyms(node.synonyms ?? []);
     setEditIcon(node.icon_name ?? "");
     setEditIconImage(null);
     setEditIconImagePreview(null);
@@ -630,11 +637,13 @@ export default function CategoriesPage() {
     setFormError(null);
     setSyncing(true);
     try {
+      const synonymsList = newSynonyms.map((s) => s.trim()).filter((s) => s.length > 0);
       const created = await createCategory({
         name: trimmed,
         parent_id: addParentId,
         scope: newScope,
         icon_name: newIcon ? newIcon : null,
+        synonyms: synonymsList.length > 0 ? synonymsList : undefined,
       });
       setIsAddOpen(false);
       await loadCategories(true);
@@ -687,6 +696,14 @@ export default function CategoriesPage() {
       if (normalizedIcon !== currentIcon) {
         updates.push(updateCategoryIcon(editTarget.id, normalizedIcon));
       }
+      const synonymsList = editSynonyms.map((s) => s.trim()).filter((s) => s.length > 0);
+      const currentSynonyms = editTarget.synonyms ?? [];
+      const synonymsChanged =
+        synonymsList.length !== currentSynonyms.length ||
+        synonymsList.some((s, i) => s !== currentSynonyms[i]);
+      if (synonymsChanged) {
+        updates.push(updateCategorySynonyms(editTarget.id, synonymsList));
+      }
 
       if (updates.length > 0) {
         await Promise.all(updates);
@@ -729,6 +746,7 @@ export default function CategoriesPage() {
             setFormError(null);
             setNewName("");
             setNewScope("BOTH");
+            setNewSynonyms([]);
             setNewIcon("");
             if (addIconPreviewUrlRef.current) {
               URL.revokeObjectURL(addIconPreviewUrlRef.current);
@@ -823,17 +841,26 @@ export default function CategoriesPage() {
               />
             </div>
           </div>
-          {addParentName && (
-            <div className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-              Родитель: <span style={{ color: ACTIVE_TEXT_DARK }}>{addParentName}</span>
-            </div>
-          )}
           <TextField
             label="Название"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Например, Продукты"
             required
+          />
+          {addParentName && (
+            <div className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+              Родитель: <span style={{ color: ACTIVE_TEXT_DARK }}>{addParentName}</span>
+            </div>
+          )}
+          <ChipsInput
+            label="Синонимы"
+            labelHint="Добавьте альтернативные названия категории. При импорте транзакций из банков категория будет подбираться не только по основному названию, но и по указанным в этом поле синонимам."
+            value={newSynonyms}
+            onChange={setNewSynonyms}
+            placeholder="Введите синоним и нажмите Enter"
+            maxItems={50}
+            maxLengthPerItem={300}
           />
         </div>
       </FormModal>
@@ -845,6 +872,7 @@ export default function CategoriesPage() {
             setEditTarget(null);
             setEditError(null);
             setEditScope("BOTH");
+            setEditSynonyms([]);
             setEditIcon("");
             if (editIconPreviewUrlRef.current) {
               URL.revokeObjectURL(editIconPreviewUrlRef.current);
@@ -946,6 +974,15 @@ export default function CategoriesPage() {
               Категория: <span style={{ color: ACTIVE_TEXT_DARK }}>{editTarget.name}</span>
             </div>
           )}
+          <ChipsInput
+            label="Синонимы"
+            labelHint="Добавьте альтернативные названия категории. При импорте транзакций из банков категория будет подбираться не только по основному названию, но и по указанным в этом поле синонимам."
+            value={editSynonyms}
+            onChange={setEditSynonyms}
+            placeholder="Введите синоним и нажмите Enter"
+            maxItems={50}
+            maxLengthPerItem={300}
+          />
         </div>
       </FormModal>
 

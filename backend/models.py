@@ -275,6 +275,9 @@ class Category(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     archived_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    synonyms: Mapped[list] = mapped_column(
+        JSONB, default=list, nullable=False, server_default="[]"
+    )
 
     parent: Mapped[Optional["Category"]] = relationship(
         "Category", remote_side="Category.id", back_populates="children"
@@ -327,6 +330,9 @@ class Item(Base):
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     type_code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    synonyms: Mapped[list] = mapped_column(
+        JSONB, default=list, nullable=False, server_default="[]"
+    )
 
     currency_code: Mapped[str] = mapped_column(
         String(3), ForeignKey("currencies.iso_char_code"), nullable=False

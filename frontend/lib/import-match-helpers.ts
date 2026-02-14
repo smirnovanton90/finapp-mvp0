@@ -57,21 +57,57 @@ export function findMatchingCategoryPath(
   // Собственное название категории — последний сегмент пути (без родителей)
   const getOwnName = (path: string[]) => path[path.length - 1]?.trim() ?? "";
 
-  // 1. Сначала полное совпадение (нормализованное равенство)
-  for (const { path } of entries) {
+  // Helper: get node by id from tree to read synonyms
+  const getNodeById = (nodes: CategoryNode[], targetId: number): CategoryNode | null => {
+    for (const n of nodes) {
+      if (n.id === targetId) return n;
+      if (n.children?.length) {
+        const found = getNodeById(n.children, targetId);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // 1. Сначала полное совпадение по имени
+  for (const { id, path } of entries) {
     const ownName = getOwnName(path);
     if (ownName && norm(ownName) === importedNorm) {
       return pathArrayToCategoryPath(path);
     }
   }
 
-  // 2. Затем частичное совпадение (одна строка содержит другую)
+  // 2. Полное совпадение по синониму
+  for (const { id, path } of entries) {
+    const node = getNodeById(existingNodes, id);
+    const syns = node?.synonyms ?? [];
+    for (const s of syns) {
+      const t = (s ?? "").trim();
+      if (t && norm(t) === importedNorm) return pathArrayToCategoryPath(path);
+    }
+  }
+
+  // 3. Частичное совпадение по имени
   for (const { path } of entries) {
     const ownName = getOwnName(path);
     const sn = norm(ownName);
     if (!sn) continue;
     if (importedNorm.includes(sn) || sn.includes(importedNorm)) {
       return pathArrayToCategoryPath(path);
+    }
+  }
+
+  // 4. Частичное совпадение по синониму
+  for (const { id, path } of entries) {
+    const node = getNodeById(existingNodes, id);
+    const syns = node?.synonyms ?? [];
+    for (const s of syns) {
+      const t = (s ?? "").trim();
+      if (!t) continue;
+      const sn = norm(t);
+      if (importedNorm.includes(sn) || sn.includes(importedNorm)) {
+        return pathArrayToCategoryPath(path);
+      }
     }
   }
   return null;
@@ -149,7 +185,36 @@ export function findExactMatchingCounterpartyId(
 }
 
 /**
- * Ищет существующий актив/обязательство (item), чьё название полностью или частично совпадает с импортируемым счётом.
+ * Ищет категорию по точному совпадению (нормализованному) импортируемой строки
+ * с именем категории или любым из её синонимов. Обход по всему дереву.
+ * Используется при импорте выписки Т-Банка.
+ */
+export function findCategoryIdByExactNameOrSynonym(
+  statementCategory: string,
+  categoryNodes: CategoryNode[]
+): number | null {
+  const key = normalizeExactKey(statementCategory);
+  if (!key) return null;
+  const walk = (nodes: CategoryNode[]): number | null => {
+    for (const node of nodes) {
+      if (node.name && normalizeExactKey(node.name) === key) return node.id;
+      const syns = node.synonyms ?? [];
+      for (const s of syns) {
+        const t = (s ?? "").trim();
+        if (t && normalizeExactKey(t) === key) return node.id;
+      }
+      if (node.children?.length) {
+        const found = walk(node.children);
+        if (found != null) return found;
+      }
+    }
+    return null;
+  };
+  return walk(categoryNodes);
+}
+
+/**
+ * Ищет существующий актив/обязательство (item), чьё название или синоним полностью или частично совпадает с импортируемым счётом.
  */
 export function findMatchingItemId(
   importedAccountName: string,
@@ -159,6 +224,11 @@ export function findMatchingItemId(
   for (const item of existingItems) {
     const itemName = (item.name ?? "").trim();
     if (itemName && namesMatch(importedAccountName, itemName)) return item.id;
+    const syns = item.synonyms ?? [];
+    for (const s of syns) {
+      const t = (s ?? "").trim();
+      if (t && namesMatch(importedAccountName, t)) return item.id;
+    }
   }
   return null;
 }

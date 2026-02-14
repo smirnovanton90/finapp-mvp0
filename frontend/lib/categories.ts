@@ -12,6 +12,7 @@ export type CategoryNode = {
   enabled?: boolean;
   archived_at?: string | null;
   children?: CategoryNode[];
+  synonyms?: string[];
 };
 
 export type CategoryMaps = {

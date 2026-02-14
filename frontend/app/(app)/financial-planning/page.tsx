@@ -45,7 +45,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormModal } from "@/components/form-modal";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
-import { CategorySelector } from "@/components/category-selector";
+import { buildCategoryPaths, CategorySelector } from "@/components/category-selector";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { FilterSection } from "@/components/filter-panel";
@@ -411,33 +411,10 @@ export default function FinancialPlanningPage() {
     return label || "-";
   };
 
-  const categoryPaths = useMemo(() => {
-    const paths: CategoryPathOption[] = [];
-    const addPath = (l1: string, l2: string, l3: string) => {
-      const label = formatCategoryPath(l1, l2, l3);
-      if (!label) return;
-      paths.push({
-        l1,
-        l2,
-        l3,
-        label,
-        searchKey: normalizeCategory(label),
-      });
-    };
-
-    categoryMaps.l1.forEach((l1) => {
-      addPath(l1, CATEGORY_PLACEHOLDER, CATEGORY_PLACEHOLDER);
-      const l2List = categoryMaps.l2[l1] ?? [];
-      l2List.forEach((l2) => {
-        addPath(l1, l2, CATEGORY_PLACEHOLDER);
-        const l3List = categoryMaps.l3[l2] ?? [];
-        l3List.forEach((l3) => {
-          addPath(l1, l2, l3);
-        });
-      });
-    });
-    return paths;
-  }, [categoryMaps]);
+  const categoryPaths = useMemo(
+    () => buildCategoryPaths(categoryNodes),
+    [categoryNodes]
+  );
 
 
   const itemTxCounts = useMemo(() => buildItemTransactionCounts(txs), [txs]);

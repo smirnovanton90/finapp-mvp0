@@ -226,6 +226,7 @@ class ItemCreate(BaseModel):
     commission_payment_item_id: int | None = None
     initial_value_rub: int
     plan_settings: ItemPlanSettingsBase | None = None
+    synonyms: list[str] | None = None
 
     @field_validator("account_last7", "contract_number", "card_last4", mode="before")
     @classmethod
@@ -330,11 +331,32 @@ class ItemCreate(BaseModel):
                 raise ValueError("initial_value_rub must be non-negative")
         return self
 
+    @field_validator("synonyms", mode="before")
+    @classmethod
+    def normalize_item_synonyms(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            result = []
+            for item in value:
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s:
+                        if len(s) > 300:
+                            raise ValueError("Каждый синоним не должен превышать 300 символов.")
+                        result.append(s)
+            if len(result) > 50:
+                raise ValueError("Не более 50 синонимов.")
+            return result
+        return []
+
+
 class ItemOut(BaseModel):
     id: int
     kind: ItemKind
     type_code: str
     name: str
+    synonyms: list[str] = []
     currency_code: str
     counterparty_id: int | None
     open_date: date
@@ -367,8 +389,41 @@ class ItemOut(BaseModel):
     photo_url: str | None = None
     photo_updated_at: datetime | None = None
 
+    @field_validator("synonyms", mode="before")
+    @classmethod
+    def ensure_item_synonyms_list(cls, value: object) -> list:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return []
+
     class Config:
         from_attributes = True
+
+
+class ItemSynonymsAdd(BaseModel):
+    add: list[str] = Field(default_factory=list)
+
+    @field_validator("add", mode="before")
+    @classmethod
+    def normalize_add(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            result = []
+            for item in value:
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s:
+                        if len(s) > 300:
+                            raise ValueError("Каждый синоним не должен превышать 300 символов.")
+                        result.append(s)
+            if len(result) > 50:
+                raise ValueError("Не более 50 синонимов для добавления.")
+            return result
+        return []
+
 
 class TransactionBase(BaseModel):
     transaction_date: datetime
@@ -602,6 +657,26 @@ class CategoryCreate(BaseModel):
     parent_id: int | None = None
     scope: CategoryScope
     icon_name: str | None = Field(default=None, max_length=50)
+    synonyms: list[str] | None = None
+
+    @field_validator("synonyms", mode="before")
+    @classmethod
+    def normalize_category_synonyms(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            result = []
+            for item in value:
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s:
+                        if len(s) > 300:
+                            raise ValueError("Каждый синоним не должен превышать 300 символов.")
+                        result.append(s)
+            if len(result) > 50:
+                raise ValueError("Не более 50 синонимов.")
+            return result
+        return []
 
 
 class CategoryScopeUpdate(BaseModel):
@@ -616,6 +691,52 @@ class CategoryIconUpdate(BaseModel):
     icon_name: str | None = Field(default=None, max_length=50)
 
 
+class CategorySynonymsUpdate(BaseModel):
+    synonyms: list[str] = Field(default_factory=list)
+
+    @field_validator("synonyms", mode="before")
+    @classmethod
+    def normalize_synonyms(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            result = []
+            for item in value:
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s:
+                        if len(s) > 300:
+                            raise ValueError("Каждый синоним не должен превышать 300 символов.")
+                        result.append(s)
+            if len(result) > 50:
+                raise ValueError("Не более 50 синонимов.")
+            return result
+        return []
+
+
+class CategorySynonymsAdd(BaseModel):
+    add: list[str] = Field(default_factory=list)
+
+    @field_validator("add", mode="before")
+    @classmethod
+    def normalize_add(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            result = []
+            for item in value:
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s:
+                        if len(s) > 300:
+                            raise ValueError("Каждый синоним не должен превышать 300 символов.")
+                        result.append(s)
+            if len(result) > 50:
+                raise ValueError("Не более 50 синонимов для добавления.")
+            return result
+        return []
+
+
 class CategoryOut(BaseModel):
     id: int
     name: str
@@ -626,6 +747,16 @@ class CategoryOut(BaseModel):
     enabled: bool
     archived_at: datetime | None
     children: list["CategoryOut"] = []
+    synonyms: list[str] = []
+
+    @field_validator("synonyms", mode="before")
+    @classmethod
+    def ensure_category_synonyms_list(cls, value: object) -> list:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return []
 
     class Config:
         from_attributes = True

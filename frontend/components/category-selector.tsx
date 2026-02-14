@@ -79,7 +79,7 @@ function formatCategoryPath(l1: string, l2: string, l3: string): string {
   return parts.join(" / ");
 }
 
-function buildCategoryPaths(
+export function buildCategoryPaths(
   categoryNodes: CategoryNode[],
   direction?: "INCOME" | "EXPENSE",
   options?: {
@@ -122,13 +122,16 @@ function buildCategoryPaths(
           normalizeCategoryValue(l3 || "")
         );
         const categoryId = categoryLookup.pathToId.get(key) ?? null;
-        
+        const synonymParts = (node.synonyms ?? [])
+          .map((s) => normalizeCategory(String(s).trim()))
+          .filter(Boolean);
+        const searchKey = [normalizeCategory(label), ...synonymParts].join(" ");
         paths.push({
           l1: l1 || "",
           l2: l2 || "",
           l3: l3 || "",
           label,
-          searchKey: normalizeCategory(label),
+          searchKey,
           categoryId,
         });
       }

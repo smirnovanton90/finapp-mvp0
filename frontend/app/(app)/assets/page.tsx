@@ -60,6 +60,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ChipsInput } from "@/components/ui/chips-input";
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSession } from "next-auth/react";
@@ -676,6 +677,7 @@ export default function Page() {
   const [typeCode, setTypeCode] = useState("");
   const [currencyCode, setCurrencyCode] = useState("RUB");
   const [name, setName] = useState("");
+  const [synonyms, setSynonyms] = useState<string[]>([]);
   const [amountStr, setAmountStr] = useState(""); // строка: "1234.56" / "1 234,56"
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
@@ -2511,6 +2513,7 @@ export default function Page() {
     setTypeCode("");
     setCurrencyCode("RUB");
     setName("");
+    setSynonyms([]);
     setAmountStr("");
     setCounterpartyId(null);
     setInstrumentQuery("");
@@ -2595,6 +2598,7 @@ export default function Page() {
     setTypeCode(item.type_code);
     setCurrencyCode(item.currency_code);
     setName(item.name);
+    setSynonyms(item.synonyms ?? []);
     setAmountStr(formatAmount(item.initial_value_rub));
     setCounterpartyId(item.counterparty_id);
     setInstrumentQuery(
@@ -3055,6 +3059,7 @@ export default function Page() {
         showOpeningCounterparty && openingCounterpartyId
           ? Number(openingCounterpartyId)
           : null;
+      const synonymsList = synonyms.map((s) => s.trim()).filter((s) => s.length > 0);
       const payload: ItemCreate = {
         kind,
         type_code: typeCode,
@@ -3065,6 +3070,11 @@ export default function Page() {
         opening_counterparty_item_id: openingCounterpartyValue,
         initial_value_rub: cents,
       };
+      if (editingItem) {
+        payload.synonyms = synonymsList;
+      } else if (synonymsList.length > 0) {
+        payload.synonyms = synonymsList;
+      }
 
       if (isMoexType && selectedInstrument) {
         payload.instrument_id = selectedInstrument.secid;
@@ -4911,6 +4921,16 @@ export default function Page() {
                 </div>
               </div>
             )}
+
+            <ChipsInput
+              label="Синонимы"
+              labelHint={`Добавьте альтернативные названия актива/обязательства. При импорте транзакций из банков актив/обязательство будет подбираться не только по основному названию, но и по указанным в этом поле синонимам. Например, зачастую в выписках встречается обозначение номеров карт с помощью последних четырех цифр - "*1234"`}
+              value={synonyms}
+              onChange={setSynonyms}
+              placeholder="Введите синоним и нажмите Enter"
+              maxItems={50}
+              maxLengthPerItem={300}
+            />
 
                 </div>
               </div>

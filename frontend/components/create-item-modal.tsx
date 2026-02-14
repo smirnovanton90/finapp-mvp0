@@ -149,7 +149,7 @@ export function CreateItemModal({
             placeholder="RUB"
           />
           <TextField
-            label="Начальный баланс (₽)"
+            label="Начальный баланс"
             value={amountStr}
             onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
             onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))}

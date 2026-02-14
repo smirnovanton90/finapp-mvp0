@@ -23,8 +23,9 @@ import {
   TransactionChainOut,
 } from "@/lib/api";
 import { Label } from "@/components/ui/label";
-import { ChipChoice } from "@/components/ui/chip-choice";
-import { DateField, FormField, SelectField } from "@/components/ui/form-field";
+import { Tooltip } from "@/components/ui/tooltip";
+import { FilterSection } from "@/components/filter-panel";
+import { DateField } from "@/components/ui/form-field";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { ItemSelector } from "@/components/item-selector";
 import { CategorySelector } from "@/components/category-selector";
@@ -36,15 +37,21 @@ import {
   CategoryNode,
   makeCategoryPathKey,
 } from "@/lib/categories";
-import { GREEN, RED } from "@/lib/colors";
+import { ACTIVE_TEXT_DARK, BACKGROUND_DT, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED } from "@/lib/colors";
+import { PINK_GRADIENT } from "@/lib/gradients";
 import {
+  formatWeekPeriodAsDateRange,
+  getForecastPresetEnd,
+  getHistoryPresetStart,
   getPeriodKey,
-  getPeriodPresetRange,
+  getPeriodMonthYear,
   listPeriodsInRange,
-  PeriodPresetKey,
+  type ForecastPresetKey,
+  type HistoryPresetKey,
   ReportPeriodGranularity,
   toDateKey,
 } from "@/lib/report-period-utils";
+import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatAmount, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
@@ -99,7 +106,7 @@ function formatMonthLabel(monthKey: string) {
 }
 
 function formatRub(valueInCents: number) {
-  return `${formatAmount(valueInCents)} RUB`;
+  return formatAmount(valueInCents);
 }
 
 function buildCategoryIndex(nodes: CategoryNode[]) {
@@ -721,11 +728,12 @@ export default function IncomeExpenseDynamicsPage() {
 
   // Chart report settings
   const [reportKind, setReportKind] = useState<"INCOME" | "EXPENSE">("EXPENSE");
-  const [periodPreset, setPeriodPreset] = useState<PeriodPresetKey>("last_month");
+  const [historyPreset, setHistoryPreset] = useState<HistoryPresetKey>("last_month");
+  const [forecastPreset, setForecastPreset] = useState<ForecastPresetKey>("next_month");
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [granularity, setGranularity] = useState<ReportPeriodGranularity>("month");
-  const [showForecast, setShowForecast] = useState(false);
+  const [showForecast, setShowForecast] = useState(true);
 
   // Filters (same as Transactions)
   const [dateFrom, setDateFrom] = useState("");
@@ -797,13 +805,18 @@ export default function IncomeExpenseDynamicsPage() {
     };
   }, [session]);
 
-  // Sync range dates when period preset changes (or accounting start becomes available)
+  // Sync range dates when history/forecast presets change
   useEffect(() => {
-    if (periodPreset === "custom") return;
-    const { start, end } = getPeriodPresetRange(periodPreset, accountingStartDate ?? null);
-    setRangeStart(start);
-    setRangeEnd(end);
-  }, [periodPreset, accountingStartDate]);
+    if (historyPreset !== "custom") {
+      const start = getHistoryPresetStart(historyPreset, accountingStartDate ?? null);
+      setRangeStart(start);
+    }
+  }, [historyPreset, accountingStartDate]);
+  useEffect(() => {
+    if (forecastPreset !== "custom") {
+      setRangeEnd(getForecastPresetEnd(forecastPreset));
+    }
+  }, [forecastPreset]);
 
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
@@ -936,15 +949,23 @@ export default function IncomeExpenseDynamicsPage() {
   const deletedOnly = showDeleted && !showActive;
 
   const rangeMinStartKey = accountingStartDate ?? "";
+  const effectiveRangeStart = useMemo(() => {
+    if (historyPreset === "custom") return rangeStart || "";
+    return getHistoryPresetStart(historyPreset, accountingStartDate ?? null);
+  }, [historyPreset, rangeStart, accountingStartDate]);
+  const effectiveRangeEnd = useMemo(() => {
+    if (forecastPreset === "custom") return rangeEnd || "";
+    return getForecastPresetEnd(forecastPreset);
+  }, [forecastPreset, rangeEnd]);
   const rangeStartKey = useMemo(() => {
-    if (!rangeStart) return rangeMinStartKey || "";
-    if (rangeMinStartKey && rangeStart < rangeMinStartKey) return rangeMinStartKey;
-    return rangeStart;
-  }, [rangeMinStartKey, rangeStart]);
+    if (!effectiveRangeStart) return rangeMinStartKey || "";
+    if (rangeMinStartKey && effectiveRangeStart < rangeMinStartKey) return rangeMinStartKey;
+    return effectiveRangeStart;
+  }, [rangeMinStartKey, effectiveRangeStart]);
   const rangeEndKey = useMemo(() => {
-    if (!rangeEnd) return "";
-    return rangeEnd < rangeStartKey ? rangeStartKey : rangeEnd;
-  }, [rangeEnd, rangeStartKey]);
+    if (!effectiveRangeEnd) return "";
+    return effectiveRangeEnd < rangeStartKey ? rangeStartKey : effectiveRangeEnd;
+  }, [effectiveRangeEnd, rangeStartKey]);
 
   const [chartFetchVersion, setChartFetchVersion] = useState(0);
   const triggerChartRefetch = useCallback(() => {
@@ -1180,17 +1201,36 @@ export default function IncomeExpenseDynamicsPage() {
 
   const chartTotalAndAverage = useMemo(() => {
     const totalRubCents = chartData.reduce((s, d) => s + d.sumRubCents, 0);
-    // Текущий (незавершённый) период — последний в списке; не включаем его в расчёт среднего
-    const completedCount = Math.max(0, chartData.length - 1);
-    const lastPeriodCents = chartData.length > 0 ? chartData[chartData.length - 1].sumRubCents : 0;
-    const sumCompletedOnly = totalRubCents - lastPeriodCents;
+    const todayPeriodKey = getPeriodKey(toDateKey(new Date()), granularity);
+    const completed = chartData.filter((d) => d.periodKey < todayPeriodKey);
+    const completedCount = completed.length;
+    const sumCompletedOnly = completed.reduce((s, d) => s + d.sumRubCents, 0);
     const averageRubCents = completedCount > 0 ? sumCompletedOnly / completedCount : 0;
-    return { totalRubCents, averageRubCents };
-  }, [chartData]);
+    const completedSums = completed.map((d) => d.sumRubCents);
+    const maxRubCents = completedSums.length ? Math.max(...completedSums) : 0;
+    const minRubCents = completedSums.length ? Math.min(...completedSums) : 0;
+    const totalForecastRubCents = chartDataForecast.reduce((s, d) => s + d.sumRubCents, 0);
+    // Для прогноза (факт+план) макс/сред/мин считаем по всем периодам, включая незавершённый и будущие
+    const allForecastSums = chartDataForecast.map((d) => d.sumRubCents);
+    const forecastCount = chartDataForecast.length;
+    const averageForecastRubCents = forecastCount > 0 ? totalForecastRubCents / forecastCount : 0;
+    const maxForecastRubCents = allForecastSums.length ? Math.max(...allForecastSums) : 0;
+    const minForecastRubCents = allForecastSums.length ? Math.min(...allForecastSums) : 0;
+    return {
+      totalRubCents,
+      averageRubCents,
+      maxRubCents,
+      minRubCents,
+      totalForecastRubCents,
+      averageForecastRubCents,
+      maxForecastRubCents,
+      minForecastRubCents,
+    };
+  }, [chartData, chartDataForecast, granularity]);
 
   const width = chartSize.width;
   const height = chartSize.height;
-  const padding = { top: 24, right: 0, bottom: 44, left: 52 };
+  const padding = { top: 24, right: 0, bottom: 44, left: 0 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
   const chartValues = chartData.map((d) => d.sumRubCents / 100);
@@ -1233,10 +1273,30 @@ export default function IncomeExpenseDynamicsPage() {
   const chartLinePathForecast = chartPointsForecast.length > 0 ? buildLinePath(chartPointsForecast) : null;
   const chartAreaPath = buildAreaPath(chartPointsActualOnly, baselineY);
   const periodMarks = buildPeriodMarks(
-    chartData.map((d) => ({ periodKey: d.periodKey, label: d.label })),
+    chartData.map((d) => ({
+      periodKey: d.periodKey,
+      label:
+        granularity === "week"
+          ? (d.periodKey.match(/W(\d{2})$/)?.[1] ?? d.label)
+          : d.label,
+    })),
     width,
     padding
   );
+  const chartDividers = useMemo(() => {
+    if (chartData.length <= 1) return [];
+    const divs: { x: number; type: "month" | "year" }[] = [];
+    const n = chartData.length;
+    for (let i = 1; i < n; i++) {
+      const prev = getPeriodMonthYear(chartData[i - 1].periodKey, granularity);
+      const curr = getPeriodMonthYear(chartData[i].periodKey, granularity);
+      const progress = i / (n - 1);
+      const x = padding.left + innerWidth * progress;
+      if (curr.year !== prev.year) divs.push({ x, type: "year" });
+      else if (curr.month !== prev.month) divs.push({ x, type: "month" });
+    }
+    return divs;
+  }, [chartData, granularity, padding.left, innerWidth]);
   const hoverPoint = hoverIndex != null ? chartPoints[hoverIndex] : null;
   const hoverChartData = hoverIndex != null ? chartData[hoverIndex] : null;
 
@@ -1300,12 +1360,7 @@ export default function IncomeExpenseDynamicsPage() {
   );
 
   function formatChartRub(valueInCents: number) {
-    return new Intl.NumberFormat("ru-RU", {
-      style: "currency",
-      currency: "RUB",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(valueInCents / 100);
+    return formatAmount(valueInCents);
   }
 
   const resolveItemEffectiveKind = useCallback(
@@ -1349,71 +1404,154 @@ export default function IncomeExpenseDynamicsPage() {
   return (
     <main className="min-h-screen px-8 py-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">
-            Динамика по периодам
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Диаграмма сумм доходов или расходов по выбранным периодам.
-          </p>
-        </div>
-
         {error && <div className="text-sm text-red-600">{error}</div>}
 
         <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-1.5">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="grid w-fit gap-2">
               <Label>Вид</Label>
               <SegmentedSelector
+                className="w-fit"
                 options={[
                   { value: "INCOME", label: "Доход", colorScheme: "green" },
                   { value: "EXPENSE", label: "Расход", colorScheme: "red" },
                 ]}
-                value={[reportKind]}
+                value={reportKind}
                 onChange={(value) => {
-                  const v = Array.isArray(value) ? value[0] : value;
+                  const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
                   if (v === "INCOME" || v === "EXPENSE") setReportKind(v);
                 }}
                 multiple={false}
               />
             </div>
-            <SelectField
-              label="Период отчёта"
-              value={granularity}
-              onValueChange={(v) => setGranularity(v as ReportPeriodGranularity)}
-              options={[
-                { value: "day", label: "День" },
-                { value: "week", label: "Неделя" },
-                { value: "month", label: "Месяц" },
-                { value: "year", label: "Год" },
-              ]}
-              placeholder="Период"
-            />
+            <div className="grid w-fit gap-2">
+              <Label style={{ color: ACTIVE_TEXT_DARK }} className="flex flex-wrap items-center gap-x-1.5 gap-y-0">
+                <span>Период</span>
+                <Tooltip
+                  content="Д — День, Н — Неделя, М — Месяц, Г — Год"
+                  side="top"
+                  className="inline-flex items-center"
+                >
+                  <span
+                    className="inline-flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 cursor-help"
+                    style={{ color: PLACEHOLDER_COLOR_DARK }}
+                    tabIndex={0}
+                  >
+                    <Info className="w-4 h-4" />
+                  </span>
+                </Tooltip>
+              </Label>
+              <SegmentedSelector
+                className="w-fit"
+                options={[
+                  { value: "day", label: "Д" },
+                  { value: "week", label: "Н" },
+                  { value: "month", label: "М" },
+                  { value: "year", label: "Г" },
+                ]}
+                value={granularity}
+                onChange={(value) => {
+                  const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+                  if (v === "day" || v === "week" || v === "month" || v === "year") setGranularity(v);
+                }}
+                multiple={false}
+              />
+            </div>
+            <div className="grid w-fit gap-2">
+              <Label style={{ color: ACTIVE_TEXT_DARK }}>Прогноз</Label>
+              <SegmentedSelector
+                className="w-fit"
+                options={[
+                  { value: "off", label: "Без прогноза" },
+                  { value: "on", label: "С прогнозом", colorScheme: "orange" },
+                ]}
+                value={showForecast ? "on" : "off"}
+                onChange={(value) => {
+                  const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+                  setShowForecast(v === "on");
+                }}
+                multiple={false}
+              />
+            </div>
           </div>
 
-          {periodPreset === "custom" && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <DateField
-                label="Период от"
-                min={rangeMinStartKey || undefined}
-                value={rangeStart}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setRangeStart(next);
-                  if (rangeEnd && next && rangeEnd < next) setRangeEnd(next);
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="grid w-fit gap-2">
+              <Label style={{ color: ACTIVE_TEXT_DARK }}>История</Label>
+              <SegmentedSelector
+                className="w-fit"
+                segmentWidth="auto"
+                options={[
+                  { value: "all", label: "Все время" },
+                  { value: "last_month", label: "Мес" },
+                  { value: "last_quarter", label: "Квартал" },
+                  { value: "last_year", label: "Год" },
+                  { value: "custom", label: "Свой диапазон" },
+                ]}
+                value={historyPreset}
+                onChange={(value) => {
+                  const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+                  if (v === "all" || v === "last_month" || v === "last_quarter" || v === "last_year" || v === "custom") setHistoryPreset(v);
                 }}
+                multiple={false}
               />
-              <DateField
-                label="Период до"
-                min={rangeStartKey || undefined}
-                value={rangeEnd}
-                onChange={(e) => setRangeEnd(e.target.value)}
+            </div>
+            <div className="grid w-fit gap-2">
+              <Label style={{ color: ACTIVE_TEXT_DARK }}>Прогноз</Label>
+              <SegmentedSelector
+                className="w-fit"
+                segmentWidth="auto"
+                options={[
+                  { value: "next_month", label: "Мес" },
+                  { value: "next_quarter", label: "Квартал" },
+                  { value: "next_year", label: "Год" },
+                  { value: "custom", label: "Свой диапазон" },
+                ]}
+                value={forecastPreset}
+                onChange={(value) => {
+                  const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+                  if (v === "next_month" || v === "next_quarter" || v === "next_year" || v === "custom") setForecastPreset(v);
+                }}
+                multiple={false}
               />
+            </div>
+          </div>
+
+          {(historyPreset === "custom" || forecastPreset === "custom") && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {historyPreset === "custom" && (
+                <DateField
+                  label="Диапазон от"
+                  min={rangeMinStartKey || undefined}
+                  value={rangeStart}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setRangeStart(next);
+                    if (rangeEnd && next && rangeEnd < next) setRangeEnd(next);
+                  }}
+                />
+              )}
+              {forecastPreset === "custom" && (
+                <DateField
+                  label="Диапазон до"
+                  min={rangeStartKey || undefined}
+                  value={rangeEnd}
+                  onChange={(e) => setRangeEnd(e.target.value)}
+                />
+              )}
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <FormField label="Активы/обязательства">
+          <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <FilterSection
+              label="Активы/обязательства"
+              onReset={() => {
+                setSelectedItemIds(new Set());
+                setItemFilterResetKey((k) => k + 1);
+                triggerChartRefetch();
+              }}
+              showReset={selectedItemIds.size > 0}
+            >
               <ItemSelector
                 items={activeItems}
                 selectedIds={Array.from(selectedItemIds)}
@@ -1432,8 +1570,15 @@ export default function IncomeExpenseDynamicsPage() {
                 resetSignal={itemFilterResetKey}
                 ariaLabel="Активы/обязательства"
               />
-            </FormField>
-            <FormField label="Контрагенты">
+            </FilterSection>
+            <FilterSection
+              label="Контрагенты"
+              onReset={() => {
+                setSelectedCounterpartyIds(new Set());
+                triggerChartRefetch();
+              }}
+              showReset={selectedCounterpartyIds.size > 0}
+            >
               <CounterpartySelector
                 counterparties={selectableCounterparties}
                 selectedIds={Array.from(selectedCounterpartyIds)}
@@ -1448,8 +1593,15 @@ export default function IncomeExpenseDynamicsPage() {
                 showChips={true}
                 apiBase={API_BASE}
               />
-            </FormField>
-            <FormField label="Категории">
+            </FilterSection>
+            <FilterSection
+              label="Категории"
+              onReset={() => {
+                setSelectedCategoryFilterKeys(new Set());
+                triggerChartRefetch();
+              }}
+              showReset={selectedCategoryFilterKeys.size > 0}
+            >
               <CategorySelector
                 categoryNodes={categoryNodes}
                 selectedPathKeys={selectedCategoryFilterKeys}
@@ -1458,55 +1610,76 @@ export default function IncomeExpenseDynamicsPage() {
                 placeholder="Поиск категории"
                 showChips={true}
               />
-            </FormField>
+            </FilterSection>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4">
-            <ChipChoice
-              options={[
-                { value: "all", label: "За все время" },
-                { value: "last_month", label: "Последний месяц" },
-                { value: "last_quarter", label: "Последний квартал" },
-                { value: "last_year", label: "Последний год" },
-                { value: "custom", label: "Произвольный период" },
-              ]}
-              value={periodPreset}
-              onChange={(v) => setPeriodPreset(v as PeriodPresetKey)}
-            />
-            <ChipChoice
-              options={[
-                { value: "off", label: "Без прогноза" },
-                { value: "on", label: "Прогноз" },
-              ]}
-              value={showForecast ? "on" : "off"}
-              onChange={(v) => setShowForecast(v === "on")}
-            />
-          </div>
-
-          {chartMissingRates && (
-            <div className="text-sm text-amber-600">
-              Для части транзакций не удалось получить курс валюты на дату операции.
-            </div>
-          )}
-
-          {rangeStartKey && rangeEndKey && (
-            <div className="flex flex-wrap items-baseline gap-6 text-sm">
-              <div>
-                <span className="text-muted-foreground">Общая сумма за период: </span>
-                <span className="font-medium">
-                  {formatChartRub(chartTotalAndAverage.totalRubCents)}
-                </span>
+          <div
+            className="relative mt-8 rounded-lg overflow-hidden border-0 outline-none px-6 pt-6 pb-6"
+            style={{ backgroundColor: MODAL_BG }}
+          >
+            {chartMissingRates && (
+              <div className="text-sm text-amber-600 mb-4">
+                Для части транзакций не удалось получить курс валюты на дату операции.
               </div>
-              <div>
-                <span className="text-muted-foreground">Средняя величина за период: </span>
-                <span className="font-medium">
-                  {formatChartRub(chartTotalAndAverage.averageRubCents)}
-                </span>
-              </div>
-            </div>
-          )}
+            )}
 
-          <div className="relative w-full py-6" style={{ opacity: chartDataLoading ? 0.6 : 1, transition: "opacity 0.2s" }}>
+            {rangeStartKey && rangeEndKey && (
+              <div className="flex flex-wrap items-start gap-6 mb-6">
+                <div className="flex flex-col gap-1">
+                  <div className="text-[48px] font-semibold leading-tight">
+                    <span
+                      style={{ background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}
+                    >
+                      {formatChartRub(chartTotalAndAverage.totalRubCents)}
+                    </span>
+                    {showForecast && (
+                      <>
+                        <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                        <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                          {formatChartRub(chartTotalAndAverage.totalForecastRubCents)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="text-[14px] font-normal">
+                    <span style={{ color: PLACEHOLDER_COLOR_DARK }}>за период </span>
+                    <span style={{ color: ACTIVE_TEXT_DARK }}>
+                      {[rangeStartKey, rangeEndKey].map((k) => { const [y, m, d] = k.split("-"); return `${d}.${m}.${y.slice(2)}`; }).join(" - ")}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {[
+                    { label: "Max", value: chartTotalAndAverage.maxRubCents, forecastValue: chartTotalAndAverage.maxForecastRubCents },
+                    { label: "Среднее", value: chartTotalAndAverage.averageRubCents, forecastValue: chartTotalAndAverage.averageForecastRubCents },
+                    { label: "Min", value: chartTotalAndAverage.minRubCents, forecastValue: chartTotalAndAverage.minForecastRubCents },
+                  ].map(({ label, value, forecastValue }) => (
+                    <div key={label} className="flex items-center gap-2">
+                      <span
+                        className="w-20 shrink-0 text-[14px] font-normal"
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                      >
+                        {label}
+                      </span>
+                      <span
+                        className="min-w-[10rem] shrink-0 rounded-[9px] px-2 py-1 text-right text-[14px] font-normal tabular-nums"
+                        style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}
+                      >
+                        {formatChartRub(value)}
+                        {showForecast && (
+                          <>
+                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartRub(forecastValue)}</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="relative w-full py-6" style={{ opacity: chartDataLoading ? 0.6 : 1, transition: "opacity 0.2s" }}>
               {!rangeStartKey || !rangeEndKey ? (
                 <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Выберите период от и до для построения диаграммы.
@@ -1524,17 +1697,29 @@ export default function IncomeExpenseDynamicsPage() {
                   {hoverPoint && hoverChartData && (
                     <div
                       ref={tooltipRef}
-                      className="pointer-events-none absolute z-20 max-w-xs rounded-2xl px-4 py-3 text-white shadow-lg"
+                      className="pointer-events-none absolute z-20 whitespace-nowrap rounded-[9px] px-4 py-3 text-[14px] font-normal text-right"
                       style={{
                         left: tooltipLeft != null ? `${tooltipLeft}px` : `${hoverPoint.x}px`,
-                        top: `${(hoverPoint.y / height) * 100}%`,
-                        transform: "translate(-50%, -120%)",
-                        backgroundColor: chartColor,
+                        top: 0,
+                        transform: "translate(-50%, 0)",
+                        backgroundColor: MODAL_BG,
                       }}
                     >
-                      <div className="text-xs opacity-90">{hoverChartData.label}</div>
-                      <div className="text-sm font-semibold">
+                      <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                        {granularity === "week"
+                          ? formatWeekPeriodAsDateRange(hoverChartData.periodKey)
+                          : hoverChartData.label}
+                      </div>
+                      <div className="whitespace-nowrap" style={{ color: ACTIVE_TEXT_DARK }}>
                         {formatChartRub(hoverChartData.sumRubCents)}
+                        {showForecast && hoverIndex != null && chartDataForecast[hoverIndex] != null && (
+                          <>
+                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                              {formatChartRub(chartDataForecast[hoverIndex].sumRubCents)}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1575,6 +1760,18 @@ export default function IncomeExpenseDynamicsPage() {
                         strokeDasharray="8 6"
                       />
                     )}
+                    {chartDividers.map((div, idx) => (
+                      <line
+                        key={`div-${idx}-${div.x}`}
+                        x1={div.x}
+                        x2={div.x}
+                        y1={padding.top}
+                        y2={padding.top + innerHeight}
+                        stroke={PLACEHOLDER_COLOR_DARK}
+                        strokeWidth={div.type === "year" ? 1.5 : 1}
+                        strokeOpacity={div.type === "year" ? 0.9 : 0.5}
+                      />
+                    ))}
                     {hoverPoint && (
                       <>
                         <line
@@ -1601,9 +1798,9 @@ export default function IncomeExpenseDynamicsPage() {
                         x={mark.x}
                         y={height - 12}
                         textAnchor={idx === 0 ? "start" : idx === periodMarks.length - 1 ? "end" : "middle"}
-                        fontSize="12"
-                        fill="#6F67B3"
-                        fontWeight={500}
+                        fontSize="14"
+                        fontWeight={400}
+                        fill={ACTIVE_TEXT_DARK}
                       >
                         {mark.label}
                       </text>
@@ -1611,6 +1808,7 @@ export default function IncomeExpenseDynamicsPage() {
                   </svg>
                 </div>
               ) : null}
+            </div>
           </div>
         </div>
       </div>

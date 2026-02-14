@@ -220,8 +220,6 @@ function formatRate(value: number) {
 
 function formatRub(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(valueInCents / 100);
@@ -1603,7 +1601,7 @@ export default function AssetsDynamicsPage() {
                             Стоимость, {singleCurrencyCode}
                           </TableHead>
                           <TableHead className="w-28 min-w-28 text-right font-medium text-muted-foreground whitespace-normal">
-                            Курс {singleCurrencyCode}/RUB
+                            Курс {singleCurrencyCode}
                           </TableHead>
                         </>
                       )}
@@ -1620,7 +1618,6 @@ export default function AssetsDynamicsPage() {
                         >
                           <div className="flex flex-col items-end">
                             <span className="truncate max-w-[160px]">{item.name}</span>
-                            <span className="text-xs text-muted-foreground">RUB</span>
                           </div>
                         </TableHead>
                       ))}

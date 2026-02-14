@@ -76,7 +76,7 @@ function formatMonthLabel(monthKey: string) {
 }
 
 function formatRub(valueInCents: number) {
-  return `${formatAmount(valueInCents)} RUB`;
+  return formatAmount(valueInCents);
 }
 
 function buildCategoryIndex(nodes: CategoryNode[]) {

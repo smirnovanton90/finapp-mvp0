@@ -19,7 +19,7 @@ import {
   normalizeItemSearch,
   sortItemsByTransactionCount,
 } from "@/lib/item-utils";
-import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACCENT_FILL_MEDIUM, ACTIVE_TEXT_DARK, DROPDOWN_BG, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
 import { useSelectorDropdownPortalContainer } from "@/components/selector-dropdown-portal-context";
 
@@ -442,16 +442,16 @@ export function ItemSelector({
                 key={item.id}
                 className={
                   useDefaultChipStyle
-                    ? "flex items-center gap-2 rounded-full px-3 py-1 text-xs"
-                    : `flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
+                    ? "flex items-center gap-2 rounded-[9px] border px-3 py-1 text-xs"
+                    : `flex items-center gap-2 rounded-[9px] border px-3 py-1 text-xs ${
                         isClosed
-                          ? "border-red-200 bg-red-50 text-red-700"
-                          : "border-slate-200 bg-slate-100 text-slate-500"
+                          ? "border-red-200 text-red-700"
+                          : "border-slate-200 text-slate-500"
                       }`
                 }
                 style={
                   useDefaultChipStyle
-                    ? { backgroundColor: ACCENT2, color: ACTIVE_TEXT_DARK }
+                    ? { borderColor: ACCENT_FILL_MEDIUM, color: PLACEHOLDER_COLOR_DARK }
                     : undefined
                 }
               >
@@ -459,7 +459,7 @@ export function ItemSelector({
                 <button
                   type="button"
                   className={useDefaultChipStyle ? "transition-colors hover:opacity-80" : isClosed ? "text-red-600 hover:text-red-700" : "text-slate-500 hover:text-slate-600"}
-                  style={useDefaultChipStyle ? { color: ACCENT0 } : undefined}
+                  style={useDefaultChipStyle ? { color: ACTIVE_TEXT_DARK } : undefined}
                   onClick={() => applySelection(item.id)}
                   aria-label={`Удалить фильтр ${item.name}`}
                 >

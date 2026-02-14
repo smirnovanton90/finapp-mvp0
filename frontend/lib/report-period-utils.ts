@@ -7,20 +7,24 @@ export type ReportPeriodGranularity = "day" | "week" | "month" | "year";
 
 export type PeriodPresetKey = "all" | "last_month" | "last_quarter" | "last_year" | "custom";
 
-/** Вычисляет диапазон дат для пресета периода (без "custom"). */
-export function getPeriodPresetRange(
-  preset: Exclude<PeriodPresetKey, "custom">,
+/** Пресет «История»: от какой даты смотрим назад (до сегодня). */
+export type HistoryPresetKey = "all" | "last_month" | "last_quarter" | "last_year" | "custom";
+
+/** Пресет «Прогноз»: до какой даты смотрим вперёд (от сегодня). */
+export type ForecastPresetKey = "next_month" | "next_quarter" | "next_year" | "custom";
+
+/** Дата начала для пресета «История» (без "custom"). */
+export function getHistoryPresetStart(
+  preset: Exclude<HistoryPresetKey, "custom">,
   accountingStartDate: string | null
-): { start: string; end: string } {
+): string {
   const today = new Date();
-  const end = toDateKey(today);
   if (preset === "all") {
-    const start = accountingStartDate || toDateKey(new Date(today.getFullYear(), today.getMonth(), 1));
-    return { start, end };
+    return accountingStartDate || toDateKey(new Date(today.getFullYear(), today.getMonth(), 1));
   }
   if (preset === "last_month") {
     const d = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    return { start: toDateKey(d), end };
+    return toDateKey(d);
   }
   if (preset === "last_quarter") {
     const q = Math.floor(today.getMonth() / 3) + 1;
@@ -28,13 +32,55 @@ export function getPeriodPresetRange(
     const prevYear = q === 1 ? today.getFullYear() - 1 : today.getFullYear();
     const startMonth = (prevQ - 1) * 3;
     const d = new Date(prevYear, startMonth, 1);
-    return { start: toDateKey(d), end };
+    return toDateKey(d);
   }
   if (preset === "last_year") {
     const d = new Date(today.getFullYear() - 1, 0, 1);
-    return { start: toDateKey(d), end };
+    return toDateKey(d);
   }
-  return { start: end, end };
+  return toDateKey(today);
+}
+
+/** Последний день следующего календарного месяца. */
+function lastDayOfNextMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth() + 2, 0);
+}
+
+/** Последний день следующего календарного квартала. */
+function lastDayOfNextQuarter(date: Date): Date {
+  const q = Math.floor(date.getMonth() / 3) + 1;
+  const nextQ = q === 4 ? 1 : q + 1;
+  const nextYear = q === 4 ? date.getFullYear() + 1 : date.getFullYear();
+  const endMonth = nextQ * 3;
+  return new Date(nextYear, endMonth, 0);
+}
+
+/** Последний день следующего календарного года. */
+function lastDayOfNextYear(date: Date): Date {
+  return new Date(date.getFullYear() + 1, 11, 31);
+}
+
+/** Дата окончания для пресета «Прогноз» (без "custom"). */
+export function getForecastPresetEnd(preset: Exclude<ForecastPresetKey, "custom">): string {
+  const today = new Date();
+  const d =
+    preset === "next_month"
+      ? lastDayOfNextMonth(today)
+      : preset === "next_quarter"
+        ? lastDayOfNextQuarter(today)
+        : lastDayOfNextYear(today);
+  return toDateKey(d);
+}
+
+/** Вычисляет диапазон дат для пресета периода (без "custom"). */
+export function getPeriodPresetRange(
+  preset: Exclude<PeriodPresetKey, "custom">,
+  accountingStartDate: string | null
+): { start: string; end: string } {
+  const today = new Date();
+  const end = toDateKey(today);
+  const start = getHistoryPresetStart(preset, accountingStartDate);
+  return { start, end };
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -78,6 +124,31 @@ function getMondayOfISOWeek(year: number, week: number): Date {
   const monday = new Date(jan4);
   monday.setDate(jan4.getDate() - (jan4.getDay() || 7) + 1 + (week - 1) * 7);
   return monday;
+}
+
+/** Year and month for the period (for week: Monday's month/year). */
+export function getPeriodMonthYear(
+  periodKey: string,
+  granularity: ReportPeriodGranularity
+): { year: number; month: number } {
+  if (granularity === "day") {
+    const [y, m] = periodKey.split("-");
+    return { year: Number.parseInt(y ?? "0", 10), month: Number.parseInt(m ?? "1", 10) };
+  }
+  if (granularity === "month") {
+    const [y, m] = periodKey.split("-");
+    return { year: Number.parseInt(y ?? "0", 10), month: Number.parseInt(m ?? "1", 10) };
+  }
+  if (granularity === "year") {
+    return { year: Number.parseInt(periodKey, 10), month: 1 };
+  }
+  const match = periodKey.match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return { year: 0, month: 1 };
+  const [, y, w] = match;
+  const year = Number.parseInt(y ?? "0", 10);
+  const week = Number.parseInt(w ?? "0", 10);
+  const monday = getMondayOfISOWeek(year, week);
+  return { year: monday.getFullYear(), month: monday.getMonth() + 1 };
 }
 
 /** Period key for the given date key and granularity. */
@@ -183,6 +254,22 @@ export function formatWeekRangeLabel(startDateKey: string, endDateKey: string): 
   const [endY, endM, endD] = endDateKey.split("-");
   const yearShort = endY?.slice(-2) ?? "";
   return `${startD}.${startM} — ${endD}.${endM}.${yearShort}`;
+}
+
+/** Формат периода недели для подсказки: "ДД.ММ.ГГ - ДД.ММ.ГГ". */
+export function formatWeekPeriodAsDateRange(periodKey: string): string {
+  const match = periodKey.match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return periodKey;
+  const [, y, w] = match;
+  const year = Number.parseInt(y ?? "0", 10);
+  const week = Number.parseInt(w ?? "0", 10);
+  const monday = getMondayOfISOWeek(year, week);
+  const sunday = addDays(monday, 6);
+  const toDDMMYY = (dateKey: string) => {
+    const [yr, mo, day] = dateKey.split("-");
+    return `${day}.${mo}.${yr?.slice(-2) ?? ""}`;
+  };
+  return `${toDDMMYY(toDateKey(monday))} - ${toDDMMYY(toDateKey(sunday))}`;
 }
 
 function formatMonthLabel(monthKey: string): string {

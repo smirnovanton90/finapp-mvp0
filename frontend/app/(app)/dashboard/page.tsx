@@ -256,7 +256,7 @@ function buildTicks(minValue: number, maxValue: number) {
 }
 
 function formatRub(valueInCents: number) {
-  return `${formatAmount(valueInCents)} RUB`;
+  return formatAmount(valueInCents);
 }
 
 function formatPercent(value: number) {

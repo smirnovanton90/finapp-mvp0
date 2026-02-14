@@ -282,11 +282,10 @@ function normalizeCounterpartySearch(value: string) {
 
 
 function formatRub(valueInCents: number) {
-  const formatted = new Intl.NumberFormat("ru-RU", {
+  return new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(valueInCents / 100);
-  return `${formatted} RUB`;
 }
 
 function formatRate(value: number) {
@@ -1666,7 +1665,7 @@ function TransactionCardRow({
                     color: subtleTextColor,
                   }}
                 >
-                  {formatRate(conversionRate)} RUB/{foreignCurrency}
+                  {formatRate(conversionRate)} / {foreignCurrency}
                 </div>
               )}
             </>

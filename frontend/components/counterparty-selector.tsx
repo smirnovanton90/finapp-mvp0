@@ -22,7 +22,7 @@ import {
   sortCounterpartiesByTransactionCount,
 } from "@/lib/counterparty-utils";
 import { CirclePlus } from "lucide-react";
-import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACCENT_FILL_MEDIUM, ACTIVE_TEXT_DARK, DROPDOWN_BG, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
 import { useSelectorDropdownPortalContainer } from "@/components/selector-dropdown-portal-context";
 
@@ -453,12 +453,12 @@ export function CounterpartySelector({
                 key={counterparty.id}
                 className={
                   isDeleted
-                    ? "flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs text-slate-500"
-                    : "flex items-center gap-2 rounded-full px-3 py-1 text-xs"
+                    ? "flex items-center gap-2 rounded-[9px] border border-slate-200 px-3 py-1 text-xs text-slate-500"
+                    : "flex items-center gap-2 rounded-[9px] border px-3 py-1 text-xs"
                 }
                 style={
                   !isDeleted
-                    ? { backgroundColor: ACCENT2, color: ACTIVE_TEXT_DARK }
+                    ? { borderColor: ACCENT_FILL_MEDIUM, color: PLACEHOLDER_COLOR_DARK }
                     : undefined
                 }
               >
@@ -466,7 +466,7 @@ export function CounterpartySelector({
                 <button
                   type="button"
                   className={isDeleted ? "text-slate-500 hover:text-slate-600" : "transition-colors hover:opacity-80"}
-                  style={!isDeleted ? { color: ACCENT0 } : undefined}
+                  style={!isDeleted ? { color: ACTIVE_TEXT_DARK } : undefined}
                   onClick={() => applySelection(counterparty.id)}
                   aria-label={`Удалить фильтр ${buildCounterpartyDisplayName(counterparty)}`}
                 >

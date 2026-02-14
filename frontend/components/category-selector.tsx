@@ -19,7 +19,7 @@ import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
-import { ACCENT0, ACCENT2, ACTIVE_TEXT_DARK, DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACCENT_FILL_MEDIUM, ACTIVE_TEXT_DARK, DROPDOWN_BG, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { useSelectorDropdownPortalContainer } from "@/components/selector-dropdown-portal-context";
@@ -562,15 +562,15 @@ export function CategorySelector({
             return (
               <div
                 key={pathKey}
-                className="flex items-center gap-2 rounded-full px-3 py-1 text-xs"
-                style={{ backgroundColor: ACCENT2, color: ACTIVE_TEXT_DARK }}
+                className="flex items-center gap-2 rounded-[9px] border px-3 py-1 text-xs"
+                style={{ borderColor: ACCENT_FILL_MEDIUM, color: PLACEHOLDER_COLOR_DARK }}
               >
                 <span>{path.label}</span>
                 {onTogglePath && (
                   <button
                     type="button"
                     className="transition-colors hover:opacity-80"
-                    style={{ color: ACCENT0 }}
+                    style={{ color: ACTIVE_TEXT_DARK }}
                     onClick={() => onTogglePath(path)}
                     aria-label={`Удалить фильтр ${path.label}`}
                   >

@@ -33,6 +33,8 @@ interface SegmentedSelectorProps {
   multiple?: boolean;
   className?: string;
   colorScheme?: SegmentedSelectorColorScheme;
+  /** 'equal' — сегменты делят ширину поровну; 'auto' — ширина по содержимому */
+  segmentWidth?: "equal" | "auto";
 }
 
 export function SegmentedSelector({
@@ -43,6 +45,7 @@ export function SegmentedSelector({
   multiple = false,
   className = "",
   colorScheme = "purple",
+  segmentWidth = "equal",
 }: SegmentedSelectorProps) {
   const useRows = optionsByRows != null && optionsByRows.length > 0;
   const effectiveOptions = useRows ? optionsByRows.flat() : (options ?? []);
@@ -116,15 +119,16 @@ export function SegmentedSelector({
     const selected = isSelected(option.value);
     const optionColorScheme = option.colorScheme || colorScheme;
     const optionColors = getColors(optionColorScheme);
+    const autoWidth = segmentWidth === "auto";
     return (
       <button
         key={option.value}
         type="button"
         aria-pressed={selected}
         onClick={() => handleOptionClick(option.value)}
-        className={`flex-1 min-w-0 px-3 py-2 text-sm font-normal transition-colors whitespace-normal break-words text-center leading-tight ${
-          selected ? "" : "bg-transparent hover:bg-[var(--segment-hover)]"
-        }`}
+        className={`px-3 py-2 text-sm font-normal transition-colors whitespace-nowrap text-center leading-tight ${
+          autoWidth ? "min-w-0 flex-shrink-0 flex-grow-0" : "min-w-0 whitespace-normal break-words"
+        } ${selected ? "" : "bg-transparent hover:bg-[var(--segment-hover)]"}`}
         style={{
           background: selected ? optionColors.fill : undefined,
           borderRadius: "6px",
@@ -141,7 +145,7 @@ export function SegmentedSelector({
   };
 
   return (
-    <div className={`relative w-full ${className}`}>
+    <div className={className?.includes("w-") ? `relative ${className}` : `relative w-full ${className}`.trim()}>
       <div
         className={`relative w-full rounded-[9px] bg-transparent p-[3px] z-10 ${
           useRows ? "flex flex-col gap-[3px]" : "inline-flex min-h-10 items-stretch"

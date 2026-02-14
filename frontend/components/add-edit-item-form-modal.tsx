@@ -1541,7 +1541,7 @@ export function AddEditItemFormModal({
                   {moexDatePricesLoading && <p className="text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка цен...</p>}
                   {marketPrice && moexInitialValueCents != null && (
                     <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
-                      Сумма по текущей цене: {formatAmount(moexInitialValueCents)} ₽
+                      Сумма по текущей цене: {formatAmount(moexInitialValueCents)}
                     </p>
                   )}
                   {commissionAllowed && (
@@ -1553,7 +1553,7 @@ export function AddEditItemFormModal({
                       {commissionEnabled && (
                         <>
                           <TextField
-                            label="Сумма комиссии (₽)"
+                            label="Сумма комиссии"
                             value={commissionAmount}
                             onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))}
                             onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))}
@@ -1594,7 +1594,7 @@ export function AddEditItemFormModal({
               />
               {!hideInitialAmountField && (
                 <TextField
-                  label="Начальный баланс (₽)"
+                  label="Начальный баланс"
                   value={amountStr}
                   onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                   onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))}
@@ -1603,8 +1603,8 @@ export function AddEditItemFormModal({
               )}
               {hideInitialAmountField && isMoexType && moexInitialValueCents != null && (
                 <div className="flex flex-col gap-1">
-                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Начальный баланс (₽)</Label>
-                  <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(moexInitialValueCents)} ₽</p>
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Начальный баланс</Label>
+                  <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(moexInitialValueCents)}</p>
                 </div>
               )}
             </div>
@@ -1662,7 +1662,7 @@ export function AddEditItemFormModal({
                 )}
                 {isCreditCard && (
                   <TextField
-                    label="Кредитный лимит (₽)"
+                    label="Кредитный лимит"
                     value={creditLimit}
                     onChange={(e) => setCreditLimit(formatRubInput(e.target.value))}
                     onBlur={(e) => setCreditLimit(normalizeRubOnBlur(e.target.value))}
@@ -1809,7 +1809,7 @@ export function AddEditItemFormModal({
                               placeholder="Выберите"
                             />
                             <TextField
-                              label="Сумма погашения (₽)"
+                              label="Сумма погашения"
                               value={paymentAmountStr}
                               onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))}
                               onBlur={(e) => setPaymentAmountStr(normalizeRubOnBlur(e.target.value))}

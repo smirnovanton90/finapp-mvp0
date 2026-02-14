@@ -17,6 +17,7 @@ import {
   BACKGROUND_DT,
   PLACEHOLDER_COLOR_DARK,
   ACTIVE_TEXT_DARK,
+  ACCENT2,
 } from "@/lib/colors";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { CardIcon } from "@/components/card-icon";
@@ -158,6 +159,23 @@ export function CounterpartyCard({
               >
                 {industryLabel}
               </span>
+            )}
+            {(counterparty.synonyms ?? []).length > 0 && (
+              <div className="w-full mt-1.5 flex flex-wrap justify-center gap-2">
+                {(counterparty.synonyms ?? []).map((chip, i) => (
+                  <span
+                    key={`${i}-${chip}`}
+                    className="inline-flex items-center rounded-md border px-2 py-1 text-sm font-normal shrink-0"
+                    style={{
+                      borderColor: ACCENT2,
+                      backgroundColor: "rgba(85, 68, 209, 0.15)",
+                      color: ACTIVE_TEXT_DARK,
+                    }}
+                  >
+                    <span className="max-w-[200px] truncate">{chip}</span>
+                  </span>
+                ))}
+              </div>
             )}
           </div>
 

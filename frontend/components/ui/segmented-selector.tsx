@@ -126,8 +126,10 @@ export function SegmentedSelector({
         type="button"
         aria-pressed={selected}
         onClick={() => handleOptionClick(option.value)}
-        className={`px-3 py-2 text-sm font-normal transition-colors whitespace-nowrap text-center leading-tight ${
-          autoWidth ? "min-w-0 flex-shrink-0 flex-grow-0" : "min-w-0 whitespace-normal break-words"
+        className={`px-3 py-2 text-sm font-normal transition-colors text-center leading-tight ${
+          autoWidth
+            ? "min-w-0 flex-shrink-0 flex-grow-0 whitespace-nowrap"
+            : "min-w-0 flex-1 flex-grow whitespace-normal break-words"
         } ${selected ? "" : "bg-transparent hover:bg-[var(--segment-hover)]"}`}
         style={{
           background: selected ? optionColors.fill : undefined,
@@ -148,7 +150,7 @@ export function SegmentedSelector({
     <div className={className?.includes("w-") ? `relative ${className}` : `relative w-full ${className}`.trim()}>
       <div
         className={`relative w-full rounded-[9px] bg-transparent p-[3px] z-10 ${
-          useRows ? "flex flex-col gap-[3px]" : "inline-flex min-h-10 items-stretch"
+          useRows ? "flex flex-col gap-[3px]" : "flex min-h-10 items-stretch"
         }`}
         style={{
           boxShadow: `0 0 0 1px ${ACCENT_FILL_MEDIUM}`,

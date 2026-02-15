@@ -174,7 +174,6 @@ import {
 import { transferIconPath } from "@/lib/image-paths";
 import { resolveApiImageUrl } from "@/lib/api-image-url";
 import { getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
-import { buildCategoryLookup } from "@/lib/categories";
 import { buildCategoryPaths } from "@/components/category-selector";
 import { useOnboarding } from "@/components/onboarding-context";
 import { useImagePreloader } from "@/hooks/use-image-preloader";

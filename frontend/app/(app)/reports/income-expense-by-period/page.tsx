@@ -51,7 +51,18 @@ import {
   ReportPeriodGranularity,
   toDateKey,
 } from "@/lib/report-period-utils";
-import { Info } from "lucide-react";
+import { ChevronDown, ChevronRight, Info } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { CATEGORY_ICON_BY_NAME, CATEGORY_ICON_FALLBACK } from "@/lib/category-icons";
 import { cn } from "@/lib/utils";
 import { formatAmount, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";

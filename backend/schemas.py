@@ -84,9 +84,25 @@ class UserMeOut(BaseModel):
     photo_url: str | None
     accounting_start_date: date | None
     google_sub: str | None
+    telegram_chat_id: int | None = None
+    telegram_notify_hour: int | None = None
+    telegram_notify_minute: int | None = None
+    telegram_notify_enabled: bool = True
 
     class Config:
         from_attributes = True
+
+
+class TelegramLinkCodeOut(BaseModel):
+    code: str
+    expires_at: datetime
+
+
+class TelegramStatusOut(BaseModel):
+    linked: bool
+    telegram_chat_id: int | None = None
+    notify_time: str  # "HH:MM"
+    notify_enabled: bool
 
 class UserProfileUpdate(BaseModel):
     first_name: str | None = Field(default=None, max_length=100)

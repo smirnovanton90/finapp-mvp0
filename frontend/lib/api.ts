@@ -555,6 +555,39 @@ export async function setAccountingStartDate(
   return res.json();
 }
 
+export type TelegramStatusOut = {
+  linked: boolean;
+  telegram_chat_id: number | null;
+  notify_time: string;
+  notify_enabled: boolean;
+};
+
+export type TelegramLinkCodeOut = {
+  code: string;
+  expires_at: string;
+};
+
+export async function createTelegramLinkCode(): Promise<TelegramLinkCodeOut> {
+  const res = await authFetch(`${API_BASE}/users/me/telegram/link-code`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function getTelegramStatus(): Promise<TelegramStatusOut> {
+  const res = await authFetch(`${API_BASE}/users/me/telegram`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function unlinkTelegram(): Promise<void> {
+  const res = await authFetch(`${API_BASE}/users/me/telegram`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
 export async function fetchItems(options?: {
   includeArchived?: boolean;
   includeClosed?: boolean;

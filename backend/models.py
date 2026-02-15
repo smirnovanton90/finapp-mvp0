@@ -41,6 +41,11 @@ class User(Base):
     photo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     accounting_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    telegram_notify_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telegram_notify_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telegram_notify_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -59,6 +64,24 @@ class User(Base):
     counterparties: Mapped[list["Counterparty"]] = relationship(back_populates="owner")
     onboarding_states: Mapped[list["OnboardingState"]] = relationship(
         back_populates="user"
+    )
+    telegram_link_codes: Mapped[list["TelegramLinkCode"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class TelegramLinkCode(Base):
+    __tablename__ = "telegram_link_codes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    user: Mapped["User"] = relationship(back_populates="telegram_link_codes")
+    code: Mapped[str] = mapped_column(String(10), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 

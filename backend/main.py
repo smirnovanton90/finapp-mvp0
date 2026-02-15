@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -54,6 +55,9 @@ from counterparties import router as counterparties_router
 from receipts import router as receipts_router
 from market import router as market_router, resolve_market_instrument
 from onboarding import router as onboarding_router
+from telegram_router import router as telegram_router
+from tg_bot.bot import run_bot as telegram_run_bot, stop_bot as telegram_stop_bot
+from tg_bot.scheduler import start_scheduler as telegram_start_scheduler, stop_scheduler as telegram_stop_scheduler
 from market_utils import is_moex_item, is_moex_type
 from item_plan_service import (
     create_item_chains,
@@ -73,7 +77,18 @@ from item_opening_service import (
     _build_item_comment,
 )
 
-app = FastAPI(title="FinApp API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    await telegram_run_bot()
+    telegram_start_scheduler()
+    yield
+    # shutdown
+    await telegram_stop_bot()
+    telegram_stop_scheduler()
+
+
+app = FastAPI(title="FinApp API", version="0.1.0", lifespan=lifespan)
 
 _FX_CACHE: dict[str, tuple[datetime, list[FxRateOut]]] = {}
 _FX_CACHE_TTL = timedelta(hours=1)
@@ -137,6 +152,7 @@ app.include_router(counterparties_router)
 app.include_router(receipts_router)
 app.include_router(market_router)
 app.include_router(onboarding_router)
+app.include_router(telegram_router)
 
 UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)

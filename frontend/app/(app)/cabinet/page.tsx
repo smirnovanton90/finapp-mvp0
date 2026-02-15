@@ -12,6 +12,9 @@ import {
   updateUserProfile,
   uploadUserPhoto,
   fetchUserPhotoAsBlob,
+  createTelegramLinkCode,
+  getTelegramStatus,
+  unlinkTelegram,
   UserProfileUpdate,
   UserMeOut,
 } from "@/lib/api";
@@ -88,9 +91,62 @@ export default function CabinetPage() {
   const [importServiceModalOpen, setImportServiceModalOpen] = useState(false);
   const [importSource, setImportSource] = useState<ImportSourceKey>(null);
 
+  const [telegramStatus, setTelegramStatus] = useState<{
+    linked: boolean;
+    notify_time: string;
+    notify_enabled: boolean;
+  } | null>(null);
+  const [telegramLinkCode, setTelegramLinkCode] = useState<string | null>(null);
+  const [telegramLoading, setTelegramLoading] = useState(false);
+
   useEffect(() => {
     loadProfile();
+    loadTelegramStatus();
   }, []);
+
+  const loadTelegramStatus = async () => {
+    try {
+      const s = await getTelegramStatus();
+      setTelegramStatus({
+        linked: s.linked,
+        notify_time: s.notify_time,
+        notify_enabled: s.notify_enabled,
+      });
+    } catch {
+      setTelegramStatus(null);
+    }
+  };
+
+  const handleCreateTelegramCode = async () => {
+    setTelegramLoading(true);
+    setTelegramLinkCode(null);
+    setError(null);
+    try {
+      const r = await createTelegramLinkCode();
+      setTelegramLinkCode(r.code);
+      setSuccess("Код создан. Отправьте его боту в течение 10 минут.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setTelegramLoading(false);
+    }
+  };
+
+  const handleUnlinkTelegram = async () => {
+    if (!confirm("Отвязать Telegram? Уведомления будут отключены.")) return;
+    setTelegramLoading(true);
+    setError(null);
+    try {
+      await unlinkTelegram();
+      setTelegramLinkCode(null);
+      setTelegramStatus({ linked: false, notify_time: "08:00", notify_enabled: true });
+      setSuccess("Telegram отвязан.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setTelegramLoading(false);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -432,6 +488,112 @@ export default function CabinetPage() {
                 }}
               />
             </div>
+          </div>
+        </CabinetCard>
+
+        {/* Telegram */}
+        <CabinetCard>
+          <div className="space-y-4">
+            <h3
+              className="text-2xl font-medium"
+              style={{ color: ACTIVE_TEXT_DARK }}
+            >
+              Telegram
+            </h3>
+            <p
+              className="text-sm"
+              style={{ color: PLACEHOLDER_COLOR_DARK }}
+            >
+              Уведомления о плановых и просроченных транзакциях. Отправка ошибок в тикет-систему.
+            </p>
+            {telegramStatus?.linked ? (
+              <div className="space-y-2">
+                <div
+                  className="text-sm rounded-md border p-3"
+                  style={{
+                    color: "#34D399",
+                    backgroundColor: "rgba(52, 211, 153, 0.08)",
+                    borderColor: "rgba(52, 211, 153, 0.3)",
+                  }}
+                >
+                  Подключено. Уведомления в {telegramStatus.notify_time}.
+                </div>
+                <Button
+                  type="button"
+                  variant="glass"
+                  size="sm"
+                  className="rounded-lg"
+                  style={{
+                    "--glass-bg": "rgba(239, 68, 68, 0.15)",
+                    "--glass-bg-hover": "rgba(239, 68, 68, 0.3)",
+                  } as React.CSSProperties}
+                  onClick={handleUnlinkTelegram}
+                  disabled={telegramLoading}
+                >
+                  Отвязать
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {telegramLinkCode ? (
+                  <div className="space-y-2">
+                    <p
+                      className="text-sm"
+                      style={{ color: ACTIVE_TEXT_DARK }}
+                    >
+                      Отправьте боту в Telegram:
+                    </p>
+                    <code
+                      className="block text-xl font-mono p-3 rounded-lg"
+                      style={{
+                        backgroundColor: "rgba(108, 93, 215, 0.2)",
+                        color: ACTIVE_TEXT_DARK,
+                      }}
+                    >
+                      /start {telegramLinkCode}
+                    </code>
+                    <p
+                      className="text-xs"
+                      style={{ color: PLACEHOLDER_COLOR_DARK }}
+                    >
+                      Код действителен 10 минут. После привязки обновите страницу.
+                      {typeof process !== "undefined" &&
+                        process.env?.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME && (
+                          <>
+                            {" "}
+                            <a
+                              href={`https://t.me/${process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME.replace(/^@/, "")}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline"
+                            >
+                              Открыть бота
+                            </a>
+                          </>
+                        )}
+                    </p>
+                  </div>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="authPrimary"
+                  size="sm"
+                  className="rounded-lg border-0"
+                  style={
+                    {
+                      "--auth-primary-bg":
+                        "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                      "--auth-primary-bg-hover":
+                        "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                    } as React.CSSProperties
+                  }
+                  onClick={handleCreateTelegramCode}
+                  disabled={telegramLoading}
+                >
+                  {telegramLoading ? "Создание..." : "Подключить Telegram"}
+                </Button>
+              </div>
+            )}
           </div>
         </CabinetCard>
 

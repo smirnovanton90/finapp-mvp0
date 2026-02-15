@@ -880,6 +880,7 @@ export default function GoalsPage() {
                         goal={goal}
                         isIncomeGoal={summary.isIncome}
                         categoryLookup={categoryLookup}
+                        apiBase={API_BASE}
                         categoryPathLabel={formatCategoryLabel(goal.category_id)}
                         categoryDescendants={categoryDescendants}
                         txs={txs}

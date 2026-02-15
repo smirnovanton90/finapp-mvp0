@@ -27,6 +27,7 @@ import {
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
 import {
+  API_BASE,
   fetchCategories,
   fetchGoals,
   fetchFxRates,
@@ -38,6 +39,7 @@ import {
   GoalOut,
   TransactionOut,
 } from "@/lib/api";
+import { CategoryIconImage } from "@/components/category-icon-image";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
 import {
@@ -1820,7 +1822,6 @@ export default function DashboardPage() {
                     categoryLookup.idToScope?.get(goal.category_id) === "INCOME";
                   const progressColor = getGoalProgressColor(ratio, isIncomeGoal);
                   const textColor = progressColor;
-                  const GoalCategoryIcon = resolveCategoryIcon(goal.category_id);
                   return (
                     <div
                       key={goal.id}
@@ -1832,7 +1833,14 @@ export default function DashboardPage() {
                             {goal.name}
                           </div>
                           <div className="flex min-w-0 items-center gap-2 truncate text-xs text-white/70">
-                            <GoalCategoryIcon className="h-4 w-4 shrink-0 text-white/70" />
+                            <CategoryIconImage
+                              categoryId={goal.category_id}
+                              categoryLookup={categoryLookup}
+                              apiBase={API_BASE}
+                              size={16}
+                              className="h-4 w-4 shrink-0"
+                              fallbackIconColor="rgba(255,255,255,0.7)"
+                            />
                             <span className="truncate">
                               {formatGoalCategoryLabel(goal.category_id)}
                             </span>

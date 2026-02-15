@@ -293,6 +293,12 @@ class Category(Base):
     owner_user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id"), nullable=True
     )
+    photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_mime: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    photo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    photo_updated_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

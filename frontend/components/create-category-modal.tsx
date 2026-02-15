@@ -8,7 +8,7 @@ import { TextField, SelectField } from "@/components/ui/form-field";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { CATEGORY_ICON_OPTIONS } from "@/lib/category-icons";
 import type { CategoryScope } from "@/lib/categories";
-import { createCategory } from "@/lib/api";
+import { createCategory, uploadCategoryPhoto } from "@/lib/api";
 import { ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 
 const ALLOWED_ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -99,6 +99,13 @@ export function CreateCategoryModal({
         scope: newScope,
         icon_name: newIcon ? newIcon : null,
       });
+      if (newIconImage) {
+        try {
+          await uploadCategoryPhoto(created.id, newIconImage);
+        } catch (photoErr) {
+          console.warn("Failed to upload category photo:", photoErr);
+        }
+      }
       handleOpenChange(false);
       onSuccess(created);
     } catch (err: unknown) {

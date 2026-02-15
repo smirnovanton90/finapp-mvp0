@@ -762,6 +762,8 @@ class CategoryOut(BaseModel):
     owner_user_id: int | None
     enabled: bool
     archived_at: datetime | None
+    photo_url: str | None = None
+    photo_updated_at: datetime | None = None
     children: list["CategoryOut"] = []
     synonyms: list[str] = []
 

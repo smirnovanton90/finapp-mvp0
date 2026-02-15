@@ -9,16 +9,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ComponentType,
 } from "react";
 
-import { CategoryNode, buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
-import {
-  CATEGORY_ICON_BY_NAME,
-  CATEGORY_ICON_FALLBACK,
-} from "@/lib/category-icons";
+import { API_BASE } from "@/lib/api";
+import { CategoryNode, buildCategoryLookup } from "@/lib/categories";
 import { DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
+import { CategoryIconImage } from "@/components/category-icon-image";
 import type { TransactionChainOut } from "@/lib/api";
 
 export type ChainOption = {
@@ -43,6 +40,7 @@ type ChainSelectorProps = {
   resetSignal?: number | string;
   ariaLabel?: string;
   includeDeleted?: boolean;
+  apiBase?: string;
 };
 
 const DEFAULT_EMPTY_MESSAGE = "Нет цепочек транзакций.";
@@ -65,27 +63,6 @@ function formatCategoryLabel(
     .filter((p) => p && p !== "-")
     .join(" / ");
   return label || "-";
-}
-
-function resolveCategoryIcon(
-  categoryId: number | null,
-  categoryLookup: ReturnType<typeof buildCategoryLookup>
-): ComponentType<{ className?: string; strokeWidth?: number; style?: React.CSSProperties; "aria-hidden"?: string }> {
-  if (!categoryId) return CATEGORY_ICON_FALLBACK;
-  const path = categoryLookup.idToPath.get(categoryId);
-  if (!path || path.length === 0) return CATEGORY_ICON_FALLBACK;
-  for (let depth = path.length; depth >= 1; depth -= 1) {
-    const key = makeCategoryPathKey(...path.slice(0, depth));
-    const targetId = categoryLookup.pathToId.get(key);
-    if (!targetId) continue;
-    const iconName = categoryLookup.idToIcon.get(targetId);
-    if (!iconName) continue;
-    const normalizedIconName = iconName.trim();
-    if (!normalizedIconName) continue;
-    const Icon = CATEGORY_ICON_BY_NAME[normalizedIconName];
-    if (Icon) return Icon;
-  }
-  return CATEGORY_ICON_FALLBACK;
 }
 
 function buildChainOptions(
@@ -126,6 +103,7 @@ export function ChainSelector({
   resetSignal,
   ariaLabel,
   includeDeleted = false,
+  apiBase = API_BASE,
 }: ChainSelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -161,11 +139,6 @@ export function ChainSelector({
 
   const selectedLabel = selectedOption?.name ?? "";
   const inputValue = query || selectedLabel;
-
-  const selectedIcon = useMemo(() => {
-    if (!selectedOption) return null;
-    return resolveCategoryIcon(selectedOption.categoryId, categoryLookup);
-  }, [selectedOption, categoryLookup]);
 
   const applySelection = (opt: ChainOption) => {
     if (disabled) return;
@@ -237,8 +210,7 @@ export function ChainSelector({
     zIndex: 50,
   };
 
-  const showPrefix = Boolean(selectedChainId && !query && selectedIcon);
-  const IconNode = selectedIcon;
+  const showPrefix = Boolean(selectedChainId && !query && selectedOption);
   const inputId = useId();
 
   return (
@@ -256,11 +228,14 @@ export function ChainSelector({
           disabled={disabled}
           prefixPlClass="pl-12"
           prefix={
-            showPrefix && IconNode ? (
-              <IconNode
-                className="h-4 w-4"
-                style={{ color: SIDEBAR_TEXT_ACTIVE }}
-                aria-hidden="true"
+            showPrefix && selectedOption ? (
+              <CategoryIconImage
+                categoryId={selectedOption.categoryId}
+                categoryLookup={categoryLookup}
+                apiBase={apiBase}
+                size={16}
+                className="h-4 w-4 shrink-0"
+                fallbackIconColor={SIDEBAR_TEXT_ACTIVE}
               />
             ) : undefined
           }
@@ -352,10 +327,7 @@ export function ChainSelector({
                 ) : (
                   filteredOptions.map((opt) => {
                     const isSelected = opt.chainId === selectedChainId;
-                    const Icon = resolveCategoryIcon(
-                      opt.categoryId,
-                      categoryLookup
-                    );
+                    const rowIconColor = isSelected ? "white" : SIDEBAR_TEXT_ACTIVE;
                     return (
                       <button
                         key={opt.chainId}
@@ -380,12 +352,13 @@ export function ChainSelector({
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => applySelection(opt)}
                       >
-                        <Icon
-                          className="h-4 w-4"
-                          style={{
-                            color: isSelected ? "white" : SIDEBAR_TEXT_ACTIVE,
-                          }}
-                          aria-hidden="true"
+                        <CategoryIconImage
+                          categoryId={opt.categoryId}
+                          categoryLookup={categoryLookup}
+                          apiBase={apiBase}
+                          size={16}
+                          className="h-4 w-4 shrink-0"
+                          fallbackIconColor={rowIconColor}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-normal break-words">

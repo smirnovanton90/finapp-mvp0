@@ -170,15 +170,16 @@ import {
 import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
-  CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
-import { categoryIconPath, transferIconPath } from "@/lib/image-paths";
+import { transferIconPath } from "@/lib/image-paths";
 import { resolveApiImageUrl } from "@/lib/api-image-url";
 import { getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
+import { buildCategoryLookup } from "@/lib/categories";
 import { buildCategoryPaths } from "@/components/category-selector";
 import { useOnboarding } from "@/components/onboarding-context";
 import { useImagePreloader } from "@/hooks/use-image-preloader";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
+import { useCategoryImage } from "@/hooks/use-category-icon";
 import { CardIcon } from "@/components/card-icon";
 
 type TransactionsViewMode = "actual" | "planning";
@@ -1152,7 +1153,7 @@ function TransactionCardRow({
   counterpartyItemCounterparty,
   apiBase,
   itemBankName,
-  categoryIconForId,
+  categoryLookup,
   categoryLinesForId,
   getRubEquivalentCents,
   isSelected,
@@ -1176,13 +1177,7 @@ function TransactionCardRow({
   counterpartyItemCounterparty: CounterpartyOut | null;
   apiBase: string;
   itemBankName: (id: number | null | undefined) => string;
-  categoryIconForId: (
-    categoryId: number | null
-  ) => ComponentType<{
-    className?: string;
-    strokeWidth?: number;
-    style?: CSSProperties;
-  }>;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
   categoryLinesForId: (
     categoryId: number | null
   ) => [string, string, string];
@@ -1354,27 +1349,20 @@ function TransactionCardRow({
   const counterpartyIconTone = tx.isDeleted ? "text-slate-400" : "text-slate-300";
 
   const categoryLines = categoryLinesForId(tx.category_id);
-  const CategoryIcon = categoryIconForId(tx.category_id);
-
-  // 3D иконка категории — при наличии показываем 3D, иначе 2D
-  const categoryL1 = categoryLines[0];
-  const categoryIconName = categoryL1
-    ? CATEGORY_ICON_NAME_BY_L1[categoryL1] ?? null
-    : null;
-  const [categoryIconFormat, setCategoryIconFormat] = useState<"png" | null>(
-    categoryIconName ? "png" : null
-  );
-  const categoryIcon3dPath =
-    categoryIconName && categoryIconFormat
-      ? categoryIconPath(categoryIconName, categoryIconFormat)
-      : null;
+  const {
+    imageSrc: categoryImageSrc,
+    onError: categoryImageOnError,
+    showFallbackIcon: categoryShowFallbackIcon,
+    CategoryIcon: CategoryIconFallback,
+    setCategoryIconFormat,
+  } = useCategoryImage(tx.category_id, categoryLookup, apiBase);
 
   const [transferIconFormat, setTransferIconFormat] = useState<"png" | null>("png");
   const transferIcon3dPath = transferIconPath(transferIconFormat);
 
   const imageUrls = [
     primaryBankLogo,
-    isTransfer ? transferIcon3dPath : categoryIcon3dPath,
+    isTransfer ? transferIcon3dPath : (categoryImageSrc && !categoryShowFallbackIcon ? categoryImageSrc : null),
     counterpartyBankLogo,
     counterpartyLogoUrl,
   ];
@@ -1571,17 +1559,20 @@ function TransactionCardRow({
                 setTransferIconFormat(null);
               }}
             />
-          ) : categoryIcon3dPath ? (
+          ) : categoryImageSrc && !categoryShowFallbackIcon ? (
             <CardIcon
-              src={categoryIcon3dPath}
+              src={categoryImageSrc}
               alt=""
               size={90}
               shadow
+              fallbackIcon={CategoryIconFallback}
+              fallbackIconColor={ACCENT2}
               imgRef={(el) => setImageRef(1, el)}
               onLoad={() => handleImageLoad(1)}
               onError={() => {
-                handleImageError(1);
+                categoryImageOnError();
                 setCategoryIconFormat(null);
+                handleImageError(1);
               }}
             />
           ) : (
@@ -1593,7 +1584,7 @@ function TransactionCardRow({
                 filter: "drop-shadow(4px -1px 6.5px rgba(0,0,0,0.3))",
               }}
             >
-              <CategoryIcon
+              <CategoryIconFallback
                 strokeWidth={1.5}
                 style={{ width: 56, height: 56, color: ACCENT2 }}
               />
@@ -6414,7 +6405,7 @@ function TransactionsView({
                     counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
                     apiBase={API_BASE}
                     itemBankName={itemBankName}
-                    categoryIconForId={resolveCategoryIcon}
+                    categoryLookup={categoryLookup}
                     categoryLinesForId={getCategoryLines}
                     getRubEquivalentCents={getRubEquivalentCents}
                     isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}

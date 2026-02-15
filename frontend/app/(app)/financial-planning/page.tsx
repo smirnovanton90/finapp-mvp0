@@ -70,7 +70,7 @@ import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
 } from "@/lib/category-icons";
-import { useCategoryIcon } from "@/hooks/use-category-icon";
+import { CategoryIconImage } from "@/components/category-icon-image";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import {
   createTransactionChain,
@@ -1083,10 +1083,6 @@ export default function FinancialPlanningPage() {
     const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
     const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
 
-    // Используем хук для получения иконки категории (та же логика, что и в транзакции)
-    const { categoryIcon3dPath, CategoryIcon: CategoryIconComponent, setCategoryIconFormat } =
-      useCategoryIcon(chain.category_id, categoryLookup);
-
     return (
       <div
         className="relative w-full rounded-lg overflow-hidden"
@@ -1100,28 +1096,19 @@ export default function FinancialPlanningPage() {
         <div className="pt-[12px] pr-[12px] pb-[12px] pl-[19px]">
           {/* Header: иконка + основная информация + кнопка меню */}
           <div className="flex items-start justify-between gap-4 mb-3">
-            {/* Иконка категории 100x100 */}
-            <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
-              {categoryIcon3dPath ? (
-                <img
-                  src={categoryIcon3dPath}
-                  alt=""
-                  className="w-[100px] h-[100px] object-contain"
-                  style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
-                  onError={() => setCategoryIconFormat(null)}
-                />
-              ) : (
-                <div
-                  className="w-full h-full flex items-center justify-center"
-                  style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
-                >
-                  <CategoryIconComponent
-                    className="w-16 h-16"
-                    style={{ color: ACCENT }}
-                    strokeWidth={1.5}
-                  />
-                </div>
-              )}
+            {/* Иконка категории 100x100 (фото → 3D → 2D) */}
+            <div
+              className="w-[100px] h-[100px] flex items-center justify-center shrink-0"
+              style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
+            >
+              <CategoryIconImage
+                categoryId={chain.category_id}
+                categoryLookup={categoryLookup}
+                apiBase={API_BASE}
+                size={100}
+                className="w-[100px] h-[100px] object-contain"
+                fallbackIconColor={ACCENT}
+              />
             </div>
 
             {/* Текстовый контент */}

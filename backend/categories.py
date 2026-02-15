@@ -1,14 +1,18 @@
 from dataclasses import dataclass
 import hashlib
 import json
+from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import Response as FastAPIResponse
 import sqlalchemy as sa
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
+from PIL import Image
 
 from auth import get_current_user
+from config import settings
 from db import get_db
 from models import Category, User, UserCategoryState
 from schemas import (
@@ -22,6 +26,25 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/categories", tags=["categories"])
+
+MAX_PHOTO_BYTES = 2 * 1024 * 1024
+MAX_PHOTO_DIM = 1024
+ALLOWED_PHOTO_FORMATS = {"PNG", "JPEG", "WEBP"}
+FORMAT_TO_MIME = {
+    "PNG": "image/png",
+    "JPEG": "image/jpeg",
+    "WEBP": "image/webp",
+}
+
+
+def build_category_photo_url(category_id: int) -> str:
+    return f"{settings.public_base_url}/categories/{category_id}/photo"
+
+
+def apply_category_photo_url(category: Category) -> None:
+    category.photo_url = (
+        build_category_photo_url(category.id) if category.photo_data else None
+    )
 
 
 @dataclass
@@ -108,6 +131,7 @@ def ensure_category_synonyms_unique(
 
 
 def build_category_out(category: Category, state: UserCategoryState | None) -> CategoryOut:
+    apply_category_photo_url(category)
     if category.owner_user_id is None:
         icon_name = (
             state.icon_override
@@ -127,6 +151,8 @@ def build_category_out(category: Category, state: UserCategoryState | None) -> C
         owner_user_id=category.owner_user_id,
         enabled=enabled,
         archived_at=category.archived_at,
+        photo_url=category.photo_url,
+        photo_updated_at=category.photo_updated_at,
         children=[],
         synonyms=synonyms,
     )
@@ -395,6 +421,76 @@ def update_category_icon(
     db.commit()
     db.refresh(category)
     invalidate_category_cache(user.id)
+    return build_category_out(category, state)
+
+
+@router.get("/{category_id}/photo")
+def get_category_photo(
+    category_id: int,
+    db: Session = Depends(get_db),
+):
+    """Отдача фото категории без авторизации (как GET фото контрагентов/активов), чтобы <img src> в браузере мог загрузить картинку."""
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found.")
+    if not category.photo_data:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    media_type = category.photo_mime or "application/octet-stream"
+    return FastAPIResponse(content=category.photo_data, media_type=media_type)
+
+
+@router.post("/{category_id}/photo", response_model=CategoryOut)
+async def upload_category_photo(
+    category_id: int,
+    file: UploadFile = File(..., alias="file"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    category = fetch_category(db, user, category_id)
+    if category.owner_user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Загрузить фото может только владелец категории.",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Файл не загружен.")
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Размер изображения не более {MAX_PHOTO_BYTES // (1024 * 1024)} МБ.",
+        )
+
+    try:
+        image = Image.open(BytesIO(data))
+        image.verify()
+        image = Image.open(BytesIO(data))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Неверный формат изображения.") from exc
+
+    if image.format not in ALLOWED_PHOTO_FORMATS:
+        raise HTTPException(status_code=400, detail="Допустимые форматы: PNG, JPEG, WebP.")
+
+    width, height = image.size
+    if width > MAX_PHOTO_DIM or height > MAX_PHOTO_DIM:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Разрешение не более {MAX_PHOTO_DIM}px.",
+        )
+
+    category.photo_mime = FORMAT_TO_MIME[image.format]
+    category.photo_data = data
+    category.photo_updated_at = func.now()
+    db.commit()
+    db.refresh(category)
+    invalidate_category_cache(user.id)
+    state = db.execute(
+        select(UserCategoryState).where(
+            UserCategoryState.user_id == user.id,
+            UserCategoryState.category_id == category_id,
+        )
+    ).scalar_one_or_none()
     return build_category_out(category, state)
 
 

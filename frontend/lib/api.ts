@@ -239,6 +239,8 @@ export type CategoryNode = {
   owner_user_id: number | null;
   enabled: boolean;
   archived_at: string | null;
+  photo_url?: string | null;
+  photo_updated_at?: string | null;
   children?: CategoryNode[];
   synonyms?: string[];
 };
@@ -896,6 +898,20 @@ export async function updateCategoryIcon(
   const res = await authFetch(`${API_BASE}/categories/${id}/icon`, {
     method: "PATCH",
     body: JSON.stringify({ icon_name: iconName }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function uploadCategoryPhoto(
+  categoryId: number,
+  file: File
+): Promise<CategoryNode> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await authFetch(`${API_BASE}/categories/${categoryId}/photo`, {
+    method: "POST",
+    body: formData,
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

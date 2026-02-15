@@ -1,15 +1,18 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
   CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
 import { makeCategoryPathKey } from "@/lib/categories";
+import { resolveApiImageUrl } from "@/lib/api-image-url";
 import { categoryIconPath } from "@/lib/image-paths";
 
 type CategoryLookup = {
   idToPath: Map<number, string[]>;
   idToIcon: Map<number, string | null>;
+  idToPhotoUrl?: Map<number, string | null>;
+  idToPhotoUpdatedAt?: Map<number, string | null>;
   pathToId: Map<string, number>;
 };
 
@@ -81,6 +84,65 @@ export function useCategoryIcon(
 
   return {
     categoryIcon3dPath,
+    CategoryIcon,
+    setCategoryIconFormat,
+  };
+}
+
+/**
+ * Хук для отображения иконки категории с каскадом: загруженное пользователем фото → 3D PNG → 2D Lucide.
+ * Аналог useCounterpartyImage для категорий.
+ */
+export function useCategoryImage(
+  categoryId: number | null,
+  categoryLookup: CategoryLookup,
+  apiBase: string
+): {
+  imageSrc: string | null;
+  onError: () => void;
+  showFallbackIcon: boolean;
+  CategoryIcon: CategoryIcon;
+  setCategoryIconFormat: (format: "png" | null) => void;
+} {
+  const {
+    categoryIcon3dPath,
+    CategoryIcon,
+    setCategoryIconFormat,
+  } = useCategoryIcon(categoryId, categoryLookup);
+
+  const candidates = useMemo(() => {
+    const list: string[] = [];
+    const photoUrl = categoryLookup.idToPhotoUrl?.get(categoryId ?? 0);
+    const photoUpdatedAt = categoryLookup.idToPhotoUpdatedAt?.get(categoryId ?? 0) ?? null;
+    const resolved = resolveApiImageUrl(photoUrl ?? null, apiBase);
+    if (resolved) {
+      const withCacheBust = photoUpdatedAt
+        ? `${resolved}?t=${new Date(photoUpdatedAt).getTime()}`
+        : resolved;
+      list.push(withCacheBust);
+    }
+    if (categoryIcon3dPath) list.push(categoryIcon3dPath);
+    return list;
+  }, [categoryId, categoryLookup.idToPhotoUrl, categoryLookup.idToPhotoUpdatedAt, categoryIcon3dPath, apiBase]);
+
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const imageSrc =
+    candidateIndex < candidates.length ? candidates[candidateIndex] : null;
+  const showFallbackIcon = candidateIndex >= candidates.length;
+
+  const onError = useCallback(() => {
+    setCandidateIndex((prev) => Math.min(prev + 1, candidates.length));
+    if (candidateIndex === 0 && candidates.length > 1) setCategoryIconFormat(null);
+  }, [candidates.length, candidateIndex, setCategoryIconFormat]);
+
+  useEffect(() => {
+    setCandidateIndex(0);
+  }, [categoryId]);
+
+  return {
+    imageSrc,
+    onError,
+    showFallbackIcon,
     CategoryIcon,
     setCategoryIconFormat,
   };

@@ -9,8 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useCategoryIcon } from "@/hooks/use-category-icon";
-import { useImagePreloader } from "@/hooks/use-image-preloader";
+import { CategoryIconImage } from "@/components/category-icon-image";
 import type { GoalOut, GoalPeriod, TransactionOut } from "@/lib/api";
 import type { TransactionDirection } from "@/lib/api";
 import {
@@ -194,6 +193,7 @@ export interface GoalCardProps {
   goal: GoalOut;
   isIncomeGoal: boolean;
   categoryLookup: CategoryLookup;
+  apiBase: string;
   categoryPathLabel: string;
   categoryDescendants: Map<number, Set<number>>;
   txs: TransactionOut[];
@@ -208,6 +208,7 @@ export function GoalCard({
   goal,
   isIncomeGoal,
   categoryLookup,
+  apiBase,
   categoryPathLabel,
   categoryDescendants,
   txs,
@@ -225,14 +226,6 @@ export function GoalCard({
   const previousRanges = getPreviousPeriodRanges(goal, today, null);
   const direction: TransactionDirection = isIncomeGoal ? "INCOME" : "EXPENSE";
 
-  const { categoryIcon3dPath, CategoryIcon, setCategoryIconFormat } = useCategoryIcon(
-    goal.category_id,
-    categoryLookup
-  );
-  const { isReady, setImageRef, handleImageLoad, handleImageError } = useImagePreloader({
-    imageUrls: categoryIcon3dPath ? [categoryIcon3dPath] : [],
-    cacheCheckDelay: 0,
-  });
   const categoryIds = categoryDescendants.get(goal.category_id) ?? new Set([goal.category_id]);
 
   const currentRatio = goal.amount_rub > 0 ? currentAmount / goal.amount_rub : 0;
@@ -246,8 +239,6 @@ export function GoalCard({
       className="relative rounded-lg overflow-hidden"
       style={{
         backgroundColor: cardBg,
-        opacity: isReady ? 1 : 0,
-        transition: "opacity 0.2s ease-in-out",
       }}
     >
       {/* Левая обводка: как у активов (доход) — зелёная, как у обязательств (расход) — красная */}
@@ -257,31 +248,18 @@ export function GoalCard({
       />
       <div className="pt-[12px] pr-[12px] pb-[12px] pl-[19px]">
         <div className="flex items-start justify-between mb-3 gap-3">
-          <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0">
-            {categoryIcon3dPath ? (
-              <img
-                ref={(el) => setImageRef(0, el)}
-                src={categoryIcon3dPath}
-                alt=""
-                className="w-[100px] h-[100px] rounded-lg object-contain"
-                style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
-                onLoad={() => handleImageLoad(0)}
-                onError={() => {
-                  setCategoryIconFormat(null);
-                  handleImageError(0);
-                }}
-              />
-            ) : (
-              <div
-                className="w-[100px] h-[100px] rounded-lg flex items-center justify-center"
-                style={{
-                  filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))",
-                  color: ACCENT,
-                }}
-              >
-                <CategoryIcon className="w-16 h-16" strokeWidth={1.5} />
-              </div>
-            )}
+          <div
+            className="w-[100px] h-[100px] flex items-center justify-center shrink-0"
+            style={{ filter: "drop-shadow(0 34px 48.8px rgba(0,0,0,0.25))" }}
+          >
+            <CategoryIconImage
+              categoryId={goal.category_id}
+              categoryLookup={categoryLookup}
+              apiBase={apiBase}
+              size={100}
+              className="w-[100px] h-[100px] rounded-lg object-contain"
+              fallbackIconColor={ACCENT}
+            />
           </div>
           <div className="flex flex-col items-center justify-center flex-1 min-w-0">
             <div

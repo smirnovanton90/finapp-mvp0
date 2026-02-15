@@ -62,7 +62,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { CATEGORY_ICON_BY_NAME, CATEGORY_ICON_FALLBACK } from "@/lib/category-icons";
+import { CategoryIconImage } from "@/components/category-icon-image";
 import { cn } from "@/lib/utils";
 import { formatAmount, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
@@ -513,7 +513,8 @@ function CategorySectionBody({
   monthKeys,
   emptyLabel,
   accent,
-  l1IconById,
+  categoryLookup,
+  apiBase,
 }: {
   sectionId: string;
   title: string;
@@ -522,7 +523,8 @@ function CategorySectionBody({
   monthKeys: string[];
   emptyLabel: string;
   accent: string;
-  l1IconById: Map<number, string>;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  apiBase: string;
 }) {
   const {
     l1HasChildren,
@@ -571,12 +573,6 @@ function CategorySectionBody({
                 ? expandedL2.has(l2Key)
                 : true;
           const indentClass = row.level === 1 ? "" : row.level === 2 ? "pl-4" : "pl-8";
-          const iconName = row.level === 1 ? l1IconById.get(row.l1Id) : null;
-          const CategoryIcon =
-            row.level === 1
-              ? (iconName ? CATEGORY_ICON_BY_NAME[iconName] : undefined) ??
-                CATEGORY_ICON_FALLBACK
-              : null;
           return (
             <TableRow key={`${sectionId}:${row.id}`}>
               <TableCell
@@ -608,9 +604,14 @@ function CategorySectionBody({
                   ) : (
                     <span className="inline-flex h-5 w-5" aria-hidden="true" />
                   )}
-                  {CategoryIcon ? (
-                    <CategoryIcon className="h-4 w-4 text-muted-foreground" />
-                  ) : null}
+                  <CategoryIconImage
+                    categoryId={row.id}
+                    categoryLookup={categoryLookup}
+                    apiBase={apiBase}
+                    size={16}
+                    className="h-4 w-4 shrink-0 text-muted-foreground"
+                    fallbackIconColor="currentColor"
+                  />
                   <span>{row.label}</span>
                 </div>
               </TableCell>
@@ -640,7 +641,8 @@ function CategoryTable({
   emptyLabel,
   summaryLabel,
   summaryTotals,
-  l1IconById,
+  categoryLookup,
+  apiBase,
 }: {
   title: string;
   monthKeys: string[];
@@ -655,7 +657,8 @@ function CategoryTable({
   emptyLabel: string;
   summaryLabel?: string;
   summaryTotals?: Record<string, number>;
-  l1IconById: Map<number, string>;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  apiBase: string;
 }) {
   const hasAnyRows = sections.some((section) => section.rows.length > 0);
 
@@ -691,7 +694,8 @@ function CategoryTable({
                     monthKeys={monthKeys}
                     emptyLabel={section.emptyLabel}
                     accent={section.accent}
-                    l1IconById={l1IconById}
+                    categoryLookup={categoryLookup}
+                    apiBase={apiBase}
                   />
                 ))}
               </TableBody>

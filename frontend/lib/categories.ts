@@ -1,3 +1,4 @@
+import { resolveApiImageUrl } from "@/lib/api-image-url";
 import { CATEGORY_ICON_NAME_BY_L1 } from "@/lib/category-icons";
 
 export type CategoryScope = "INCOME" | "EXPENSE" | "BOTH";
@@ -11,6 +12,8 @@ export type CategoryNode = {
   owner_user_id?: number | null;
   enabled?: boolean;
   archived_at?: string | null;
+  photo_url?: string | null;
+  photo_updated_at?: string | null;
   children?: CategoryNode[];
   synonyms?: string[];
 };
@@ -255,6 +258,14 @@ function coerceNodes(value: unknown): CategoryNode[] | null {
           typeof item.archived_at === "string" && item.archived_at.trim().length > 0
             ? item.archived_at
             : undefined,
+        photo_url:
+          typeof item.photo_url === "string" && item.photo_url.trim().length > 0
+            ? item.photo_url
+            : undefined,
+        photo_updated_at:
+          typeof item.photo_updated_at === "string" && item.photo_updated_at.trim().length > 0
+            ? item.photo_updated_at
+            : undefined,
         children: Array.isArray(item.children) ? walk(item.children) : undefined,
       }));
   return walk(value);
@@ -334,6 +345,8 @@ export function buildCategoryLookup(nodes: CategoryNode[]) {
   const idToPath = new Map<number, string[]>();
   const idToIcon = new Map<number, string | null>();
   const idToScope = new Map<number, CategoryScope>();
+  const idToPhotoUrl = new Map<number, string | null>();
+  const idToPhotoUpdatedAt = new Map<number, string | null>();
   const pathToId = new Map<string, number>();
 
   const walk = (items: CategoryNode[], trail: string[]) => {
@@ -341,6 +354,8 @@ export function buildCategoryLookup(nodes: CategoryNode[]) {
       const nextTrail = [...trail, item.name];
       idToPath.set(item.id, nextTrail);
       idToScope.set(item.id, item.scope);
+      idToPhotoUrl.set(item.id, item.photo_url ?? null);
+      idToPhotoUpdatedAt.set(item.id, item.photo_updated_at ?? null);
       // Для L1-категорий по умолчанию приоритет у маппинга из конфига (актуальная иконка без зависимости от БД)
       const iconName =
         nextTrail.length === 1 &&
@@ -359,7 +374,21 @@ export function buildCategoryLookup(nodes: CategoryNode[]) {
 
   walk(nodes, []);
 
-  return { idToPath, idToIcon, idToScope, pathToId };
+  return { idToPath, idToIcon, idToScope, idToPhotoUrl, idToPhotoUpdatedAt, pathToId };
+}
+
+/** URL фото категории с cache-busting по photo_updated_at (для отображения в формах и списках). */
+export function getCategoryPhotoUrl(
+  category: { photo_url?: string | null; photo_updated_at?: string | null } | null,
+  apiBase: string
+): string | null {
+  if (!category?.photo_url) return null;
+  const base = resolveApiImageUrl(category.photo_url, apiBase);
+  if (!base) return null;
+  const qs = category.photo_updated_at
+    ? `?t=${new Date(category.photo_updated_at).getTime()}`
+    : "";
+  return `${base}${qs}`;
 }
 
 export function buildCategoryDescendants(nodes: CategoryNode[]) {

@@ -14,6 +14,7 @@ import {
 } from "react";
 
 import { CirclePlus } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 import { CategoryNode, buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
 import {
   CATEGORY_ICON_BY_NAME,
@@ -56,6 +57,8 @@ type CategorySelectorProps = {
   showChips?: boolean;
   /** When set, shows "Добавить" as first option; on click calls this and closes dropdown. */
   onAddCategory?: () => void;
+  /** Базовый URL API для отображения загруженных фото категорий. По умолчанию API_BASE. */
+  apiBase?: string;
 };
 
 const DEFAULT_EMPTY_MESSAGE = "Нет категорий.";
@@ -192,6 +195,7 @@ export function CategorySelector({
   maxDepth,
   showChips = true,
   onAddCategory,
+  apiBase = API_BASE,
 }: CategorySelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -361,6 +365,7 @@ export function CategorySelector({
               <CategoryIconImage
                 categoryId={selectedCategoryId}
                 categoryLookup={categoryLookup}
+                apiBase={apiBase}
                 size={24}
                 className="h-6 w-6 rounded object-contain"
                 fallbackIconColor={SIDEBAR_TEXT_ACTIVE}
@@ -526,6 +531,7 @@ export function CategorySelector({
                             <CategoryIconImage
                               categoryId={path.categoryId}
                               categoryLookup={categoryLookup}
+                              apiBase={apiBase}
                               size={24}
                               className="h-6 w-6 rounded-sm object-contain"
                               fallbackIconColor={rowIconColor}

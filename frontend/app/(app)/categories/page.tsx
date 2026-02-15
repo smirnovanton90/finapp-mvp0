@@ -23,24 +23,22 @@ import { FilterSection } from "@/components/filter-panel";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { AuthInput } from "@/components/ui/auth-input";
 import { IconButton } from "@/components/ui/icon-button";
-import { CategoryNode, CategoryScope, buildCategoryLookup } from "@/lib/categories";
-import {
-  CATEGORY_ICON_BY_NAME,
-  CATEGORY_ICON_NAME_BY_L1,
-  CATEGORY_ICON_OPTIONS,
-} from "@/lib/category-icons";
+import { CategoryNode, CategoryScope, buildCategoryLookup, getCategoryPhotoUrl } from "@/lib/categories";
+import { CATEGORY_ICON_OPTIONS } from "@/lib/category-icons";
 import { cn } from "@/lib/utils";
 import {
+  API_BASE,
   createCategory,
   deleteCategory,
   fetchCategories,
   updateCategoryIcon,
   updateCategoryScope,
   updateCategorySynonyms,
+  uploadCategoryPhoto,
   updateCategoryVisibility,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
-import { useCategoryIcon } from "@/hooks/use-category-icon";
+import { CategoryIconImage } from "@/components/category-icon-image";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import {
   ACCENT,
@@ -74,6 +72,8 @@ type EditTarget = {
   scope: CategoryScope;
   iconName: string | null | undefined;
   synonyms: string[];
+  photo_url?: string | null;
+  photo_updated_at?: string | null;
 };
 
 const MAX_DEPTH = 3;
@@ -163,6 +163,7 @@ function CategoryCard({
   depth,
   parentName,
   categoryLookup,
+  apiBase,
   onAddChild,
   onEdit,
   onDelete,
@@ -175,6 +176,7 @@ function CategoryCard({
   depth: number;
   parentName: string | null;
   categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  apiBase: string;
   onAddChild: (node: CategoryNode, depth: number) => void;
   onEdit: (node: CategoryNode) => void;
   onDelete: (node: CategoryNode) => void;
@@ -192,21 +194,6 @@ function CategoryCard({
   const isDeleted = node.enabled === false || Boolean(node.archived_at);
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
   const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
-
-  const { categoryIcon3dPath, CategoryIcon: CategoryIcon2d, setCategoryIconFormat } =
-    useCategoryIcon(node.id, categoryLookup);
-
-  // Для L1-категорий по умолчанию приоритет у маппинга из конфига (актуальная иконка без зависимости от БД)
-  const iconName =
-    depth === 0 &&
-    node.owner_user_id == null &&
-    node.name &&
-    CATEGORY_ICON_NAME_BY_L1[node.name]
-      ? CATEGORY_ICON_NAME_BY_L1[node.name]
-      : node.icon_name && node.icon_name.trim().length > 0
-        ? node.icon_name
-        : undefined;
-  const PreviewIcon = iconName ? CATEGORY_ICON_BY_NAME[iconName] : CategoryIcon2d;
 
   const indent = depth * INDENT_PX;
   return (
@@ -240,37 +227,15 @@ function CategoryCard({
         )}
         <div
           className="flex-shrink-0 flex items-center justify-center"
-          style={{ width: ICON_SIZE_PX, height: ICON_SIZE_PX }}
+          style={{ width: ICON_SIZE_PX, height: ICON_SIZE_PX, filter: "drop-shadow(0 8px 16px rgba(0,0,0,0.2))" }}
         >
-          {categoryIcon3dPath ? (
-            <img
-              src={categoryIcon3dPath}
-              alt=""
-              className="w-[64px] h-[64px] object-contain"
-              style={{ filter: "drop-shadow(0 8px 16px rgba(0,0,0,0.2))" }}
-              onError={() => setCategoryIconFormat(null)}
-            />
-          ) : (
-            <div
-              className="w-full h-full flex items-center justify-center"
-              style={{ filter: "drop-shadow(0 8px 16px rgba(0,0,0,0.2))" }}
-            >
-              <PreviewIcon
-                className={ICON_2D_SIZE_CLASS}
-                style={{ color: ACCENT }}
-                strokeWidth={1.5}
-              />
-            </div>
-          )}
-        </div>
-        <div
-          className="flex-shrink-0 flex items-center justify-center"
-          style={{ width: ICON_SIZE_PX, height: ICON_SIZE_PX }}
-        >
-          <PreviewIcon
-            className={ICON_2D_SIZE_CLASS}
-            style={{ color: ACCENT }}
-            strokeWidth={1.5}
+          <CategoryIconImage
+            categoryId={node.id}
+            categoryLookup={categoryLookup}
+            apiBase={apiBase}
+            size={ICON_SIZE_PX}
+            className="w-[64px] h-[64px] object-contain"
+            fallbackIconColor={ACCENT}
           />
         </div>
         <div className="flex-1 min-w-0">
@@ -338,6 +303,7 @@ function CategoryCardList({
   depth,
   parentName,
   categoryLookup,
+  apiBase,
   onAddChild,
   onEdit,
   onDelete,
@@ -349,6 +315,7 @@ function CategoryCardList({
   depth: number;
   parentName: string | null;
   categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  apiBase: string;
   onAddChild: (node: CategoryNode, depth: number) => void;
   onEdit: (node: CategoryNode) => void;
   onDelete: (node: CategoryNode) => void;
@@ -370,6 +337,7 @@ function CategoryCardList({
               depth={depth}
               parentName={parentName}
               categoryLookup={categoryLookup}
+              apiBase={apiBase}
               onAddChild={onAddChild}
               onEdit={onEdit}
               onDelete={onDelete}
@@ -384,6 +352,7 @@ function CategoryCardList({
                 depth={depth + 1}
                 parentName={node.name}
                 categoryLookup={categoryLookup}
+                apiBase={apiBase}
                 onAddChild={onAddChild}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -604,6 +573,8 @@ export default function CategoriesPage() {
       scope: node.scope,
       iconName: node.icon_name,
       synonyms: node.synonyms ?? [],
+      photo_url: node.photo_url,
+      photo_updated_at: node.photo_updated_at,
     });
     setEditScope(node.scope);
     setEditSynonyms(node.synonyms ?? []);
@@ -645,6 +616,13 @@ export default function CategoriesPage() {
         icon_name: newIcon ? newIcon : null,
         synonyms: synonymsList.length > 0 ? synonymsList : undefined,
       });
+      if (newIconImage) {
+        try {
+          await uploadCategoryPhoto(created.id, newIconImage);
+        } catch (photoErr) {
+          console.warn("Failed to upload category photo:", photoErr);
+        }
+      }
       setIsAddOpen(false);
       await loadCategories(true);
     } catch (e: unknown) {
@@ -707,6 +685,20 @@ export default function CategoriesPage() {
 
       if (updates.length > 0) {
         await Promise.all(updates);
+      }
+      if (editIconImage) {
+        try {
+          await uploadCategoryPhoto(editTarget.id, editIconImage);
+        } catch (photoErr: unknown) {
+          const photoMessage = photoErr && typeof photoErr === "object" && "message" in photoErr
+            ? String((photoErr as { message: unknown }).message)
+            : "Не удалось загрузить изображение.";
+          setEditError(photoMessage);
+          setSyncing(false);
+          return;
+        }
+      }
+      if (updates.length > 0 || editIconImage) {
         await loadCategories(true);
       }
       setEditTarget(null);
@@ -907,9 +899,9 @@ export default function CategoriesPage() {
                 className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
                 onClick={() => editIconInputRef.current?.click()}
               >
-                {editIconImagePreview ? (
+                {(editIconImagePreview ?? (editTarget && getCategoryPhotoUrl(editTarget, API_BASE))) ? (
                   <img
-                    src={editIconImagePreview}
+                    src={editIconImagePreview ?? (editTarget ? getCategoryPhotoUrl(editTarget, API_BASE) : null) ?? undefined}
                     alt=""
                     className="w-full h-full object-cover"
                   />
@@ -1169,6 +1161,7 @@ export default function CategoriesPage() {
               depth={0}
               parentName={null}
               categoryLookup={categoryLookup}
+              apiBase={API_BASE}
               onAddChild={(node, depth) =>
                 openAddDialog(node.id, node.name, depth, node.scope)
               }

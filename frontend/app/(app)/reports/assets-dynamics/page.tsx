@@ -265,6 +265,28 @@ function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number
   return isPrimary ? -amount : amount;
 }
 
+function getTxDeltaRubForItem(
+  tx: TransactionOut,
+  itemId: number,
+  itemKind: ItemOut["kind"]
+): number | null {
+  const isPrimary = tx.primary_item_id === itemId || tx.primary_card_item_id === itemId;
+  const isCounter = tx.counterparty_item_id === itemId || tx.counterparty_card_item_id === itemId;
+  if (isPrimary) {
+    if (tx.direction === "INCOME") return tx.amount_rub;
+    if (tx.direction === "EXPENSE") {
+      const isOpening = tx.source === "AUTO_ITEM_OPENING";
+      return isOpening && itemKind === "LIABILITY" ? tx.amount_rub : -tx.amount_rub;
+    }
+    if (tx.direction === "TRANSFER") return transferDelta(itemKind, true, tx.amount_rub);
+  }
+  if (isCounter && tx.direction === "TRANSFER") {
+    const amount = tx.amount_counterparty ?? tx.amount_rub;
+    return transferDelta(itemKind, false, amount);
+  }
+  return null;
+}
+
 function isMoexItem(item: ItemOut) {
   return Boolean(item.instrument_id);
 }
@@ -515,6 +537,7 @@ export default function AssetsDynamicsPage() {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [tooltipLeft, setTooltipLeft] = useState<number | null>(null);
   const [clickedChartDates, setClickedChartDates] = useState<string[]>([]);
+  const [expandedItemId, setExpandedItemId] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -2156,8 +2179,29 @@ export default function AssetsDynamicsPage() {
                                       : ((rowRubByDate[1] ?? 0) - (rowRubByDate[0] ?? 0)) / Math.abs(rowRubByDate[0]) * 100
                                     : null;
                                 const growthColor = rowGrowthPercent != null && rowGrowthPercent !== 0 ? ((rowGrowthPercent >= 0) === growthPositiveIsGood ? GREEN : RED) : undefined;
+                                const colSpan = 1 + dateSnapshotRows.length + (dateSnapshotRows.length === 2 ? 1 : 0);
+                                const isExpanded = expandedItemId === item.id;
+                                const dateStart = clickedChartDates[0];
+                                const dateEnd = clickedChartDates[1];
+                                const txsInRange =
+                                  dateStart && dateEnd && dateStart !== dateEnd
+                                    ? transactions
+                                        .filter((tx) => {
+                                          const d = toTxDateKey(tx.transaction_date);
+                                          return d >= dateStart && d <= dateEnd && getTxDeltaRubForItem(tx, item.id, item.kind) !== null;
+                                        })
+                                        .map((tx) => ({ tx, deltaRub: getTxDeltaRubForItem(tx, item.id, item.kind)! as number }))
+                                        .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)))
+                                    : [];
                                 return (
-                                  <tr key={item.id} className="border-t border-white/10 transition-colors hover:bg-white/[0.06]">
+                                  <Fragment key={item.id}>
+                                  <tr
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setExpandedItemId((id) => (id === item.id ? null : item.id))}
+                                    onKeyDown={(e) => e.key === "Enter" && setExpandedItemId((id) => (id === item.id ? null : item.id))}
+                                    className="border-t border-white/10 transition-colors hover:bg-white/[0.06] cursor-pointer"
+                                  >
                                     <td className="pl-8 pr-6 py-3 text-sm">
                                       <div className="flex items-center gap-2 flex-wrap">
                                         <div className="h-5 w-5 shrink-0 rounded-sm overflow-hidden flex items-center justify-center">
@@ -2213,6 +2257,73 @@ export default function AssetsDynamicsPage() {
                                       );
                                     })}
                                   </tr>
+                                  {isExpanded && (
+                                    <tr style={{ backgroundColor: BACKGROUND_DT }}>
+                                      <td colSpan={colSpan} className="py-3 pl-8 pr-8 align-top" style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                        <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                                          <thead>
+                                            <tr style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                              <th className="py-1.5 pr-4 font-normal text-left"></th>
+                                              {currencyCode !== "RUB" && <th className="py-1.5 pr-4 font-normal text-right">В валюте</th>}
+                                              {currencyCode !== "RUB" && <th className="py-1.5 pr-4 font-normal text-right">Курс</th>}
+                                              <th className="py-1.5 font-normal text-right">Руб</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {dateSnapshotRows.length > 0 && (() => {
+                                              const row = dateSnapshotRows[0];
+                                              const valueCents = row.itemValues[item.id] ?? null;
+                                              const rubCents = row.itemRubValues[item.id] ?? null;
+                                              const effectiveKind = valueCents != null ? resolveItemEffectiveKind(item, valueCents) : item.kind;
+                                              const displayRub = rubCents != null && effectiveKind === "LIABILITY" ? Math.abs(rubCents) : rubCents ?? 0;
+                                              const displayCur = valueCents != null && effectiveKind === "LIABILITY" ? Math.abs(valueCents) : valueCents ?? 0;
+                                              const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, row.date, currencyCode, latestRatesByCurrency, todayKey) : null;
+                                              const label = dateSnapshotRows.length === 1 ? `Сальдо на ${formatDateLabel(row.date)}` : `Сальдо на начало (${formatDateLabel(row.date)})`;
+                                              return (
+                                                <tr key="open">
+                                                  <td className="py-1 pr-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>{label}</td>
+                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{valueCents == null ? "–" : new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(displayCur / 100)} {currencyCode}</td>}
+                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{rate != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rate) : "–"}</td>}
+                                                  <td className="py-1 text-right tabular-nums">{rubCents == null ? "–" : formatRub(displayRub)}</td>
+                                                </tr>
+                                              );
+                                            })()}
+                                            {txsInRange.map(({ tx, deltaRub }) => {
+                                              const d = toTxDateKey(tx.transaction_date);
+                                              const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey) : null;
+                                              const currencyUnits = rate != null && rate !== 0 ? deltaRub / (100 * rate) : null;
+                                              return (
+                                                <tr key={tx.id}>
+                                                  <td className="py-1 pr-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatDateLabel(d)} {tx.comment ? ` · ${tx.comment}` : ""}</td>
+                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"} {currencyCode}</td>}
+                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{rate != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rate) : "–"}</td>}
+                                                  <td className="py-1 text-right tabular-nums">{formatSignedValue(deltaRub, formatRub)}</td>
+                                                </tr>
+                                              );
+                                            })}
+                                            {dateSnapshotRows.length >= 2 && dateSnapshotRows[1] && (() => {
+                                              const row = dateSnapshotRows[1];
+                                              const valueCents = row.itemValues[item.id] ?? null;
+                                              const rubCents = row.itemRubValues[item.id] ?? null;
+                                              const effectiveKind = valueCents != null ? resolveItemEffectiveKind(item, valueCents) : item.kind;
+                                              const displayRub = rubCents != null && effectiveKind === "LIABILITY" ? Math.abs(rubCents) : rubCents ?? 0;
+                                              const displayCur = valueCents != null && effectiveKind === "LIABILITY" ? Math.abs(valueCents) : valueCents ?? 0;
+                                              const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, row.date, currencyCode, latestRatesByCurrency, todayKey) : null;
+                                              return (
+                                                <tr key="close">
+                                                  <td className="py-1 pr-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>Сальдо на конец ({formatDateLabel(row.date)})</td>
+                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{valueCents == null ? "–" : new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(displayCur / 100)} {currencyCode}</td>}
+                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{rate != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rate) : "–"}</td>}
+                                                  <td className="py-1 text-right tabular-nums">{rubCents == null ? "–" : formatRub(displayRub)}</td>
+                                                </tr>
+                                              );
+                                            })()}
+                                          </tbody>
+                                        </table>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
                                 );
                               })}
                               <tr className="border-t border-white/10 font-medium" style={{ backgroundColor: BACKGROUND_DT }}>

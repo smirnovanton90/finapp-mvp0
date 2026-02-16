@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { ACTIVE_TEXT_DARK, MODAL_BG, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
@@ -110,13 +113,19 @@ function ReportCard({
   href,
   title,
   description,
+  imageSrc,
   className,
 }: {
   href: string;
   title: string;
   description: string;
+  imageSrc?: string;
   className?: string;
 }) {
+  const [imageError, setImageError] = useState(false);
+  const showImage = imageSrc && !imageError;
+  const previewId = href.replace(/^\//, "").replace(/\//g, "-");
+
   return (
     <Link
       href={href}
@@ -135,9 +144,18 @@ function ReportCard({
           {description}
         </p>
       </div>
-      <div className="flex shrink-0 items-center justify-end sm:w-[45%] sm:min-w-[200px]">
-        <div className="h-[120px] w-full max-w-[280px] sm:h-[140px]">
-          <ReportChartPreview id={href.replace(/^\//, "").replace(/\//g, "-")} />
+      <div className="flex shrink-0 w-full items-center justify-end sm:w-1/2">
+        <div className="h-[120px] w-full sm:h-[140px]">
+          {showImage ? (
+            <img
+              src={imageSrc}
+              alt=""
+              className="h-full w-full object-contain object-right"
+              onError={() => setImageError(true)}
+            />
+          ) : (
+            <ReportChartPreview id={previewId} />
+          )}
         </div>
       </div>
     </Link>
@@ -150,24 +168,28 @@ export default function ReportsPage() {
       <div className="w-full max-w-[900px] space-y-6">
         <section className="flex flex-col gap-6">
           <ReportCard
+            href="/reports/income-expense-by-period"
+            title="Динамика доходов и расходов"
+            description="Этот отчет позволяет увидеть динамику доходов и расходов за выбранный период с возможностью детализации категорий, контрагентов и счетов"
+            imageSrc="/reports/income-expense-by-period.png"
+          />
+          <ReportCard
             href="/reports/assets-dynamics"
             title="Динамика стоимости активов"
             description="Отчет, в котором можно отследить стоимость одного или нескольких активов / обязательств"
-          />
-          <ReportCard
-            href="/reports/income-expense-by-period"
-            title="Динамика по периодам"
-            description="График доходов или расходов по выбранному периоду (день/неделя/месяц/год) с фильтрами в боковой панели"
+            imageSrc="/reports/assets-dynamics.png"
           />
           <ReportCard
             href="/reports/income-expense-dynamics"
             title="Доходы и расходы по категориям"
             description="Таблица фактических доходов и расходов по категориям с помесячной разбивкой"
+            imageSrc="/reports/income-expense-dynamics.png"
           />
           <ReportCard
             href="/reports/counterparty-settlements"
             title="Расчёты с контрагентом"
             description="Отчет о задолженностях и расчётах с контрагентами"
+            imageSrc="/reports/counterparty-settlements.png"
           />
         </section>
       </div>

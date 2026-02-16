@@ -12,7 +12,7 @@ interface FilterSectionProps {
 
 export function FilterSection({ label, onReset, showReset, children }: FilterSectionProps) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex items-center justify-between gap-4">
         <div className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
           {label}

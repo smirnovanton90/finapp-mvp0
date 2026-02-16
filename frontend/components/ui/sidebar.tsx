@@ -76,7 +76,7 @@ const nav = [
       },
       {
         href: "/reports/income-expense-by-period",
-        label: "Динамика по периодам",
+        label: "Динамика доходов и расходов",
       },
       {
         href: "/reports/income-expense-dynamics",

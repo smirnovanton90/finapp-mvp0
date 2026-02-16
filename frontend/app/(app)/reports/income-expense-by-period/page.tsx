@@ -1427,6 +1427,7 @@ export default function IncomeExpenseDynamicsPage() {
               <Label>Вид</Label>
               <SegmentedSelector
                 className="w-fit"
+                segmentWidth="auto"
                 options={[
                   { value: "INCOME", label: "Доход", colorScheme: "green" },
                   { value: "EXPENSE", label: "Расход", colorScheme: "red" },
@@ -1458,6 +1459,7 @@ export default function IncomeExpenseDynamicsPage() {
               </Label>
               <SegmentedSelector
                 className="w-fit"
+                segmentWidth="auto"
                 options={[
                   { value: "day", label: "Д" },
                   { value: "week", label: "Н" },
@@ -1476,6 +1478,7 @@ export default function IncomeExpenseDynamicsPage() {
               <Label style={{ color: ACTIVE_TEXT_DARK }}>Прогноз</Label>
               <SegmentedSelector
                 className="w-fit"
+                segmentWidth="auto"
                 options={[
                   { value: "off", label: "Без прогноза" },
                   { value: "on", label: "С прогнозом", colorScheme: "orange" },

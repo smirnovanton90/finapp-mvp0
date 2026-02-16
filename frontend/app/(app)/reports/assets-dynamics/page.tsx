@@ -19,18 +19,25 @@ import {
   MarketPriceOut,
   TransactionOut,
 } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tooltip } from "@/components/ui/tooltip";
+import { FilterSection } from "@/components/filter-panel";
+import { DateField } from "@/components/ui/form-field";
 import { ItemSelector } from "@/components/item-selector";
+import { SegmentedSelector } from "@/components/ui/segmented-selector";
+import { ACCENT, ACTIVE_TEXT_DARK, BACKGROUND_DT, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED } from "@/lib/colors";
+import { PINK_GRADIENT } from "@/lib/gradients";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  formatWeekPeriodAsDateRange,
+  getForecastPresetEnd,
+  getHistoryPresetStart,
+  getPeriodKey,
+  listPeriodsInRange,
+  type ForecastPresetKey,
+  type HistoryPresetKey,
+  type ReportPeriodGranularity,
+} from "@/lib/report-period-utils";
+import { Info } from "lucide-react";
 import {
   buildItemTransactionCounts,
   getEffectiveItemKind,
@@ -38,7 +45,6 @@ import {
 } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { formatAmount } from "@/lib/item-utils";
-import { cn } from "@/lib/utils";
 
 type ChartPoint = {
   x: number;
@@ -211,13 +217,6 @@ function formatDateLabel(dateKey: string) {
 }
 
 
-function formatRate(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  }).format(value);
-}
-
 function formatRub(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 2,
@@ -229,6 +228,15 @@ function formatSignedValue(valueInCents: number, formatter: (value: number) => s
   const absValue = Math.abs(valueInCents);
   const formatted = formatter(absValue);
   return valueInCents < 0 ? `-${formatted}` : formatted;
+}
+
+function formatGrowthPercent(percent: number | null): string {
+  if (percent == null || Number.isNaN(percent)) return "—";
+  const formatted = new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(Math.abs(percent));
+  return percent < 0 ? `-${formatted}%` : `+${formatted}%`;
 }
 
 function getItemStartKey(item: ItemOut, accountingStartDate?: string | null) {
@@ -483,6 +491,9 @@ export default function AssetsDynamicsPage() {
   >(new Map());
   const [marketPricesLoading, setMarketPricesLoading] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+  const [historyPreset, setHistoryPreset] = useState<HistoryPresetKey>("last_month");
+  const [forecastPreset, setForecastPreset] = useState<ForecastPresetKey>("next_month");
+  const [periodGranularity, setPeriodGranularity] = useState<ReportPeriodGranularity>("day");
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [loading, setLoading] = useState(false);
@@ -627,9 +638,13 @@ export default function AssetsDynamicsPage() {
     const selected = new Set(selectedItemIds);
     return sortedItems.filter((item) => selected.has(item.id));
   }, [sortedItems, selectedItemIds]);
+  const effectiveSelectedItems = useMemo(
+    () => (selectedItemIds.length === 0 ? sortedItems : selectedItems),
+    [selectedItemIds.length, sortedItems, selectedItems]
+  );
   const moexItems = useMemo(
-    () => selectedItems.filter((item) => isMoexItem(item)),
-    [selectedItems]
+    () => effectiveSelectedItems.filter((item) => isMoexItem(item)),
+    [effectiveSelectedItems]
   );
   const moexItemIds = useMemo(
     () => new Set(moexItems.map((item) => item.id)),
@@ -646,11 +661,11 @@ export default function AssetsDynamicsPage() {
 
   const selectedCurrencyCodes = useMemo(() => {
     const set = new Set<string>();
-    selectedItems.forEach((item) => {
+    effectiveSelectedItems.forEach((item) => {
       if (item.currency_code) set.add(item.currency_code);
     });
     return Array.from(set);
-  }, [selectedItems]);
+  }, [effectiveSelectedItems]);
 
   const singleCurrencyCode =
     selectedCurrencyCodes.length === 1 ? selectedCurrencyCodes[0] : null;
@@ -662,53 +677,55 @@ export default function AssetsDynamicsPage() {
   const defaultStartKey = getRelativeDateKey(-7);
   const defaultEndKey = getRelativeDateKey(7);
   const startKeys = useMemo(
-    () => selectedItems.map((item) => getEffectiveStartKey(item)).sort(),
-    [getEffectiveStartKey, selectedItems]
+    () => effectiveSelectedItems.map((item) => getEffectiveStartKey(item)).sort(),
+    [getEffectiveStartKey, effectiveSelectedItems]
   );
   const earliestStartKey = startKeys[0] ?? "";
   const rangeMinStartKey =
     startKeys.length > 0 ? startKeys[startKeys.length - 1] : "";
+  const rangeStartFloor = accountingStartDate ?? "";
 
   useEffect(() => {
-    if (selectedItems.length === 0) {
+    if (effectiveSelectedItems.length === 0) {
       setRangeStart("");
       setRangeEnd("");
-      return;
     }
+  }, [effectiveSelectedItems.length]);
 
-    const baseStart =
-      rangeMinStartKey && defaultStartKey < rangeMinStartKey
-        ? rangeMinStartKey
-        : defaultStartKey;
-    const baseEnd = defaultEndKey < baseStart ? baseStart : defaultEndKey;
+  useEffect(() => {
+    if (historyPreset !== "custom") {
+      setRangeStart(getHistoryPresetStart(historyPreset, accountingStartDate ?? null));
+    }
+  }, [historyPreset, accountingStartDate]);
 
-    setRangeStart((prev) => {
-      if (!prev) return baseStart;
-      if (rangeMinStartKey && prev < rangeMinStartKey) return rangeMinStartKey;
-      return prev;
-    });
-    setRangeEnd((prev) => {
-      const fallback = prev || baseEnd;
-      if (rangeMinStartKey && fallback < rangeMinStartKey) {
-        return rangeMinStartKey;
-      }
-      return fallback;
-    });
-  }, [defaultEndKey, defaultStartKey, rangeMinStartKey, selectedItems.length]);
+  useEffect(() => {
+    if (forecastPreset !== "custom") {
+      setRangeEnd(getForecastPresetEnd(forecastPreset));
+    }
+  }, [forecastPreset]);
+
+  const effectiveRangeStart = useMemo(() => {
+    if (historyPreset === "custom") return rangeStart || "";
+    return getHistoryPresetStart(historyPreset, accountingStartDate ?? null);
+  }, [historyPreset, rangeStart, accountingStartDate]);
+
+  const effectiveRangeEnd = useMemo(() => {
+    if (forecastPreset === "custom") return rangeEnd || "";
+    return getForecastPresetEnd(forecastPreset);
+  }, [forecastPreset, rangeEnd]);
 
   const rangeStartKey = useMemo(() => {
-    if (selectedItems.length === 0) return "";
-    if (!rangeStart || (rangeMinStartKey && rangeStart < rangeMinStartKey)) {
-      return rangeMinStartKey;
-    }
-    return rangeStart;
-  }, [rangeMinStartKey, rangeStart, selectedItems.length]);
+    if (effectiveSelectedItems.length === 0) return "";
+    const start = effectiveRangeStart || rangeStartFloor;
+    if (rangeStartFloor && start < rangeStartFloor) return rangeStartFloor;
+    return start;
+  }, [effectiveRangeStart, rangeStartFloor, effectiveSelectedItems.length]);
 
   const rangeEndKey = useMemo(() => {
     if (!rangeStartKey) return "";
-    const end = rangeEnd || defaultEndKey;
+    const end = effectiveRangeEnd || defaultEndKey;
     return end < rangeStartKey ? rangeStartKey : end;
-  }, [defaultEndKey, rangeEnd, rangeStartKey]);
+  }, [defaultEndKey, effectiveRangeEnd, rangeStartKey]);
 
   const dateKeys = useMemo(() => {
     if (!rangeStartKey || !rangeEndKey) return [];
@@ -716,8 +733,8 @@ export default function AssetsDynamicsPage() {
   }, [rangeEndKey, rangeStartKey]);
 
   const needsRates = useMemo(
-    () => selectedItems.some((item) => item.currency_code !== "RUB"),
-    [selectedItems]
+    () => effectiveSelectedItems.some((item) => item.currency_code !== "RUB"),
+    [effectiveSelectedItems]
   );
 
   const rateFetchKeys = useMemo(() => {
@@ -932,15 +949,15 @@ export default function AssetsDynamicsPage() {
   }, [marketPricesByKey]);
 
   const dailyRows = useMemo<DailyRow[]>(() => {
-    if (!selectedItems.length || !rangeStartKey || !rangeEndKey) return [];
+    if (!effectiveSelectedItems.length || !rangeStartKey || !rangeEndKey) return [];
 
-    const selectedIds = new Set(selectedItems.map((item) => item.id));
-    const itemKindById = new Map(selectedItems.map((item) => [item.id, item.kind]));
+    const selectedIds = new Set(effectiveSelectedItems.map((item) => item.id));
+    const itemKindById = new Map(effectiveSelectedItems.map((item) => [item.id, item.kind]));
     const itemStartKeyById = new Map(
-      selectedItems.map((item) => [item.id, getEffectiveStartKey(item)])
+      effectiveSelectedItems.map((item) => [item.id, getEffectiveStartKey(item)])
     );
     const itemsByStartDate = new Map<string, ItemOut[]>();
-    selectedItems.forEach((item) => {
+    effectiveSelectedItems.forEach((item) => {
       const startKey = itemStartKeyById.get(item.id);
       if (!startKey) return;
       if (!itemsByStartDate.has(startKey)) itemsByStartDate.set(startKey, []);
@@ -1044,7 +1061,7 @@ export default function AssetsDynamicsPage() {
       let missingRubValue = false;
       let missingCurrencyValue = false;
 
-      selectedItems.forEach((item) => {
+      effectiveSelectedItems.forEach((item) => {
         const startKeyForItem = itemStartKeyById.get(item.id) ?? "";
         if (startKeyForItem && dateKey < startKeyForItem) {
           itemValues[item.id] = null;
@@ -1153,70 +1170,230 @@ export default function AssetsDynamicsPage() {
     moexItemIds,
     moexItems,
     moexPriceKeyByItemId,
-    selectedItems,
+    effectiveSelectedItems,
     showCurrencyColumns,
     singleCurrencyCode,
     todayKey,
     transactions,
   ]);
 
-  const chartData = useMemo(
-    () =>
-      dailyRows.map((row) => ({
+  const chartData = useMemo(() => {
+    const assetIds = new Set(
+      effectiveSelectedItems.filter((i) => i.kind === "ASSET").map((i) => i.id)
+    );
+    const liabilityIds = new Set(
+      effectiveSelectedItems.filter((i) => i.kind === "LIABILITY").map((i) => i.id)
+    );
+    return dailyRows.map((row) => {
+      let assetsRubCents = 0;
+      let liabilitiesRubCents = 0;
+      Object.entries(row.itemRubValues).forEach(([idStr, cents]) => {
+        const id = Number(idStr);
+        if (assetIds.has(id) && cents != null) assetsRubCents += cents;
+        if (liabilityIds.has(id) && cents != null) liabilitiesRubCents += cents;
+      });
+      const derivedNet = assetsRubCents - liabilitiesRubCents;
+      const netRubCents = row.totalRubCents ?? derivedNet;
+      return {
         date: row.date,
-        value: (row.totalRubCents ?? 0) / 100,
+        value: netRubCents / 100,
         totalRubCents: row.totalRubCents,
+        assetsRubCents,
+        liabilitiesRubCents,
+        netRubCents,
         itemRubValues: row.itemRubValues,
         itemValues: row.itemValues,
-      })),
-    [dailyRows]
-  );
+      };
+    });
+  }, [dailyRows, effectiveSelectedItems]);
+
+  const chartDataForDisplay = useMemo(() => {
+    if (periodGranularity === "day") {
+      return chartData.map((p) => ({ ...p, label: formatDateLabel(p.date) }));
+    }
+    if (!rangeStartKey || !rangeEndKey) return [];
+    const periods = listPeriodsInRange(rangeStartKey, rangeEndKey, periodGranularity);
+    return periods
+      .map((period) => {
+        const inPeriod = chartData.filter(
+          (p) => getPeriodKey(p.date, periodGranularity) === period.periodKey
+        );
+        if (inPeriod.length === 0) return null;
+        const sorted = [...inPeriod].sort((a, b) => a.date.localeCompare(b.date));
+        const last = sorted[sorted.length - 1];
+        return { ...last, periodKey: period.periodKey, label: period.label };
+      })
+      .filter((p): p is NonNullable<typeof p> => p != null);
+  }, [chartData, periodGranularity, rangeStartKey, rangeEndKey]);
+
+  const hasAssets = effectiveSelectedItems.some((i) => i.kind === "ASSET");
+  const hasLiabilities = effectiveSelectedItems.some((i) => i.kind === "LIABILITY");
+  const showNetSeries = hasAssets && hasLiabilities;
 
   const width = chartSize.width;
   const height = chartSize.height;
-  const padding = { top: 24, right: 0, bottom: 44, left: 52 };
+  const padding = { top: 24, right: 0, bottom: 44, left: 0 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
 
-  const values = chartData.map((point) => point.value);
-  const minValue = values.length ? Math.min(...values) : 0;
-  const maxValue = values.length ? Math.max(...values) : 0;
+  const allValues = useMemo(() => {
+    const vals: number[] = [];
+    chartDataForDisplay.forEach((p) => {
+      if (hasAssets) vals.push(p.assetsRubCents / 100);
+      if (hasLiabilities) vals.push(p.liabilitiesRubCents / 100);
+      if (showNetSeries) vals.push(p.netRubCents / 100);
+    });
+    return vals;
+  }, [chartDataForDisplay, hasAssets, hasLiabilities, showNetSeries]);
+  const minValue = allValues.length ? Math.min(...allValues) : 0;
+  const maxValue = allValues.length ? Math.max(...allValues) : 0;
   const rangePadding = Math.max((maxValue - minValue) * 0.12, 1);
   const paddedMin = minValue - rangePadding;
   const paddedMax = maxValue + rangePadding;
   const ticks = buildTicks(paddedMin, paddedMax);
   const chartMin = ticks[0];
   const chartMax = ticks[ticks.length - 1];
+  const valueToRatio = (v: number) =>
+    (v - chartMin) / (chartMax - chartMin || 1);
+  const zeroRatio = Math.max(0, Math.min(1, valueToRatio(0)));
+  const zeroY = padding.top + innerHeight - innerHeight * zeroRatio;
 
-  const points: ChartPoint[] = chartData.map((point, index) => {
-    const progress = chartData.length <= 1 ? 0 : index / (chartData.length - 1);
-    const x = padding.left + innerWidth * progress;
-    const valueRatio = (point.value - chartMin) / (chartMax - chartMin || 1);
-    const y = padding.top + innerHeight - innerHeight * valueRatio;
-    return { x, y, value: point.value };
-  });
+  const futureStartIndex = chartDataForDisplay.findIndex((point) => point.date > todayKey);
+  const splitAt = futureStartIndex === -1 ? chartDataForDisplay.length : Math.max(futureStartIndex, 0);
+
+  const chartSummary = useMemo(() => {
+    const first = chartData[0];
+    const last = chartData[chartData.length - 1];
+    const netAtStart = first?.netRubCents ?? 0;
+    const netAtEndOfPeriod = last?.netRubCents ?? 0;
+    const currentPoint = [...chartData].reverse().find((p) => p.date <= todayKey);
+    const netAtCurrentDate = currentPoint?.netRubCents ?? netAtStart;
+
+    const actualPoints = chartDataForDisplay.filter((p) => p.date <= todayKey);
+    const forecastPoints = chartDataForDisplay.filter((p) => p.date > todayKey);
+    const actualNets = actualPoints.map((p) => p.netRubCents);
+    const forecastNets = forecastPoints.map((p) => p.netRubCents);
+    const maxActual = actualNets.length ? Math.max(...actualNets) : 0;
+    const minActual = actualNets.length ? Math.min(...actualNets) : 0;
+    const maxForecast = forecastNets.length ? Math.max(...forecastNets) : 0;
+    const minForecast = forecastNets.length ? Math.min(...forecastNets) : 0;
+
+    const growthToCurrent = netAtCurrentDate - netAtStart;
+    const growthToEnd = netAtEndOfPeriod - netAtStart;
+    const hasForecast = forecastPoints.length > 0;
+    const growthToCurrentPercent =
+      netAtStart !== 0 ? (growthToCurrent / Math.abs(netAtStart)) * 100 : null;
+    const growthToEndPercent =
+      netAtStart !== 0 ? (growthToEnd / Math.abs(netAtStart)) * 100 : null;
+
+    return {
+      netAtCurrentDate,
+      netAtEndOfPeriod,
+      maxActual,
+      minActual,
+      maxForecast,
+      minForecast,
+      growthToCurrent,
+      growthToEnd,
+      growthToCurrentPercent,
+      growthToEndPercent,
+      hasForecast,
+    };
+  }, [chartData, chartDataForDisplay, todayKey]);
+
+  const toPoints = (getValue: (p: (typeof chartDataForDisplay)[0]) => number) =>
+    chartDataForDisplay.map((point, index) => {
+      const progress = chartDataForDisplay.length <= 1 ? 0 : index / (chartDataForDisplay.length - 1);
+      const x = padding.left + innerWidth * progress;
+      const v = getValue(point);
+      const y = padding.top + innerHeight - innerHeight * valueToRatio(v);
+      return { x, y, value: v };
+    });
+
+  const assetsPoints = toPoints((p) => p.assetsRubCents / 100);
+  const liabilitiesPoints = toPoints((p) => p.liabilitiesRubCents / 100);
+  const netPoints = toPoints((p) => p.netRubCents / 100);
+
+  const assetsPast = splitAt > 0 ? assetsPoints.slice(0, splitAt) : [];
+  const assetsFuture = splitAt < chartDataForDisplay.length ? assetsPoints.slice(splitAt - 1) : [];
+  const liabilitiesPast = splitAt > 0 ? liabilitiesPoints.slice(0, splitAt) : [];
+  const liabilitiesFuture = splitAt < chartDataForDisplay.length ? liabilitiesPoints.slice(splitAt - 1) : [];
+  const netPast = splitAt > 0 ? netPoints.slice(0, splitAt) : [];
+  const netFuture = splitAt < chartDataForDisplay.length ? netPoints.slice(splitAt - 1) : [];
 
   const baselineValue = chartMin;
   const baselineRatio = (baselineValue - chartMin) / (chartMax - chartMin || 1);
   const baselineY = padding.top + innerHeight - innerHeight * baselineRatio;
-  const futureStartIndex = chartData.findIndex((point) => point.date > todayKey);
-  const pastPoints =
-    futureStartIndex === -1 ? points : points.slice(0, Math.max(futureStartIndex, 0));
-  const futurePoints =
-    futureStartIndex === -1 ? [] : points.slice(Math.max(futureStartIndex - 1, 0));
-  const pastLinePath = buildLinePath(pastPoints);
-  const futureLinePath = buildLinePath(futurePoints);
-  const pastAreaPath = buildAreaPath(pastPoints, baselineY);
-  const futureAreaPath = buildAreaPath(futurePoints, baselineY);
 
-  const hoverPoint = hoverIndex !== null ? points[hoverIndex] : null;
-  const hoverData = hoverIndex !== null ? chartData[hoverIndex] : null;
+  const assetsPastPath = buildLinePath(assetsPast);
+  const assetsFuturePath = buildLinePath(assetsFuture);
+  const liabilitiesPastPath = buildLinePath(liabilitiesPast);
+  const liabilitiesFuturePath = buildLinePath(liabilitiesFuture);
+  const netPastPath = buildLinePath(netPast);
+  const netFuturePath = buildLinePath(netFuture);
+
+  const assetsPastAreaPath = buildAreaPath(assetsPast, baselineY);
+  const liabilitiesPastAreaPath = buildAreaPath(liabilitiesPast, baselineY);
+  const netPastAreaPath = buildAreaPath(netPast, baselineY);
+
+  const hoverValueForY =
+    hoverIndex !== null && chartDataForDisplay.length > 0
+      ? showNetSeries
+        ? chartDataForDisplay[hoverIndex].netRubCents / 100
+        : hasAssets
+          ? chartDataForDisplay[hoverIndex].assetsRubCents / 100
+          : chartDataForDisplay[hoverIndex].liabilitiesRubCents / 100
+      : 0;
+  const hoverPoint =
+    hoverIndex !== null && chartDataForDisplay.length > 0
+      ? {
+          x: padding.left + innerWidth * (chartDataForDisplay.length <= 1 ? 0 : hoverIndex / (chartDataForDisplay.length - 1)),
+          y: padding.top + innerHeight - innerHeight * valueToRatio(hoverValueForY),
+        }
+      : null;
+  const hoverData = hoverIndex !== null ? chartDataForDisplay[hoverIndex] : null;
   const hoverIsFuture = hoverData ? hoverData.date > todayKey : false;
 
-  const dayMarks =
-    chartData.length >= 2
-      ? buildDayMarks(chartData[0].date, chartData[chartData.length - 1].date, width, padding)
-      : [];
+  const dayMarks = useMemo(() => {
+    if (chartDataForDisplay.length < 2) return [];
+    if (periodGranularity === "day") {
+      return buildDayMarks(
+        chartDataForDisplay[0].date,
+        chartDataForDisplay[chartDataForDisplay.length - 1].date,
+        width,
+        padding
+      );
+    }
+    const n = chartDataForDisplay.length;
+    return chartDataForDisplay.map((p, i) => ({
+      label:
+        periodGranularity === "week" && p.periodKey
+          ? (p.periodKey.match(/W(\d{2})$/)?.[1] ?? p.label)
+          : p.label,
+      x:
+        padding.left +
+        innerWidth * (n <= 1 ? 0 : i / (n - 1)),
+    }));
+  }, [chartDataForDisplay, periodGranularity, width, padding, innerWidth]);
+
+  const chartDividers = useMemo(() => {
+    if (chartDataForDisplay.length <= 1) return [];
+    const divs: { x: number; type: "month" | "year" }[] = [];
+    const n = chartDataForDisplay.length;
+    for (let i = 1; i < n; i++) {
+      const prevDate = chartDataForDisplay[i - 1].date;
+      const currDate = chartDataForDisplay[i].date;
+      const prevYear = parseInt(prevDate.slice(0, 4), 10);
+      const prevMonth = parseInt(prevDate.slice(5, 7), 10);
+      const currYear = parseInt(currDate.slice(0, 4), 10);
+      const currMonth = parseInt(currDate.slice(5, 7), 10);
+      const progress = (n - 1) > 0 ? i / (n - 1) : 0;
+      const x = padding.left + innerWidth * progress;
+      if (currYear !== prevYear) divs.push({ x, type: "year" });
+      else if (currMonth !== prevMonth) divs.push({ x, type: "month" });
+    }
+    return divs;
+  }, [chartDataForDisplay, padding.left, innerWidth]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1255,8 +1432,8 @@ export default function AssetsDynamicsPage() {
   }, [hoverPoint?.x, hoverIndex, chartSize.width]);
 
   const handlePointerMove = (event: React.MouseEvent<SVGSVGElement>) => {
-    if (!svgRef.current || chartData.length === 0) return;
-    if (chartData.length === 1) {
+    if (!svgRef.current || chartDataForDisplay.length === 0) return;
+    if (chartDataForDisplay.length === 1) {
       setHoverIndex(0);
       return;
     }
@@ -1277,82 +1454,219 @@ export default function AssetsDynamicsPage() {
       width - padding.right
     );
     const progress = (clampedX - padding.left) / innerWidth;
-    const index = Math.round(progress * (chartData.length - 1));
-    setHoverIndex(Math.min(Math.max(index, 0), chartData.length - 1));
+    const index = Math.round(progress * (chartDataForDisplay.length - 1));
+    setHoverIndex(Math.min(Math.max(index, 0), chartDataForDisplay.length - 1));
   };
 
   return (
-    <main className="min-h-screen px-4 sm:px-8 py-8">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
-          <div className="space-y-1.5">
-            <Label>Активы и обязательства</Label>
-            <ItemSelector
-              items={sortedItems}
-              selectedIds={selectedItemIds}
-              onChange={setSelectedItemIds}
-              selectionMode="multi"
-              placeholder="Начните вводить название"
-              emptyMessage="Нет активов и обязательств"
-              noResultsMessage="Ничего не найдено"
-              getItemTypeLabel={getItemTypeLabel}
-              getItemKind={(item) => resolveItemEffectiveKind(item, item.current_value_rub)}
-              getBankLogoUrl={itemCounterpartyLogoUrl}
-              getBankName={itemCounterpartyName}
-              getItemBalance={getItemDisplayBalanceCents}
-              itemCounts={itemTxCounts}
-              ariaLabel="Активы и обязательства"
-            />
+    <main className="min-h-screen px-8 py-8">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+        {error && <div className="text-sm text-red-600">{error}</div>}
+
+        <div className="space-y-4">
+          <div className="flex flex-nowrap items-start gap-6">
+            <div className="min-w-0 flex-1">
+              <FilterSection
+                label="Активы и обязательства"
+                onReset={() => setSelectedItemIds([])}
+                showReset={selectedItemIds.length > 0}
+              >
+                <ItemSelector
+                  items={sortedItems}
+                  selectedIds={selectedItemIds}
+                  onChange={setSelectedItemIds}
+                  selectionMode="multi"
+                  placeholder="Начните вводить название"
+                  emptyMessage="Нет активов и обязательств"
+                  noResultsMessage="Ничего не найдено"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={(item) => resolveItemEffectiveKind(item, item.current_value_rub)}
+                  getBankLogoUrl={itemCounterpartyLogoUrl}
+                  getBankName={itemCounterpartyName}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  itemCounts={itemTxCounts}
+                  ariaLabel="Активы и обязательства"
+                />
+              </FilterSection>
+            </div>
+            <div className="grid w-fit gap-2 shrink-0">
+              <Label style={{ color: ACTIVE_TEXT_DARK }} className="flex flex-wrap items-center gap-x-1.5 gap-y-0">
+                <span>Период</span>
+                <Tooltip
+                  content="Д — День, Н — Неделя, М — Месяц, Г — Год"
+                  side="top"
+                  className="inline-flex items-center"
+                >
+                  <span
+                    className="inline-flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 cursor-help"
+                    style={{ color: PLACEHOLDER_COLOR_DARK }}
+                    tabIndex={0}
+                  >
+                    <Info className="w-4 h-4" />
+                  </span>
+                </Tooltip>
+              </Label>
+              <SegmentedSelector
+                className="w-fit"
+                segmentWidth="auto"
+                options={[
+                  { value: "day", label: "Д" },
+                  { value: "week", label: "Н" },
+                  { value: "month", label: "М" },
+                  { value: "year", label: "Г" },
+                ]}
+                value={periodGranularity}
+                onChange={(value) => {
+                  const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+                  if (v === "day" || v === "week" || v === "month" || v === "year") setPeriodGranularity(v);
+                }}
+                multiple={false}
+              />
+            </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="assets-range-start">Дата от</Label>
-            <Input
-              id="assets-range-start"
-              type="date"
-              min={rangeMinStartKey || undefined}
-              value={rangeStartKey}
-              onChange={(event) => {
-                const next = event.target.value;
-                const normalized =
-                  !next || (rangeMinStartKey && next < rangeMinStartKey)
-                    ? rangeMinStartKey
-                    : next;
-                setRangeStart(normalized);
-                setRangeEnd((prev) => {
-                  const fallback = prev || defaultEndKey;
-                  return fallback < normalized ? normalized : fallback;
-                });
-              }}
-              className="h-10 border-2 border-border/70 bg-card shadow-none"
-              disabled={selectedItems.length === 0}
-            />
+          <div className="flex flex-nowrap items-end gap-6">
+            <div className="grid w-fit gap-2 shrink-0">
+              <Label style={{ color: ACTIVE_TEXT_DARK }}>История</Label>
+              <SegmentedSelector
+                className="w-fit"
+                segmentWidth="auto"
+                options={[
+                  { value: "all", label: "Все время" },
+                  { value: "last_month", label: "Мес" },
+                  { value: "last_quarter", label: "Квартал" },
+                  { value: "last_year", label: "Год" },
+                  { value: "custom", label: "Свой диапазон" },
+                ]}
+                value={historyPreset}
+                onChange={(value) => {
+                  const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+                  if (v === "all" || v === "last_month" || v === "last_quarter" || v === "last_year" || v === "custom") setHistoryPreset(v);
+                }}
+                multiple={false}
+              />
+            </div>
+            <div className="grid w-fit gap-2 shrink-0">
+              <Label style={{ color: ACTIVE_TEXT_DARK }}>Прогноз</Label>
+              <SegmentedSelector
+                className="w-fit"
+                segmentWidth="auto"
+                options={[
+                  { value: "next_month", label: "Мес" },
+                  { value: "next_quarter", label: "Квартал" },
+                  { value: "next_year", label: "Год" },
+                  { value: "custom", label: "Свой диапазон" },
+                ]}
+                value={forecastPreset}
+                onChange={(value) => {
+                  const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+                  if (v === "next_month" || v === "next_quarter" || v === "next_year" || v === "custom") setForecastPreset(v);
+                }}
+                multiple={false}
+              />
+            </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="assets-range-end">Дата до</Label>
-            <Input
-              id="assets-range-end"
-              type="date"
-              min={rangeStartKey || undefined}
-              value={rangeEndKey}
-              onChange={(event) => {
-                const next = event.target.value || defaultEndKey;
-                setRangeEnd(next < rangeStartKey ? rangeStartKey : next);
-              }}
-              className="h-10 border-2 border-border/70 bg-card shadow-none"
-              disabled={selectedItems.length === 0}
-            />
-          </div>
+          {(historyPreset === "custom" || forecastPreset === "custom") && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {historyPreset === "custom" && (
+                <DateField
+                  label="Диапазон от"
+                  min={rangeStartFloor || undefined}
+                  value={rangeStart}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setRangeStart(next);
+                    if (rangeEnd && next && rangeEnd < next) setRangeEnd(next);
+                  }}
+                  disabled={effectiveSelectedItems.length === 0}
+                />
+              )}
+              {forecastPreset === "custom" && (
+                <DateField
+                  label="Диапазон до"
+                  min={rangeStartKey || undefined}
+                  value={rangeEnd}
+                  onChange={(e) => setRangeEnd(e.target.value)}
+                  disabled={effectiveSelectedItems.length === 0}
+                />
+              )}
+            </div>
+          )}
         </div>
 
-        <Card className="overflow-hidden">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base text-slate-800">
-              Динамика эквивалента в рублях
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-0">
+        <div
+          className="relative rounded-lg overflow-hidden border-0 outline-none px-6 pt-6 pb-6"
+          style={{ backgroundColor: MODAL_BG }}
+        >
+          <div className="px-0">
+            {rangeStartKey && rangeEndKey && chartDataForDisplay.length > 0 && (
+              <div className="flex flex-wrap items-start gap-6 mb-6">
+                <div className="flex flex-col gap-1">
+                  <div className="text-[48px] font-semibold leading-tight">
+                    <span
+                      style={{ background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}
+                    >
+                      {formatRub(chartSummary.netAtCurrentDate)}
+                    </span>
+                    <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                    <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      {formatRub(chartSummary.netAtEndOfPeriod)}
+                    </span>
+                  </div>
+                  <div className="text-[14px] font-normal">
+                    <span style={{ color: PLACEHOLDER_COLOR_DARK }}>за период </span>
+                    <span style={{ color: ACTIVE_TEXT_DARK }}>
+                      {[rangeStartKey, rangeEndKey].map((k) => { const [y, m, d] = k.split("-"); return `${d}.${m}.${y.slice(2)}`; }).join(" - ")}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {[
+                    { label: "Max", value: chartSummary.maxActual, forecastValue: chartSummary.maxForecast },
+                    { label: "Min", value: chartSummary.minActual, forecastValue: chartSummary.minForecast },
+                    {
+                      label: "Прирост",
+                      value: chartSummary.growthToCurrentPercent,
+                      forecastValue: chartSummary.growthToEndPercent,
+                      asPercent: true,
+                      alwaysTwo: true,
+                    },
+                  ].map(({ label, value, forecastValue, signed, alwaysTwo, asPercent }) => (
+                    <div key={label} className="flex items-center gap-2">
+                      <span
+                        className="w-20 shrink-0 text-[14px] font-normal"
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                      >
+                        {label}
+                      </span>
+                      <span
+                        className="min-w-[10rem] shrink-0 rounded-[9px] px-2 py-1 text-right text-[14px] font-normal tabular-nums"
+                        style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}
+                      >
+                        {asPercent
+                          ? formatGrowthPercent(value as number | null)
+                          : signed
+                            ? formatSignedValue(value as number, formatRub)
+                            : formatRub(value as number)}
+                        {(alwaysTwo || chartSummary.hasForecast) && (
+                          <>
+                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                              {asPercent
+                                ? formatGrowthPercent(forecastValue as number | null)
+                                : signed
+                                  ? formatSignedValue(forecastValue as number, formatRub)
+                                  : formatRub(forecastValue as number)}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div
               className="relative py-6"
               style={{
@@ -1366,67 +1680,59 @@ export default function AssetsDynamicsPage() {
                 </div>
               )}
 
-              {!error && selectedItems.length === 0 && !loading && (
+              {!error && effectiveSelectedItems.length === 0 && !loading && (
                 <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
-                  Выберите активы или обязательства для построения отчета.
+                  Нет активов и обязательств для построения отчета.
                 </div>
               )}
 
-              {!error && selectedItems.length > 0 && chartData.length === 0 && !loading && (
+              {!error && effectiveSelectedItems.length > 0 && chartDataForDisplay.length === 0 && !loading && (
                 <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Нет данных для выбранного периода.
                 </div>
               )}
 
-              {!error && selectedItems.length > 0 && chartData.length > 0 && (
-                <div ref={chartRef} className="relative h-80 w-full">
+              {!error && effectiveSelectedItems.length > 0 && chartDataForDisplay.length > 0 && (
+                <div
+                  ref={chartRef}
+                  className="relative w-full min-w-0"
+                  style={{ aspectRatio: `${width}/${height}` }}
+                >
                   {hoverPoint && hoverData && (
                     <div
                       ref={tooltipRef}
-                      className="pointer-events-none absolute z-20 max-w-xs rounded-2xl bg-gradient-to-r from-[#7F5CFF] via-[#8B6CFF] to-[#9B7CFF] px-4 py-3 text-white shadow-lg"
+                      className="pointer-events-none absolute z-20 whitespace-nowrap rounded-[9px] px-4 py-3 text-[14px] font-normal text-right"
                       style={{
-                        left:
-                          tooltipLeft !== null ? `${tooltipLeft}px` : `${hoverPoint.x}px`,
-                        top: `${(hoverPoint.y / height) * 100}%`,
-                        transform: "translate(-50%, -120%)",
+                        left: tooltipLeft != null ? `${tooltipLeft}px` : `${hoverPoint.x}px`,
+                        top: 0,
+                        transform: "translate(-50%, 0)",
+                        backgroundColor: MODAL_BG,
                       }}
                     >
-                      <div className="text-xs opacity-80">
-                        {formatDateLabel(hoverData.date)}
+                      <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                        {periodGranularity === "week" && hoverData.periodKey
+                          ? formatWeekPeriodAsDateRange(hoverData.periodKey)
+                          : hoverData.label}
                       </div>
-                      <div className="text-sm font-semibold">
-                        {hoverData.totalRubCents === null
-                          ? "—"
-                          : formatSignedValue(hoverData.totalRubCents, formatRub)}
-                      </div>
-                      <div className="mt-2 space-y-1 text-xs">
-                        {selectedItems.map((item) => {
-                          const rubValue = hoverData.itemRubValues[item.id];
-                          const valueCents = hoverData.itemValues[item.id];
-                          const effectiveKind =
-                            valueCents === null || valueCents === undefined
-                              ? item.kind
-                              : resolveItemEffectiveKind(item, valueCents);
-                          const signedRub =
-                            rubValue === null
-                              ? null
-                              : effectiveKind === "LIABILITY"
-                              ? -rubValue
-                              : rubValue;
-                          return (
-                            <div
-                              key={item.id}
-                              className="flex items-center justify-between gap-3"
-                            >
-                              <span className="truncate opacity-80">{item.name}</span>
-                              <span>
-                                {signedRub === null
-                                  ? "—"
-                                  : formatSignedValue(signedRub, formatRub)}
-                              </span>
-                            </div>
-                          );
-                        })}
+                      <div className="mt-2 space-y-1">
+                        {hasAssets && (
+                          <div className="flex items-center justify-between gap-3" style={{ color: GREEN }}>
+                            <span>Активы</span>
+                            <span>{formatRub(hoverData.assetsRubCents)}</span>
+                          </div>
+                        )}
+                        {hasLiabilities && (
+                          <div className="flex items-center justify-between gap-3" style={{ color: RED }}>
+                            <span>Пассивы</span>
+                            <span>{formatRub(hoverData.liabilitiesRubCents)}</span>
+                          </div>
+                        )}
+                        {showNetSeries && (
+                          <div className="flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                            <span>Чистые активы</span>
+                            <span>{formatSignedValue(hoverData.netRubCents, formatRub)}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1440,86 +1746,112 @@ export default function AssetsDynamicsPage() {
                     onMouseLeave={() => setHoverIndex(null)}
                   >
                     <defs>
-                      <linearGradient id="assetsArea" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#8D63FF" stopOpacity="0.35" />
-                        <stop offset="100%" stopColor="#8D63FF" stopOpacity="0" />
+                      <linearGradient id="assetsAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={GREEN} stopOpacity="0.35" />
+                        <stop offset="100%" stopColor={GREEN} stopOpacity="0" />
                       </linearGradient>
-                      <linearGradient
-                        id="assetsAreaFuture"
-                        x1="0"
-                        y1="0"
-                        x2="0"
-                        y2="1"
-                      >
-                        <stop offset="0%" stopColor="#F59E0B" stopOpacity="0.35" />
-                        <stop offset="100%" stopColor="#F59E0B" stopOpacity="0" />
+                      <linearGradient id="liabilitiesAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={RED} stopOpacity="0.35" />
+                        <stop offset="100%" stopColor={RED} stopOpacity="0" />
                       </linearGradient>
-                      <linearGradient id="assetsLine" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0%" stopColor="#7F5CFF" />
-                        <stop offset="100%" stopColor="#A089FF" />
+                      <linearGradient id="netAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={ACCENT} stopOpacity="0.35" />
+                        <stop offset="100%" stopColor={ACCENT} stopOpacity="0" />
                       </linearGradient>
-                      <filter id="assetsGlow" x="-50%" y="-50%" width="200%" height="200%">
-                        <feDropShadow
-                          dx="0"
-                          dy="10"
-                          stdDeviation="8"
-                          floodColor="#8D63FF"
-                          floodOpacity="0.25"
-                        />
-                      </filter>
                     </defs>
-
-                    <g>
-                      {ticks.map((tick) => {
-                        const ratio = (tick - chartMin) / (chartMax - chartMin || 1);
-                        const y = padding.top + innerHeight - innerHeight * ratio;
-                        return (
-                          <g key={tick}>
-                            <line
-                              x1={padding.left}
-                              x2={width - padding.right}
-                              y1={y}
-                              y2={y}
-                              stroke="#DED8FF"
-                              strokeDasharray="4 8"
-                            />
-                            <text
-                              x={padding.left - 12}
-                              y={y + 4}
-                              textAnchor="end"
-                              fontSize="12"
-                              fill="#9A93BF"
-                            >
-                              {formatTick(tick)}
-                            </text>
-                          </g>
-                        );
-                      })}
-                    </g>
-
-                    {pastAreaPath && <path d={pastAreaPath} fill="url(#assetsArea)" />}
-                    {futureAreaPath && (
-                      <path d={futureAreaPath} fill="url(#assetsAreaFuture)" />
+                    {hasAssets && assetsPastAreaPath && (
+                      <path d={assetsPastAreaPath} fill="url(#assetsAreaGrad)" />
                     )}
-                    {pastLinePath && (
+                    {hasLiabilities && liabilitiesPastAreaPath && (
+                      <path d={liabilitiesPastAreaPath} fill="url(#liabilitiesAreaGrad)" />
+                    )}
+                    {showNetSeries && netPastAreaPath && (
+                      <path d={netPastAreaPath} fill="url(#netAreaGrad)" />
+                    )}
+                    {hasAssets && assetsPastPath && (
                       <path
-                        d={pastLinePath}
+                        d={assetsPastPath}
                         fill="none"
-                        stroke="url(#assetsLine)"
-                        strokeWidth="3"
+                        stroke={GREEN}
+                        strokeWidth="2.5"
                         strokeLinecap="round"
-                        filter="url(#assetsGlow)"
+                        strokeLinejoin="round"
                       />
                     )}
-                    {futureLinePath && (
+                    {hasAssets && assetsFuturePath && (
                       <path
-                        d={futureLinePath}
+                        d={assetsFuturePath}
                         fill="none"
-                        stroke="#F59E0B"
-                        strokeWidth="3"
+                        stroke={GREEN}
+                        strokeWidth="2.5"
                         strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeDasharray="8 6"
                       />
                     )}
+                    {hasLiabilities && liabilitiesPastPath && (
+                      <path
+                        d={liabilitiesPastPath}
+                        fill="none"
+                        stroke={RED}
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+                    {hasLiabilities && liabilitiesFuturePath && (
+                      <path
+                        d={liabilitiesFuturePath}
+                        fill="none"
+                        stroke={RED}
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeDasharray="8 6"
+                      />
+                    )}
+                    {showNetSeries && netPastPath && (
+                      <path
+                        d={netPastPath}
+                        fill="none"
+                        stroke={ACCENT}
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+                    {showNetSeries && netFuturePath && (
+                      <path
+                        d={netFuturePath}
+                        fill="none"
+                        stroke={ACCENT}
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeDasharray="8 6"
+                      />
+                    )}
+                    {chartDividers.map((div, idx) => (
+                      <line
+                        key={`div-${idx}-${div.x}`}
+                        x1={div.x}
+                        x2={div.x}
+                        y1={padding.top}
+                        y2={padding.top + innerHeight}
+                        stroke={PLACEHOLDER_COLOR_DARK}
+                        strokeWidth={div.type === "year" ? 1.5 : 1}
+                        strokeOpacity={div.type === "year" ? 0.9 : 0.5}
+                      />
+                    ))}
+                    <line
+                      x1={padding.left}
+                      x2={width - padding.right}
+                      y1={zeroY}
+                      y2={zeroY}
+                      stroke={PLACEHOLDER_COLOR_DARK}
+                      strokeWidth={1.5}
+                      strokeOpacity={0.9}
+                    />
                     {hoverPoint && (
                       <>
                         <line
@@ -1527,200 +1859,38 @@ export default function AssetsDynamicsPage() {
                           x2={hoverPoint.x}
                           y1={padding.top}
                           y2={padding.top + innerHeight}
-                          stroke={hoverIsFuture ? "#FDE68A" : "#CFC5FF"}
+                          stroke={PLACEHOLDER_COLOR_DARK}
                           strokeDasharray="4 6"
                         />
                         <circle
                           cx={hoverPoint.x}
                           cy={hoverPoint.y}
                           r="6"
-                          fill={hoverIsFuture ? "#F59E0B" : "#7F5CFF"}
-                          stroke={hoverIsFuture ? "#FEF3C7" : "#F3EDFF"}
-                          strokeWidth="4"
+                          fill={showNetSeries ? ACCENT : hasAssets ? GREEN : RED}
+                          stroke="#fff"
+                          strokeWidth="2"
                         />
                       </>
                     )}
-                    {dayMarks.map((mark, index) => {
-                      const anchor =
-                        index === 0
-                          ? "start"
-                          : index === dayMarks.length - 1
-                          ? "end"
-                          : "middle";
-                      return (
+                    {dayMarks.map((mark, idx) => (
                       <text
-                        key={`${mark.label}-${mark.x}`}
+                        key={`${mark.label}-${idx}`}
                         x={mark.x}
                         y={height - 12}
-                        textAnchor={anchor}
-                        fontSize="12"
-                        fill="#6F67B3"
-                        fontWeight={500}
+                        textAnchor={idx === 0 ? "start" : idx === dayMarks.length - 1 ? "end" : "middle"}
+                        fontSize="14"
+                        fontWeight={400}
+                        fill={ACTIVE_TEXT_DARK}
                       >
                         {mark.label}
                       </text>
-                      );
-                    })}
+                    ))}
                   </svg>
                 </div>
               )}
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="px-0">
-            {ratesLoading && (
-              <div className="px-8 text-sm text-muted-foreground">
-                Загружаем курсы валют...
-              </div>
-            )}
-            {marketPricesLoading && (
-              <div className="px-8 text-sm text-muted-foreground">
-                Загружаем котировки MOEX...
-              </div>
-            )}
-
-            {!ratesLoading && !error && selectedItems.length === 0 && (
-              <div className="px-8 text-sm text-muted-foreground">
-                Выберите активы или обязательства для просмотра таблицы.
-              </div>
-            )}
-
-            {!error && selectedItems.length > 0 && (
-              <div className="overflow-x-auto">
-                <Table className="table-fixed min-w-full">
-                  <TableHeader className="[&_tr]:border-b-2 [&_tr]:border-border/70">
-                    <TableRow className="border-b-2 border-border/70">
-                      <TableHead className="w-32 min-w-32 pl-8 font-medium text-muted-foreground whitespace-normal">
-                        Дата
-                      </TableHead>
-                      {showCurrencyColumns && singleCurrencyCode && (
-                        <>
-                          <TableHead className="w-36 min-w-36 text-right font-medium text-muted-foreground whitespace-normal">
-                            Стоимость, {singleCurrencyCode}
-                          </TableHead>
-                          <TableHead className="w-28 min-w-28 text-right font-medium text-muted-foreground whitespace-normal">
-                            Курс {singleCurrencyCode}
-                          </TableHead>
-                        </>
-                      )}
-                      <TableHead className="w-44 min-w-44 text-right font-medium text-muted-foreground whitespace-normal">
-                        Итого эквивалент в рублях
-                      </TableHead>
-                      {selectedItems.map((item, index) => (
-                        <TableHead
-                          key={item.id}
-                          className={cn(
-                            "min-w-[180px] text-right font-medium text-muted-foreground whitespace-normal",
-                            index === selectedItems.length - 1 && "pr-8"
-                          )}
-                        >
-                          <div className="flex flex-col items-end">
-                            <span className="truncate max-w-[160px]">{item.name}</span>
-                          </div>
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dailyRows.length === 0 ? (
-                      <TableRow>
-                        <TableCell
-                          colSpan={selectedItems.length + (showCurrencyColumns ? 4 : 2)}
-                          className="px-8 text-center text-sm text-muted-foreground"
-                        >
-                          Нет данных для выбранного периода.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      dailyRows.map((row) => {
-                        const isFuture = row.date > todayKey;
-                        const totalRub = row.totalRubCents ?? 0;
-                        return (
-                          <TableRow
-                            key={row.date}
-                            className={cn(
-                              "border-b-2 border-border/70",
-                              isFuture && "bg-amber-50"
-                            )}
-                          >
-                            <TableCell
-                              className={cn(
-                                "pl-8 whitespace-nowrap",
-                                isFuture && "font-medium text-amber-700"
-                              )}
-                            >
-                              {formatDateLabel(row.date)}
-                            </TableCell>
-                            {showCurrencyColumns && singleCurrencyCode && (
-                              <>
-                                <TableCell
-                                  className={cn(
-                                    "text-right font-semibold",
-                                    (row.totalCurrencyCents ?? 0) < 0 && "text-red-600"
-                                  )}
-                                >
-                                  {row.totalCurrencyCents === null
-                                    ? "—"
-                                    : formatSignedValue(
-                                        row.totalCurrencyCents,
-                                        formatAmount
-                                      )}
-                                </TableCell>
-                                <TableCell className="text-right text-sm text-muted-foreground">
-                                  {row.rate === null ? "—" : formatRate(row.rate)}
-                                </TableCell>
-                              </>
-                            )}
-                            <TableCell
-                              className={cn(
-                                "text-right font-semibold",
-                                totalRub < 0 && "text-red-600"
-                              )}
-                            >
-                              {row.totalRubCents === null
-                                ? "—"
-                                : formatSignedValue(row.totalRubCents, formatRub)}
-                            </TableCell>
-                            {selectedItems.map((item, index) => {
-                              const rubValue = row.itemRubValues[item.id];
-                              const valueCents = row.itemValues[item.id];
-                              const effectiveKind =
-                                valueCents === null || valueCents === undefined
-                                  ? item.kind
-                                  : resolveItemEffectiveKind(item, valueCents);
-                              const signedValue =
-                                rubValue === null
-                                  ? null
-                                  : effectiveKind === "LIABILITY"
-                                  ? -rubValue
-                                  : rubValue;
-                              return (
-                                <TableCell
-                                  key={`${row.date}-${item.id}`}
-                                  className={cn(
-                                    "text-right",
-                                    effectiveKind === "LIABILITY" && "text-red-600",
-                                    index === selectedItems.length - 1 && "pr-8"
-                                  )}
-                                >
-                                  {signedValue === null
-                                    ? "—"
-                                    : formatSignedValue(signedValue, formatRub)}
-                                </TableCell>
-                              );
-                            })}
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </main>
   );

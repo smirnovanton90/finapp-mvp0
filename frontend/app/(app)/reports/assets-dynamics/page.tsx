@@ -244,7 +244,7 @@ function formatSignedValue(valueInCents: number, formatter: (value: number) => s
 }
 
 function formatGrowthPercent(percent: number | null): string {
-  if (percent == null || Number.isNaN(percent)) return "—";
+  if (percent == null || Number.isNaN(percent) || percent === 0) return "–";
   const formatted = new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
@@ -1585,7 +1585,7 @@ export default function AssetsDynamicsPage() {
               <Label style={{ color: ACTIVE_TEXT_DARK }} className="flex flex-wrap items-center gap-x-1.5 gap-y-0">
                 <span>Период</span>
                 <Tooltip
-                  content="Д — День, Н — Неделя, М — Месяц, Г — Год"
+                  content="Д – День, Н – Неделя, М – Месяц, Г – Год"
                   side="top"
                   className="inline-flex items-center"
                 >
@@ -2093,10 +2093,12 @@ export default function AssetsDynamicsPage() {
             {[
               { kind: "ASSET" as const, label: "Активы", items: effectiveSelectedItems.filter((i) => i.kind === "ASSET") },
               { kind: "LIABILITY" as const, label: "Обязательства", items: effectiveSelectedItems.filter((i) => i.kind === "LIABILITY") },
-            ].map((section) => {
+            ]
+              .filter((section) => section.items.length > 0)
+              .map((section) => {
               const isLiabilitySection = section.kind === "LIABILITY";
               const positiveIsGood = !isLiabilitySection;
-              const growthPositiveIsGood = isLiabilitySection ? !positiveIsGood : positiveIsGood;
+              const growthPositiveIsGood = positiveIsGood;
               const totalRubByDate = dateSnapshotRows.map((row) =>
                 section.items.reduce((sum, item) => {
                   const rubCents = row.itemRubValues[item.id] ?? null;
@@ -2108,7 +2110,9 @@ export default function AssetsDynamicsPage() {
               );
               const totalGrowthPercent =
                 dateSnapshotRows.length === 2 && totalRubByDate[0] !== 0
-                  ? (totalRubByDate[1] - totalRubByDate[0]) / Math.abs(totalRubByDate[0]) * 100
+                  ? isLiabilitySection
+                    ? (Math.abs(totalRubByDate[1]) - Math.abs(totalRubByDate[0])) / Math.abs(totalRubByDate[0]) * 100
+                    : (totalRubByDate[1] - totalRubByDate[0]) / Math.abs(totalRubByDate[0]) * 100
                   : null;
               return (
                 <div
@@ -2121,7 +2125,7 @@ export default function AssetsDynamicsPage() {
                       <table className="w-full text-left border-collapse">
                             <thead>
                               <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
-                                <th className="pl-8 pr-6 py-3 text-sm font-medium">Актив / обязательство</th>
+                                <th className="pl-8 pr-6 py-3 text-sm font-medium">{section.kind === "ASSET" ? "Актив" : "Обязательство"}</th>
                                 {dateSnapshotRows.map((_, i) => (
                                   <Fragment key={clickedChartDates[i]}>
                                     {i === 1 && dateSnapshotRows.length === 2 && (
@@ -2147,9 +2151,11 @@ export default function AssetsDynamicsPage() {
                                 });
                                 const rowGrowthPercent =
                                   dateSnapshotRows.length === 2 && rowRubByDate[0] != null && rowRubByDate[1] != null && rowRubByDate[0] !== 0
-                                    ? ((rowRubByDate[1] ?? 0) - (rowRubByDate[0] ?? 0)) / Math.abs(rowRubByDate[0]) * 100
+                                    ? isLiabilitySection
+                                      ? (Math.abs(rowRubByDate[1] ?? 0) - Math.abs(rowRubByDate[0] ?? 0)) / Math.abs(rowRubByDate[0]) * 100
+                                      : ((rowRubByDate[1] ?? 0) - (rowRubByDate[0] ?? 0)) / Math.abs(rowRubByDate[0]) * 100
                                     : null;
-                                const growthColor = rowGrowthPercent != null ? ((rowGrowthPercent >= 0) === growthPositiveIsGood ? GREEN : RED) : undefined;
+                                const growthColor = rowGrowthPercent != null && rowGrowthPercent !== 0 ? ((rowGrowthPercent >= 0) === growthPositiveIsGood ? GREEN : RED) : undefined;
                                 return (
                                   <tr key={item.id} className="border-t border-white/10">
                                     <td className="pl-8 pr-6 py-3 text-sm">
@@ -2188,17 +2194,17 @@ export default function AssetsDynamicsPage() {
                                         <Fragment key={row.date}>
                                           {dateIdx === 1 && dateSnapshotRows.length === 2 && (
                                             <td className="px-3 py-3 text-center tabular-nums text-sm" style={growthColor ? { color: growthColor } : undefined}>
-                                              {rowGrowthPercent != null ? formatGrowthPercent(rowGrowthPercent) : "—"}
+                                              {rowGrowthPercent != null ? formatGrowthPercent(rowGrowthPercent) : "–"}
                                             </td>
                                           )}
                                           <td className={`px-4 py-3 text-right tabular-nums ${dateIdx === dateSnapshotRows.length - 1 ? "pr-8" : ""}`}>
                                             <div className="flex flex-col items-end gap-0.5">
                                               <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
-                                                {rubCents == null ? "—" : formatSignedValue(signedRub ?? 0, formatRub)}
+                                                {rubCents == null ? "–" : isLiabilitySection ? formatRub(Math.abs(signedRub ?? 0)) : formatSignedValue(signedRub ?? 0, formatRub)}
                                               </span>
                                               {showCurrencyAmount && (
                                                 <span className="text-[10px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                                  {formatSignedValue(signedValue ?? 0, formatCur)} {currencyCode}
+                                                  {isLiabilitySection ? formatCur(Math.abs(signedValue ?? 0)) : formatSignedValue(signedValue ?? 0, formatCur)} {currencyCode}
                                                 </span>
                                               )}
                                             </div>
@@ -2214,18 +2220,18 @@ export default function AssetsDynamicsPage() {
                                 {dateSnapshotRows.map((_, dateIdx) => {
                                   const totalRub = totalRubByDate[dateIdx];
                                   const totalGrowthColor =
-                                    dateSnapshotRows.length === 2 && dateIdx === 1 && totalGrowthPercent != null
+                                    dateSnapshotRows.length === 2 && dateIdx === 1 && totalGrowthPercent != null && totalGrowthPercent !== 0
                                       ? (totalGrowthPercent >= 0) === growthPositiveIsGood ? GREEN : RED
                                       : undefined;
                                   return (
                                     <Fragment key={clickedChartDates[dateIdx]}>
                                       {dateIdx === 1 && dateSnapshotRows.length === 2 && (
                                         <td className="px-3 py-3 text-center tabular-nums text-sm" style={totalGrowthColor ? { color: totalGrowthColor } : undefined}>
-                                          {totalGrowthPercent != null ? formatGrowthPercent(totalGrowthPercent) : "—"}
+                                          {totalGrowthPercent != null ? formatGrowthPercent(totalGrowthPercent) : "–"}
                                         </td>
                                       )}
                                       <td className={`px-4 py-3 text-right tabular-nums text-sm ${dateIdx === dateSnapshotRows.length - 1 ? "pr-8" : ""}`} style={{ color: ACTIVE_TEXT_DARK }}>
-                                        {formatSignedValue(totalRub, formatRub)}
+                                        {isLiabilitySection ? formatRub(Math.abs(totalRub)) : formatSignedValue(totalRub, formatRub)}
                                       </td>
                                     </Fragment>
                                   );

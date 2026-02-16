@@ -2157,7 +2157,7 @@ export default function AssetsDynamicsPage() {
                                     : null;
                                 const growthColor = rowGrowthPercent != null && rowGrowthPercent !== 0 ? ((rowGrowthPercent >= 0) === growthPositiveIsGood ? GREEN : RED) : undefined;
                                 return (
-                                  <tr key={item.id} className="border-t border-white/10">
+                                  <tr key={item.id} className="border-t border-white/10 transition-colors hover:bg-white/[0.06]">
                                     <td className="pl-8 pr-6 py-3 text-sm">
                                       <div className="flex items-center gap-2 flex-wrap">
                                         <div className="h-5 w-5 shrink-0 rounded-sm overflow-hidden flex items-center justify-center">

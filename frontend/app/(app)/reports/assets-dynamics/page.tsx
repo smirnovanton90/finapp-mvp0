@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import {
@@ -23,9 +23,10 @@ import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { FilterSection } from "@/components/filter-panel";
 import { DateField } from "@/components/ui/form-field";
+import { AssetItemIcon } from "@/components/asset-item-icon";
 import { ItemSelector } from "@/components/item-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
-import { ACCENT, ACTIVE_TEXT_DARK, BACKGROUND_DT, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED } from "@/lib/colors";
+import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, BACKGROUND_DT, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
 import {
   formatWeekPeriodAsDateRange,
@@ -214,6 +215,18 @@ function toCbrDate(value: string) {
 function formatDateLabel(dateKey: string) {
   const [year, month, day] = dateKey.split("-");
   return `${day}.${month}.${year}`;
+}
+
+const CURRENCY_BADGE_CLASSES: Record<string, string> = {
+  RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
+  USD: "bg-[#2E7D32]/20 text-[#2E7D32]",
+  EUR: "bg-[#003399]/20 text-[#003399]",
+  JPY: "bg-[#BC002D]/20 text-[#BC002D]",
+  CNY: "bg-[#DE2910]/20 text-[#DE2910]",
+};
+
+function getCurrencyBadgeClass(code: string) {
+  return CURRENCY_BADGE_CLASSES[code] ?? "bg-muted/20 text-slate-600";
 }
 
 
@@ -501,6 +514,7 @@ export default function AssetsDynamicsPage() {
   const [error, setError] = useState<string | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [tooltipLeft, setTooltipLeft] = useState<number | null>(null);
+  const [clickedChartDates, setClickedChartDates] = useState<string[]>([]);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -1354,6 +1368,44 @@ export default function AssetsDynamicsPage() {
   const hoverData = hoverIndex !== null ? chartDataForDisplay[hoverIndex] : null;
   const hoverIsFuture = hoverData ? hoverData.date > todayKey : false;
 
+  const markerPointsForClickedDates = useMemo(() => {
+    if (clickedChartDates.length === 0 || chartDataForDisplay.length === 0) return [];
+    const points = showNetSeries ? netPoints : hasAssets ? assetsPoints : liabilitiesPoints;
+    return clickedChartDates.map((dateKey, i) => {
+      const index = chartDataForDisplay.findIndex((p) => p.date === dateKey);
+      if (index === -1) return null;
+      const pt = points[index];
+      if (!pt) return null;
+      return { dateKey, label: String(i + 1), x: pt.x, y: pt.y };
+    }).filter((m): m is NonNullable<typeof m> => m != null);
+  }, [clickedChartDates, chartDataForDisplay, netPoints, assetsPoints, liabilitiesPoints, showNetSeries, hasAssets]);
+
+  const arrowFromFirstToSecond = useMemo(() => {
+    if (markerPointsForClickedDates.length !== 2 || chartDataForDisplay.length === 0) return null;
+    const [m1, m2] = markerPointsForClickedDates;
+    const getValueRub = (p: (typeof chartDataForDisplay)[0]) =>
+      showNetSeries ? p.netRubCents / 100 : hasAssets ? p.assetsRubCents / 100 : p.liabilitiesRubCents / 100;
+    const point1 = chartDataForDisplay.find((p) => p.date === m1.dateKey);
+    const point2 = chartDataForDisplay.find((p) => p.date === m2.dateKey);
+    if (!point1 || !point2) return null;
+    const value1Rub = getValueRub(point1);
+    const value2Rub = getValueRub(point2);
+    const growthRub = value2Rub - value1Rub;
+    const growthRubCents = Math.round(growthRub * 100);
+    const growthPercent =
+      value1Rub !== 0 ? (growthRub / Math.abs(value1Rub)) * 100 : null;
+    return {
+      x1: m1.x,
+      y1: m1.y,
+      x2: m2.x,
+      y2: m2.y,
+      midX: (m1.x + m2.x) / 2,
+      midY: (m1.y + m2.y) / 2,
+      growthRubCents,
+      growthPercent,
+    };
+  }, [markerPointsForClickedDates, chartDataForDisplay, showNetSeries, hasAssets]);
+
   const dayMarks = useMemo(() => {
     if (chartDataForDisplay.length < 2) return [];
     if (periodGranularity === "day") {
@@ -1457,6 +1509,46 @@ export default function AssetsDynamicsPage() {
     const index = Math.round(progress * (chartDataForDisplay.length - 1));
     setHoverIndex(Math.min(Math.max(index, 0), chartDataForDisplay.length - 1));
   };
+
+  const handleChartClick = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (!svgRef.current || chartDataForDisplay.length === 0) return;
+    const ctm = svgRef.current.getScreenCTM();
+    if (!ctm) return;
+    let svgX = 0;
+    if (typeof DOMPoint !== "undefined") {
+      const point = new DOMPoint(event.clientX, event.clientY);
+      svgX = point.matrixTransform(ctm.inverse()).x;
+    } else {
+      const point = svgRef.current.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      svgX = point.matrixTransform(ctm.inverse()).x;
+    }
+    const clampedX = Math.min(
+      Math.max(svgX, padding.left),
+      width - padding.right
+    );
+    const progress = (clampedX - padding.left) / innerWidth;
+    const index = Math.round(progress * (chartDataForDisplay.length - 1));
+    const safeIndex = Math.min(Math.max(index, 0), chartDataForDisplay.length - 1);
+    const date = chartDataForDisplay[safeIndex]?.date;
+    if (!date) return;
+    setClickedChartDates((prev) => {
+      if (prev.length === 0) return [date];
+      if (prev.length === 1) {
+        if (prev[0] === date) return prev;
+        return [prev[0], date];
+      }
+      return [date];
+    });
+  };
+
+  const dateSnapshotRows = useMemo(() => {
+    if (clickedChartDates.length === 0) return [];
+    return clickedChartDates
+      .map((dateKey) => dailyRows.find((r) => r.date === dateKey))
+      .filter((r): r is DailyRow => r != null);
+  }, [clickedChartDates, dailyRows]);
 
   return (
     <main className="min-h-screen px-8 py-8">
@@ -1744,6 +1836,8 @@ export default function AssetsDynamicsPage() {
                     aria-label="График динамики стоимости активов"
                     onMouseMove={handlePointerMove}
                     onMouseLeave={() => setHoverIndex(null)}
+                    onClick={handleChartClick}
+                    className="cursor-pointer"
                   >
                     <defs>
                       <linearGradient id="assetsAreaGrad" x1="0" y1="0" x2="0" y2="1">
@@ -1758,6 +1852,26 @@ export default function AssetsDynamicsPage() {
                         <stop offset="0%" stopColor={ACCENT} stopOpacity="0.35" />
                         <stop offset="100%" stopColor={ACCENT} stopOpacity="0" />
                       </linearGradient>
+                      <marker
+                        id="arrowheadGreen"
+                        markerWidth="10"
+                        markerHeight="7"
+                        refX="9"
+                        refY="3.5"
+                        orient="auto"
+                      >
+                        <polygon points="0 0, 10 3.5, 0 7" fill={GREEN} />
+                      </marker>
+                      <marker
+                        id="arrowheadRed"
+                        markerWidth="10"
+                        markerHeight="7"
+                        refX="9"
+                        refY="3.5"
+                        orient="auto"
+                      >
+                        <polygon points="0 0, 10 3.5, 0 7" fill={RED} />
+                      </marker>
                     </defs>
                     {hasAssets && assetsPastAreaPath && (
                       <path d={assetsPastAreaPath} fill="url(#assetsAreaGrad)" />
@@ -1852,6 +1966,75 @@ export default function AssetsDynamicsPage() {
                       strokeWidth={1.5}
                       strokeOpacity={0.9}
                     />
+                    {arrowFromFirstToSecond && (() => {
+                      const { x1, y1, x2, y2, midX, growthRubCents, growthPercent } = arrowFromFirstToSecond;
+                      const inset = 14;
+                      const yTop = padding.top + 8;
+                      const y1Start = y1 + inset;
+                      const y2End = y2 - inset;
+                      const pathD = `M ${x1} ${y1Start} L ${x1} ${yTop} L ${x2} ${yTop} L ${x2} ${y2End}`;
+                      const labelY = yTop - 10;
+                      const isLiabilitiesSeries = !showNetSeries && !hasAssets && hasLiabilities;
+                      const positiveIsGood = !isLiabilitiesSeries;
+                      const arrowColor = (growthRubCents >= 0) === positiveIsGood ? GREEN : RED;
+                      const markerEnd = (growthRubCents >= 0) === positiveIsGood ? "url(#arrowheadGreen)" : "url(#arrowheadRed)";
+                      return (
+                        <g>
+                          <path
+                            d={pathD}
+                            fill="none"
+                            stroke={arrowColor}
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            markerEnd={markerEnd}
+                          />
+                          <text
+                            x={midX}
+                            y={labelY}
+                            textAnchor="middle"
+                            fontSize="11"
+                            fontWeight={500}
+                            fill={arrowColor}
+                          >
+                            {formatSignedValue(growthRubCents, formatRub)}  ({formatGrowthPercent(growthPercent)})
+                          </text>
+                        </g>
+                      );
+                    })()}
+                    {markerPointsForClickedDates.map((m) => (
+                      <g key={m.dateKey}>
+                        <line
+                          x1={m.x}
+                          x2={m.x}
+                          y1={padding.top}
+                          y2={padding.top + innerHeight}
+                          stroke={PLACEHOLDER_COLOR_DARK}
+                          strokeDasharray="4 6"
+                          strokeOpacity={0.7}
+                        />
+                        <rect
+                          x={m.x - 12}
+                          y={m.y - 12}
+                          width={24}
+                          height={24}
+                          rx={9}
+                          ry={9}
+                          fill={ACCENT2}
+                        />
+                        <text
+                          x={m.x}
+                          y={m.y}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize="12"
+                          fontWeight={600}
+                          fill={ACTIVE_TEXT_DARK}
+                        >
+                          {m.label}
+                        </text>
+                      </g>
+                    ))}
                     {hoverPoint && (
                       <>
                         <line
@@ -1891,6 +2074,172 @@ export default function AssetsDynamicsPage() {
             </div>
           </div>
         </div>
+
+        {clickedChartDates.length >= 1 && dateSnapshotRows.length > 0 && (
+          <>
+            <div className="flex items-center justify-between py-2">
+              <h3 className="text-base font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
+                Остатки на выбранные даты
+              </h3>
+              <button
+                type="button"
+                onClick={() => setClickedChartDates([])}
+                className="text-sm rounded-md px-3 py-1.5 hover:bg-white/10 transition-colors"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+              >
+                Закрыть
+              </button>
+            </div>
+            {[
+              { kind: "ASSET" as const, label: "Активы", items: effectiveSelectedItems.filter((i) => i.kind === "ASSET") },
+              { kind: "LIABILITY" as const, label: "Обязательства", items: effectiveSelectedItems.filter((i) => i.kind === "LIABILITY") },
+            ].map((section) => {
+              const isLiabilitySection = section.kind === "LIABILITY";
+              const positiveIsGood = !isLiabilitySection;
+              const growthPositiveIsGood = isLiabilitySection ? !positiveIsGood : positiveIsGood;
+              const totalRubByDate = dateSnapshotRows.map((row) =>
+                section.items.reduce((sum, item) => {
+                  const rubCents = row.itemRubValues[item.id] ?? null;
+                  const valueCents = row.itemValues[item.id] ?? null;
+                  const effectiveKind = valueCents != null ? resolveItemEffectiveKind(item, valueCents) : item.kind;
+                  const signed = rubCents != null && effectiveKind === "LIABILITY" ? -rubCents : rubCents ?? 0;
+                  return sum + signed;
+                }, 0)
+              );
+              const totalGrowthPercent =
+                dateSnapshotRows.length === 2 && totalRubByDate[0] !== 0
+                  ? (totalRubByDate[1] - totalRubByDate[0]) / Math.abs(totalRubByDate[0]) * 100
+                  : null;
+              return (
+                <div
+                  key={section.kind}
+                  className="relative rounded-lg overflow-hidden border-0 outline-none"
+                  style={{ backgroundColor: MODAL_BG }}
+                >
+                  <div className="px-0">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
+                                <th className="pl-8 pr-6 py-3 text-sm font-medium">Актив / обязательство</th>
+                                {dateSnapshotRows.map((_, i) => (
+                                  <Fragment key={clickedChartDates[i]}>
+                                    {i === 1 && dateSnapshotRows.length === 2 && (
+                                      <th className="px-3 py-3 text-sm font-medium text-center w-20">Прирост</th>
+                                    )}
+                                    <th className={`px-6 py-3 text-sm font-medium text-center ${i === dateSnapshotRows.length - 1 ? "pr-8" : ""}`}>
+                                      {formatDateLabel(clickedChartDates[i])}
+                                    </th>
+                                  </Fragment>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {section.items.map((item) => {
+                                const currencyCode = item.currency_code ?? "RUB";
+                                const counterparty = item.counterparty_id != null ? counterpartiesById.get(item.counterparty_id) ?? null : null;
+                                const rowRubByDate = dateSnapshotRows.map((row) => {
+                                  const valueCents = row.itemValues[item.id] ?? null;
+                                  const rubCents = row.itemRubValues[item.id] ?? null;
+                                  const effectiveKind = valueCents != null ? resolveItemEffectiveKind(item, valueCents) : item.kind;
+                                  const signedRub = rubCents != null && effectiveKind === "LIABILITY" ? -rubCents : rubCents;
+                                  return signedRub;
+                                });
+                                const rowGrowthPercent =
+                                  dateSnapshotRows.length === 2 && rowRubByDate[0] != null && rowRubByDate[1] != null && rowRubByDate[0] !== 0
+                                    ? ((rowRubByDate[1] ?? 0) - (rowRubByDate[0] ?? 0)) / Math.abs(rowRubByDate[0]) * 100
+                                    : null;
+                                const growthColor = rowGrowthPercent != null ? ((rowGrowthPercent >= 0) === growthPositiveIsGood ? GREEN : RED) : undefined;
+                                return (
+                                  <tr key={item.id} className="border-t border-white/10">
+                                    <td className="pl-8 pr-6 py-3 text-sm">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <div className="h-5 w-5 shrink-0 rounded-sm overflow-hidden flex items-center justify-center">
+                                          <AssetItemIcon
+                                            item={item}
+                                            counterparty={counterparty ?? null}
+                                            apiBase={API_BASE}
+                                            size={20}
+                                            className="h-5 w-5 rounded-sm object-contain"
+                                            fallbackIconColor={ACTIVE_TEXT_DARK}
+                                            alt={itemCounterpartyName(item.id) || item.name || ""}
+                                          />
+                                        </div>
+                                        <span style={{ color: ACTIVE_TEXT_DARK }}>{item.name}</span>
+                                        {currencyCode && (
+                                          <span
+                                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase ${getCurrencyBadgeClass(currencyCode)}`}
+                                          >
+                                            {currencyCode}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    {dateSnapshotRows.map((row, dateIdx) => {
+                                      const valueCents = row.itemValues[item.id] ?? null;
+                                      const rubCents = row.itemRubValues[item.id] ?? null;
+                                      const effectiveKind = valueCents != null ? resolveItemEffectiveKind(item, valueCents) : item.kind;
+                                      const signedValue = valueCents != null && effectiveKind === "LIABILITY" ? -valueCents : valueCents;
+                                      const signedRub = rubCents != null && effectiveKind === "LIABILITY" ? -rubCents : rubCents;
+                                      const formatCur = (cents: number) =>
+                                        new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100);
+                                      const showCurrencyAmount = currencyCode !== "RUB" && valueCents != null;
+                                      return (
+                                        <Fragment key={row.date}>
+                                          {dateIdx === 1 && dateSnapshotRows.length === 2 && (
+                                            <td className="px-3 py-3 text-center tabular-nums text-sm" style={growthColor ? { color: growthColor } : undefined}>
+                                              {rowGrowthPercent != null ? formatGrowthPercent(rowGrowthPercent) : "—"}
+                                            </td>
+                                          )}
+                                          <td className={`px-4 py-3 text-right tabular-nums ${dateIdx === dateSnapshotRows.length - 1 ? "pr-8" : ""}`}>
+                                            <div className="flex flex-col items-end gap-0.5">
+                                              <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                                                {rubCents == null ? "—" : formatSignedValue(signedRub ?? 0, formatRub)}
+                                              </span>
+                                              {showCurrencyAmount && (
+                                                <span className="text-[10px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                                  {formatSignedValue(signedValue ?? 0, formatCur)} {currencyCode}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </td>
+                                        </Fragment>
+                                      );
+                                    })}
+                                  </tr>
+                                );
+                              })}
+                              <tr className="border-t border-white/10 font-medium" style={{ backgroundColor: BACKGROUND_DT }}>
+                                <td className="pl-8 pr-6 py-3 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>Итого</td>
+                                {dateSnapshotRows.map((_, dateIdx) => {
+                                  const totalRub = totalRubByDate[dateIdx];
+                                  const totalGrowthColor =
+                                    dateSnapshotRows.length === 2 && dateIdx === 1 && totalGrowthPercent != null
+                                      ? (totalGrowthPercent >= 0) === growthPositiveIsGood ? GREEN : RED
+                                      : undefined;
+                                  return (
+                                    <Fragment key={clickedChartDates[dateIdx]}>
+                                      {dateIdx === 1 && dateSnapshotRows.length === 2 && (
+                                        <td className="px-3 py-3 text-center tabular-nums text-sm" style={totalGrowthColor ? { color: totalGrowthColor } : undefined}>
+                                          {totalGrowthPercent != null ? formatGrowthPercent(totalGrowthPercent) : "—"}
+                                        </td>
+                                      )}
+                                      <td className={`px-4 py-3 text-right tabular-nums text-sm ${dateIdx === dateSnapshotRows.length - 1 ? "pr-8" : ""}`} style={{ color: ACTIVE_TEXT_DARK }}>
+                                        {formatSignedValue(totalRub, formatRub)}
+                                      </td>
+                                    </Fragment>
+                                  );
+                                })}
+                              </tr>
+                            </tbody>
+                          </table>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
     </main>
   );

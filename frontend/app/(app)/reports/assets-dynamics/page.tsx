@@ -567,7 +567,12 @@ export default function AssetsDynamicsPage() {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const [chartContainerReady, setChartContainerReady] = useState(false);
   const [chartSize, setChartSize] = useState({ width: 720, height: 280 });
+  const setChartRef = useCallback((el: HTMLDivElement | null) => {
+    chartRef.current = el;
+    setChartContainerReady(!!el);
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -1500,7 +1505,7 @@ export default function AssetsDynamicsPage() {
   }, [chartDataForDisplay, padding.left, innerWidth]);
 
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!chartContainerReady || !chartRef.current) return;
     const element = chartRef.current;
 
     const updateSize = () => {
@@ -1518,7 +1523,7 @@ export default function AssetsDynamicsPage() {
     observer.observe(element);
 
     return () => observer.disconnect();
-  }, []);
+  }, [chartContainerReady]);
 
   useEffect(() => {
     if (!hoverPoint || !chartRef.current || !tooltipRef.current) {
@@ -1834,7 +1839,7 @@ export default function AssetsDynamicsPage() {
 
               {!error && effectiveSelectedItems.length > 0 && chartDataForDisplay.length > 0 && (
                 <div
-                  ref={chartRef}
+                  ref={setChartRef}
                   className="relative w-full min-w-0"
                   style={{ aspectRatio: `${width}/${height}` }}
                 >

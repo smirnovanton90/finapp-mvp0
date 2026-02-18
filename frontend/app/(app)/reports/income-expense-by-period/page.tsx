@@ -1090,7 +1090,12 @@ export default function IncomeExpenseDynamicsPage() {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const [chartContainerReady, setChartContainerReady] = useState(false);
   const [chartSize, setChartSize] = useState({ width: 720, height: 280 });
+  const setChartRef = useCallback((el: HTMLDivElement | null) => {
+    chartRef.current = el;
+    setChartContainerReady(!!el);
+  }, []);
   const [clickedChartPeriodKeys, setClickedChartPeriodKeys] = useState<string[]>([]);
   const [expandedCategoryId, setExpandedCategoryId] = useState<number | null>(null);
 
@@ -1801,7 +1806,7 @@ export default function IncomeExpenseDynamicsPage() {
   const hoverBalanceData = hoverIndex != null && isBoth ? chartDataBalance[hoverIndex] : null;
 
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!chartContainerReady || !chartRef.current) return;
     const el = chartRef.current;
     const updateSize = () => {
       const rect = el.getBoundingClientRect();
@@ -1815,7 +1820,7 @@ export default function IncomeExpenseDynamicsPage() {
     const observer = new ResizeObserver(updateSize);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [chartContainerReady]);
 
   useEffect(() => {
     if (!hoverPoint || !chartRef.current || !tooltipRef.current) {
@@ -2385,7 +2390,7 @@ export default function IncomeExpenseDynamicsPage() {
                 </div>
               ) : chartData.length > 0 ? (
                 <div
-                  ref={chartRef}
+                  ref={setChartRef}
                   className="relative w-full min-w-0"
                   style={{ aspectRatio: `${width}/${height}` }}
                 >

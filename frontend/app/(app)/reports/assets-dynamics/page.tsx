@@ -4,15 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "rea
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import {
-  fetchBanks,
   fetchCounterparties,
   fetchFxRates,
+  fetchCategories,
   fetchItems,
   fetchMarketInstrumentPrice,
   fetchMarketInstrumentPrices,
   fetchTransactions,
   API_BASE,
-  BankOut,
   CounterpartyOut,
   FxRateOut,
   ItemOut,
@@ -24,6 +23,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { FilterSection } from "@/components/filter-panel";
 import { DateField } from "@/components/ui/form-field";
 import { AssetItemIcon } from "@/components/asset-item-icon";
+import { CategoryIconImage } from "@/components/category-icon-image";
+import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
 import { ItemSelector } from "@/components/item-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, BACKGROUND_DT, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED } from "@/lib/colors";
@@ -38,7 +39,7 @@ import {
   type HistoryPresetKey,
   type ReportPeriodGranularity,
 } from "@/lib/report-period-utils";
-import { Info } from "lucide-react";
+import { Info, MessageSquare } from "lucide-react";
 import {
   buildItemTransactionCounts,
   getEffectiveItemKind,
@@ -217,6 +218,28 @@ function formatDateLabel(dateKey: string) {
   return `${day}.${month}.${year}`;
 }
 
+/** Форматирует дату транзакции: дата; время HH:mm — только если оно есть в transaction_date и не 00:00. */
+function formatTxDateCell(transactionDate: string) {
+  const dateKey = toTxDateKey(transactionDate);
+  const dateLabel = formatDateLabel(dateKey);
+  const tIdx = transactionDate.indexOf("T");
+  if (tIdx === -1) return dateLabel;
+  const timePart = transactionDate.slice(tIdx + 1);
+  const match = /^(\d{1,2}):(\d{2})/.exec(timePart);
+  if (!match) return dateLabel;
+  const hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  if (hours === 0 && minutes === 0) return dateLabel;
+  const timeLabel = `${match[1].padStart(2, "0")}:${match[2]}`;
+  return (
+    <>
+      {dateLabel}
+      <br />
+      <span className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK, fontWeight: 400 }}>{timeLabel}</span>
+    </>
+  );
+}
+
 const CURRENCY_BADGE_CLASSES: Record<string, string> = {
   RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
   USD: "bg-[#2E7D32]/20 text-[#2E7D32]",
@@ -265,24 +288,26 @@ function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number
   return isPrimary ? -amount : amount;
 }
 
-function getTxDeltaRubForItem(
+function getTxDeltaForItem(
   tx: TransactionOut,
   itemId: number,
   itemKind: ItemOut["kind"]
-): number | null {
+): { deltaCents: number; inCurrency: boolean } | null {
   const isPrimary = tx.primary_item_id === itemId || tx.primary_card_item_id === itemId;
   const isCounter = tx.counterparty_item_id === itemId || tx.counterparty_card_item_id === itemId;
   if (isPrimary) {
-    if (tx.direction === "INCOME") return tx.amount_rub;
+    if (tx.direction === "INCOME") return { deltaCents: tx.amount_rub, inCurrency: false };
     if (tx.direction === "EXPENSE") {
       const isOpening = tx.source === "AUTO_ITEM_OPENING";
-      return isOpening && itemKind === "LIABILITY" ? tx.amount_rub : -tx.amount_rub;
+      const amount = isOpening && itemKind === "LIABILITY" ? tx.amount_rub : -tx.amount_rub;
+      return { deltaCents: amount, inCurrency: false };
     }
-    if (tx.direction === "TRANSFER") return transferDelta(itemKind, true, tx.amount_rub);
+    if (tx.direction === "TRANSFER") return { deltaCents: transferDelta(itemKind, true, tx.amount_rub), inCurrency: false };
   }
   if (isCounter && tx.direction === "TRANSFER") {
     const amount = tx.amount_counterparty ?? tx.amount_rub;
-    return transferDelta(itemKind, false, amount);
+    const inCurrency = tx.amount_counterparty != null;
+    return { deltaCents: transferDelta(itemKind, false, amount), inCurrency };
   }
   return null;
 }
@@ -513,6 +538,7 @@ export default function AssetsDynamicsPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const [items, setItems] = useState<ItemOut[]>([]);
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [transactions, setTransactions] = useState<TransactionOut[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
@@ -552,12 +578,14 @@ export default function AssetsDynamicsPage() {
     Promise.all([
       fetchItems({ includeClosed: true, includeArchived: true }),
       fetchTransactions(),
+      fetchCategories().catch(() => []),
       fetchCounterparties().catch(() => []),
     ])
-      .then(([itemsData, txData, counterpartiesData]) => {
+      .then(([itemsData, txData, categoriesData, counterpartiesData]) => {
         if (!active) return;
         setItems(itemsData);
         setTransactions(txData);
+        setCategories(Array.isArray(categoriesData) ? categoriesData : []);
         setCounterparties(counterpartiesData);
       })
       .catch((e: any) => {
@@ -588,6 +616,7 @@ export default function AssetsDynamicsPage() {
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
+  const categoryLookup = useMemo(() => buildCategoryLookup(categories), [categories]);
   const counterpartiesById = useMemo(
     () => new Map(counterparties.map((cp) => [cp.id, cp])),
     [counterparties]
@@ -1284,7 +1313,7 @@ export default function AssetsDynamicsPage() {
   }, [chartDataForDisplay, hasAssets, hasLiabilities, showNetSeries]);
   const minValue = allValues.length ? Math.min(...allValues) : 0;
   const maxValue = allValues.length ? Math.max(...allValues) : 0;
-  const rangePadding = Math.max((maxValue - minValue) * 0.12, 1);
+  const rangePadding = Math.max(Math.max(maxValue, Math.abs(minValue)) * 0.12, 1);
   const paddedMin = minValue - rangePadding;
   const paddedMax = maxValue + rangePadding;
   const ticks = buildTicks(paddedMin, paddedMax);
@@ -1442,8 +1471,8 @@ export default function AssetsDynamicsPage() {
     const n = chartDataForDisplay.length;
     return chartDataForDisplay.map((p, i) => ({
       label:
-        periodGranularity === "week" && p.periodKey
-          ? (p.periodKey.match(/W(\d{2})$/)?.[1] ?? p.label)
+        periodGranularity === "week" && "periodKey" in p && p.periodKey
+          ? ((p as { periodKey: string }).periodKey.match(/W(\d{2})$/)?.[1] ?? p.label)
           : p.label,
       x:
         padding.left +
@@ -1747,7 +1776,7 @@ export default function AssetsDynamicsPage() {
                       asPercent: true,
                       alwaysTwo: true,
                     },
-                  ].map(({ label, value, forecastValue, signed, alwaysTwo, asPercent }) => (
+                  ].map(({ label, value, forecastValue, alwaysTwo, asPercent }) => (
                     <div key={label} className="flex items-center gap-2">
                       <span
                         className="w-20 shrink-0 text-[14px] font-normal"
@@ -1761,18 +1790,14 @@ export default function AssetsDynamicsPage() {
                       >
                         {asPercent
                           ? formatGrowthPercent(value as number | null)
-                          : signed
-                            ? formatSignedValue(value as number, formatRub)
-                            : formatRub(value as number)}
+                          : formatRub(value as number)}
                         {(alwaysTwo || chartSummary.hasForecast) && (
                           <>
                             <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
                             <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
                               {asPercent
                                 ? formatGrowthPercent(forecastValue as number | null)
-                                : signed
-                                  ? formatSignedValue(forecastValue as number, formatRub)
-                                  : formatRub(forecastValue as number)}
+                                : formatRub(forecastValue as number)}
                             </span>
                           </>
                         )}
@@ -1825,8 +1850,8 @@ export default function AssetsDynamicsPage() {
                       }}
                     >
                       <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                        {periodGranularity === "week" && hoverData.periodKey
-                          ? formatWeekPeriodAsDateRange(hoverData.periodKey)
+                        {periodGranularity === "week" && "periodKey" in hoverData && hoverData.periodKey
+                          ? formatWeekPeriodAsDateRange((hoverData as { periodKey: string }).periodKey)
                           : hoverData.label}
                       </div>
                       <div className="mt-2 space-y-1">
@@ -1854,13 +1879,12 @@ export default function AssetsDynamicsPage() {
                   <svg
                     ref={svgRef}
                     viewBox={`0 0 ${width} ${height}`}
-                    className="h-full w-full"
+                    className="h-full w-full cursor-pointer"
                     role="img"
                     aria-label="График динамики стоимости активов"
                     onMouseMove={handlePointerMove}
                     onMouseLeave={() => setHoverIndex(null)}
                     onClick={handleChartClick}
-                    className="cursor-pointer"
                   >
                     <defs>
                       <linearGradient id="assetsAreaGrad" x1="0" y1="0" x2="0" y2="1">
@@ -1910,7 +1934,7 @@ export default function AssetsDynamicsPage() {
                         d={assetsPastPath}
                         fill="none"
                         stroke={GREEN}
-                        strokeWidth="2.5"
+                        strokeWidth="3"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
@@ -1931,7 +1955,7 @@ export default function AssetsDynamicsPage() {
                         d={liabilitiesPastPath}
                         fill="none"
                         stroke={RED}
-                        strokeWidth="2.5"
+                        strokeWidth="3"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
@@ -1986,8 +2010,9 @@ export default function AssetsDynamicsPage() {
                       y1={zeroY}
                       y2={zeroY}
                       stroke={PLACEHOLDER_COLOR_DARK}
-                      strokeWidth={1.5}
-                      strokeOpacity={0.9}
+                      strokeWidth="1"
+                      strokeDasharray="4 4"
+                      strokeOpacity="0.7"
                     />
                     {arrowFromFirstToSecond && (() => {
                       const { x1, y1, x2, y2, midX, growthRubCents, growthPercent } = arrowFromFirstToSecond;
@@ -2188,9 +2213,12 @@ export default function AssetsDynamicsPage() {
                                     ? transactions
                                         .filter((tx) => {
                                           const d = toTxDateKey(tx.transaction_date);
-                                          return d >= dateStart && d <= dateEnd && getTxDeltaRubForItem(tx, item.id, item.kind) !== null;
+                                          return d >= dateStart && d <= dateEnd && getTxDeltaForItem(tx, item.id, item.kind) !== null;
                                         })
-                                        .map((tx) => ({ tx, deltaRub: getTxDeltaRubForItem(tx, item.id, item.kind)! as number }))
+                                        .map((tx) => {
+                                          const res = getTxDeltaForItem(tx, item.id, item.kind)!;
+                                          return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
+                                        })
                                         .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)))
                                     : [];
                                 return (
@@ -2259,65 +2287,75 @@ export default function AssetsDynamicsPage() {
                                   </tr>
                                   {isExpanded && (
                                     <tr style={{ backgroundColor: BACKGROUND_DT }}>
-                                      <td colSpan={colSpan} className="py-3 pl-8 pr-8 align-top" style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                      <td colSpan={colSpan} className="py-3 pl-8 pr-8 align-middle" style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
                                         <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
-                                          <thead>
-                                            <tr style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                              <th className="py-1.5 pr-4 font-normal text-left"></th>
-                                              {currencyCode !== "RUB" && <th className="py-1.5 pr-4 font-normal text-right">В валюте</th>}
-                                              {currencyCode !== "RUB" && <th className="py-1.5 pr-4 font-normal text-right">Курс</th>}
-                                              <th className="py-1.5 font-normal text-right">Руб</th>
-                                            </tr>
-                                          </thead>
                                           <tbody>
-                                            {dateSnapshotRows.length > 0 && (() => {
-                                              const row = dateSnapshotRows[0];
-                                              const valueCents = row.itemValues[item.id] ?? null;
-                                              const rubCents = row.itemRubValues[item.id] ?? null;
-                                              const effectiveKind = valueCents != null ? resolveItemEffectiveKind(item, valueCents) : item.kind;
-                                              const displayRub = rubCents != null && effectiveKind === "LIABILITY" ? Math.abs(rubCents) : rubCents ?? 0;
-                                              const displayCur = valueCents != null && effectiveKind === "LIABILITY" ? Math.abs(valueCents) : valueCents ?? 0;
-                                              const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, row.date, currencyCode, latestRatesByCurrency, todayKey) : null;
-                                              const label = dateSnapshotRows.length === 1 ? `Сальдо на ${formatDateLabel(row.date)}` : `Сальдо на начало (${formatDateLabel(row.date)})`;
-                                              return (
-                                                <tr key="open">
-                                                  <td className="py-1 pr-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>{label}</td>
-                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{valueCents == null ? "–" : new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(displayCur / 100)} {currencyCode}</td>}
-                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{rate != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rate) : "–"}</td>}
-                                                  <td className="py-1 text-right tabular-nums">{rubCents == null ? "–" : formatRub(displayRub)}</td>
-                                                </tr>
-                                              );
-                                            })()}
-                                            {txsInRange.map(({ tx, deltaRub }) => {
+                                            {txsInRange.map(({ tx, deltaCents, inCurrency }) => {
                                               const d = toTxDateKey(tx.transaction_date);
                                               const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey) : null;
-                                              const currencyUnits = rate != null && rate !== 0 ? deltaRub / (100 * rate) : null;
+                                              const currencyUnits = currencyCode !== "RUB" ? (inCurrency ? deltaCents / 100 : (rate != null && rate !== 0 ? deltaCents / (100 * rate) : null)) : null;
+                                              const rubCents = currencyCode !== "RUB" ? (inCurrency && rate != null ? Math.round(deltaCents * rate) : deltaCents) : deltaCents;
+                                              const categoryPath = tx.category_id != null ? (categoryLookup.idToPath.get(tx.category_id) ?? []) : [];
+                                              const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : null;
+                                              const isTransfer = tx.direction === "TRANSFER";
+                                              const otherItemId = isTransfer
+                                                ? (tx.primary_item_id === item.id || tx.primary_card_item_id === item.id
+                                                  ? (tx.counterparty_item_id ?? tx.counterparty_card_item_id)
+                                                  : (tx.primary_item_id ?? tx.primary_card_item_id))
+                                                : null;
+                                              const otherItem = otherItemId != null ? itemsById.get(otherItemId) ?? null : null;
+                                              const otherCounterparty = otherItem?.counterparty_id != null ? counterpartiesById.get(otherItem.counterparty_id) ?? null : null;
+                                              const amountColor = tx.direction === "EXPENSE" ? RED : tx.direction === "INCOME" ? GREEN : ACCENT;
                                               return (
-                                                <tr key={tx.id}>
-                                                  <td className="py-1 pr-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatDateLabel(d)} {tx.comment ? ` · ${tx.comment}` : ""}</td>
-                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"} {currencyCode}</td>}
-                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{rate != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rate) : "–"}</td>}
-                                                  <td className="py-1 text-right tabular-nums">{formatSignedValue(deltaRub, formatRub)}</td>
+                                                <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                                  <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
+                                                  <td className="py-1.5 pr-4 align-middle">
+                                                    {isTransfer && otherItem ? (
+                                                      <div className="flex flex-col gap-0.5">
+                                                        <span className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>{deltaCents < 0 ? "Перевод на" : "Перевод с"}</span>
+                                                        <div className="flex items-center gap-2">
+                                                          <div className="h-5 w-5 shrink-0 rounded-sm overflow-hidden flex items-center justify-center">
+                                                            <AssetItemIcon
+                                                              item={otherItem}
+                                                              counterparty={otherCounterparty ?? null}
+                                                              apiBase={API_BASE}
+                                                              size={20}
+                                                              className="h-5 w-5 rounded-sm object-contain"
+                                                              fallbackIconColor={ACTIVE_TEXT_DARK}
+                                                              alt={itemCounterpartyName(otherItem.id) || otherItem.name || ""}
+                                                            />
+                                                          </div>
+                                                          <span style={{ color: ACTIVE_TEXT_DARK }}>{otherItem.name}</span>
+                                                        </div>
+                                                      </div>
+                                                    ) : tx.category_id != null ? (
+                                                      <div className="flex items-center gap-2">
+                                                        <CategoryIconImage
+                                                          categoryId={tx.category_id}
+                                                          categoryLookup={categoryLookup}
+                                                          apiBase={API_BASE}
+                                                          size={18}
+                                                          className="h-4 w-4 rounded-sm object-contain shrink-0"
+                                                          fallbackIconColor={ACTIVE_TEXT_DARK}
+                                                        />
+                                                        <span style={{ color: ACTIVE_TEXT_DARK }}>{categoryLabel ?? "–"}</span>
+                                                      </div>
+                                                    ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                                  </td>
+                                                  <td className="py-1.5 pr-4 align-middle">
+                                                    {tx.comment?.trim() ? (
+                                                      <div className="flex items-center gap-1.5" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                                        <MessageSquare className="h-3.5 w-3.5 shrink-0" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                                                        <span className="text-xs">{tx.comment.trim()}</span>
+                                                      </div>
+                                                    ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                                  </td>
+                                                  {currencyCode !== "RUB" && <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: amountColor }}>{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"} {currencyCode}</td>}
+                                                  {currencyCode !== "RUB" && <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>{rate != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rate) : "–"}</td>}
+                                                  <td className="py-1.5 text-right tabular-nums align-middle" style={{ color: amountColor }}>{formatSignedValue(rubCents, formatRub)}</td>
                                                 </tr>
                                               );
                                             })}
-                                            {dateSnapshotRows.length >= 2 && dateSnapshotRows[1] && (() => {
-                                              const row = dateSnapshotRows[1];
-                                              const valueCents = row.itemValues[item.id] ?? null;
-                                              const rubCents = row.itemRubValues[item.id] ?? null;
-                                              const effectiveKind = valueCents != null ? resolveItemEffectiveKind(item, valueCents) : item.kind;
-                                              const displayRub = rubCents != null && effectiveKind === "LIABILITY" ? Math.abs(rubCents) : rubCents ?? 0;
-                                              const displayCur = valueCents != null && effectiveKind === "LIABILITY" ? Math.abs(valueCents) : valueCents ?? 0;
-                                              const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, row.date, currencyCode, latestRatesByCurrency, todayKey) : null;
-                                              return (
-                                                <tr key="close">
-                                                  <td className="py-1 pr-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>Сальдо на конец ({formatDateLabel(row.date)})</td>
-                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{valueCents == null ? "–" : new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(displayCur / 100)} {currencyCode}</td>}
-                                                  {currencyCode !== "RUB" && <td className="py-1 pr-4 text-right tabular-nums">{rate != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rate) : "–"}</td>}
-                                                  <td className="py-1 text-right tabular-nums">{rubCents == null ? "–" : formatRub(displayRub)}</td>
-                                                </tr>
-                                              );
-                                            })()}
                                           </tbody>
                                         </table>
                                       </td>

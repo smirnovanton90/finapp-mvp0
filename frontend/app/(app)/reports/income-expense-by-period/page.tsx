@@ -1,6 +1,7 @@
 "use client";
 
-import {
+import React, {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -37,7 +38,7 @@ import {
   CategoryNode,
   makeCategoryPathKey,
 } from "@/lib/categories";
-import { ACTIVE_TEXT_DARK, BACKGROUND_DT, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED } from "@/lib/colors";
+import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, BACKGROUND_DT, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
 import {
   formatWeekPeriodAsDateRange,
@@ -118,6 +119,68 @@ function formatMonthLabel(monthKey: string) {
 
 function formatRub(valueInCents: number) {
   return formatAmount(valueInCents);
+}
+
+function formatSignedValue(valueInCents: number, formatter: (v: number) => string) {
+  const absValue = Math.abs(valueInCents);
+  const formatted = formatter(absValue);
+  return valueInCents < 0 ? `-${formatted}` : formatted;
+}
+
+function formatGrowthPercent(percent: number | null): string {
+  if (percent == null || Number.isNaN(percent) || percent === 0) return "–";
+  const formatted = new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(Math.abs(percent));
+  return percent < 0 ? `-${formatted}%` : `+${formatted}%`;
+}
+
+function buildCategoryBreakdownByPeriod(
+  txs: TransactionOut[],
+  direction: "INCOME" | "EXPENSE",
+  periodKeys: string[],
+  granularity: ReportPeriodGranularity,
+  itemsById: Map<number, ItemOut>,
+  ratesByDate: Record<string, FxRateOut[]>,
+  categoryById: Map<number, CategoryNode>
+): { rows: CategoryRow[]; totals: Map<number, Record<string, number>> } {
+  const filteredTxs = txs.filter((tx) => tx.direction === direction);
+  const rows = buildCategoryRows(filteredTxs, categoryById);
+  const totals = new Map<number, Record<string, number>>();
+  rows.forEach((row) => {
+    totals.set(row.id, Object.fromEntries(periodKeys.map((pk) => [pk, 0])));
+  });
+  const resolveTrail = buildCategoryTrailResolver(categoryById);
+
+  const addValue = (rowId: number, periodKey: string, value: number) => {
+    const rowTotals = totals.get(rowId);
+    if (!rowTotals) return;
+    rowTotals[periodKey] = (rowTotals[periodKey] ?? 0) + value;
+  };
+
+  filteredTxs.forEach((tx) => {
+    const categoryId = tx.category_id;
+    if (!categoryId || !tx.transaction_date) return;
+    const periodKey = getPeriodKey(toTxDateKey(tx.transaction_date), granularity);
+    if (!periodKeys.includes(periodKey)) return;
+    const trail = resolveTrail(categoryId);
+    if (trail.length === 0) return;
+    const [l1, l2, l3] = trail;
+    if (!l1) return;
+    const currencyCode = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
+    const rubCents = getRubEquivalentCents(tx, currencyCode, ratesByDate);
+    if (rubCents === null) return;
+    const sign = direction === "EXPENSE" ? -1 : 1;
+    const value = Math.abs(rubCents) * sign;
+    addValue(l1.id, periodKey, value);
+    if (l2) {
+      addValue(l2.id, periodKey, value);
+      if (l3) addValue(l3.id, periodKey, value);
+    }
+  });
+
+  return { rows, totals };
 }
 
 function buildCategoryIndex(nodes: CategoryNode[]) {
@@ -724,6 +787,251 @@ function CategoryTable({
   );
 }
 
+function CategoryBreakdownTable({
+  reportKind,
+  clickedPeriodKeys,
+  chartPeriodPoints,
+  granularity,
+  categoryBreakdownIncome,
+  categoryBreakdownExpense,
+  chartTxList,
+  itemsById,
+  chartRatesByDate,
+  categoryById,
+  categoryLookup,
+  categoryDescendantsMap,
+  expandedCategoryId,
+  setExpandedCategoryId,
+  onClose,
+  formatPeriodLabel,
+}: {
+  reportKind: "BOTH" | "INCOME" | "EXPENSE";
+  clickedPeriodKeys: string[];
+  chartPeriodPoints: { periodKey: string; label: string }[];
+  granularity: ReportPeriodGranularity;
+  categoryBreakdownIncome: { rows: CategoryRow[]; totals: Map<number, Record<string, number>> };
+  categoryBreakdownExpense: { rows: CategoryRow[]; totals: Map<number, Record<string, number>> };
+  chartTxList: TransactionOut[];
+  itemsById: Map<number, ItemOut>;
+  chartRatesByDate: Record<string, FxRateOut[]>;
+  categoryById: Map<number, CategoryNode>;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  categoryDescendantsMap: Map<number, Set<number>>;
+  expandedCategoryId: number | null;
+  setExpandedCategoryId: React.Dispatch<React.SetStateAction<number | null>>;
+  onClose: () => void;
+  formatPeriodLabel: (periodKey: string) => string;
+}) {
+  const sections: { direction: "INCOME" | "EXPENSE"; label: string; rows: CategoryRow[]; totals: Map<number, Record<string, number>> }[] = [];
+  if (reportKind === "BOTH" || reportKind === "INCOME") {
+    if (categoryBreakdownIncome.rows.length > 0) {
+      sections.push({ direction: "INCOME", label: "Доходы", rows: categoryBreakdownIncome.rows, totals: categoryBreakdownIncome.totals });
+    }
+  }
+  if (reportKind === "BOTH" || reportKind === "EXPENSE") {
+    if (categoryBreakdownExpense.rows.length > 0) {
+      sections.push({ direction: "EXPENSE", label: "Расходы", rows: categoryBreakdownExpense.rows, totals: categoryBreakdownExpense.totals });
+    }
+  }
+  const sumTxToRubCents = useCallback(
+    (tx: TransactionOut) => {
+      const dateKey = toTxDateKey(tx.transaction_date);
+      if (!dateKey) return 0;
+      const code = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
+      let rubCents = tx.amount_rub;
+      if (code !== "RUB") {
+        const rates = chartRatesByDate[dateKey];
+        const rate = rates?.find((r) => r.char_code === code)?.rate;
+        if (rate == null) return 0;
+        rubCents = Math.round((tx.amount_rub / 100) * rate * 100);
+      }
+      return Math.abs(rubCents);
+    },
+    [itemsById, chartRatesByDate]
+  );
+  return (
+    <>
+      <div className="flex items-center justify-between py-2">
+        <h3 className="text-base font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>Категории по выбранным периодам</h3>
+        <button type="button" onClick={onClose} className="text-sm rounded-md px-3 py-1.5 hover:bg-white/10 transition-colors" style={{ color: PLACEHOLDER_COLOR_DARK }}>Закрыть</button>
+      </div>
+      {sections.map((section) => (
+        <CategoryBreakdownSection
+          key={section.direction}
+          section={section}
+          clickedPeriodKeys={clickedPeriodKeys}
+          formatPeriodLabel={formatPeriodLabel}
+          chartTxList={chartTxList}
+          granularity={granularity}
+          categoryLookup={categoryLookup}
+          categoryDescendantsMap={categoryDescendantsMap}
+          sumTxToRubCents={sumTxToRubCents}
+          expandedCategoryId={expandedCategoryId}
+          setExpandedCategoryId={setExpandedCategoryId}
+        />
+      ))}
+    </>
+  );
+}
+
+function CategoryBreakdownSection({
+  section,
+  clickedPeriodKeys,
+  formatPeriodLabel,
+  chartTxList,
+  granularity,
+  categoryLookup,
+  categoryDescendantsMap,
+  sumTxToRubCents,
+  expandedCategoryId,
+  setExpandedCategoryId,
+}: {
+  section: { direction: "INCOME" | "EXPENSE"; label: string; rows: CategoryRow[]; totals: Map<number, Record<string, number>> };
+  clickedPeriodKeys: string[];
+  formatPeriodLabel: (pk: string) => string;
+  chartTxList: TransactionOut[];
+  granularity: ReportPeriodGranularity;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  categoryDescendantsMap: Map<number, Set<number>>;
+  sumTxToRubCents: (tx: TransactionOut) => number;
+  expandedCategoryId: number | null;
+  setExpandedCategoryId: React.Dispatch<React.SetStateAction<number | null>>;
+}) {
+  const { direction, rows, totals } = section;
+  const { l1HasChildren, l2HasChildren, expandedL1, expandedL2, toggleL1, toggleL2, isRowVisible } = useCategoryExpansion(rows);
+  const totalByPeriod = clickedPeriodKeys.map((pk) => rows.filter((r) => r.level === 1).reduce((s, r) => s + (totals.get(r.id)?.[pk] ?? 0), 0));
+  const totalGrowthPercent = clickedPeriodKeys.length === 2 && totalByPeriod[0] !== 0
+    ? direction === "EXPENSE" ? (Math.abs(totalByPeriod[1]) - Math.abs(totalByPeriod[0])) / Math.abs(totalByPeriod[0]) * 100
+    : (totalByPeriod[1] - totalByPeriod[0]) / Math.abs(totalByPeriod[0]) * 100
+    : null;
+  const positiveIsGood = direction === "INCOME";
+  const getTxsForCategory = useCallback(
+    (categoryId: number) => {
+      const ids = categoryDescendantsMap.get(categoryId);
+      if (!ids) return [];
+      const periodSet = new Set(clickedPeriodKeys);
+      return chartTxList
+        .filter((tx) => {
+          if (tx.direction !== direction) return false;
+          const catId = tx.category_id;
+          if (!catId || !ids.has(catId)) return false;
+          const periodKey = getPeriodKey(toTxDateKey(tx.transaction_date), granularity);
+          return periodSet.has(periodKey);
+        })
+        .map((tx) => ({ tx, rubCents: sumTxToRubCents(tx) * (direction === "EXPENSE" ? -1 : 1) }))
+        .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)));
+    },
+    [chartTxList, clickedPeriodKeys, direction, granularity, categoryDescendantsMap, sumTxToRubCents]
+  );
+  return (
+    <div className="relative rounded-lg overflow-hidden border-0 outline-none mb-4" style={{ backgroundColor: MODAL_BG }}>
+      <div className="px-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
+                <th className="pl-8 pr-6 py-3 text-sm font-medium">Категория</th>
+                {clickedPeriodKeys.map((_, i) => (
+                  <Fragment key={clickedPeriodKeys[i]}>
+                    {i === 1 && clickedPeriodKeys.length === 2 && <th className="px-3 py-3 text-sm font-medium text-center w-20">Прирост</th>}
+                    <th className={`px-6 py-3 text-sm font-medium text-center ${i === clickedPeriodKeys.length - 1 ? "pr-8" : ""}`}>{formatPeriodLabel(clickedPeriodKeys[i] ?? "")}</th>
+                  </Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                if (!isRowVisible(row)) return null;
+                const rowTotals = totals.get(row.id) ?? {};
+                const valuesByPeriod = clickedPeriodKeys.map((pk) => rowTotals[pk] ?? 0);
+                const growthPercent = clickedPeriodKeys.length === 2 && valuesByPeriod[0] !== 0
+                  ? direction === "EXPENSE" ? (Math.abs(valuesByPeriod[1] ?? 0) - Math.abs(valuesByPeriod[0] ?? 0)) / Math.abs(valuesByPeriod[0]) * 100
+                  : ((valuesByPeriod[1] ?? 0) - (valuesByPeriod[0] ?? 0)) / Math.abs(valuesByPeriod[0]) * 100
+                  : null;
+                const growthColor = growthPercent != null && growthPercent !== 0 ? (growthPercent >= 0 === positiveIsGood ? GREEN : RED) : undefined;
+                const l2Key = `${row.l1Id}::${row.l2Id ?? 0}`;
+                const hasChildren = row.level === 1 ? l1HasChildren.has(row.l1Id) : row.level === 2 ? l2HasChildren.has(l2Key) : false;
+                const isExpanded = row.level === 1 ? expandedL1.has(row.l1Id) : row.level === 2 ? expandedL2.has(l2Key) : true;
+                const indentClass = row.level === 1 ? "" : row.level === 2 ? "pl-4" : "pl-8";
+                const isCategoryExpanded = expandedCategoryId === row.id;
+                const txsForCategory = isCategoryExpanded ? getTxsForCategory(row.id) : [];
+                return (
+                  <Fragment key={row.id}>
+                    <tr
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => { const target = e.target as HTMLElement; if (target.closest("button")) return; setExpandedCategoryId((id) => (id === row.id ? null : row.id)); }}
+                      onKeyDown={(e) => e.key === "Enter" && setExpandedCategoryId((id) => (id === row.id ? null : row.id))}
+                      className="border-t border-white/10 transition-colors hover:bg-white/[0.06] cursor-pointer"
+                    >
+                      <td className="pl-8 pr-6 py-3 text-sm">
+                        <div className={cn("flex items-center gap-2 flex-wrap", indentClass)}>
+                          {hasChildren ? (
+                            <button type="button" onClick={(e) => { e.stopPropagation(); row.level === 1 ? toggleL1(row.l1Id) : toggleL2(l2Key); }} className="inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" aria-label={isExpanded ? "Свернуть" : "Развернуть"}>
+                              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            </button>
+                          ) : <span className="w-5" />}
+                          <CategoryIconImage categoryId={row.id} categoryLookup={categoryLookup} apiBase={API_BASE} size={20} className="h-5 w-5 rounded-sm" />
+                          <span style={{ color: ACTIVE_TEXT_DARK }}>{row.label}</span>
+                        </div>
+                      </td>
+                      {clickedPeriodKeys.map((pk, dateIdx) => (
+                        <Fragment key={pk}>
+                          {dateIdx === 1 && clickedPeriodKeys.length === 2 && (
+                            <td className="px-3 py-3 text-center tabular-nums text-sm" style={growthColor ? { color: growthColor } : undefined}>{growthPercent != null ? formatGrowthPercent(growthPercent) : "–"}</td>
+                          )}
+                          <td className={`px-4 py-3 text-right tabular-nums text-sm ${dateIdx === clickedPeriodKeys.length - 1 ? "pr-8" : ""}`}>
+                            <span style={{ color: ACTIVE_TEXT_DARK }}>{direction === "EXPENSE" ? formatRub(Math.abs(valuesByPeriod[dateIdx] ?? 0)) : formatRub(valuesByPeriod[dateIdx] ?? 0)}</span>
+                          </td>
+                        </Fragment>
+                      ))}
+                    </tr>
+                    {isCategoryExpanded && txsForCategory.length > 0 && (
+                      <tr style={{ backgroundColor: BACKGROUND_DT }}>
+                        <td colSpan={1 + clickedPeriodKeys.length + (clickedPeriodKeys.length === 2 ? 1 : 0)} className="py-3 pl-8 pr-8 align-top w-full" style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                          <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK, width: "100%" }}>
+                            <thead>
+                              <tr style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                <th className="py-1.5 pr-4 font-normal text-left">Дата · Комментарий</th>
+                                <th className="py-1.5 font-normal text-right whitespace-nowrap w-28">Сумма</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {txsForCategory.map(({ tx, rubCents }) => (
+                                <tr key={tx.id}>
+                                  <td className="py-1 pr-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>{toTxDateKey(tx.transaction_date).split("-").reverse().join(".")} {tx.comment ? ` · ${tx.comment}` : ""}</td>
+                                  <td className="py-1 text-right tabular-nums">{direction === "EXPENSE" ? formatRub(Math.abs(rubCents)) : formatRub(rubCents)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              <tr className="border-t border-white/10 font-medium" style={{ backgroundColor: BACKGROUND_DT }}>
+                <td className="pl-8 pr-6 py-3 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>Итого</td>
+                {clickedPeriodKeys.map((_, dateIdx) => {
+                  const total = totalByPeriod[dateIdx] ?? 0;
+                  const totalGrowthColor = clickedPeriodKeys.length === 2 && dateIdx === 1 && totalGrowthPercent != null && totalGrowthPercent !== 0 ? (totalGrowthPercent >= 0) === positiveIsGood ? GREEN : RED : undefined;
+                  return (
+                    <Fragment key={clickedPeriodKeys[dateIdx]}>
+                      {dateIdx === 1 && clickedPeriodKeys.length === 2 && <td className="px-3 py-3 text-center tabular-nums text-sm" style={totalGrowthColor ? { color: totalGrowthColor } : undefined}>{totalGrowthPercent != null ? formatGrowthPercent(totalGrowthPercent) : "–"}</td>}
+                      <td className={`px-4 py-3 text-right tabular-nums text-sm ${dateIdx === clickedPeriodKeys.length - 1 ? "pr-8" : ""}`} style={{ color: ACTIVE_TEXT_DARK }}>{direction === "EXPENSE" ? formatRub(Math.abs(total)) : formatRub(total)}</td>
+                    </Fragment>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const EMPTY_NUMBER_ARRAY: number[] = [];
 const CATEGORY_PLACEHOLDER = "-";
 
@@ -742,7 +1050,7 @@ export default function IncomeExpenseDynamicsPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Chart report settings
-  const [reportKind, setReportKind] = useState<"INCOME" | "EXPENSE">("EXPENSE");
+  const [reportKind, setReportKind] = useState<"BOTH" | "INCOME" | "EXPENSE">("BOTH");
   const [historyPreset, setHistoryPreset] = useState<HistoryPresetKey>("last_month");
   const [forecastPreset, setForecastPreset] = useState<ForecastPresetKey>("next_month");
   const [rangeStart, setRangeStart] = useState("");
@@ -783,6 +1091,8 @@ export default function IncomeExpenseDynamicsPage() {
   const chartRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [chartSize, setChartSize] = useState({ width: 720, height: 280 });
+  const [clickedChartPeriodKeys, setClickedChartPeriodKeys] = useState<string[]>([]);
+  const [expandedCategoryId, setExpandedCategoryId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!session) return;
@@ -1034,7 +1344,7 @@ export default function IncomeExpenseDynamicsPage() {
     const params = {
       date_from: p.date_from,
       date_to: p.date_to,
-      direction: [reportKind] as TransactionOut["direction"][],
+      direction: reportKind === "BOTH" ? (["INCOME", "EXPENSE"] as TransactionOut["direction"][]) : [reportKind],
       transaction_type: chartTransactionTypeFilter,
       status: statusFilter,
       item_ids: p.item_ids.length ? p.item_ids : undefined,
@@ -1167,10 +1477,11 @@ export default function IncomeExpenseDynamicsPage() {
     [itemsById, chartRatesByDate]
   );
 
-  const chartSumsByPeriod = useMemo(() => {
+  const chartSumsByPeriodIncome = useMemo(() => {
     const map = new Map<string, number>();
     chartPeriodPoints.forEach((p) => map.set(p.periodKey, 0));
     chartTxList.forEach((tx) => {
+      if (tx.direction !== "INCOME") return;
       if (showForecast && tx.transaction_type !== "ACTUAL") return;
       const dateKey = toTxDateKey(tx.transaction_date);
       if (!dateKey) return;
@@ -1182,11 +1493,12 @@ export default function IncomeExpenseDynamicsPage() {
     return map;
   }, [chartTxList, chartPeriodPoints, granularity, showForecast, sumTxToRubCents]);
 
-  const chartSumsByPeriodForecast = useMemo(() => {
-    if (!showForecast) return new Map<string, number>();
+  const chartSumsByPeriodExpense = useMemo(() => {
     const map = new Map<string, number>();
     chartPeriodPoints.forEach((p) => map.set(p.periodKey, 0));
     chartTxList.forEach((tx) => {
+      if (tx.direction !== "EXPENSE") return;
+      if (showForecast && tx.transaction_type !== "ACTUAL") return;
       const dateKey = toTxDateKey(tx.transaction_date);
       if (!dateKey) return;
       const periodKey = getPeriodKey(dateKey, granularity);
@@ -1197,22 +1509,96 @@ export default function IncomeExpenseDynamicsPage() {
     return map;
   }, [chartTxList, chartPeriodPoints, granularity, showForecast, sumTxToRubCents]);
 
-  const chartData = useMemo(() => {
+  const chartSumsByPeriodForecastIncome = useMemo(() => {
+    if (!showForecast) return new Map<string, number>();
+    const map = new Map<string, number>();
+    chartPeriodPoints.forEach((p) => map.set(p.periodKey, 0));
+    chartTxList.forEach((tx) => {
+      if (tx.direction !== "INCOME") return;
+      const dateKey = toTxDateKey(tx.transaction_date);
+      if (!dateKey) return;
+      const periodKey = getPeriodKey(dateKey, granularity);
+      if (!map.has(periodKey)) return;
+      const cents = sumTxToRubCents(tx);
+      if (cents > 0) map.set(periodKey, (map.get(periodKey) ?? 0) + cents);
+    });
+    return map;
+  }, [chartTxList, chartPeriodPoints, granularity, showForecast, sumTxToRubCents]);
+
+  const chartSumsByPeriodForecastExpense = useMemo(() => {
+    if (!showForecast) return new Map<string, number>();
+    const map = new Map<string, number>();
+    chartPeriodPoints.forEach((p) => map.set(p.periodKey, 0));
+    chartTxList.forEach((tx) => {
+      if (tx.direction !== "EXPENSE") return;
+      const dateKey = toTxDateKey(tx.transaction_date);
+      if (!dateKey) return;
+      const periodKey = getPeriodKey(dateKey, granularity);
+      if (!map.has(periodKey)) return;
+      const cents = sumTxToRubCents(tx);
+      if (cents > 0) map.set(periodKey, (map.get(periodKey) ?? 0) + cents);
+    });
+    return map;
+  }, [chartTxList, chartPeriodPoints, granularity, showForecast, sumTxToRubCents]);
+
+  const chartDataIncome = useMemo(() => {
     return chartPeriodPoints.map((p) => ({
       periodKey: p.periodKey,
       label: p.label,
-      sumRubCents: chartSumsByPeriod.get(p.periodKey) ?? 0,
+      sumRubCents: chartSumsByPeriodIncome.get(p.periodKey) ?? 0,
     }));
-  }, [chartPeriodPoints, chartSumsByPeriod]);
+  }, [chartPeriodPoints, chartSumsByPeriodIncome]);
 
-  const chartDataForecast = useMemo(() => {
+  const chartDataExpense = useMemo(() => {
+    return chartPeriodPoints.map((p) => ({
+      periodKey: p.periodKey,
+      label: p.label,
+      sumRubCents: chartSumsByPeriodExpense.get(p.periodKey) ?? 0,
+    }));
+  }, [chartPeriodPoints, chartSumsByPeriodExpense]);
+
+  const chartDataBalance = useMemo(() => {
+    return chartPeriodPoints.map((p) => {
+      const income = chartSumsByPeriodIncome.get(p.periodKey) ?? 0;
+      const expense = chartSumsByPeriodExpense.get(p.periodKey) ?? 0;
+      return {
+        periodKey: p.periodKey,
+        label: p.label,
+        balanceRubCents: income - expense,
+      };
+    });
+  }, [chartPeriodPoints, chartSumsByPeriodIncome, chartSumsByPeriodExpense]);
+
+  const chartDataForecastIncome = useMemo(() => {
     if (!showForecast) return [];
     return chartPeriodPoints.map((p) => ({
       periodKey: p.periodKey,
       label: p.label,
-      sumRubCents: chartSumsByPeriodForecast.get(p.periodKey) ?? 0,
+      sumRubCents: chartSumsByPeriodForecastIncome.get(p.periodKey) ?? 0,
     }));
-  }, [chartPeriodPoints, chartSumsByPeriodForecast, showForecast]);
+  }, [chartPeriodPoints, chartSumsByPeriodForecastIncome, showForecast]);
+
+  const chartDataForecastExpense = useMemo(() => {
+    if (!showForecast) return [];
+    return chartPeriodPoints.map((p) => ({
+      periodKey: p.periodKey,
+      label: p.label,
+      sumRubCents: chartSumsByPeriodForecastExpense.get(p.periodKey) ?? 0,
+    }));
+  }, [chartPeriodPoints, chartSumsByPeriodForecastExpense, showForecast]);
+
+  const chartData = useMemo(() => {
+    if (reportKind === "INCOME") return chartDataIncome;
+    if (reportKind === "EXPENSE") return chartDataExpense;
+    return chartDataIncome;
+  }, [reportKind, chartDataIncome, chartDataExpense]);
+
+  const chartDataForecast = useMemo(() => {
+    if (!showForecast) return [];
+    if (reportKind === "INCOME") return chartDataForecastIncome;
+    if (reportKind === "EXPENSE") return chartDataForecastExpense;
+    return chartDataForecastIncome;
+  }, [showForecast, reportKind, chartDataForecastIncome, chartDataForecastExpense]);
 
   const chartTotalAndAverage = useMemo(() => {
     const totalRubCents = chartData.reduce((s, d) => s + d.sumRubCents, 0);
@@ -1225,12 +1611,17 @@ export default function IncomeExpenseDynamicsPage() {
     const maxRubCents = completedSums.length ? Math.max(...completedSums) : 0;
     const minRubCents = completedSums.length ? Math.min(...completedSums) : 0;
     const totalForecastRubCents = chartDataForecast.reduce((s, d) => s + d.sumRubCents, 0);
-    // Для прогноза (факт+план) макс/сред/мин считаем по всем периодам, включая незавершённый и будущие
     const allForecastSums = chartDataForecast.map((d) => d.sumRubCents);
     const forecastCount = chartDataForecast.length;
     const averageForecastRubCents = forecastCount > 0 ? totalForecastRubCents / forecastCount : 0;
     const maxForecastRubCents = allForecastSums.length ? Math.max(...allForecastSums) : 0;
     const minForecastRubCents = allForecastSums.length ? Math.min(...allForecastSums) : 0;
+    const totalIncomeRubCents = chartDataIncome.reduce((s, d) => s + d.sumRubCents, 0);
+    const totalExpenseRubCents = chartDataExpense.reduce((s, d) => s + d.sumRubCents, 0);
+    const totalBalanceRubCents = chartDataBalance.reduce((s, d) => s + d.balanceRubCents, 0);
+    const totalForecastIncomeRubCents = chartDataForecastIncome.reduce((s, d) => s + d.sumRubCents, 0);
+    const totalForecastExpenseRubCents = chartDataForecastExpense.reduce((s, d) => s + d.sumRubCents, 0);
+    const totalForecastBalanceRubCents = totalForecastIncomeRubCents - totalForecastExpenseRubCents;
     return {
       totalRubCents,
       averageRubCents,
@@ -1240,22 +1631,41 @@ export default function IncomeExpenseDynamicsPage() {
       averageForecastRubCents,
       maxForecastRubCents,
       minForecastRubCents,
+      totalIncomeRubCents,
+      totalExpenseRubCents,
+      totalBalanceRubCents,
+      totalForecastIncomeRubCents,
+      totalForecastExpenseRubCents,
+      totalForecastBalanceRubCents,
     };
-  }, [chartData, chartDataForecast, granularity]);
+  }, [chartData, chartDataForecast, chartDataIncome, chartDataExpense, chartDataBalance, chartDataForecastIncome, chartDataForecastExpense, granularity]);
 
   const width = chartSize.width;
   const height = chartSize.height;
   const padding = { top: 24, right: 0, bottom: 44, left: 0 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
+  const isBoth = reportKind === "BOTH";
   const chartValues = chartData.map((d) => d.sumRubCents / 100);
   const forecastValues = chartDataForecast.map((d) => d.sumRubCents / 100);
+  const incomeValues = chartDataIncome.map((d) => d.sumRubCents / 100);
+  const expenseValues = chartDataExpense.map((d) => d.sumRubCents / 100);
+  const balanceValues = chartDataBalance.map((d) => d.balanceRubCents / 100);
   const allValues = showForecast && forecastValues.length ? [...chartValues, ...forecastValues] : chartValues;
   const maxChartVal = allValues.length ? Math.max(...allValues, 0) : 0;
-  const rangePadding = Math.max(maxChartVal * 0.12, 1);
-  const paddedMax = maxChartVal + rangePadding;
-  const chartTicks = buildChartTicks(0, paddedMax);
-  const chartMin = 0;
+  const minBalanceVal = isBoth && balanceValues.length ? Math.min(...balanceValues, 0) : 0;
+  const maxIncomeExpense = isBoth
+    ? Math.max(
+        ...(incomeValues.length ? incomeValues : [0]),
+        ...(expenseValues.length ? expenseValues : [0]),
+        0
+      )
+    : maxChartVal;
+  const rangePadding = Math.max(Math.max(maxChartVal, maxIncomeExpense) * 0.12, 1);
+  const paddedMax = maxIncomeExpense + rangePadding;
+  const paddedMin = isBoth ? Math.min(minBalanceVal - rangePadding, 0) : 0;
+  const chartTicks = buildChartTicks(paddedMin, paddedMax);
+  const chartMin = chartTicks[0] ?? paddedMin;
   const chartMax = chartTicks[chartTicks.length - 1] ?? paddedMax;
   const todayPeriodKey = getPeriodKey(toDateKey(new Date()), granularity);
   const actualLastIndex = (() => {
@@ -1264,29 +1674,101 @@ export default function IncomeExpenseDynamicsPage() {
     }
     return -1;
   })();
+  const valueToY = (value: number) => {
+    const valueRatio = (value - chartMin) / (chartMax - chartMin || 1);
+    return padding.top + innerHeight - innerHeight * valueRatio;
+  };
   const chartPoints: ChartPoint[] = chartData.map((point, index) => {
     const progress = chartData.length <= 1 ? 0 : index / (chartData.length - 1);
     const x = padding.left + innerWidth * progress;
     const value = point.sumRubCents / 100;
-    const valueRatio = (value - chartMin) / (chartMax - chartMin || 1);
-    const y = padding.top + innerHeight - innerHeight * valueRatio;
+    const y = valueToY(value);
     return { x, y, value };
   });
+  const chartPointsIncome: ChartPoint[] = isBoth
+    ? chartDataIncome.map((point, index) => {
+        const progress = chartDataIncome.length <= 1 ? 0 : index / (chartDataIncome.length - 1);
+        const x = padding.left + innerWidth * progress;
+        const value = point.sumRubCents / 100;
+        const y = valueToY(value);
+        return { x, y, value };
+      })
+    : [];
+  const chartPointsExpense: ChartPoint[] = isBoth
+    ? chartDataExpense.map((point, index) => {
+        const progress = chartDataExpense.length <= 1 ? 0 : index / (chartDataExpense.length - 1);
+        const x = padding.left + innerWidth * progress;
+        const value = point.sumRubCents / 100;
+        const y = valueToY(value);
+        return { x, y, value };
+      })
+    : [];
   const chartPointsActualOnly = actualLastIndex >= 0 ? chartPoints.slice(0, actualLastIndex + 1) : [];
+  const chartPointsIncomeActualOnly =
+    isBoth && actualLastIndex >= 0 ? chartPointsIncome.slice(0, actualLastIndex + 1) : [];
+  const chartPointsExpenseActualOnly =
+    isBoth && actualLastIndex >= 0 ? chartPointsExpense.slice(0, actualLastIndex + 1) : [];
   const chartPointsForecast: ChartPoint[] = chartDataForecast.map((point, index) => {
     const progress = chartDataForecast.length <= 1 ? 0 : index / (chartDataForecast.length - 1);
     const x = padding.left + innerWidth * progress;
     const value = point.sumRubCents / 100;
-    const valueRatio = (value - chartMin) / (chartMax - chartMin || 1);
-    const y = padding.top + innerHeight - innerHeight * valueRatio;
+    const y = valueToY(value);
     return { x, y, value };
   });
-  const baselineValue = chartMin;
-  const baselineRatio = (baselineValue - chartMin) / (chartMax - chartMin || 1);
-  const baselineY = padding.top + innerHeight - innerHeight * baselineRatio;
+  const chartPointsForecastIncome: ChartPoint[] = isBoth
+    ? chartDataForecastIncome.map((point, index) => {
+        const progress = chartDataForecastIncome.length <= 1 ? 0 : index / (chartDataForecastIncome.length - 1);
+        const x = padding.left + innerWidth * progress;
+        const value = point.sumRubCents / 100;
+        const y = valueToY(value);
+        return { x, y, value };
+      })
+    : [];
+  const chartPointsForecastExpense: ChartPoint[] = isBoth
+    ? chartDataForecastExpense.map((point, index) => {
+        const progress = chartDataForecastExpense.length <= 1 ? 0 : index / (chartDataForecastExpense.length - 1);
+        const x = padding.left + innerWidth * progress;
+        const value = point.sumRubCents / 100;
+        const y = valueToY(value);
+        return { x, y, value };
+      })
+    : [];
+  const baselineValue = 0;
+  const baselineY = valueToY(0);
   const chartLinePath = buildLinePath(chartPointsActualOnly);
   const chartLinePathForecast = chartPointsForecast.length > 0 ? buildLinePath(chartPointsForecast) : null;
   const chartAreaPath = buildAreaPath(chartPointsActualOnly, baselineY);
+  const chartLinePathIncome = isBoth ? buildLinePath(chartPointsIncomeActualOnly) : null;
+  const chartLinePathExpense = isBoth ? buildLinePath(chartPointsExpenseActualOnly) : null;
+  const chartLinePathForecastIncome =
+    isBoth && chartPointsForecastIncome.length > 0 ? buildLinePath(chartPointsForecastIncome) : null;
+  const chartLinePathForecastExpense =
+    isBoth && chartPointsForecastExpense.length > 0 ? buildLinePath(chartPointsForecastExpense) : null;
+  const chartAreaPathIncome = isBoth ? buildAreaPath(chartPointsIncomeActualOnly, baselineY) : null;
+  const chartAreaPathExpense = isBoth ? buildAreaPath(chartPointsExpenseActualOnly, baselineY) : null;
+  const balanceBars = isBoth
+    ? chartDataBalance.map((point, index) => {
+        const progress = chartDataBalance.length <= 1 ? 0 : index / (chartDataBalance.length - 1);
+        const x = padding.left + innerWidth * progress;
+        const periodSpan = chartDataBalance.length <= 1 ? innerWidth : innerWidth / (chartDataBalance.length - 1);
+        const barWidth = Math.max(4, periodSpan * 0.35);
+        const barCenterX = x;
+        const balanceRub = point.balanceRubCents / 100;
+        const yZero = baselineY;
+        const yBalance = valueToY(balanceRub);
+        const barTop = Math.min(yZero, yBalance);
+        const barBottom = Math.max(yZero, yBalance);
+        const barHeight = Math.max(2, barBottom - barTop);
+        return {
+          x: barCenterX - barWidth / 2,
+          y: barTop,
+          width: barWidth,
+          height: barHeight,
+          balanceRubCents: point.balanceRubCents,
+          balanceRub,
+        };
+      })
+    : [];
   const periodMarks = buildPeriodMarks(
     chartData.map((d) => ({
       periodKey: d.periodKey,
@@ -1314,6 +1796,9 @@ export default function IncomeExpenseDynamicsPage() {
   }, [chartData, granularity, padding.left, innerWidth]);
   const hoverPoint = hoverIndex != null ? chartPoints[hoverIndex] : null;
   const hoverChartData = hoverIndex != null ? chartData[hoverIndex] : null;
+  const hoverIncomeData = hoverIndex != null && isBoth ? chartDataIncome[hoverIndex] : null;
+  const hoverExpenseData = hoverIndex != null && isBoth ? chartDataExpense[hoverIndex] : null;
+  const hoverBalanceData = hoverIndex != null && isBoth ? chartDataBalance[hoverIndex] : null;
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1374,6 +1859,117 @@ export default function IncomeExpenseDynamicsPage() {
     [chartData.length, innerWidth, padding.left, padding.right, width]
   );
 
+  const handleChartClick = useCallback(
+    (event: React.MouseEvent<SVGSVGElement>) => {
+      if (!svgRef.current || chartData.length === 0) return;
+      const ctm = svgRef.current.getScreenCTM();
+      if (!ctm) return;
+      let svgX = 0;
+      if (typeof DOMPoint !== "undefined") {
+        const pt = new DOMPoint(event.clientX, event.clientY);
+        svgX = pt.matrixTransform(ctm.inverse()).x;
+      } else {
+        const pt = svgRef.current.createSVGPoint();
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+        svgX = pt.matrixTransform(ctm.inverse()).x;
+      }
+      const clampedX = Math.min(Math.max(svgX, padding.left), width - padding.right);
+      const progress = (clampedX - padding.left) / innerWidth;
+      const index = Math.round(progress * (chartData.length - 1));
+      const safeIndex = Math.min(Math.max(index, 0), chartData.length - 1);
+      const periodKey = chartData[safeIndex]?.periodKey;
+      if (!periodKey) return;
+      setClickedChartPeriodKeys((prev) => {
+        if (prev.length === 0) return [periodKey];
+        if (prev.length === 1) {
+          if (prev[0] === periodKey) return prev;
+          return [prev[0], periodKey];
+        }
+        return [periodKey];
+      });
+    },
+    [chartData]
+  );
+
+  const markerPointsForClickedPeriods = useMemo(() => {
+    if (clickedChartPeriodKeys.length === 0 || chartData.length === 0) return [];
+    const points = isBoth ? chartPointsIncome : chartPoints;
+    return clickedChartPeriodKeys
+      .map((periodKey, i) => {
+        const index = chartData.findIndex((p) => p.periodKey === periodKey);
+        if (index === -1) return null;
+        const pt = points[index];
+        if (!pt) return null;
+        return { periodKey, label: String(i + 1), x: pt.x, y: pt.y };
+      })
+      .filter((m): m is NonNullable<typeof m> => m != null);
+  }, [clickedChartPeriodKeys, chartData, chartPointsIncome, chartPoints, isBoth]);
+
+  const arrowFromFirstToSecond = useMemo(() => {
+    if (markerPointsForClickedPeriods.length !== 2 || chartData.length === 0) return null;
+    const [m1, m2] = markerPointsForClickedPeriods;
+    const getValueRubCents = (periodKey: string) => {
+      const p = chartData.find((d) => d.periodKey === periodKey);
+      if (!p) return 0;
+      return p.sumRubCents;
+    };
+    const value1 = getValueRubCents(m1.periodKey);
+    const value2 = getValueRubCents(m2.periodKey);
+    const growthRubCents = value2 - value1;
+    const growthPercent = value1 !== 0 ? (growthRubCents / Math.abs(value1)) * 100 : null;
+    return {
+      x1: m1.x,
+      y1: m1.y,
+      x2: m2.x,
+      y2: m2.y,
+      midX: (m1.x + m2.x) / 2,
+      midY: (m1.y + m2.y) / 2,
+      growthRubCents,
+      growthPercent,
+    };
+  }, [markerPointsForClickedPeriods, chartData]);
+
+  const categoryById = useMemo(() => buildCategoryIndex(categoryNodes), [categoryNodes]);
+  const categoryBreakdownIncome = useMemo(() => {
+    if (clickedChartPeriodKeys.length === 0) return { rows: [] as CategoryRow[], totals: new Map<number, Record<string, number>>() };
+    return buildCategoryBreakdownByPeriod(
+      chartTxList,
+      "INCOME",
+      clickedChartPeriodKeys,
+      granularity,
+      itemsById,
+      chartRatesByDate,
+      categoryById
+    );
+  }, [
+    clickedChartPeriodKeys,
+    chartTxList,
+    granularity,
+    itemsById,
+    chartRatesByDate,
+    categoryById,
+  ]);
+  const categoryBreakdownExpense = useMemo(() => {
+    if (clickedChartPeriodKeys.length === 0) return { rows: [] as CategoryRow[], totals: new Map<number, Record<string, number>>() };
+    return buildCategoryBreakdownByPeriod(
+      chartTxList,
+      "EXPENSE",
+      clickedChartPeriodKeys,
+      granularity,
+      itemsById,
+      chartRatesByDate,
+      categoryById
+    );
+  }, [
+    clickedChartPeriodKeys,
+    chartTxList,
+    granularity,
+    itemsById,
+    chartRatesByDate,
+    categoryById,
+  ]);
+
   function formatChartRub(valueInCents: number) {
     return formatAmount(valueInCents);
   }
@@ -1429,13 +2025,14 @@ export default function IncomeExpenseDynamicsPage() {
                 className="w-fit"
                 segmentWidth="auto"
                 options={[
+                  { value: "BOTH", label: "Доход и расход" },
                   { value: "INCOME", label: "Доход", colorScheme: "green" },
                   { value: "EXPENSE", label: "Расход", colorScheme: "red" },
                 ]}
                 value={reportKind}
                 onChange={(value) => {
                   const v = typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
-                  if (v === "INCOME" || v === "EXPENSE") setReportKind(v);
+                  if (v === "BOTH" || v === "INCOME" || v === "EXPENSE") setReportKind(v);
                 }}
                 multiple={false}
               />
@@ -1643,57 +2240,137 @@ export default function IncomeExpenseDynamicsPage() {
 
             {rangeStartKey && rangeEndKey && (
               <div className="flex flex-wrap items-start gap-6 mb-6">
-                <div className="flex flex-col gap-1">
-                  <div className="text-[48px] font-semibold leading-tight">
-                    <span
-                      style={{ background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}
-                    >
-                      {formatChartRub(chartTotalAndAverage.totalRubCents)}
-                    </span>
-                    {showForecast && (
-                      <>
-                        <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
-                        <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                          {formatChartRub(chartTotalAndAverage.totalForecastRubCents)}
+                {isBoth ? (
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <div className="text-[14px] font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                        за период{" "}
+                        <span style={{ color: ACTIVE_TEXT_DARK }}>
+                          {[rangeStartKey, rangeEndKey]
+                            .map((k) => {
+                              const [y, m, d] = k.split("-");
+                              return `${d}.${m}.${y.slice(2)}`;
+                            })
+                            .join(" - ")}
                         </span>
-                      </>
-                    )}
-                  </div>
-                  <div className="text-[14px] font-normal">
-                    <span style={{ color: PLACEHOLDER_COLOR_DARK }}>за период </span>
-                    <span style={{ color: ACTIVE_TEXT_DARK }}>
-                      {[rangeStartKey, rangeEndKey].map((k) => { const [y, m, d] = k.split("-"); return `${d}.${m}.${y.slice(2)}`; }).join(" - ")}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {[
-                    { label: "Max", value: chartTotalAndAverage.maxRubCents, forecastValue: chartTotalAndAverage.maxForecastRubCents },
-                    { label: "Среднее", value: chartTotalAndAverage.averageRubCents, forecastValue: chartTotalAndAverage.averageForecastRubCents },
-                    { label: "Min", value: chartTotalAndAverage.minRubCents, forecastValue: chartTotalAndAverage.minForecastRubCents },
-                  ].map(({ label, value, forecastValue }) => (
-                    <div key={label} className="flex items-center gap-2">
-                      <span
-                        className="w-20 shrink-0 text-[14px] font-normal"
-                        style={{ color: PLACEHOLDER_COLOR_DARK }}
-                      >
-                        {label}
-                      </span>
-                      <span
-                        className="min-w-[10rem] shrink-0 rounded-[9px] px-2 py-1 text-right text-[14px] font-normal tabular-nums"
-                        style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}
-                      >
-                        {formatChartRub(value)}
+                      </div>
+                      <div className="flex flex-wrap gap-6">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[12px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                            Доход
+                          </span>
+                          <span className="text-2xl font-semibold" style={{ color: GREEN }}>
+                            {formatChartRub(chartTotalAndAverage.totalIncomeRubCents)}
+                            {showForecast && (
+                              <>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                  {formatChartRub(chartTotalAndAverage.totalForecastIncomeRubCents)}
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[12px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                            Расход
+                          </span>
+                          <span className="text-2xl font-semibold" style={{ color: RED }}>
+                            {formatChartRub(chartTotalAndAverage.totalExpenseRubCents)}
+                            {showForecast && (
+                              <>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                  {formatChartRub(chartTotalAndAverage.totalForecastExpenseRubCents)}
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[12px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                            Остаток
+                          </span>
+                          <span className="text-2xl font-semibold" style={{ color: ACCENT }}>
+                            {formatChartRub(chartTotalAndAverage.totalBalanceRubCents)}
+                            {showForecast && (
+                              <>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                  {formatChartRub(chartTotalAndAverage.totalForecastBalanceRubCents)}
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {[
+                        { label: "Max", value: chartTotalAndAverage.maxRubCents, forecastValue: chartTotalAndAverage.maxForecastRubCents },
+                        { label: "Среднее", value: chartTotalAndAverage.averageRubCents, forecastValue: chartTotalAndAverage.averageForecastRubCents },
+                        { label: "Min", value: chartTotalAndAverage.minRubCents, forecastValue: chartTotalAndAverage.minForecastRubCents },
+                      ].map(({ label, value, forecastValue }) => (
+                        <div key={label} className="flex items-center gap-2">
+                          <span className="w-20 shrink-0 text-[14px] font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>{label}</span>
+                          <span className="min-w-[10rem] shrink-0 rounded-[9px] px-2 py-1 text-right text-[14px] font-normal tabular-nums" style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}>
+                            {formatChartRub(value)}
+                            {showForecast && (
+                              <>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartRub(forecastValue)}</span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-[48px] font-semibold leading-tight">
+                        <span style={{ background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
+                          {formatChartRub(chartTotalAndAverage.totalRubCents)}
+                        </span>
                         {showForecast && (
                           <>
                             <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
-                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartRub(forecastValue)}</span>
+                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                              {formatChartRub(chartTotalAndAverage.totalForecastRubCents)}
+                            </span>
                           </>
                         )}
-                      </span>
+                      </div>
+                      <div className="text-[14px] font-normal">
+                        <span style={{ color: PLACEHOLDER_COLOR_DARK }}>за период </span>
+                        <span style={{ color: ACTIVE_TEXT_DARK }}>
+                          {[rangeStartKey, rangeEndKey].map((k) => { const [y, m, d] = k.split("-"); return `${d}.${m}.${y.slice(2)}`; }).join(" - ")}
+                        </span>
+                      </div>
                     </div>
-                  ))}
-                </div>
+                    <div className="flex flex-col gap-2">
+                      {[
+                        { label: "Max", value: chartTotalAndAverage.maxRubCents, forecastValue: chartTotalAndAverage.maxForecastRubCents },
+                        { label: "Среднее", value: chartTotalAndAverage.averageRubCents, forecastValue: chartTotalAndAverage.averageForecastRubCents },
+                        { label: "Min", value: chartTotalAndAverage.minRubCents, forecastValue: chartTotalAndAverage.minForecastRubCents },
+                      ].map(({ label, value, forecastValue }) => (
+                        <div key={label} className="flex items-center gap-2">
+                          <span className="w-20 shrink-0 text-[14px] font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>{label}</span>
+                          <span className="min-w-[10rem] shrink-0 rounded-[9px] px-2 py-1 text-right text-[14px] font-normal tabular-nums" style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}>
+                            {formatChartRub(value)}
+                            {showForecast && (
+                              <>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartRub(forecastValue)}</span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -1728,55 +2405,102 @@ export default function IncomeExpenseDynamicsPage() {
                           ? formatWeekPeriodAsDateRange(hoverChartData.periodKey)
                           : hoverChartData.label}
                       </div>
-                      <div className="whitespace-nowrap" style={{ color: ACTIVE_TEXT_DARK }}>
-                        {formatChartRub(hoverChartData.sumRubCents)}
-                        {showForecast && hoverIndex != null && chartDataForecast[hoverIndex] != null && (
-                          <>
-                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
-                            <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                              {formatChartRub(chartDataForecast[hoverIndex].sumRubCents)}
-                            </span>
-                          </>
-                        )}
-                      </div>
+                      {isBoth && hoverIncomeData != null && hoverExpenseData != null && hoverBalanceData != null ? (
+                        <div className="flex flex-col gap-0.5 mt-1">
+                          <div className="whitespace-nowrap" style={{ color: GREEN }}>
+                            Доход: {formatChartRub(hoverIncomeData.sumRubCents)}
+                          </div>
+                          <div className="whitespace-nowrap" style={{ color: RED }}>
+                            Расход: {formatChartRub(hoverExpenseData.sumRubCents)}
+                          </div>
+                          <div className="whitespace-nowrap" style={{ color: ACCENT }}>
+                            Остаток: {formatChartRub(hoverBalanceData.balanceRubCents)}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="whitespace-nowrap" style={{ color: ACTIVE_TEXT_DARK }}>
+                          {formatChartRub(hoverChartData.sumRubCents)}
+                          {showForecast && hoverIndex != null && chartDataForecast[hoverIndex] != null && (
+                            <>
+                              <span style={{ color: PLACEHOLDER_COLOR_DARK }}> / </span>
+                              <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                {formatChartRub(chartDataForecast[hoverIndex].sumRubCents)}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                   <svg
                     ref={svgRef}
                     viewBox={`0 0 ${width} ${height}`}
-                    className="h-full w-full"
+                    className="h-full w-full cursor-pointer"
                     role="img"
-                    aria-label="График динамики доходов или расходов"
+                    aria-label="График динамики доходов или расходов. Кликните для выбора периода."
                     onMouseMove={handleChartPointerMove}
                     onMouseLeave={() => setHoverIndex(null)}
+                    onClick={handleChartClick}
                   >
                     <defs>
+                      <marker id="arrowheadGreenIE" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill={GREEN} />
+                      </marker>
+                      <marker id="arrowheadRedIE" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill={RED} />
+                      </marker>
                       <linearGradient id="incomeExpenseArea" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor={chartColor} stopOpacity="0.35" />
                         <stop offset="100%" stopColor={chartColor} stopOpacity="0" />
                       </linearGradient>
+                      <linearGradient id="incomeAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={GREEN} stopOpacity="0.35" />
+                        <stop offset="100%" stopColor={GREEN} stopOpacity="0" />
+                      </linearGradient>
+                      <linearGradient id="expenseAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={RED} stopOpacity="0.35" />
+                        <stop offset="100%" stopColor={RED} stopOpacity="0" />
+                      </linearGradient>
                     </defs>
-                    {chartAreaPath && <path d={chartAreaPath} fill="url(#incomeExpenseArea)" />}
-                    {chartLinePath && (
-                      <path
-                        d={chartLinePath}
-                        fill="none"
-                        stroke={chartColor}
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    )}
-                    {chartLinePathForecast && (
-                      <path
-                        d={chartLinePathForecast}
-                        fill="none"
-                        stroke={chartColor}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeDasharray="8 6"
-                      />
+                    {isBoth ? (
+                      <>
+                        {balanceBars.map((bar, idx) => (
+                          <rect
+                            key={`balance-${idx}`}
+                            x={bar.x}
+                            y={bar.y}
+                            width={bar.width}
+                            height={bar.height}
+                            fill={ACCENT}
+                            fillOpacity={0.6}
+                            rx={2}
+                          />
+                        ))}
+                        {chartAreaPathIncome && <path d={chartAreaPathIncome} fill="url(#incomeAreaGrad)" />}
+                        {chartAreaPathExpense && <path d={chartAreaPathExpense} fill="url(#expenseAreaGrad)" />}
+                        {chartLinePathIncome && (
+                          <path d={chartLinePathIncome} fill="none" stroke={GREEN} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        )}
+                        {chartLinePathExpense && (
+                          <path d={chartLinePathExpense} fill="none" stroke={RED} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        )}
+                        {chartLinePathForecastIncome && (
+                          <path d={chartLinePathForecastIncome} fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 6" />
+                        )}
+                        {chartLinePathForecastExpense && (
+                          <path d={chartLinePathForecastExpense} fill="none" stroke={RED} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 6" />
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {chartAreaPath && <path d={chartAreaPath} fill="url(#incomeExpenseArea)" />}
+                        {chartLinePath && (
+                          <path d={chartLinePath} fill="none" stroke={chartColor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        )}
+                        {chartLinePathForecast && (
+                          <path d={chartLinePathForecast} fill="none" stroke={chartColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 6" />
+                        )}
+                      </>
                     )}
                     {chartDividers.map((div, idx) => (
                       <line
@@ -1790,24 +2514,48 @@ export default function IncomeExpenseDynamicsPage() {
                         strokeOpacity={div.type === "year" ? 0.9 : 0.5}
                       />
                     ))}
+                    {chartMin < 0 && isBoth && (
+                      <line x1={padding.left} x2={width - padding.right} y1={baselineY} y2={baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth="1" strokeDasharray="4 4" strokeOpacity="0.7" />
+                    )}
+                    {arrowFromFirstToSecond && (() => {
+                      const { x1, y1, x2, y2, midX, growthRubCents, growthPercent } = arrowFromFirstToSecond;
+                      const inset = 14;
+                      const yTop = padding.top + 8;
+                      const pathD = `M ${x1} ${y1 + inset} L ${x1} ${yTop} L ${x2} ${yTop} L ${x2} ${y2 - inset}`;
+                      const positiveIsGood = reportKind === "INCOME";
+                      const arrowColor = (growthRubCents >= 0) === positiveIsGood ? GREEN : RED;
+                      const markerEnd = (growthRubCents >= 0) === positiveIsGood ? "url(#arrowheadGreenIE)" : "url(#arrowheadRedIE)";
+                      return (
+                        <g>
+                          <path d={pathD} fill="none" stroke={arrowColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" markerEnd={markerEnd} />
+                          <text x={midX} y={yTop - 10} textAnchor="middle" fontSize="11" fontWeight={500} fill={arrowColor}>
+                            {formatSignedValue(growthRubCents, (v) => formatRub(v))}  ({formatGrowthPercent(growthPercent)})
+                          </text>
+                        </g>
+                      );
+                    })()}
+                    {markerPointsForClickedPeriods.map((m) => (
+                      <g key={m.periodKey}>
+                        <line x1={m.x} x2={m.x} y1={padding.top} y2={padding.top + innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" strokeOpacity={0.7} />
+                        <rect x={m.x - 12} y={m.y - 12} width={24} height={24} rx={9} ry={9} fill={ACCENT2} />
+                        <text x={m.x} y={m.y} textAnchor="middle" dominantBaseline="central" fontSize="12" fontWeight={600} fill={ACTIVE_TEXT_DARK}>{m.label}</text>
+                      </g>
+                    ))}
                     {hoverPoint && (
                       <>
-                        <line
-                          x1={hoverPoint.x}
-                          x2={hoverPoint.x}
-                          y1={padding.top}
-                          y2={padding.top + innerHeight}
-                          stroke="#CFC5FF"
-                          strokeDasharray="4 6"
-                        />
-                        <circle
-                          cx={hoverPoint.x}
-                          cy={hoverPoint.y}
-                          r="6"
-                          fill={chartColor}
-                          stroke="#fff"
-                          strokeWidth="2"
-                        />
+                        <line x1={hoverPoint.x} x2={hoverPoint.x} y1={padding.top} y2={padding.top + innerHeight} stroke="#CFC5FF" strokeDasharray="4 6" />
+                        {isBoth && hoverIndex != null ? (
+                          <>
+                            {chartPointsIncome[hoverIndex] && (
+                              <circle cx={chartPointsIncome[hoverIndex].x} cy={chartPointsIncome[hoverIndex].y} r="5" fill={GREEN} stroke="#fff" strokeWidth="2" />
+                            )}
+                            {chartPointsExpense[hoverIndex] && (
+                              <circle cx={chartPointsExpense[hoverIndex].x} cy={chartPointsExpense[hoverIndex].y} r="5" fill={RED} stroke="#fff" strokeWidth="2" />
+                            )}
+                          </>
+                        ) : (
+                          <circle cx={hoverPoint.x} cy={hoverPoint.y} r="6" fill={chartColor} stroke="#fff" strokeWidth="2" />
+                        )}
                       </>
                     )}
                     {periodMarks.map((mark, idx) => (
@@ -1829,6 +2577,31 @@ export default function IncomeExpenseDynamicsPage() {
             </div>
           </div>
         </div>
+
+        {clickedChartPeriodKeys.length >= 1 && (reportKind === "BOTH" || reportKind === "INCOME" || reportKind === "EXPENSE") && (
+          <CategoryBreakdownTable
+            reportKind={reportKind}
+            clickedPeriodKeys={clickedChartPeriodKeys}
+            chartPeriodPoints={chartPeriodPoints}
+            granularity={granularity}
+            categoryBreakdownIncome={categoryBreakdownIncome}
+            categoryBreakdownExpense={categoryBreakdownExpense}
+            chartTxList={chartTxList}
+            itemsById={itemsById}
+            chartRatesByDate={chartRatesByDate}
+            categoryById={categoryById}
+            categoryLookup={categoryLookup}
+            categoryDescendantsMap={categoryDescendantsMap}
+            expandedCategoryId={expandedCategoryId}
+            setExpandedCategoryId={setExpandedCategoryId}
+            onClose={() => setClickedChartPeriodKeys([])}
+            formatPeriodLabel={(pk) => {
+              const p = chartPeriodPoints.find((pt) => pt.periodKey === pk);
+              if (p) return granularity === "week" ? formatWeekPeriodAsDateRange(pk) : p.label;
+              return granularity === "week" ? formatWeekPeriodAsDateRange(pk) : pk;
+            }}
+          />
+        )}
       </div>
     </main>
   );

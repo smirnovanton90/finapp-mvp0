@@ -4017,7 +4017,7 @@ export default function Page() {
               }`}
             >
               {isMoexType && (
-                <div className="grid gap-3 rounded-lg border-2 border-border/70 p-3" style={{ backgroundColor: BACKGROUND_DT }}>
+                <div className="grid gap-3">
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
                     <Label style={{ color: ACTIVE_TEXT_DARK }}>Ценная бумага</Label>

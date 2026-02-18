@@ -1464,7 +1464,7 @@ export function AddEditItemFormModal({
             {/* MOEX block */}
             <div className={cn("overflow-hidden transition-all duration-300", isMoexType ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0")}>
               {isMoexType && (
-                <div className="grid gap-3 rounded-lg border-2 border-border/70 p-3" style={{ backgroundColor: BACKGROUND_DT }}>
+                <div className="grid gap-3">
                   <div className="grid gap-2">
                     <div className="flex items-center gap-2">
                       <Label style={{ color: ACTIVE_TEXT_DARK }}>Ценная бумага</Label>

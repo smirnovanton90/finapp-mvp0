@@ -38,6 +38,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { CurrencyChip } from "@/components/currency-chip";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
@@ -457,18 +458,6 @@ const TYPE_ICON_BY_CODE: Record<
   business_liability: AlertCircle,
   other_liability: AlertCircle,
 };
-
-const CURRENCY_BADGE_CLASSES: Record<string, string> = {
-  RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
-  USD: "bg-[#2E7D32]/20 text-[#2E7D32]",
-  EUR: "bg-[#003399]/20 text-[#003399]",
-  JPY: "bg-[#BC002D]/20 text-[#BC002D]",
-  CNY: "bg-[#DE2910]/20 text-[#DE2910]",
-};
-
-function getCurrencyBadgeClass(code: string) {
-  return CURRENCY_BADGE_CLASSES[code] ?? "bg-muted/20 text-slate-600";
-}
 
 function formatRub(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
@@ -3712,15 +3701,10 @@ export default function Page() {
                         {isLinkedCard ? (
                           "-"
                         ) : currencyCode ? (
-                          <span
-                            className={[
-                              "inline-flex min-w-10 items-center justify-center rounded-full px-1.5 py-[1px] text-[11px] font-semibold uppercase",
-                              getCurrencyBadgeClass(currencyCode),
-                              isArchived || isClosed ? "opacity-40" : "",
-                            ].join(" ")}
-                          >
-                            {currencyCode}
-                          </span>
+                          <CurrencyChip
+                            code={currencyCode}
+                            className={["min-w-10 justify-center", isArchived || isClosed ? "opacity-40" : ""].join(" ")}
+                          />
                         ) : (
                           "-"
                         )}
@@ -4326,14 +4310,7 @@ export default function Page() {
                 value: c.iso_char_code,
                 label: (
                   <div className="flex items-center gap-2">
-                    <span
-                      className={[
-                        "inline-flex min-w-10 items-center justify-center rounded-full px-1.5 py-[1px] text-[11px] font-semibold uppercase",
-                        getCurrencyBadgeClass(c.iso_char_code),
-                      ].join(" ")}
-                    >
-                      {c.iso_char_code}
-                    </span>
+                    <CurrencyChip code={c.iso_char_code} className="min-w-10 justify-center" />
                     <span>{c.name}</span>
                   </div>
                 ),

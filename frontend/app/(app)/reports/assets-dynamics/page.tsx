@@ -29,6 +29,7 @@ import { ItemSelector } from "@/components/item-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, BACKGROUND_DT, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
+import { CurrencyChip } from "@/components/currency-chip";
 import {
   formatWeekPeriodAsDateRange,
   getForecastPresetEnd,
@@ -239,19 +240,6 @@ function formatTxDateCell(transactionDate: string) {
     </>
   );
 }
-
-const CURRENCY_BADGE_CLASSES: Record<string, string> = {
-  RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
-  USD: "bg-[#2E7D32]/20 text-[#2E7D32]",
-  EUR: "bg-[#003399]/20 text-[#003399]",
-  JPY: "bg-[#BC002D]/20 text-[#BC002D]",
-  CNY: "bg-[#DE2910]/20 text-[#DE2910]",
-};
-
-function getCurrencyBadgeClass(code: string) {
-  return CURRENCY_BADGE_CLASSES[code] ?? "bg-muted/20 text-slate-600";
-}
-
 
 function formatRub(valueInCents: number) {
   return new Intl.NumberFormat("ru-RU", {
@@ -2242,20 +2230,14 @@ export default function AssetsDynamicsPage() {
                                             item={item}
                                             counterparty={counterparty ?? null}
                                             apiBase={API_BASE}
-                                            size={20}
-                                            className="h-5 w-5 rounded-sm object-contain"
+                                            size={18}
+                                            className="h-4 w-4 rounded-sm object-contain"
                                             fallbackIconColor={ACTIVE_TEXT_DARK}
                                             alt={itemCounterpartyName(item.id) || item.name || ""}
                                           />
                                         </div>
                                         <span style={{ color: ACTIVE_TEXT_DARK }}>{item.name}</span>
-                                        {currencyCode && (
-                                          <span
-                                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase ${getCurrencyBadgeClass(currencyCode)}`}
-                                          >
-                                            {currencyCode}
-                                          </span>
-                                        )}
+                                        {currencyCode && <CurrencyChip code={currencyCode} />}
                                       </div>
                                     </td>
                                     {dateSnapshotRows.map((row, dateIdx) => {
@@ -2293,13 +2275,15 @@ export default function AssetsDynamicsPage() {
                                   {isExpanded && (
                                     <tr style={{ backgroundColor: BACKGROUND_DT }}>
                                       <td colSpan={colSpan} className="py-3 pl-8 pr-8 align-middle" style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                        {txsInRange.length > 0 && (
                                         <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                                           <tbody>
-                                            {txsInRange.map(({ tx, deltaCents, inCurrency }) => {
+                                            {txsInRange.map(({ tx, deltaCents }) => {
                                               const d = toTxDateKey(tx.transaction_date);
                                               const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey) : null;
-                                              const currencyUnits = currencyCode !== "RUB" ? (inCurrency ? deltaCents / 100 : (rate != null && rate !== 0 ? deltaCents / (100 * rate) : null)) : null;
-                                              const rubCents = currencyCode !== "RUB" ? (inCurrency && rate != null ? Math.round(deltaCents * rate) : deltaCents) : deltaCents;
+                                              // Для валютных счетов: в "В валюте" — сумма в валюте, в "Руб" — эта сумма × курс
+                                              const currencyUnits = currencyCode !== "RUB" ? deltaCents / 100 : null;
+                                              const rubCents = currencyCode !== "RUB" && rate != null ? Math.round(deltaCents * rate) : deltaCents;
                                               const categoryPath = tx.category_id != null ? (categoryLookup.idToPath.get(tx.category_id) ?? []) : [];
                                               const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : null;
                                               const isTransfer = tx.direction === "TRANSFER";
@@ -2324,8 +2308,8 @@ export default function AssetsDynamicsPage() {
                                                               item={otherItem}
                                                               counterparty={otherCounterparty ?? null}
                                                               apiBase={API_BASE}
-                                                              size={20}
-                                                              className="h-5 w-5 rounded-sm object-contain"
+                                                              size={18}
+                                                              className="h-4 w-4 rounded-sm object-contain"
                                                               fallbackIconColor={ACTIVE_TEXT_DARK}
                                                               alt={itemCounterpartyName(otherItem.id) || otherItem.name || ""}
                                                             />
@@ -2355,14 +2339,104 @@ export default function AssetsDynamicsPage() {
                                                       </div>
                                                     ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
                                                   </td>
-                                                  {currencyCode !== "RUB" && <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: amountColor }}>{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"} {currencyCode}</td>}
+                                                  {currencyCode !== "RUB" && (
+                                                    <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                                      <div className="flex items-center gap-2 tabular-nums w-full">
+                                                        <CurrencyChip code={currencyCode} />
+                                                        <span className="ml-auto" style={{ color: amountColor }}>{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"}</span>
+                                                      </div>
+                                                    </td>
+                                                  )}
                                                   {currencyCode !== "RUB" && <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>{rate != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rate) : "–"}</td>}
-                                                  <td className="py-1.5 text-right tabular-nums align-middle" style={{ color: amountColor }}>{formatSignedValue(rubCents, formatRub)}</td>
+                                                  <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                                    <div className="flex items-center gap-2 tabular-nums w-full">
+                                                      <CurrencyChip code="RUB" />
+                                                      <span className="ml-auto" style={{ color: amountColor }}>{formatSignedValue(rubCents, formatRub)}</span>
+                                                    </div>
+                                                  </td>
                                                 </tr>
                                               );
                                             })}
                                           </tbody>
                                         </table>
+                                        )}
+                                        {(() => {
+                                          const row0 = dateSnapshotRows[0];
+                                          const row1 = dateSnapshotRows.length >= 2 ? dateSnapshotRows[1] : null;
+                                          const initialValueCents = row0?.itemValues[item.id] ?? null;
+                                          const initialRubCents = row0?.itemRubValues[item.id] ?? null;
+                                          const effectiveKind = initialValueCents != null ? resolveItemEffectiveKind(item, initialValueCents) : item.kind;
+                                          const initialDisplayRub = initialRubCents != null && effectiveKind === "LIABILITY" ? Math.abs(initialRubCents) : initialRubCents ?? 0;
+                                          const initialDisplayCur = initialValueCents != null && effectiveKind === "LIABILITY" ? Math.abs(initialValueCents) : initialValueCents ?? 0;
+                                          const finalValueCents = row1?.itemValues[item.id] ?? initialValueCents;
+                                          const finalRubCents = row1?.itemRubValues[item.id] ?? initialRubCents;
+                                          const finalDisplayRub = finalRubCents != null && effectiveKind === "LIABILITY" ? Math.abs(finalRubCents) : finalRubCents ?? 0;
+                                          const finalDisplayCur = finalValueCents != null && effectiveKind === "LIABILITY" ? Math.abs(finalValueCents) : finalValueCents ?? 0;
+                                          let totalIncomeRub = 0;
+                                          let totalExpenseRub = 0;
+                                          let totalIncomeCur = 0;
+                                          let totalExpenseCur = 0;
+                                          let totalTransferRub = 0;
+                                          let totalTransferCur = 0;
+                                          let netFlowRub = 0;
+                                          txsInRange.forEach(({ tx, deltaCents }) => {
+                                            const d = toTxDateKey(tx.transaction_date);
+                                            const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey) : null;
+                                            const rubCents = currencyCode !== "RUB" && rate != null ? Math.round(deltaCents * rate) : deltaCents;
+                                            netFlowRub += rubCents;
+                                            if (tx.direction === "TRANSFER") {
+                                              totalTransferRub += rubCents;
+                                              if (currencyCode !== "RUB") totalTransferCur += deltaCents / 100;
+                                            } else {
+                                              if (rubCents > 0) totalIncomeRub += rubCents; else totalExpenseRub += Math.abs(rubCents);
+                                              if (currencyCode !== "RUB") {
+                                                const curUnits = deltaCents / 100;
+                                                if (curUnits > 0) totalIncomeCur += curUnits; else totalExpenseCur += Math.abs(curUnits);
+                                              }
+                                            }
+                                          });
+                                          const signedInitialRub = initialRubCents != null && effectiveKind === "LIABILITY" ? -initialRubCents : initialRubCents ?? 0;
+                                          const signedFinalRub = finalRubCents != null && effectiveKind === "LIABILITY" ? -finalRubCents : finalRubCents ?? 0;
+                                          const courseDiffRub = currencyCode !== "RUB" ? (signedFinalRub - signedInitialRub) - netFlowRub : 0;
+                                          const formatCur = (v: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+                                          const SummaryBlock = ({ title, curVal, rubVal, amountColor, showCurRow = true }: { title: string; curVal: number | null; rubVal: number; amountColor?: string; showCurRow?: boolean }) => (
+                                            <div className="flex flex-1 min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+                                              <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
+                                              <div className="flex flex-col gap-2">
+                                                {currencyCode !== "RUB" && (
+                                                  showCurRow ? (
+                                                    <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                                                      <CurrencyChip code={currencyCode} />
+                                                      <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{curVal != null ? formatCur(curVal) : "–"}</span>
+                                                    </div>
+                                                  ) : (
+                                                    <div className="rounded-md px-2 py-1 flex items-center text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden>
+                                                      <span className="invisible select-none">0</span>
+                                                    </div>
+                                                  )
+                                                )}
+                                                <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                                                  <CurrencyChip code="RUB" />
+                                                  <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{formatRub(rubVal)}</span>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          );
+                                          const dateStartLabel = dateStart ? formatDateLabel(dateStart) : "";
+                                          const dateEndLabel = dateEnd ? formatDateLabel(dateEnd) : dateStartLabel;
+                                          return (
+                                            <div className="flex w-full gap-4 mt-4">
+                                              <SummaryBlock title={`На ${dateStartLabel}`} curVal={currencyCode !== "RUB" ? initialDisplayCur / 100 : null} rubVal={initialDisplayRub} />
+                                              {currencyCode !== "RUB" && (
+                                                <SummaryBlock title="Курсовая разница" curVal={null} rubVal={courseDiffRub} showCurRow={false} />
+                                              )}
+                                              <SummaryBlock title="Приход" curVal={currencyCode !== "RUB" ? totalIncomeCur : null} rubVal={totalIncomeRub} amountColor={GREEN} />
+                                              <SummaryBlock title="Расход" curVal={currencyCode !== "RUB" ? -totalExpenseCur : null} rubVal={-totalExpenseRub} amountColor={RED} />
+                                              <SummaryBlock title="Переводы" curVal={currencyCode !== "RUB" ? totalTransferCur : null} rubVal={totalTransferRub} />
+                                              <SummaryBlock title={`На ${dateEndLabel}`} curVal={currencyCode !== "RUB" ? finalDisplayCur / 100 : null} rubVal={finalDisplayRub} />
+                                            </div>
+                                          );
+                                        })()}
                                       </td>
                                     </tr>
                                   )}

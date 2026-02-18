@@ -37,17 +37,7 @@ const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set([
   "third_party_payables",
 ]);
 
-const CURRENCY_BADGE_CLASSES: Record<string, string> = {
-  RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
-  USD: "bg-[#2E7D32]/20 text-[#2E7D32]",
-  EUR: "bg-[#003399]/20 text-[#003399]",
-  JPY: "bg-[#BC002D]/20 text-[#BC002D]",
-  CNY: "bg-[#DE2910]/20 text-[#DE2910]",
-};
-
-function getCurrencyBadgeClass(code: string) {
-  return CURRENCY_BADGE_CLASSES[code] ?? "bg-muted/20 text-slate-600";
-}
+import { CurrencyChip } from "@/components/currency-chip";
 
 function formatShortDate(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
@@ -248,13 +238,7 @@ export function ImportAccountCard({
       <div className="flex flex-col flex-1 min-w-0 py-6 pr-6 pl-4 gap-4">
         {/* Первая строка: валюта (слева — из выписки) | название | link; pencil-off справа от поля */}
         <div className="flex flex-row items-center flex-wrap justify-center gap-2 min-w-0">
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase shrink-0 ${
-              getCurrencyBadgeClass(account.currency)
-            }`}
-          >
-            {account.currency}
-          </span>
+          <CurrencyChip code={account.currency} />
           {!isEditingCurrency ? (
             <IconButton
               onClick={() => setIsEditingCurrency(true)}

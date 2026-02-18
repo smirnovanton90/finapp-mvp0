@@ -33,6 +33,7 @@ import { assetIconPath } from "@/lib/image-paths";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { CardIcon } from "@/components/card-icon";
+import { CurrencyChip } from "@/components/currency-chip";
 
 const MOEX_TYPE_CODES = ["securities", "bonds", "etf", "bpif", "pif"];
 
@@ -102,18 +103,6 @@ interface AssetCardProps {
 
 // Simplified industry icon mapping (can be expanded if needed)
 const COUNTERPARTY_LEGAL_FALLBACK_ICON = Building2;
-
-const CURRENCY_BADGE_CLASSES: Record<string, string> = {
-  RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
-  USD: "bg-[#2E7D32]/20 text-[#2E7D32]",
-  EUR: "bg-[#003399]/20 text-[#003399]",
-  JPY: "bg-[#BC002D]/20 text-[#BC002D]",
-  CNY: "bg-[#DE2910]/20 text-[#DE2910]",
-};
-
-function getCurrencyBadgeClass(code: string) {
-  return CURRENCY_BADGE_CLASSES[code] ?? "bg-muted/20 text-slate-600";
-}
 
 function formatRate(value: number) {
   return new Intl.NumberFormat("ru-RU", {
@@ -306,14 +295,10 @@ export function AssetCard({
                 {typeLabel}
               </span>
               {currencyCode && (
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase ${
-                    getCurrencyBadgeClass(currencyCode)
-                  }`}
+                <CurrencyChip
+                  code={currencyCode}
                   style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined}
-                >
-                  {currencyCode}
-                </span>
+                />
               )}
             </div>
             <h3

@@ -11,6 +11,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
+import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -127,6 +128,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <AppHeader />
         <MobileFiltersDrawer />
+        <PwaInstallPrompt />
         <div className="relative z-10 flex">
           <Sidebar />
           <div

@@ -52,7 +52,7 @@ import {
   ReportPeriodGranularity,
   toDateKey,
 } from "@/lib/report-period-utils";
-import { ChevronDown, ChevronRight, Info } from "lucide-react";
+import { ChevronDown, ChevronRight, Info, MessageSquare } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -64,11 +64,41 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CategoryIconImage } from "@/components/category-icon-image";
+import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 import { formatAmount, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { buildItemTransactionCounts } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
+import { AssetItemIcon } from "@/components/asset-item-icon";
+import { CounterpartyIconImage } from "@/components/counterparty-icon-image";
+
+function formatDateLabel(dateKey: string) {
+  const [y, m, d] = dateKey.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+/** Форматирует дату транзакции: дата; время HH:mm — только если оно есть в transaction_date и не 00:00. */
+function formatTxDateCell(transactionDate: string) {
+  const dateKey = toTxDateKey(transactionDate);
+  const dateLabel = formatDateLabel(dateKey);
+  const tIdx = transactionDate.indexOf("T");
+  if (tIdx === -1) return dateLabel;
+  const timePart = transactionDate.slice(tIdx + 1);
+  const match = /^(\d{1,2}):(\d{2})/.exec(timePart);
+  if (!match) return dateLabel;
+  const hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  if (hours === 0 && minutes === 0) return dateLabel;
+  const timeLabel = `${match[1].padStart(2, "0")}:${match[2]}`;
+  return (
+    <>
+      {dateLabel}
+      <br />
+      <span className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK, fontWeight: 400 }}>{timeLabel}</span>
+    </>
+  );
+}
 
 type CategoryRow = {
   id: number;
@@ -648,12 +678,12 @@ function CategorySectionBody({
               >
                 <div className={cn("flex items-center gap-2", indentClass)}>
                   {hasChildren ? (
-                    <button
+                    <IconButton
                       type="button"
                       onClick={() =>
                         row.level === 1 ? toggleL1(row.l1Id) : toggleL2(l2Key)
                       }
-                      className="inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                      className="h-6 w-6 shrink-0"
                       aria-label={
                         isExpanded ? "Свернуть подкатегории" : "Развернуть подкатегории"
                       }
@@ -663,9 +693,9 @@ function CategorySectionBody({
                       ) : (
                         <ChevronRight className="h-4 w-4" />
                       )}
-                    </button>
+                    </IconButton>
                   ) : (
-                    <span className="inline-flex h-5 w-5" aria-hidden="true" />
+                    <span className="inline-flex h-6 w-6 shrink-0" aria-hidden="true" />
                   )}
                   <CategoryIconImage
                     categoryId={row.id}
@@ -796,6 +826,7 @@ function CategoryBreakdownTable({
   categoryBreakdownExpense,
   chartTxList,
   itemsById,
+  counterparties,
   chartRatesByDate,
   categoryById,
   categoryLookup,
@@ -813,6 +844,7 @@ function CategoryBreakdownTable({
   categoryBreakdownExpense: { rows: CategoryRow[]; totals: Map<number, Record<string, number>> };
   chartTxList: TransactionOut[];
   itemsById: Map<number, ItemOut>;
+  counterparties: Awaited<ReturnType<typeof fetchCounterparties>>;
   chartRatesByDate: Record<string, FxRateOut[]>;
   categoryById: Map<number, CategoryNode>;
   categoryLookup: ReturnType<typeof buildCategoryLookup>;
@@ -863,6 +895,8 @@ function CategoryBreakdownTable({
           formatPeriodLabel={formatPeriodLabel}
           chartTxList={chartTxList}
           granularity={granularity}
+          itemsById={itemsById}
+          counterparties={counterparties}
           categoryLookup={categoryLookup}
           categoryDescendantsMap={categoryDescendantsMap}
           sumTxToRubCents={sumTxToRubCents}
@@ -880,6 +914,8 @@ function CategoryBreakdownSection({
   formatPeriodLabel,
   chartTxList,
   granularity,
+  itemsById,
+  counterparties,
   categoryLookup,
   categoryDescendantsMap,
   sumTxToRubCents,
@@ -891,6 +927,8 @@ function CategoryBreakdownSection({
   formatPeriodLabel: (pk: string) => string;
   chartTxList: TransactionOut[];
   granularity: ReportPeriodGranularity;
+  itemsById: Map<number, ItemOut>;
+  counterparties: Awaited<ReturnType<typeof fetchCounterparties>>;
   categoryLookup: ReturnType<typeof buildCategoryLookup>;
   categoryDescendantsMap: Map<number, Set<number>>;
   sumTxToRubCents: (tx: TransactionOut) => number;
@@ -898,6 +936,16 @@ function CategoryBreakdownSection({
   setExpandedCategoryId: React.Dispatch<React.SetStateAction<number | null>>;
 }) {
   const { direction, rows, totals } = section;
+  const counterpartiesById = useMemo(() => new Map(counterparties.map((c) => [c.id, c])), [counterparties]);
+  const itemCounterpartyName = useCallback(
+    (itemId: number | null | undefined) => {
+      if (!itemId) return "";
+      const cpId = itemsById.get(itemId)?.counterparty_id;
+      if (cpId == null) return "";
+      return counterpartiesById.get(cpId)?.name ?? "";
+    },
+    [itemsById, counterpartiesById]
+  );
   const { l1HasChildren, l2HasChildren, expandedL1, expandedL2, toggleL1, toggleL2, isRowVisible } = useCategoryExpansion(rows);
   const totalByPeriod = clickedPeriodKeys.map((pk) => rows.filter((r) => r.level === 1).reduce((s, r) => s + (totals.get(r.id)?.[pk] ?? 0), 0));
   const totalGrowthPercent = clickedPeriodKeys.length === 2 && totalByPeriod[0] !== 0
@@ -967,10 +1015,15 @@ function CategoryBreakdownSection({
                       <td className="pl-8 pr-6 py-3 text-sm">
                         <div className={cn("flex items-center gap-2 flex-wrap", indentClass)}>
                           {hasChildren ? (
-                            <button type="button" onClick={(e) => { e.stopPropagation(); row.level === 1 ? toggleL1(row.l1Id) : toggleL2(l2Key); }} className="inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" aria-label={isExpanded ? "Свернуть" : "Развернуть"}>
+                            <IconButton
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); row.level === 1 ? toggleL1(row.l1Id) : toggleL2(l2Key); }}
+                              className="h-6 w-6 shrink-0"
+                              aria-label={isExpanded ? "Свернуть" : "Развернуть"}
+                            >
                               {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                            </button>
-                          ) : <span className="w-5" />}
+                            </IconButton>
+                          ) : <span className="w-6 shrink-0" aria-hidden="true" />}
                           <CategoryIconImage categoryId={row.id} categoryLookup={categoryLookup} apiBase={API_BASE} size={20} className="h-5 w-5 rounded-sm" />
                           <span style={{ color: ACTIVE_TEXT_DARK }}>{row.label}</span>
                         </div>
@@ -981,7 +1034,9 @@ function CategoryBreakdownSection({
                             <td className="px-3 py-3 text-center tabular-nums text-sm" style={growthColor ? { color: growthColor } : undefined}>{growthPercent != null ? formatGrowthPercent(growthPercent) : "–"}</td>
                           )}
                           <td className={`px-4 py-3 text-right tabular-nums text-sm ${dateIdx === clickedPeriodKeys.length - 1 ? "pr-8" : ""}`}>
-                            <span style={{ color: ACTIVE_TEXT_DARK }}>{direction === "EXPENSE" ? formatRub(Math.abs(valuesByPeriod[dateIdx] ?? 0)) : formatRub(valuesByPeriod[dateIdx] ?? 0)}</span>
+                            <span style={{ color: direction === "EXPENSE" ? RED : GREEN }}>
+                              {direction === "EXPENSE" ? `−${formatRub(Math.abs(valuesByPeriod[dateIdx] ?? 0))}` : formatRub(valuesByPeriod[dateIdx] ?? 0)}
+                            </span>
                           </td>
                         </Fragment>
                       ))}
@@ -990,19 +1045,63 @@ function CategoryBreakdownSection({
                       <tr style={{ backgroundColor: BACKGROUND_DT }}>
                         <td colSpan={1 + clickedPeriodKeys.length + (clickedPeriodKeys.length === 2 ? 1 : 0)} className="py-3 pl-8 pr-8 align-top w-full" style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
                           <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK, width: "100%" }}>
-                            <thead>
-                              <tr style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                <th className="py-1.5 pr-4 font-normal text-left">Дата · Комментарий</th>
-                                <th className="py-1.5 font-normal text-right whitespace-nowrap w-28">Сумма</th>
-                              </tr>
-                            </thead>
                             <tbody>
-                              {txsForCategory.map(({ tx, rubCents }) => (
-                                <tr key={tx.id}>
-                                  <td className="py-1 pr-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>{toTxDateKey(tx.transaction_date).split("-").reverse().join(".")} {tx.comment ? ` · ${tx.comment}` : ""}</td>
-                                  <td className="py-1 text-right tabular-nums">{direction === "EXPENSE" ? formatRub(Math.abs(rubCents)) : formatRub(rubCents)}</td>
-                                </tr>
-                              ))}
+                              {txsForCategory.map(({ tx, rubCents }, txIdx) => {
+                                const item = tx.primary_item_id != null ? itemsById.get(tx.primary_item_id) : undefined;
+                                const itemCounterparty = item?.counterparty_id != null ? counterpartiesById.get(item.counterparty_id) : undefined;
+                                const txCounterparty = tx.counterparty_id != null ? counterpartiesById.get(tx.counterparty_id) : undefined;
+                                const amountColor = direction === "EXPENSE" ? RED : GREEN;
+                                const isLastTx = txIdx === txsForCategory.length - 1;
+                                return (
+                                  <tr key={tx.id} style={isLastTx ? undefined : { borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                    <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
+                                    <td className="py-1.5 pr-4 align-middle">
+                                      {item ? (
+                                        <div className="flex items-center gap-2">
+                                          <div className="h-5 w-5 shrink-0 rounded-sm overflow-hidden flex items-center justify-center">
+                                            <AssetItemIcon
+                                              item={item}
+                                              counterparty={itemCounterparty ?? null}
+                                              apiBase={API_BASE}
+                                              size={18}
+                                              className="h-4 w-4 rounded-sm object-contain"
+                                              fallbackIconColor={ACTIVE_TEXT_DARK}
+                                              alt={itemCounterpartyName(item.id) || item.name || ""}
+                                            />
+                                          </div>
+                                          <span style={{ color: ACTIVE_TEXT_DARK }}>{item.name || "–"}</span>
+                                        </div>
+                                      ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                    </td>
+                                    <td className="py-1.5 pr-4 align-middle">
+                                      {txCounterparty ? (
+                                        <div className="flex items-center gap-2">
+                                          <div className="h-5 w-5 shrink-0 rounded-sm overflow-hidden flex items-center justify-center">
+                                            <CounterpartyIconImage
+                                              counterparty={txCounterparty}
+                                              apiBase={API_BASE}
+                                              size={18}
+                                              className="h-4 w-4 rounded-sm object-contain"
+                                              fallbackIconColor={ACTIVE_TEXT_DARK}
+                                              alt={txCounterparty.name}
+                                            />
+                                          </div>
+                                          <span style={{ color: ACTIVE_TEXT_DARK }}>{txCounterparty.name}</span>
+                                        </div>
+                                      ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                    </td>
+                                    <td className="py-1.5 pr-4 align-middle">
+                                      {tx.comment?.trim() ? (
+                                        <div className="flex items-center gap-1.5" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                          <MessageSquare className="h-3.5 w-3.5 shrink-0" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                                          <span className="text-xs">{tx.comment.trim()}</span>
+                                        </div>
+                                      ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                    </td>
+                                    <td className="py-1.5 pr-4 align-middle tabular-nums text-right" style={{ color: amountColor }}>{formatSignedValue(rubCents, formatRub)}</td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </td>
@@ -1019,7 +1118,7 @@ function CategoryBreakdownSection({
                   return (
                     <Fragment key={clickedPeriodKeys[dateIdx]}>
                       {dateIdx === 1 && clickedPeriodKeys.length === 2 && <td className="px-3 py-3 text-center tabular-nums text-sm" style={totalGrowthColor ? { color: totalGrowthColor } : undefined}>{totalGrowthPercent != null ? formatGrowthPercent(totalGrowthPercent) : "–"}</td>}
-                      <td className={`px-4 py-3 text-right tabular-nums text-sm ${dateIdx === clickedPeriodKeys.length - 1 ? "pr-8" : ""}`} style={{ color: ACTIVE_TEXT_DARK }}>{direction === "EXPENSE" ? formatRub(Math.abs(total)) : formatRub(total)}</td>
+                      <td className={`px-4 py-3 text-right tabular-nums text-sm ${dateIdx === clickedPeriodKeys.length - 1 ? "pr-8" : ""}`} style={{ color: direction === "EXPENSE" ? RED : GREEN }}>{direction === "EXPENSE" ? `−${formatRub(Math.abs(total))}` : formatRub(total)}</td>
                     </Fragment>
                   );
                 })}
@@ -1197,6 +1296,29 @@ export default function IncomeExpenseDynamicsPage() {
     });
     return options;
   }, [selectedCategoryFilterKeys, categoryFilterPathByKey]);
+  const reportKindFromSelectedCategories = useMemo((): "BOTH" | "INCOME" | "EXPENSE" | null => {
+    if (selectedCategoryFilterOptions.length === 0) return null;
+    const scopes: ("INCOME" | "EXPENSE" | "BOTH")[] = [];
+    selectedCategoryFilterOptions.forEach((opt) => {
+      const id = categoryLookup.pathToId.get(makeCategoryPathKey(opt.l1, opt.l2, opt.l3));
+      if (id != null) {
+        const scope = categoryLookup.idToScope.get(id);
+        if (scope) scopes.push(scope);
+      }
+    });
+    if (scopes.length === 0) return null;
+    const onlyIncome = scopes.every((s) => s === "INCOME");
+    const onlyExpense = scopes.every((s) => s === "EXPENSE");
+    if (onlyIncome) return "INCOME";
+    if (onlyExpense) return "EXPENSE";
+    return "BOTH";
+  }, [selectedCategoryFilterOptions, categoryLookup]);
+  useEffect(() => {
+    if (reportKindFromSelectedCategories != null) {
+      setReportKind(reportKindFromSelectedCategories);
+    }
+  }, [reportKindFromSelectedCategories]);
+
   const categoryFilterIds = useMemo(() => {
     if (selectedCategoryFilterOptions.length === 0) return EMPTY_NUMBER_ARRAY;
     const matchedIds = new Set<number>();
@@ -2593,6 +2715,7 @@ export default function IncomeExpenseDynamicsPage() {
             categoryBreakdownExpense={categoryBreakdownExpense}
             chartTxList={chartTxList}
             itemsById={itemsById}
+            counterparties={counterparties}
             chartRatesByDate={chartRatesByDate}
             categoryById={categoryById}
             categoryLookup={categoryLookup}

@@ -48,6 +48,7 @@ import {
 } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { formatAmount } from "@/lib/item-utils";
+import { getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
 
 type ChartPoint = {
   x: number;
@@ -666,15 +667,20 @@ export default function AssetsDynamicsPage() {
     },
     [accountingStartDate, itemsById]
   );
+  const getCounterpartyForItemId = useCallback(
+    (id: number) => {
+      const cpId = itemsById.get(id)?.counterparty_id;
+      if (!cpId) return null;
+      return counterpartiesById.get(cpId) ?? null;
+    },
+    [itemsById, counterpartiesById]
+  );
   const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
     if (!id) return null;
-    const cpId = itemsById.get(id)?.counterparty_id;
-    if (!cpId) return null;
-    const counterparty = counterpartiesById.get(cpId);
-    if (!counterparty) return null;
-    return counterparty.entity_type === "PERSON"
-      ? counterparty.photo_url ?? null
-      : counterparty.logo_url ?? null;
+    const cp = getCounterpartyForItemId(id);
+    if (!cp) return null;
+    const candidates = getCounterpartyImageUrlCandidates(cp, API_BASE);
+    return candidates[0] ?? null;
   };
   const itemCounterpartyName = (id: number | null | undefined) => {
     if (!id) return "";
@@ -1617,7 +1623,9 @@ export default function AssetsDynamicsPage() {
                   emptyMessage="Нет активов и обязательств"
                   noResultsMessage="Ничего не найдено"
                   getItemTypeLabel={getItemTypeLabel}
-                  getItemKind={(item) => resolveItemEffectiveKind(item, item.current_value_rub)}
+                  getItemKind={(item) => resolveItemEffectiveKind(item, getItemDisplayBalanceCents(item))}
+                  getCounterpartyForItemId={getCounterpartyForItemId}
+                  apiBase={API_BASE}
                   getBankLogoUrl={itemCounterpartyLogoUrl}
                   getBankName={itemCounterpartyName}
                   getItemBalance={getItemDisplayBalanceCents}

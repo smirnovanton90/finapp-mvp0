@@ -69,7 +69,7 @@ import { cn } from "@/lib/utils";
 import { formatAmount, getEffectiveItemKind } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { buildItemTransactionCounts } from "@/lib/item-utils";
-import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
+import { buildCounterpartyTransactionCounts, getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
 import { AssetItemIcon } from "@/components/asset-item-icon";
 import { CounterpartyIconImage } from "@/components/counterparty-icon-image";
 
@@ -1251,6 +1251,57 @@ export default function IncomeExpenseDynamicsPage() {
     () => new Map(items.map((item) => [item.id, item])),
     [items]
   );
+  const counterpartiesById = useMemo(
+    () => new Map(counterparties.map((c) => [c.id, c])),
+    [counterparties]
+  );
+  const getItemCounterparty = useCallback(
+    (id: number | null | undefined) => {
+      if (!id) return null;
+      const cpId = itemsById.get(id)?.counterparty_id;
+      if (!cpId) return null;
+      return counterpartiesById.get(cpId) ?? null;
+    },
+    [itemsById, counterpartiesById]
+  );
+  const getCounterpartyForItemId = useCallback(
+    (id: number) => getItemCounterparty(id) ?? null,
+    [getItemCounterparty]
+  );
+  const itemBankLogoUrl = useCallback(
+    (id: number | null | undefined) => {
+      const cp = getItemCounterparty(id);
+      if (!cp) return null;
+      const candidates = getCounterpartyImageUrlCandidates(cp, API_BASE);
+      return candidates[0] ?? null;
+    },
+    [getItemCounterparty]
+  );
+  const itemBankName = useCallback(
+    (id: number | null | undefined) => {
+      if (!id) return "";
+      const cpId = itemsById.get(id)?.counterparty_id;
+      if (!cpId) return "";
+      const cp = counterpartiesById.get(cpId);
+      if (!cp) return "";
+      if (cp.entity_type === "PERSON") {
+        const parts = [cp.last_name, cp.first_name, cp.middle_name].filter(Boolean);
+        return parts.length > 0 ? parts.join(" ") : "";
+      }
+      return cp.name || cp.full_name || "";
+    },
+    [itemsById, counterpartiesById]
+  );
+  const getItemDisplayBalanceCents = useCallback(
+    (item: ItemOut) => {
+      if (item.type_code === "bank_card" && item.card_account_id) {
+        const linked = itemsById.get(item.card_account_id);
+        if (linked) return linked.current_value_rub;
+      }
+      return item.current_value_rub;
+    },
+    [itemsById]
+  );
   const activeItems = useMemo(
     () => items.filter((item) => !item.archived_at && !item.closed_at),
     [items]
@@ -2307,7 +2358,11 @@ export default function IncomeExpenseDynamicsPage() {
                 noResultsMessage="Ничего не найдено"
                 getItemTypeLabel={getItemTypeLabel}
                 getItemKind={resolveItemEffectiveKind}
-                getItemBalance={(item) => item.current_value_rub}
+                getCounterpartyForItemId={getCounterpartyForItemId}
+                apiBase={API_BASE}
+                getBankLogoUrl={itemBankLogoUrl}
+                getBankName={itemBankName}
+                getItemBalance={getItemDisplayBalanceCents}
                 itemCounts={itemTxCounts}
                 resetSignal={itemFilterResetKey}
                 ariaLabel="Активы/обязательства"

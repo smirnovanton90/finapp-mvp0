@@ -148,7 +148,7 @@ def _create_transfer(
     counterparty_item_id: int,
     amount_rub: int,
     tx_date: date,
-    linked_item_id: int,
+    related_item_id: int | None,
     source: str,
     comment: str | None = None,
     transaction_type: str = "ACTUAL",
@@ -209,7 +209,7 @@ def _create_transfer(
 
     tx = Transaction(
         user_id=user.id,
-        linked_item_id=linked_item_id,
+        related_item_id=related_item_id,
         transaction_date=datetime.combine(tx_date, datetime.min.time()),
         primary_item_id=primary.id,
         primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
@@ -232,6 +232,9 @@ def _create_transfer(
     db.add(tx)
 
 
+ACQUISITION_CATEGORY_NAME = "Приобретение активов"
+
+
 def _create_income_expense(
     db: Session,
     user: User,
@@ -240,11 +243,12 @@ def _create_income_expense(
     tx_date: date,
     direction: str,
     category_name: str,
-    linked_item_id: int,
+    related_item_id: int,
     comment: str | None = None,
     primary_quantity_lots: int | None = None,
     source: str = AUTO_OPENING_SOURCE,
     counterparty_id: int | None = None,
+    asset_link_type: str | None = None,
 ) -> None:
     primary_side = _resolve_effective_side(db, user, item_id, True, "primary")
     _validate_tx_date(tx_date, primary_side, "Transaction")
@@ -274,7 +278,7 @@ def _create_income_expense(
     category = _resolve_category_by_name(db, user, category_name)
     tx = Transaction(
         user_id=user.id,
-        linked_item_id=linked_item_id,
+        related_item_id=related_item_id,
         transaction_date=datetime.combine(tx_date, datetime.min.time()),
         primary_item_id=primary.id,
         primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
@@ -291,6 +295,7 @@ def _create_income_expense(
         category_id=category.id,
         comment=comment,
         source=source,
+        asset_link_type=asset_link_type,
     )
     db.add(tx)
 
@@ -338,31 +343,57 @@ def create_opening_transactions(
 
     tx_date = item.open_date
     if counterparty:
-        if item.kind == "ASSET":
+        primary_value_kind = getattr(item, "primary_value_kind", None)
+        use_transfer_for_asset = primary_value_kind == "BALANCE" or primary_value_kind is None
+        if item.kind == "ASSET" and not use_transfer_for_asset:
+            # Стоимость приобретения / вложенных / рыночная — расход с категорией «Приобретение активов»
+            _create_income_expense(
+                db=db,
+                user=user,
+                item_id=counterparty.id,
+                amount_rub=amount_rub,
+                tx_date=tx_date,
+                direction="EXPENSE",
+                category_name=ACQUISITION_CATEGORY_NAME,
+                related_item_id=item.id,
+                comment=opening_comment,
+                primary_quantity_lots=None,
+                source=AUTO_OPENING_SOURCE,
+                counterparty_id=item.counterparty_id,
+                asset_link_type="ASSET_PURCHASE",
+            )
+            if is_moex and quantity_lots:
+                _apply_position_delta(item, quantity_lots, tx_date)
             primary_id = counterparty.id
             counter_id = item.id
             primary_lots = None
             counter_lots = quantity_lots if is_moex else None
         else:
-            primary_id = item.id
-            counter_id = counterparty.id
-            primary_lots = quantity_lots if is_moex else None
-            counter_lots = None
-
-        _create_transfer(
-            db=db,
-            user=user,
-            primary_item_id=primary_id,
-            counterparty_item_id=counter_id,
-            amount_rub=amount_rub,
-            tx_date=tx_date,
-            linked_item_id=item.id,
-            source=AUTO_OPENING_SOURCE,
-            comment=opening_comment,
-            primary_quantity_lots=primary_lots,
-            counterparty_quantity_lots=counter_lots,
-            counterparty_id=item.counterparty_id,
-        )
+            # Балансовая стоимость (BALANCE) или обязательство: перевод с источника на актив / с актива на источник
+            if item.kind == "ASSET":
+                primary_id = counterparty.id
+                counter_id = item.id
+                primary_lots = None
+                counter_lots = quantity_lots if is_moex else None
+            else:
+                primary_id = item.id
+                counter_id = counterparty.id
+                primary_lots = quantity_lots if is_moex else None
+                counter_lots = None
+            _create_transfer(
+                db=db,
+                user=user,
+                primary_item_id=primary_id,
+                counterparty_item_id=counter_id,
+                amount_rub=amount_rub,
+                tx_date=tx_date,
+                related_item_id=None,
+                source=AUTO_OPENING_SOURCE,
+                comment=opening_comment,
+                primary_quantity_lots=primary_lots,
+                counterparty_quantity_lots=counter_lots,
+                counterparty_id=item.counterparty_id,
+            )
 
         closing_date = _resolve_closing_date(item, deposit_end_date, plan_settings)
         if closing_date:
@@ -373,7 +404,7 @@ def create_opening_transactions(
                 counterparty_item_id=primary_id,
                 amount_rub=amount_rub,
                 tx_date=closing_date,
-                linked_item_id=item.id,
+                related_item_id=item.id,
                 source=AUTO_CLOSING_SOURCE,
                 comment=closing_comment,
                 transaction_type="PLANNED",
@@ -399,7 +430,7 @@ def create_opening_transactions(
         direction=direction,
         category_name=category_name,
         comment=opening_comment,
-        linked_item_id=item.id,
+        related_item_id=item.id,
         primary_quantity_lots=quantity_lots if is_moex else None,
         counterparty_id=item.counterparty_id,
     )
@@ -432,7 +463,7 @@ def create_commission_transaction(
         direction="EXPENSE",
         category_name=COMMISSION_CATEGORY_NAME,
         comment=comment,
-        linked_item_id=item.id,
+        related_item_id=item.id,
         source=AUTO_COMMISSION_SOURCE,
     )
 
@@ -441,7 +472,7 @@ def delete_opening_transactions(db: Session, user: User, item_id: int) -> None:
     txs = (
         db.query(Transaction)
         .filter(Transaction.user_id == user.id)
-        .filter(Transaction.linked_item_id == item_id)
+        .filter(Transaction.related_item_id == item_id)
         .filter(Transaction.source.in_([AUTO_OPENING_SOURCE, AUTO_CLOSING_SOURCE]))
         .filter(Transaction.deleted_at.is_(None))
         .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
@@ -456,7 +487,7 @@ def delete_commission_transactions(db: Session, user: User, item_id: int) -> Non
     txs = (
         db.query(Transaction)
         .filter(Transaction.user_id == user.id)
-        .filter(Transaction.linked_item_id == item_id)
+        .filter(Transaction.related_item_id == item_id)
         .filter(Transaction.source == AUTO_COMMISSION_SOURCE)
         .filter(Transaction.deleted_at.is_(None))
         .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())

@@ -1,8 +1,18 @@
 import { getSession } from "next-auth/react";
 
 export type ItemKind = "ASSET" | "LIABILITY";
+export type PrimaryValueKind = "BALANCE" | "ACQUISITION" | "INVESTED" | "MARKET";
 export type CardKind = "DEBIT" | "CREDIT";
 export type ItemHistoryStatus = "NEW" | "HISTORICAL";
+export type AssetLinkType =
+  | "ASSET_PURCHASE"
+  | "ASSET_INVESTMENT"
+  | "ASSET_EXPENSE"
+  | "ASSET_SALE"
+  | "ASSET_INCOME"
+  | "ASSET_RELATED_INCOME"
+  | "ASSET_RELATED_EXPENSE"
+  | "ACQUISITION_EXPENSE";
 export type FirstPayoutRule = "OPEN_DATE" | "MONTH_END" | "SHIFT_ONE_MONTH";
 export type RepaymentType = "ANNUITY" | "DIFFERENTIATED";
 export type PaymentAmountKind = "TOTAL" | "PRINCIPAL";
@@ -60,6 +70,29 @@ export type ItemOut = {
   plan_settings?: ItemPlanSettings | null;
   photo_url: string | null;
   photo_updated_at: string | null;
+  primary_value_kind?: PrimaryValueKind | null;
+  /** Последняя рыночная стоимость (копейки), для primary_value_kind=MARKET не-MOEX. Заполняется API в list/get. */
+  latest_market_value_rub?: number | null;
+};
+
+export type ItemMarketValueOut = {
+  id: number;
+  item_id: number;
+  value_date: string;
+  value_rub: number;
+  created_at: string;
+};
+
+export type ItemMarketValueCreate = {
+  value_date: string;
+  value_rub: number;
+};
+
+export type ItemCostsOut = {
+  balance_rub: number;
+  acquisition_rub: number;
+  invested_rub: number;
+  market_rub: number | null;
 };
 
 export type ItemCreate = {
@@ -91,6 +124,7 @@ export type ItemCreate = {
   initial_value_rub: number;
   plan_settings?: ItemPlanSettings | null;
   synonyms?: string[];
+  primary_value_kind?: PrimaryValueKind | null;
 };
 
 export type BankOut = {
@@ -290,8 +324,8 @@ export type TransactionOut = {
 
   created_at: string;
   deleted_at: string | null;
-  linked_item_id?: number | null;
   related_item_id?: number | null;
+  asset_link_type?: AssetLinkType | null;
   source?: TransactionSource | null;
 };
 
@@ -439,6 +473,7 @@ export type TransactionCreate = {
 
   comment?: string | null;
   related_item_id?: number | null;
+  asset_link_type?: AssetLinkType | null;
 };
 
 export type DebtDirection =
@@ -599,6 +634,12 @@ export async function fetchItems(options?: {
   if (options?.includeClosed) params.set("include_closed", "true");
   const qs = params.toString();
   const res = await authFetch(`${API_BASE}/items${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchItem(itemId: number): Promise<ItemOut> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
@@ -1042,6 +1083,50 @@ export async function closeItem(
   });
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
+}
+
+export async function fetchItemCosts(itemId: number): Promise<ItemCostsOut> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}/costs`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchItemMarketValues(itemId: number): Promise<ItemMarketValueOut[]> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}/market-values`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createItemMarketValue(
+  itemId: number,
+  payload: ItemMarketValueCreate
+): Promise<ItemMarketValueOut> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}/market-values`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateItemMarketValue(
+  itemId: number,
+  mvId: number,
+  payload: ItemMarketValueCreate
+): Promise<ItemMarketValueOut> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}/market-values/${mvId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function deleteItemMarketValue(itemId: number, mvId: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}/market-values/${mvId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 async function readError(res: Response) {

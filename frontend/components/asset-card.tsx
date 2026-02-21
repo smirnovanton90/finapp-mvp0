@@ -91,6 +91,8 @@ interface AssetCardProps {
   accountingStartDate: string | null;
   rate?: number | null;
   rubEquivalent?: number | null;
+  /** Подпись над значением в рублях (например «Балансовая стоимость», «Рыночная стоимость») */
+  primaryValueLabel?: string | null;
   counterparty?: CounterpartyOut | null;
   moexMarketPrice?: MarketPriceOut | null;
   onEdit?: (item: ItemOut) => void;
@@ -99,6 +101,8 @@ interface AssetCardProps {
   onClose?: (item: ItemOut) => void;
   getItemDisplayBalanceCents: (item: ItemOut) => number;
   onReady?: () => void;
+  /** При клике по карточке (не по меню) — переход на детальную страницу */
+  onNavigate?: (item: ItemOut) => void;
 }
 
 // Simplified industry icon mapping (can be expanded if needed)
@@ -136,6 +140,7 @@ export function AssetCard({
   accountingStartDate,
   rate,
   rubEquivalent,
+  primaryValueLabel,
   counterparty,
   moexMarketPrice,
   onEdit,
@@ -144,6 +149,7 @@ export function AssetCard({
   onClose,
   getItemDisplayBalanceCents,
   onReady,
+  onNavigate,
 }: AssetCardProps) {
   const isArchived = Boolean(item.archived_at);
   const isClosed = Boolean(item.closed_at);
@@ -158,6 +164,9 @@ export function AssetCard({
   const useMarketValueLabel = MARKET_VALUE_TYPE_CODES.has(item.type_code);
   const isCreditLiability = CREDIT_LIABILITY_TYPE_CODES.has(item.type_code);
   const useCreditPrincipalLabel = isCreditLiability;
+  const valueLabel =
+    primaryValueLabel ??
+    (useCreditPrincipalLabel ? "Остаток основного долга" : useMarketValueLabel ? "Рыночная стоимость" : "Баланс");
 
   const displayBalanceCents = getItemDisplayBalanceCents(item);
   const ps = item.plan_settings;
@@ -241,7 +250,11 @@ export function AssetCard({
         style={{ backgroundColor: stripeColor }}
       />
 
-      <div className="pt-[12px] pr-[12px] pb-[12px] pl-[19px]">
+      <div
+        className={`pt-[12px] pr-[12px] pb-[12px] pl-[19px] ${onNavigate ? "cursor-pointer" : ""}`}
+        onClick={() => onNavigate?.(item)}
+        role={onNavigate ? "button" : undefined}
+      >
         {/* Header: иконка + основная информация + кнопка меню */}
         <div className="flex items-start justify-between mb-3 gap-3">
           {/* Icon — единый CardIcon, без фона и обводки, с тенью: фото → 3D → 2D */}
@@ -341,9 +354,11 @@ export function AssetCard({
           <div className="shrink-0">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <IconButton aria-label="Открыть меню действий">
-                  <MoreVertical />
-                </IconButton>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <IconButton aria-label="Открыть меню действий">
+                    <MoreVertical />
+                  </IconButton>
+                </div>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 {onEdit && !isArchived && !isClosed && (
@@ -538,7 +553,7 @@ export function AssetCard({
                 style={{ color: PLACEHOLDER_COLOR_DARK }}
               >
                 <span className="text-sm font-normal">
-                  {isMoexItem ? "Кол-во" : useCreditPrincipalLabel ? "Остаток основного долга" : useMarketValueLabel ? "Рыночная стоимость" : "Баланс"}
+                  {isMoexItem ? "Кол-во" : valueLabel}
                 </span>
               </div>
               <div
@@ -554,7 +569,7 @@ export function AssetCard({
                 style={{ color: PLACEHOLDER_COLOR_DARK }}
               >
                 <span className="text-sm font-normal">
-                  {useCreditPrincipalLabel ? "Остаток основного долга" : useMarketValueLabel ? "Рыночная стоимость" : "Баланс"}
+                  {valueLabel}
                 </span>
               </div>
               {/* Строка сумм: одна линия */}
@@ -595,7 +610,7 @@ export function AssetCard({
                 style={{ color: PLACEHOLDER_COLOR_DARK }}
               >
                 <span className="text-sm font-normal">
-                  {useCreditPrincipalLabel ? "Остаток основного долга" : useMarketValueLabel ? "Рыночная стоимость" : "Баланс"}
+                  {valueLabel}
                 </span>
               </div>
               <div className="col-span-3 flex h-9 w-full items-center justify-center">

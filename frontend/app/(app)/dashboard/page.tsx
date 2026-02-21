@@ -802,7 +802,8 @@ export default function DashboardPage() {
     });
   }, [fxRates, todayKey]);
 
-  function getRubEquivalentCents(item: ItemOut): number | null {
+  /** Основная стоимость в рублях (копейках) для итогов по primary_value_kind. На дашборде пока используем баланс. */
+  function getPrimaryValueRubCents(item: ItemOut): number | null {
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
     const amount = Math.abs(item.current_value_rub) / 100;
@@ -868,26 +869,26 @@ export default function DashboardPage() {
   );
 
   const cashTotal = useMemo(
-    () => cashItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    () => cashItems.reduce((sum, x) => sum + (getPrimaryValueRubCents(x) ?? 0), 0),
     [cashItems, rateByCode]
   );
 
   const financialInstrumentsTotal = useMemo(
     () =>
       financialInstrumentsItems.reduce(
-        (sum, x) => sum + (getRubEquivalentCents(x) ?? 0),
+        (sum, x) => sum + (getPrimaryValueRubCents(x) ?? 0),
         0
       ),
     [financialInstrumentsItems, rateByCode]
   );
 
   const propertyTotal = useMemo(
-    () => propertyItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    () => propertyItems.reduce((sum, x) => sum + (getPrimaryValueRubCents(x) ?? 0), 0),
     [propertyItems, rateByCode]
   );
 
   const otherAssetTotal = useMemo(
-    () => otherAssetItems.reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
+    () => otherAssetItems.reduce((sum, x) => sum + (getPrimaryValueRubCents(x) ?? 0), 0),
     [otherAssetItems, rateByCode]
   );
 
@@ -895,7 +896,7 @@ export default function DashboardPage() {
     const byType = new Map<string, number>();
     activeItems.forEach((item) => {
       if (resolveItemEffectiveKind(item) !== "ASSET") return;
-      const value = getRubEquivalentCents(item) ?? 0;
+      const value = getPrimaryValueRubCents(item) ?? 0;
       if (value <= 0) return;
       byType.set(item.type_code, (byType.get(item.type_code) ?? 0) + value);
     });
@@ -921,7 +922,7 @@ export default function DashboardPage() {
       totals[type.code] = 0;
     });
     liabilityItems.forEach((item) => {
-      totals[item.type_code] = (totals[item.type_code] ?? 0) + (getRubEquivalentCents(item) ?? 0);
+      totals[item.type_code] = (totals[item.type_code] ?? 0) + (getPrimaryValueRubCents(item) ?? 0);
     });
     return totals;
   }, [liabilityItems, rateByCode]);
@@ -947,11 +948,11 @@ export default function DashboardPage() {
   const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
     const assets = activeItems
       .filter((x) => resolveItemEffectiveKind(x) === "ASSET")
-      .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
+      .reduce((sum, x) => sum + (getPrimaryValueRubCents(x) ?? 0), 0);
 
     const liabilities = activeItems
       .filter((x) => resolveItemEffectiveKind(x) === "LIABILITY")
-      .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0);
+      .reduce((sum, x) => sum + (getPrimaryValueRubCents(x) ?? 0), 0);
 
     return {
       totalAssets: assets,

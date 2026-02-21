@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
-from fastapi.responses import Response
+import logging
+from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, File
+from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date as date_type
@@ -15,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from db import get_db
 from models import (
     Item,
+    ItemMarketValue,
     User,
     OnboardingState,
     Currency,
@@ -41,6 +43,9 @@ from schemas import (
     UserProfileUpdate,
     AccountingStartDateUpdate,
     ItemCloseRequest,
+    ItemMarketValueCreate,
+    ItemMarketValueOut,
+    ItemCostsOut,
 )
 from auth import get_current_user, create_access_token, hash_password, verify_password
 
@@ -160,13 +165,47 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 from fastapi.middleware.cors import CORSMiddleware
 
+_CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "http://157.22.230.201", "https://157.22.230.201"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://157.22.230.201", "https://157.22.230.201"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _cors_headers(origin: str | None) -> dict:
+    if origin and origin in _CORS_ORIGINS:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    return {}
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    origin = request.headers.get("origin")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=_cors_headers(origin),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logging.exception("Unhandled exception: %s", exc)
+    origin = request.headers.get("origin")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers=_cors_headers(origin),
+    )
 
 
 def _parse_date_req(date_req: str | None) -> date_type | None:
@@ -340,6 +379,24 @@ def _get_latest_market_price(
     )
 
 
+def _get_latest_item_market_value_rub(
+    db: Session, item_id: int, user_id: int
+) -> int | None:
+    """Последняя рыночная стоимость по item_market_values (копейки). Для не-MOEX активов."""
+    row = (
+        db.query(ItemMarketValue)
+        .filter(
+            ItemMarketValue.item_id == item_id,
+            ItemMarketValue.user_id == user_id,
+            ItemMarketValue.value_date <= date_type.today(),
+        )
+        .order_by(ItemMarketValue.value_date.desc())
+        .limit(1)
+        .first()
+    )
+    return row.value_rub if row else None
+
+
 def _compute_market_value_rub(
     item: Item,
     price: MarketPrice | None,
@@ -382,6 +439,26 @@ def _get_bank_industry_id(db: Session) -> int | None:
             CounterpartyIndustry.name == _BANK_INDUSTRY_NAME
         )
     ).scalar_one_or_none()
+
+
+def _default_primary_value_kind(type_code: str, kind: str) -> str:
+    """Default primary_value_kind by asset/liability type (plan: п. 2.2)."""
+    if kind == "LIABILITY":
+        return "BALANCE"
+    # ASSET
+    cash = {"cash", "bank_account", "bank_card", "savings_account", "e_wallet", "brokerage"}
+    investment = {"deposit", "securities", "bonds", "etf", "bpif", "pif", "iis", "precious_metals", "crypto"}
+    third_party_debt = {"loan_to_third_party", "counterparty_settlements"}
+    real_estate = {"real_estate", "townhouse", "land_plot", "garage", "commercial_real_estate", "real_estate_share"}
+    transport = {"car", "motorcycle", "boat", "trailer", "special_vehicle"}
+    valuables = {"jewelry", "electronics", "art", "collectibles", "other_valuables"}
+    pension = {"npf", "investment_life_insurance"}
+    other_asset = {"business_share", "sole_proprietor", "other_asset"}
+    if type_code in cash or type_code in third_party_debt or type_code in pension or type_code in other_asset:
+        return "BALANCE"
+    if type_code in investment or type_code in real_estate or type_code in transport or type_code in valuables:
+        return "MARKET"
+    return "BALANCE"
 
 
 def _apply_logo_url(counterparty: Counterparty) -> None:
@@ -780,8 +857,42 @@ def list_items(
         if value is not None:
             item.current_value_rub = value
     for item in items:
+        setattr(item, "latest_market_value_rub", None)
+    for item in items:
+        if getattr(item, "primary_value_kind", None) == "MARKET" and not is_moex_item(item):
+            latest = _get_latest_item_market_value_rub(db, item.id, user.id)
+            if latest is not None:
+                setattr(item, "latest_market_value_rub", latest)
+    for item in items:
         _apply_item_photo_url(item)
     return items
+
+
+@app.get("/items/{item_id}", response_model=ItemOut)
+def get_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    stmt = (
+        select(Item)
+        .where(Item.id == item_id, Item.user_id == user.id)
+        .options(selectinload(Item.plan_settings))
+    )
+    item = db.execute(stmt).scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if is_moex_item(item):
+        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+        value = _compute_market_value_rub(item, price, db)
+        if value is not None:
+            item.current_value_rub = value
+    elif getattr(item, "primary_value_kind", None) == "MARKET":
+        latest = _get_latest_item_market_value_rub(db, item.id, user.id)
+        if latest is not None:
+            setattr(item, "latest_market_value_rub", latest)
+    _apply_item_photo_url(item)
+    return item
 
 
 @app.get("/currencies", response_model=list[CurrencyOut])
@@ -1036,6 +1147,10 @@ def create_item(
     )
 
     synonyms_list = getattr(payload, "synonyms", None) or []
+    primary_value_kind = (
+        getattr(payload, "primary_value_kind", None)
+        or _default_primary_value_kind(payload.type_code, item_kind)
+    )
     item = Item(
         user_id=user.id,
         kind=item_kind,
@@ -1071,6 +1186,7 @@ def create_item(
         opening_counterparty_item_id=opening_counterparty.id
         if opening_counterparty
         else None,
+        primary_value_kind=primary_value_kind,
     )
     db.add(item)
     db.flush()
@@ -1090,6 +1206,8 @@ def create_item(
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
         )
+        if is_moex and opening_quantity_lots is not None:
+            item.position_lots = (item.position_lots or 0) + opening_quantity_lots
 
     if commission_requested and commission_enabled and commission_payment_item:
         instrument_label = item.instrument_id or item.name
@@ -1413,6 +1531,8 @@ def update_item(
         opening_counterparty.id if opening_counterparty else None
     )
     item.synonyms = getattr(payload, "synonyms", None) or []
+    if getattr(payload, "primary_value_kind", None) is not None:
+        item.primary_value_kind = payload.primary_value_kind
 
     settings = upsert_plan_settings(db, item, payload.plan_settings)
     is_plan_enabled = settings.enabled if settings else False
@@ -1609,7 +1729,7 @@ def close_item(
                     counterparty_item_id=counter_id,
                     amount_rub=balance_amount,
                     tx_date=closing_date,
-                    linked_item_id=item.id,
+                    related_item_id=item.id,
                     source=AUTO_CLOSING_SOURCE,
                     comment=comment,
                     transaction_type="ACTUAL",
@@ -1633,7 +1753,7 @@ def close_item(
                     counterparty_item_id=counter_id,
                     amount_rub=balance_amount,
                     tx_date=closing_date,
-                    linked_item_id=item.id,
+                    related_item_id=item.id,
                     source=AUTO_CLOSING_SOURCE,
                     comment=comment,
                     transaction_type="ACTUAL",
@@ -1658,7 +1778,7 @@ def close_item(
                 tx_date=closing_date,
                 direction=direction,
                 category_name=category_name,
-                linked_item_id=item.id,
+                related_item_id=item.id,
                 comment=comment,
                 primary_quantity_lots=balance_lots if is_moex else None,
                 source=AUTO_CLOSING_SOURCE,
@@ -1700,6 +1820,178 @@ def close_item(
     db.refresh(item)
     _apply_item_photo_url(item)
     return item
+
+
+@app.get("/items/{item_id}/costs", response_model=ItemCostsOut)
+def get_item_costs(
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    balance_rub = item.current_value_rub
+    acquisition_rub = (
+        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type == "ASSET_PURCHASE",
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    investment_sum = (
+        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type == "ASSET_INVESTMENT",
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    invested_rub = acquisition_rub + investment_sum
+    market_rub = None
+    if is_moex_item(item) and item.instrument_id and item.instrument_board_id:
+        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+        if price:
+            market_rub = _compute_market_value_rub(item, price, db)
+    else:
+        latest = (
+            db.query(ItemMarketValue)
+            .filter(
+                ItemMarketValue.item_id == item_id,
+                ItemMarketValue.user_id == user.id,
+                ItemMarketValue.value_date <= date_type.today(),
+            )
+            .order_by(ItemMarketValue.value_date.desc())
+            .limit(1)
+            .first()
+        )
+        if latest:
+            market_rub = latest.value_rub
+    return ItemCostsOut(
+        balance_rub=balance_rub,
+        acquisition_rub=acquisition_rub,
+        invested_rub=invested_rub,
+        market_rub=market_rub,
+    )
+
+
+@app.get("/items/{item_id}/market-values", response_model=list[ItemMarketValueOut])
+def list_item_market_values(
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    rows = (
+        db.query(ItemMarketValue)
+        .filter(ItemMarketValue.item_id == item_id, ItemMarketValue.user_id == user.id)
+        .order_by(ItemMarketValue.value_date.asc())
+        .all()
+    )
+    return rows
+
+
+@app.post("/items/{item_id}/market-values", response_model=ItemMarketValueOut)
+def create_item_market_value(
+    item_id: int,
+    payload: ItemMarketValueCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    existing = (
+        db.query(ItemMarketValue)
+        .filter(
+            ItemMarketValue.item_id == item_id,
+            ItemMarketValue.user_id == user.id,
+            ItemMarketValue.value_date == payload.value_date,
+        )
+        .first()
+    )
+    if existing:
+        existing.value_rub = payload.value_rub
+        db.commit()
+        db.refresh(existing)
+        return existing
+    row = ItemMarketValue(
+        user_id=user.id,
+        item_id=item_id,
+        value_date=payload.value_date,
+        value_rub=payload.value_rub,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@app.patch("/items/{item_id}/market-values/{mv_id}", response_model=ItemMarketValueOut)
+def update_item_market_value(
+    item_id: int,
+    mv_id: int,
+    payload: ItemMarketValueCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    row = (
+        db.query(ItemMarketValue)
+        .filter(
+            ItemMarketValue.id == mv_id,
+            ItemMarketValue.item_id == item_id,
+            ItemMarketValue.user_id == user.id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Market value record not found")
+    row.value_date = payload.value_date
+    row.value_rub = payload.value_rub
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@app.delete("/items/{item_id}/market-values/{mv_id}", status_code=204)
+def delete_item_market_value(
+    item_id: int,
+    mv_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    row = (
+        db.query(ItemMarketValue)
+        .filter(
+            ItemMarketValue.id == mv_id,
+            ItemMarketValue.item_id == item_id,
+            ItemMarketValue.user_id == user.id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Market value record not found")
+    db.delete(row)
+    db.commit()
+    return None
+
 
 @app.get("/items/{item_id}/photo")
 def get_item_photo(
@@ -1769,9 +2061,6 @@ def list_archived_items(
 
     stmt = select(Item).where(
         Item.user_id == user.id,
-        or_(
-            Item.is_archived == False,
-            Item.is_archived.is_(None),
-        )
+        Item.archived_at.is_(None),
     )
     return db.scalars(stmt).all()

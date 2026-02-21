@@ -94,7 +94,7 @@ import { ChainSelector } from "@/components/chain-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { FilterSection } from "@/components/filter-panel";
 import { FormModal } from "@/components/form-modal";
-import { TextField, DateField, FormField } from "@/components/ui/form-field";
+import { TextField, DateField, FormField, SelectField } from "@/components/ui/form-field";
 import {
   Dialog,
   DialogContent,
@@ -148,6 +148,7 @@ import {
   updateTransaction,
   updateTransactionStatus,
   API_BASE,
+  AssetLinkType,
 } from "@/lib/api";
 import {
   formatRubInput,
@@ -194,6 +195,7 @@ type BulkEditBaseline = {
   counterpartyItemId: number | null;
   counterpartyId: number | null;
   relatedItemId: number | null;
+  assetLinkType: AssetLinkType | null;
   amountStr: string;
   amountCounterpartyStr: string;
   primaryQuantityLots: string;
@@ -2072,6 +2074,7 @@ function TransactionsView({
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
   const [comment, setComment] = useState("");
   const [relatedItemId, setRelatedItemId] = useState<number | null>(null);
+  const [assetLinkType, setAssetLinkType] = useState<AssetLinkType | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -2610,6 +2613,7 @@ function TransactionsView({
     applyCategorySelection("", "", "");
     setComment("");
     setRelatedItemId(null);
+    setAssetLinkType(null);
     setReceiptMessage(null);
   };
 
@@ -2986,6 +2990,7 @@ function TransactionsView({
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
     setRelatedItemId(tx.related_item_id ?? null);
+    setAssetLinkType(tx.asset_link_type ?? null);
 
     const primaryItem = itemsById.get(tx.primary_item_id);
     const counterpartyItem = tx.counterparty_item_id
@@ -3057,6 +3062,7 @@ function TransactionsView({
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
     setRelatedItemId(tx.related_item_id ?? null);
+    setAssetLinkType(tx.asset_link_type ?? null);
   };
 
   const openRealizeDialog = (
@@ -3098,6 +3104,7 @@ function TransactionsView({
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
     setRelatedItemId(tx.related_item_id ?? null);
+    setAssetLinkType(tx.asset_link_type ?? null);
   };
 
   const openBulkEditDialog = () => {
@@ -3137,6 +3144,7 @@ function TransactionsView({
       cat3: baselineCat3 || CATEGORY_PLACEHOLDER,
       comment: baselineTx.comment ?? "",
       relatedItemId: baselineTx.related_item_id ?? null,
+      assetLinkType: baselineTx.asset_link_type ?? null,
     };
 
     setFormError(null);
@@ -3159,6 +3167,7 @@ function TransactionsView({
     applyCategorySelection(baseline.cat1, baseline.cat2, baseline.cat3);
     setComment(baseline.comment);
     setRelatedItemId(baseline.relatedItemId);
+    setAssetLinkType(baseline.assetLinkType);
   };
 
   const handleConfirmStatus = async (tx: TransactionCard) => {
@@ -3200,6 +3209,7 @@ function TransactionsView({
       hasCat3Changed: cat3 !== bulkEditBaseline.cat3,
       hasCommentChanged: comment !== bulkEditBaseline.comment,
       hasRelatedItemChanged: relatedItemId !== bulkEditBaseline.relatedItemId,
+      hasAssetLinkTypeChanged: assetLinkType !== bulkEditBaseline.assetLinkType,
     };
   };
 
@@ -3460,6 +3470,7 @@ function TransactionsView({
             })(),
             comment: changes.hasCommentChanged ? comment || null : tx.comment ?? null,
             related_item_id: changes.hasRelatedItemChanged ? relatedItemId ?? null : tx.related_item_id ?? null,
+            asset_link_type: changes.hasAssetLinkTypeChanged ? assetLinkType ?? null : tx.asset_link_type ?? null,
           };
 
           return updateTransaction(tx.id, payload);
@@ -5548,6 +5559,7 @@ function TransactionsView({
                           category_id: resolvedCategoryId,
                           comment: comment || null,
                           related_item_id: relatedItemId ?? null,
+                          asset_link_type: assetLinkType ?? null,
                         };
 
                         if (isEditMode && editingTx) {
@@ -6093,11 +6105,15 @@ function TransactionsView({
                       </FormField>
                     ) : null}
 
-                    <FormField label="Связь с активом/обязательством">
+                    <FormField label="Связанный актив">
                       <ItemSelector
                         items={activeItems}
                         selectedIds={relatedItemId ? [relatedItemId] : []}
-                        onChange={(ids) => setRelatedItemId(ids[0] ?? null)}
+                        onChange={(ids) => {
+                          const next = ids[0] ?? null;
+                          setRelatedItemId(next);
+                          if (next == null) setAssetLinkType(null);
+                        }}
                         selectionMode="single"
                         placeholder="Выберите"
                         getItemTypeLabel={getItemTypeLabel}
@@ -6109,9 +6125,37 @@ function TransactionsView({
                         getItemBalance={getItemDisplayBalanceCents}
                         itemCounts={itemTxCounts}
                         disabled={isImportFormDisabled}
-                        ariaLabel="Связь с активом/обязательством"
+                        ariaLabel="Связанный актив"
                       />
                     </FormField>
+
+                    {direction !== "TRANSFER" && relatedItemId != null && (
+                      <FormField label="Тип привязки к активу">
+                        <SelectField
+                          value={assetLinkType ?? "__none"}
+                          onValueChange={(v) =>
+                            setAssetLinkType(v === "__none" ? null : (v as AssetLinkType))
+                          }
+                          options={[
+                            { value: "__none", label: "Не выбрано" },
+                            ...(direction === "EXPENSE"
+                              ? [
+                                  { value: "ASSET_PURCHASE", label: "Приобретение актива" },
+                                  { value: "ASSET_INVESTMENT", label: "Вложение в актив" },
+                                  { value: "ASSET_EXPENSE", label: "Расход по активу" },
+                                  { value: "ACQUISITION_EXPENSE", label: "Расход на приобретение" },
+                                  { value: "ASSET_RELATED_EXPENSE", label: "Расход, связанный с активом" },
+                                ]
+                              : [
+                                  { value: "ASSET_SALE", label: "Продажа актива" },
+                                  { value: "ASSET_INCOME", label: "Доход от актива" },
+                                  { value: "ASSET_RELATED_INCOME", label: "Доход, связанный с активом" },
+                                ]),
+                          ]}
+                          placeholder="Выберите тип"
+                        />
+                      </FormField>
+                    )}
 
                     <TextField
                       label="Комментарий"

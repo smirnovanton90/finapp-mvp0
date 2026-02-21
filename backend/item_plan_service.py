@@ -133,7 +133,7 @@ def delete_auto_chains(
         db.query(TransactionChain)
         .filter(
             TransactionChain.user_id == user.id,
-            TransactionChain.linked_item_id == item_id,
+            TransactionChain.related_item_id == item_id,
             TransactionChain.source == "AUTO_ITEM",
             TransactionChain.deleted_at.is_(None),
         )
@@ -928,7 +928,6 @@ def _create_chain_with_transactions(
         monthly_day=monthly_day,
         monthly_rule=monthly_rule,
         interval_days=interval_days,
-        linked_item_id=item.id,
         related_item_id=item.id,
         source="AUTO_ITEM",
         purpose=purpose,

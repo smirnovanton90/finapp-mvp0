@@ -634,6 +634,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         category_id=category.id if category else None,
         comment=data.comment,
         related_item_id=data.related_item_id,
+        asset_link_type=data.asset_link_type,
     )
 
     if data.transaction_type == "ACTUAL":
@@ -972,6 +973,7 @@ def update_transaction(
     tx.category_id = category.id if category else None
     tx.comment = data.comment
     tx.related_item_id = data.related_item_id
+    tx.asset_link_type = data.asset_link_type
 
     for item in items_by_id.values():
         if item and item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:

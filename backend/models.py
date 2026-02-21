@@ -409,7 +409,8 @@ class Item(Base):
     opening_counterparty_item_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("items.id"), nullable=True
     )
-    
+    primary_value_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -428,6 +429,10 @@ class Item(Base):
         uselist=False,
         cascade="all, delete-orphan",
         foreign_keys="ItemPlanSettings.item_id",
+    )
+    market_values: Mapped[list["ItemMarketValue"]] = relationship(
+        back_populates="item",
+        cascade="all, delete-orphan",
     )
 
     __table_args__ = (
@@ -468,6 +473,25 @@ class Item(Base):
             "(position_lots is null) or (position_lots >= 0)",
             name="ck_items_position_lots_non_negative",
         ),
+        CheckConstraint(
+            "(primary_value_kind is null) or (primary_value_kind in ('BALANCE','ACQUISITION','INVESTED','MARKET'))",
+            name="ck_items_primary_value_kind",
+        ),
+    )
+
+
+class ItemMarketValue(Base):
+    __tablename__ = "item_market_values"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    user: Mapped["User"] = relationship()
+    item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
+    item: Mapped["Item"] = relationship(back_populates="market_values")
+    value_date: Mapped[date] = mapped_column(Date, nullable=False)
+    value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 
@@ -553,9 +577,6 @@ class Transaction(Base):
     chain: Mapped[Optional["TransactionChain"]] = relationship(back_populates="transactions")
 
     transaction_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    linked_item_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("items.id"), nullable=True
-    )
     source: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)
@@ -607,6 +628,7 @@ class Transaction(Base):
     related_item: Mapped[Optional["Item"]] = relationship(
         foreign_keys=[related_item_id]
     )
+    asset_link_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -627,6 +649,10 @@ class Transaction(Base):
             "(source is null) or (source in ('AUTO_ITEM_OPENING','AUTO_ITEM_CLOSING','AUTO_ITEM_COMMISSION','MANUAL'))",
             name="ck_transactions_source",
         ),
+        CheckConstraint(
+            "(asset_link_type is null) or (asset_link_type in ('ASSET_PURCHASE','ASSET_INVESTMENT','ASSET_EXPENSE','ASSET_SALE','ASSET_INCOME','ASSET_RELATED_INCOME','ASSET_RELATED_EXPENSE','ACQUISITION_EXPENSE'))",
+            name="ck_transactions_asset_link_type",
+        ),
     )
 
 
@@ -646,11 +672,6 @@ class TransactionChain(Base):
     monthly_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     monthly_rule: Mapped[str | None] = mapped_column(String(20), nullable=True)
     interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
-    linked_item_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("items.id"), nullable=True
-    )
-    linked_item: Mapped[Optional["Item"]] = relationship(foreign_keys=[linked_item_id])
 
     source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     purpose: Mapped[str | None] = mapped_column(String(20), nullable=True)

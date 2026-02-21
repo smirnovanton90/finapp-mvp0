@@ -17,6 +17,18 @@ TransactionChainFrequency = Literal["DAILY", "WEEKLY", "MONTHLY", "REGULAR"]
 TransactionChainMonthlyRule = Literal["FIRST_DAY", "LAST_DAY"]
 TransactionChainSource = Literal["AUTO_ITEM", "MANUAL"]
 TransactionChainPurpose = Literal["INTEREST", "PRINCIPAL"]
+PrimaryValueKind = Literal["BALANCE", "ACQUISITION", "INVESTED", "MARKET"]
+AssetLinkType = Literal[
+    "ASSET_PURCHASE",
+    "ASSET_INVESTMENT",
+    "ASSET_EXPENSE",
+    "ASSET_SALE",
+    "ASSET_INCOME",
+    # Legacy values (kept for existing DB rows)
+    "ASSET_RELATED_INCOME",
+    "ASSET_RELATED_EXPENSE",
+    "ACQUISITION_EXPENSE",
+]
 CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
 LimitPeriod = Literal["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"]
 GoalPeriod = LimitPeriod
@@ -243,6 +255,7 @@ class ItemCreate(BaseModel):
     initial_value_rub: int
     plan_settings: ItemPlanSettingsBase | None = None
     synonyms: list[str] | None = None
+    primary_value_kind: PrimaryValueKind | None = None
 
     @field_validator("account_last7", "contract_number", "card_last4", mode="before")
     @classmethod
@@ -404,6 +417,9 @@ class ItemOut(BaseModel):
     plan_settings: ItemPlanSettingsBase | None = None
     photo_url: str | None = None
     photo_updated_at: datetime | None = None
+    primary_value_kind: PrimaryValueKind | None = None
+    """Последняя рыночная стоимость (копейки), для primary_value_kind=MARKET не-MOEX. Заполняется в list/get."""
+    latest_market_value_rub: int | None = None
 
     @field_validator("synonyms", mode="before")
     @classmethod
@@ -441,6 +457,31 @@ class ItemSynonymsAdd(BaseModel):
         return []
 
 
+class ItemMarketValueCreate(BaseModel):
+    value_date: date
+    value_rub: int = Field(..., ge=0)
+
+
+class ItemMarketValueOut(BaseModel):
+    id: int
+    item_id: int
+    value_date: date
+    value_rub: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ItemCostsOut(BaseModel):
+    """Four cost types for an item (all in kopecks)."""
+
+    balance_rub: int
+    acquisition_rub: int
+    invested_rub: int
+    market_rub: int | None
+
+
 class TransactionBase(BaseModel):
     transaction_date: datetime
     primary_item_id: int
@@ -455,6 +496,7 @@ class TransactionBase(BaseModel):
     category_id: int | None = None
     comment: str | None = None
     related_item_id: int | None = None
+    asset_link_type: AssetLinkType | None = None
 
     @model_validator(mode="after")
     def validate_category_for_direction(self) -> "TransactionBase":
@@ -463,8 +505,38 @@ class TransactionBase(BaseModel):
                 raise ValueError("category_id is not allowed for TRANSFER")
         return self
 
+    # No asset_link_type vs direction validation here: used for response (TransactionOut)
+    # where legacy data may have any stored values. Validation only in TransactionCreate.
+
 class TransactionCreate(TransactionBase):
     status: TransactionStatus | None = None
+
+    @model_validator(mode="after")
+    def validate_asset_link_input(self) -> "TransactionCreate":
+        if self.asset_link_type is not None:
+            if self.related_item_id is None:
+                raise ValueError("related_item_id is required when asset_link_type is set")
+            if self.direction == "EXPENSE" and self.asset_link_type not in (
+                "ASSET_PURCHASE",
+                "ASSET_INVESTMENT",
+                "ASSET_EXPENSE",
+                "ASSET_RELATED_EXPENSE",
+                "ACQUISITION_EXPENSE",
+            ):
+                raise ValueError(
+                    "asset_link_type for EXPENSE must be ASSET_PURCHASE, ASSET_INVESTMENT, ASSET_EXPENSE, ASSET_RELATED_EXPENSE or ACQUISITION_EXPENSE"
+                )
+            if self.direction == "INCOME" and self.asset_link_type not in (
+                "ASSET_SALE",
+                "ASSET_INCOME",
+                "ASSET_RELATED_INCOME",
+            ):
+                raise ValueError(
+                    "asset_link_type for INCOME must be ASSET_SALE, ASSET_INCOME or ASSET_RELATED_INCOME"
+                )
+            if self.direction == "TRANSFER":
+                raise ValueError("asset_link_type is not allowed for TRANSFER")
+        return self
 
 
 DebtDirection = Literal["I_PAID", "THEY_PAID"]
@@ -504,7 +576,6 @@ class TransactionOut(TransactionBase):
     primary_card_item_id: int | None = None
     counterparty_card_item_id: int | None = None
     deleted_at: datetime | None = None
-    linked_item_id: int | None = None
     related_item_id: int | None = None
     source: str | None = None
 
@@ -612,7 +683,6 @@ class TransactionChainOut(BaseModel):
     comment: str | None
     deleted_at: datetime | None
     created_at: datetime
-    linked_item_id: int | None = None
     related_item_id: int | None = None
     source: TransactionChainSource | None = None
     purpose: TransactionChainPurpose | None = None

@@ -1,6 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   Archive,
@@ -100,6 +101,7 @@ import {
   fetchTransactions,
   fetchTransactionChains,
   createItem,
+  createItemMarketValue,
   updateItem,
   archiveItem,
   closeItem,
@@ -124,7 +126,9 @@ import {
   FirstPayoutRule,
   RepaymentType,
   PaymentAmountKind,
+  PrimaryValueKind,
 } from "@/lib/api";
+import { getDefaultPrimaryValueKind, PRIMARY_VALUE_KIND_OPTIONS, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
@@ -606,9 +610,10 @@ function formatSize(bytes: number) {
 }
 
 export default function Page() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
+  const router = useRouter();
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
@@ -666,6 +671,7 @@ export default function Page() {
   const [name, setName] = useState("");
   const [synonyms, setSynonyms] = useState<string[]>([]);
   const [amountStr, setAmountStr] = useState(""); // строка: "1234.56" / "1 234,56"
+  const [marketValueStr, setMarketValueStr] = useState("");
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
   const [counterpartyLoading, setCounterpartyLoading] = useState(false);
@@ -723,6 +729,7 @@ export default function Page() {
   const [paymentAmountKind, setPaymentAmountKind] = useState<PaymentAmountKind | "">("");
   const [paymentAmountStr, setPaymentAmountStr] = useState("");
   const [openingCounterpartyId, setOpeningCounterpartyId] = useState("");
+  const [primaryValueKind, setPrimaryValueKind] = useState<PrimaryValueKind>("BALANCE");
   const [linkedChains, setLinkedChains] = useState<TransactionChainOut[]>([]);
   const [originalPlanSignature, setOriginalPlanSignature] = useState<string | null>(null);
   const [logoOverlayHeight, setLogoOverlayHeight] = useState(0);
@@ -963,6 +970,13 @@ export default function Page() {
         const linked = itemsById.get(item.card_account_id);
         if (linked) return linked.current_value_rub;
       }
+      // Для активов с основной стоимостью «Рыночная» показываем последнюю рыночную стоимость с API
+      if (
+        item.primary_value_kind === "MARKET" &&
+        item.latest_market_value_rub != null
+      ) {
+        return item.latest_market_value_rub;
+      }
       return item.current_value_rub;
     },
     [itemsById]
@@ -1016,6 +1030,17 @@ export default function Page() {
     }
     
     // Для обычных активов/обязательств используем текущее значение из БД
+    const rate = rateByCode[item.currency_code];
+    if (!rate) return null;
+    const amount = Math.abs(getItemDisplayBalanceCents(item)) / 100;
+    return Math.round(amount * rate * 100);
+  }
+
+  /** Основная стоимость в рублях (копейках) для отображения на карточке по primary_value_kind. */
+  function getPrimaryValueRubCents(item: ItemOut): number | null {
+    const kind = item.primary_value_kind ?? "BALANCE";
+    if (kind === "MARKET") return getRubEquivalentCents(item);
+    // BALANCE, ACQUISITION, INVESTED: пока используем баланс в рублях (для ACQUISITION/INVESTED позже — из /items/:id/costs)
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
     const amount = Math.abs(getItemDisplayBalanceCents(item)) / 100;
@@ -1121,7 +1146,10 @@ export default function Page() {
     () => AUTO_PLAN_LOAN_TYPES.includes(typeCode),
     [typeCode]
   );
-  const openDateLabel = "\u0414\u0430\u0442\u0430 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f";
+  const openDateLabel =
+    primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED"
+      ? "Дата приобретения"
+      : "Дата появления";
   const accountingStartLabel = accountingStartDate
     ? `\u0414\u0430\u0442\u0430 \u043d\u0430\u0447\u0430\u043b\u0430 \u0443\u0447\u0435\u0442\u0430 (${formatShortDate(accountingStartDate)})`
     : "\u0414\u0430\u0442\u0430 \u043d\u0430\u0447\u0430\u043b\u0430 \u0443\u0447\u0435\u0442\u0430";
@@ -1270,8 +1298,11 @@ export default function Page() {
   const hasNonZeroAmount = Number.isFinite(amountCents) && amountCents !== 0;
   const hasNonZeroLots = moexLots != null && moexLots > 0;
   const showOpeningCounterparty =
-    resolvedHistoryStatus === "NEW" &&
-    (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
+    (primaryValueKind === "BALANCE" ||
+      primaryValueKind === "ACQUISITION" ||
+      primaryValueKind === "INVESTED" ||
+      primaryValueKind === "MARKET") &&
+    (resolvedHistoryStatus === "NEW" ? (isMoexType ? hasNonZeroLots : hasNonZeroAmount) : true);
   const showMoexPricing = isMoexType && kind === "ASSET";
   const showMoexCommission =
     isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW" && hasNonZeroLots;
@@ -1287,8 +1318,7 @@ export default function Page() {
       showContractNumberField ||
       showDepositFields ||
       showInterestFields ||
-      showPlanSection ||
-      showOpeningCounterparty
+      showPlanSection
     );
   }, [
     showMoexPricing,
@@ -1299,7 +1329,6 @@ export default function Page() {
     showDepositFields,
     showInterestFields,
     showPlanSection,
-    showOpeningCounterparty,
   ]);
   
   // Close right panel when there are no additional fields
@@ -1360,8 +1389,8 @@ export default function Page() {
   );
   const openingCounterpartyLabel =
     kind === "LIABILITY"
-      ? "\u0410\u043a\u0442\u0438\u0432 \u0434\u043b\u044f \u0437\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u0438\u044f"
-      : "\u0410\u043a\u0442\u0438\u0432-\u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0441\u0440\u0435\u0434\u0441\u0442\u0432";
+      ? "Актив для зачисления"
+      : "Источник средств";
   const openingHint =
     showOpeningCounterparty
       ? kind === "LIABILITY"
@@ -1369,19 +1398,34 @@ export default function Page() {
         : "Если не выбрать актив, будет создана фактическая транзакция с категорией «Прочие доходы»."
       : null;
   const amountLabel = useMemo(() => {
+    if (primaryValueKind === "MARKET" && !isMoexType) {
+      if (resolvedHistoryStatus === "HISTORICAL") {
+        const dateLabel = accountingStartDate
+          ? formatShortDate(accountingStartDate)
+          : "";
+        return dateLabel
+          ? `Рыночная стоимость на дату начала учета (${dateLabel})`
+          : "Рыночная стоимость на дату начала учета";
+      }
+      if (resolvedHistoryStatus === "NEW") return "Рыночная стоимость на дату появления";
+      return "Рыночная стоимость";
+    }
+    if (primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED") {
+      return "Стоимость приобретения";
+    }
     if (resolvedHistoryStatus === "HISTORICAL") {
       const dateLabel = accountingStartDate
         ? formatShortDate(accountingStartDate)
         : "";
       return dateLabel
-        ? `Сумма на дату начала учета (${dateLabel})`
-        : "Сумма на дату начала учета";
+        ? `Баланс на дату начала учета (${dateLabel})`
+        : "Баланс на дату начала учета";
     }
     if (resolvedHistoryStatus === "NEW") {
-      return "\u0421\u0443\u043c\u043c\u0430 \u043d\u0430 \u0434\u0430\u0442\u0443 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f";
+      return "Баланс на дату появления";
     }
     return "Сумма";
-  }, [resolvedHistoryStatus, accountingStartDate, kind]);
+  }, [resolvedHistoryStatus, accountingStartDate, kind, primaryValueKind, isMoexType]);
   const activeItemsForTotals = useMemo(
     () =>
       activeItems.filter(
@@ -1495,7 +1539,7 @@ export default function Page() {
       const items = visibleItems.filter((item) => itemInSection(item)(section));
       if (items.length === 0) continue;
       const sortedItems = sortItemsByTransactionCount(items, itemTxCounts);
-      const totalRubCents = sortedItems.reduce((sum, it) => sum + (getRubEquivalentCents(it) ?? 0), 0);
+      const totalRubCents = sortedItems.reduce((sum, it) => sum + (getPrimaryValueRubCents(it) ?? 0), 0);
       list.push({ section, items: sortedItems, totalRubCents });
     }
     list.sort((a, b) => {
@@ -1505,7 +1549,7 @@ export default function Page() {
       return sumB - sumA;
     });
     return list;
-  }, [visibleItems, itemTxCounts, resolveItemEffectiveKind, getRubEquivalentCents]);
+  }, [visibleItems, itemTxCounts, resolveItemEffectiveKind, getRubEquivalentCents, getPrimaryValueRubCents]);
 
   const activeAssetItems = useMemo(
     () =>
@@ -1945,6 +1989,12 @@ export default function Page() {
     }
   }, [isCreateOpen, typeOptions, typeCode, isGeneralCreate]);
 
+  // При создании предвыбираем «Основная стоимость» по выбранному виду актива/обязательства
+  useEffect(() => {
+    if (!isCreateOpen || editingItem) return;
+    setPrimaryValueKind(getDefaultPrimaryValueKind(typeCode || "", kind));
+  }, [isCreateOpen, typeCode, kind, editingItem]);
+
   async function loadItems() {
     setLoading(true);
     setError(null);
@@ -2050,14 +2100,14 @@ export default function Page() {
   }
 
   useEffect(() => {
-    if (session) {
+    if (sessionStatus === "authenticated") {
       loadItems();
       loadTransactions();
       loadCurrencies();
       loadFxRates();
       loadCounterparties();
     }
-  }, [session]);
+  }, [sessionStatus]);
 
   useEffect(() => {
     if (items.length > 0) {
@@ -2502,6 +2552,7 @@ export default function Page() {
     setName("");
     setSynonyms([]);
     setAmountStr("");
+    setMarketValueStr("");
     setCounterpartyId(null);
     setInstrumentQuery("");
     setInstrumentOptions([]);
@@ -2540,6 +2591,11 @@ export default function Page() {
     setPaymentAmountKind("");
     setPaymentAmountStr("");
     setOpeningCounterpartyId("");
+    setPrimaryValueKind(
+      nextTypeCodes.length > 0
+        ? getDefaultPrimaryValueKind(nextTypeCodes[0], nextKind)
+        : "BALANCE"
+    );
     setLinkedChains([]);
     setOriginalPlanSignature(null);
     setFormError(null);
@@ -2587,6 +2643,8 @@ export default function Page() {
     setName(item.name);
     setSynonyms(item.synonyms ?? []);
     setAmountStr(formatAmount(item.initial_value_rub));
+    setMarketValueStr("");
+    setPrimaryValueKind(item.primary_value_kind ?? getDefaultPrimaryValueKind(item.type_code, item.kind));
     setCounterpartyId(item.counterparty_id);
     setInstrumentQuery(
       item.instrument_id ? `${item.instrument_id} - ${item.name ?? ""}`.trim() : ""
@@ -2629,7 +2687,7 @@ export default function Page() {
     setMoexPurchasePrice("");
     if (item.instrument_id && item.history_status === "NEW") {
       const commissionTx = txs.find(
-        (tx) => tx.linked_item_id === item.id && tx.source === "AUTO_ITEM_COMMISSION"
+        (tx) => tx.related_item_id === item.id && tx.source === "AUTO_ITEM_COMMISSION"
       );
       if (commissionTx) {
         setCommissionEnabled(true);
@@ -2804,6 +2862,34 @@ export default function Page() {
     }
     if (openDate > todayKey) {
       setFormError("\u0414\u0430\u0442\u0430 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0431\u044b\u0442\u044c \u043f\u043e\u0437\u0434\u043d\u0435\u0435 \u0441\u0435\u0433\u043e\u0434\u043d\u044f\u0448\u043d\u0435\u0439 \u0434\u0430\u0442\u044b.");
+      return;
+    }
+    const needsOpeningSource =
+      resolvedHistoryStatus === "NEW" &&
+      (primaryValueKind === "BALANCE" ||
+        primaryValueKind === "ACQUISITION" ||
+        primaryValueKind === "INVESTED" ||
+        primaryValueKind === "MARKET") &&
+      (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
+    if (needsOpeningSource && !openingCounterpartyId) {
+      setFormError("Укажите источник средств.");
+      return;
+    }
+    const isMarketNonMoex = primaryValueKind === "MARKET" && !isMoexType;
+    if (
+      resolvedHistoryStatus === "NEW" &&
+      isMarketNonMoex &&
+      (!marketValueStr.trim() || !Number.isFinite(parseRubToCents(marketValueStr)) || parseRubToCents(marketValueStr) < 0)
+    ) {
+      setFormError("Укажите рыночную стоимость.");
+      return;
+    }
+    if (
+      resolvedHistoryStatus === "NEW" &&
+      isMarketNonMoex &&
+      (!amountStr.trim() || !Number.isFinite(parseRubToCents(amountStr)) || parseRubToCents(amountStr) < 0)
+    ) {
+      setFormError("Укажите стоимость приобретения.");
       return;
     }
 
@@ -3056,6 +3142,7 @@ export default function Page() {
         open_date: openDate,
         opening_counterparty_item_id: openingCounterpartyValue,
         initial_value_rub: cents,
+        primary_value_kind: primaryValueKind,
       };
       if (editingItem) {
         payload.synonyms = synonymsList;
@@ -3259,6 +3346,22 @@ export default function Page() {
         );
       } else {
         const createdItem = await createItem(payload);
+        if (
+          primaryValueKind === "MARKET" &&
+          !isMoexType &&
+          marketValueStr.trim() &&
+          Number.isFinite(parseRubToCents(marketValueStr)) &&
+          parseRubToCents(marketValueStr) >= 0
+        ) {
+          try {
+            await createItemMarketValue(createdItem.id, {
+              value_date: openDate,
+              value_rub: parseRubToCents(marketValueStr),
+            });
+          } catch (mvErr: any) {
+            console.warn("Failed to create market value:", mvErr?.message);
+          }
+        }
         // Upload photo if provided
         let itemWithPhoto = createdItem;
         if (itemPhotoFile) {
@@ -3286,6 +3389,7 @@ export default function Page() {
       // очищаем форму и закрываем модалку
       setName("");
       setAmountStr("");
+      setMarketValueStr("");
       setIsCreateOpen(false);
       setEditingItem(null);
       // Clear photo (same pattern as counterparties)
@@ -3531,7 +3635,7 @@ export default function Page() {
                   const typeLabel = getItemTypeLabel(it);
                   const typeMeta = typeLabel;
                   const rate = rateByCode[it.currency_code];
-                  const rubEquivalent = getRubEquivalentCents(it);
+                  const rubEquivalent = getPrimaryValueRubCents(it);
                   const displayBalanceCents = getItemDisplayBalanceCents(it);
                   const currencyCode = it.currency_code || "";
                   const counterparty = it.counterparty_id ? counterpartiesById.get(it.counterparty_id) ?? null : null;
@@ -3974,7 +4078,10 @@ export default function Page() {
                     value={sectionId}
                     onValueChange={(value) => {
                       setSectionId(value);
-                      setTypeCode("");
+                      const section = sectionOptions.find((s) => s.id === value);
+                      const firstType = section?.typeCodes?.[0] ?? "";
+                      setTypeCode(firstType);
+                      setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
                       setIcon3dFormat("png");
                       setShow2dIcon(false);
                     }}
@@ -3995,6 +4102,7 @@ export default function Page() {
                   value={typeCode}
                   onValueChange={(value) => {
                     setTypeCode(value);
+                    if (!editingItem) setPrimaryValueKind(getDefaultPrimaryValueKind(value, kind));
                     setIcon3dFormat("png");
                     setShow2dIcon(false);
                   }}
@@ -4318,7 +4426,43 @@ export default function Page() {
               placeholder="Выберите валюту"
             />
 
-            {!hideInitialAmountField && (
+            {typeCode && (
+              <SelectField
+                label="Основная стоимость"
+                value={primaryValueKind}
+                onValueChange={(value) => setPrimaryValueKind(value as PrimaryValueKind)}
+                options={PRIMARY_VALUE_KIND_OPTIONS.map((opt) => ({
+                  value: opt.value,
+                  label: opt.label,
+                }))}
+                placeholder="Выберите вид стоимости"
+              />
+            )}
+
+            {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
+              <div className="grid gap-2">
+                <TextField
+                  label="Рыночная стоимость"
+                  value={marketValueStr}
+                  onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))}
+                  onBlur={() => setMarketValueStr((prev) => normalizeRubOnBlur(prev))}
+                  inputMode="decimal"
+                  placeholder="Укажите сумму"
+                />
+                <TextField
+                  label="Стоимость приобретения"
+                  value={amountStr}
+                  onChange={(e) => {
+                    const formatted = formatRubInput(e.target.value);
+                    setAmountStr(formatted);
+                  }}
+                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                  inputMode="decimal"
+                  placeholder="Укажите сумму"
+                />
+              </div>
+            )}
+            {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType) && (
               <div className="grid gap-2">
                 <TextField
                   label={amountLabel}
@@ -4338,6 +4482,38 @@ export default function Page() {
                 )}
               </div>
             )}
+
+            {showOpeningCounterparty && (
+              <div className="grid gap-2">
+                <Label>{openingCounterpartyLabel}</Label>
+                <ItemSelector
+                  items={openingCounterpartyItems}
+                  selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
+                  onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")}
+                  selectionMode="single"
+                  placeholder="Не выбирать"
+                  getItemTypeLabel={(it) => (it.name ?? "") + " " + (it.currency_code ?? "")}
+                  apiBase={API_BASE}
+                  getBankLogoUrl={itemCounterpartyLogoUrl}
+                  getBankName={itemCounterpartyName}
+                  itemCounts={itemTxCounts}
+                  ariaLabel={openingCounterpartyLabel}
+                />
+                {openingHint && (
+                  <p className="text-xs text-muted-foreground">{openingHint}</p>
+                )}
+              </div>
+            )}
+
+            <ChipsInput
+              label="Синонимы"
+              labelHint={'Добавьте альтернативные названия актива/обязательства. При импорте транзакций из банков актив/обязательство будет подбираться не только по основному названию, но и по указанным в этом поле синонимам. Например, зачастую в выписках встречается обозначение номеров карт с помощью последних четырех цифр - "*1234"'}
+              value={synonyms}
+              onChange={setSynonyms}
+              placeholder="Введите синоним и нажмите Enter"
+              maxItems={50}
+              maxLengthPerItem={300}
+            />
 
               </div>
 
@@ -4854,59 +5030,6 @@ export default function Page() {
                 )}
               </div>
             )}
-            {showOpeningCounterparty && (
-              <div className="rounded-lg border-2 border-border/70 p-3" style={{ backgroundColor: BACKGROUND_DT }}>
-                <div className="grid gap-2">
-                  <div className="flex items-center gap-2">
-                    <Label>{openingCounterpartyLabel}</Label>
-                    {openingHint && (
-                      <Tooltip
-                        content={openingHint}
-                        contentClassName="w-80 max-w-[calc(100vw-2rem)]"
-                      >
-                        <span
-                          className="text-muted-foreground"
-                          aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u043f\u043e\u043b\u044e \u0430\u043a\u0442\u0438\u0432\u0430"
-                        >
-                          <Info className="h-4 w-4" />
-                        </span>
-                      </Tooltip>
-                    )}
-                  </div>
-                  <ItemSelector
-                    items={openingCounterpartyItems}
-                    selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
-                    onChange={(ids) => {
-                      const nextId = ids[0] ?? null;
-                      setOpeningCounterpartyId(nextId ? String(nextId) : "");
-                    }}
-                    selectionMode="single"
-                    placeholder="Выберите актив"
-                    clearLabel="Не выбрано"
-                    getItemTypeLabel={getItemTypeLabel}
-                    getItemKind={resolveItemEffectiveKind}
-                    getItemBalance={getItemDisplayBalanceCents}
-                    getCounterpartyForItemId={getCounterpartyForItemId}
-                    apiBase={API_BASE}
-                    getBankLogoUrl={itemCounterpartyLogoUrl}
-                    getBankName={itemCounterpartyName}
-                    itemCounts={itemTxCounts}
-                    ariaLabel={openingCounterpartyLabel}
-                  />
-                </div>
-              </div>
-            )}
-
-            <ChipsInput
-              label="Синонимы"
-              labelHint={`Добавьте альтернативные названия актива/обязательства. При импорте транзакций из банков актив/обязательство будет подбираться не только по основному названию, но и по указанным в этом поле синонимам. Например, зачастую в выписках встречается обозначение номеров карт с помощью последних четырех цифр - "*1234"`}
-              value={synonyms}
-              onChange={setSynonyms}
-              placeholder="Введите синоним и нажмите Enter"
-              maxItems={50}
-              maxLengthPerItem={300}
-            />
-
                 </div>
               </div>
             </div>
@@ -5353,7 +5476,7 @@ export default function Page() {
                       <div className="columns-1 md:columns-2 xl:columns-3 gap-4">
                         {items.map((item) => {
                           const rate = rateByCode[item.currency_code];
-                          const rubEquivalent = getRubEquivalentCents(item);
+                          const rubEquivalent = getPrimaryValueRubCents(item);
                           const counterparty = item.counterparty_id
                             ? counterpartiesById.get(item.counterparty_id) ?? null
                             : null;
@@ -5370,6 +5493,7 @@ export default function Page() {
                                 accountingStartDate={accountingStartDate}
                                 rate={rate}
                                 rubEquivalent={rubEquivalent}
+                                primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                                 counterparty={counterparty}
                                 moexMarketPrice={
                                   MOEX_TYPE_CODES.includes(item.type_code)
@@ -5381,6 +5505,7 @@ export default function Page() {
                                 onArchive={(item) => onArchive(item)}
                                 onClose={(item) => onClose(item)}
                                 getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                                onNavigate={(it) => router.push(`/assets/${it.id}`)}
                               />
                             </div>
                           );

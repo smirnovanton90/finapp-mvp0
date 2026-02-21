@@ -26,6 +26,7 @@ CATEGORY_ICON_BY_L1: dict[str, str] = {
     "Уход за собой": "Scissors",
     "Хозяйственные расходы": "Home",
     "Прочие расходы": "MoreVertical",
+    "Приобретение активов": "ShoppingCart",
     "Комиссии": "Receipt",
     "Дети": "Baby",
     "Образование": "GraduationCap",
@@ -389,6 +390,7 @@ CATEGORY_SEED: list[dict] = [
             {"name": "Прочие расходы"},
         ],
     },
+    {"name": "Приобретение активов", "scope": "EXPENSE"},
     {
         "name": "Комиссии",
         "scope": "EXPENSE",

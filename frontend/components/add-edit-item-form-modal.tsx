@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
+import { ChipsInput } from "@/components/ui/chips-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { ACCENT, ACTIVE_TEXT_DARK, BACKGROUND_DT, DROPDOWN_BG, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
@@ -25,11 +26,13 @@ import {
   createItem,
   updateItem,
   uploadItemPhoto,
+  createItemMarketValue,
   API_BASE,
   CardKind,
   ItemKind,
   ItemCreate,
   ItemOut,
+  PrimaryValueKind,
   CounterpartyOut,
   CounterpartyIndustryOut,
   MarketBoardOut,
@@ -68,6 +71,8 @@ import {
   addDays,
   toDateKey,
   findPriceOnOrBefore,
+  PRIMARY_VALUE_KIND_OPTIONS,
+  getDefaultPrimaryValueKind,
 } from "@/lib/asset-item-form-constants";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-type-icons";
 
@@ -113,6 +118,7 @@ export function AddEditItemFormModal({
   const [currencyCode, setCurrencyCode] = useState("RUB");
   const [name, setName] = useState("");
   const [amountStr, setAmountStr] = useState("");
+  const [marketValueStr, setMarketValueStr] = useState("");
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
   const [counterpartyLoading, setCounterpartyLoading] = useState(false);
@@ -164,6 +170,8 @@ export function AddEditItemFormModal({
   const [paymentAmountKind, setPaymentAmountKind] = useState<PaymentAmountKind | "">("");
   const [paymentAmountStr, setPaymentAmountStr] = useState("");
   const [openingCounterpartyId, setOpeningCounterpartyId] = useState("");
+  const [primaryValueKind, setPrimaryValueKind] = useState<PrimaryValueKind>("BALANCE");
+  const [synonyms, setSynonyms] = useState<string[]>([]);
   const [linkedChains, setLinkedChains] = useState<TransactionChainOut[]>([]);
   const [originalPlanSignature, setOriginalPlanSignature] = useState<string | null>(null);
   const [itemPhotoFile, setItemPhotoFile] = useState<File | null>(null);
@@ -212,6 +220,9 @@ export function AddEditItemFormModal({
       setAmountStr("");
       setCounterpartyId(null);
       setOpenDate(getTodayDateKey());
+      setPrimaryValueKind(getDefaultPrimaryValueKind("", initialCreateOptions.kind));
+      setSynonyms([]);
+      setMarketValueStr("");
     }
     if (editingItem) {
       setKind(editingItem.kind);
@@ -237,7 +248,7 @@ export function AddEditItemFormModal({
       setDepositTermDays(editingItem.deposit_term_days != null ? String(editingItem.deposit_term_days) : "");
       setPositionLots(editingItem.position_lots != null ? String(editingItem.position_lots) : "");
       setMoexPurchasePrice("");
-      const commissionTx = transactionsForEdit.find((tx) => tx.linked_item_id === editingItem.id && tx.source === "AUTO_ITEM_COMMISSION");
+      const commissionTx = transactionsForEdit.find((tx) => tx.related_item_id === editingItem.id && tx.source === "AUTO_ITEM_COMMISSION");
       if (commissionTx) {
         setCommissionEnabled(true);
         setCommissionAmount(commissionTx.amount_rub != null ? formatAmount(commissionTx.amount_rub) : "");
@@ -264,6 +275,9 @@ export function AddEditItemFormModal({
       setPaymentAmountKind(ps?.payment_amount_kind ?? "");
       setPaymentAmountStr(ps?.payment_amount_rub != null ? formatAmount(ps.payment_amount_rub) : "");
       setOpeningCounterpartyId(editingItem.opening_counterparty_item_id != null ? String(editingItem.opening_counterparty_item_id) : "");
+      setPrimaryValueKind(editingItem.primary_value_kind ?? getDefaultPrimaryValueKind(editingItem.type_code, editingItem.kind));
+      setSynonyms(editingItem.synonyms ?? []);
+      setMarketValueStr("");
       setOriginalPlanSignature(buildPlanSignatureFromItemModal(editingItem));
       setItemPhotoPreview(getItemPhotoUrl(editingItem, API_BASE));
       setItemPhotoFile(null);
@@ -296,6 +310,12 @@ export function AddEditItemFormModal({
   );
 
   const isMoexType = useMemo(() => MOEX_TYPE_CODES.includes(typeCode), [typeCode]);
+
+  // При создании предвыбираем «Основная стоимость» по выбранному виду актива/обязательства
+  useEffect(() => {
+    if (editingItem) return;
+    setPrimaryValueKind(getDefaultPrimaryValueKind(typeCode || "", kind));
+  }, [typeCode, kind, editingItem]);
   const moexLots = useMemo(() => {
     if (!isMoexType) return null;
     const rawLots = positionLots.replace(/\s/g, "");
@@ -396,8 +416,11 @@ export function AddEditItemFormModal({
   const hasNonZeroAmount = Number.isFinite(amountCentsForSubmit) && amountCentsForSubmit !== 0;
   const hasNonZeroLots = moexLots != null && moexLots > 0;
   const showOpeningCounterparty =
-    resolvedHistoryStatus === "NEW" &&
-    (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
+    (primaryValueKind === "BALANCE" ||
+      primaryValueKind === "ACQUISITION" ||
+      primaryValueKind === "INVESTED" ||
+      primaryValueKind === "MARKET") &&
+    (resolvedHistoryStatus === "NEW" ? (isMoexType ? hasNonZeroLots : hasNonZeroAmount) : true);
   const showMoexCommission =
     isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW" && hasNonZeroLots;
   const commissionAllowed = showMoexCommission;
@@ -519,6 +542,8 @@ export function AddEditItemFormModal({
     setPaymentAmountKind("");
     setPaymentAmountStr("");
     setOpeningCounterpartyId("");
+    setMarketValueStr("");
+    setSynonyms([]);
     setLinkedChains([]);
     setOriginalPlanSignature(null);
     if (itemPhotoPreview?.startsWith("blob:")) URL.revokeObjectURL(itemPhotoPreview);
@@ -904,6 +929,34 @@ export function AddEditItemFormModal({
       setFormError("Дата появления не может быть позже сегодняшней даты.");
       return;
     }
+    const needsOpeningSource =
+      resolvedHistoryStatus === "NEW" &&
+      (primaryValueKind === "BALANCE" ||
+        primaryValueKind === "ACQUISITION" ||
+        primaryValueKind === "INVESTED" ||
+        primaryValueKind === "MARKET") &&
+      (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
+    if (needsOpeningSource && !openingCounterpartyId) {
+      setFormError("Укажите источник средств.");
+      return;
+    }
+    const isMarketNonMoex = primaryValueKind === "MARKET" && !isMoexType;
+    if (
+      resolvedHistoryStatus === "NEW" &&
+      isMarketNonMoex &&
+      (!marketValueStr.trim() || !Number.isFinite(parseRubToCents(marketValueStr)) || parseRubToCents(marketValueStr) < 0)
+    ) {
+      setFormError("Укажите рыночную стоимость.");
+      return;
+    }
+    if (
+      resolvedHistoryStatus === "NEW" &&
+      isMarketNonMoex &&
+      (!amountStr.trim() || !Number.isFinite(parseRubToCents(amountStr)) || parseRubToCents(amountStr) < 0)
+    ) {
+      setFormError("Укажите стоимость приобретения.");
+      return;
+    }
 
     const trimmedAccountLast7 = accountLast7.trim();
     const trimmedContractNumber = contractNumber.trim();
@@ -1129,6 +1182,7 @@ export function AddEditItemFormModal({
         showOpeningCounterparty && openingCounterpartyId
           ? Number(openingCounterpartyId)
           : null;
+      const synonymsList = synonyms.map((s) => s.trim()).filter((s) => s.length > 0);
       const payload: ItemCreate = {
         kind,
         type_code: typeCode,
@@ -1138,7 +1192,9 @@ export function AddEditItemFormModal({
         open_date: openDate,
         opening_counterparty_item_id: openingCounterpartyValue,
         initial_value_rub: cents,
+        primary_value_kind: primaryValueKind,
       };
+      if (synonymsList.length > 0) payload.synonyms = synonymsList;
 
       if (isMoexType && selectedInstrument) {
         payload.instrument_id = selectedInstrument.secid;
@@ -1325,6 +1381,22 @@ export function AddEditItemFormModal({
       } else {
         const createdItem = await createItem(payload);
         let itemWithPhoto = createdItem;
+        if (
+          primaryValueKind === "MARKET" &&
+          !isMoexType &&
+          marketValueStr.trim() &&
+          Number.isFinite(parseRubToCents(marketValueStr)) &&
+          parseRubToCents(marketValueStr) >= 0
+        ) {
+          try {
+            await createItemMarketValue(createdItem.id, {
+              value_date: openDate,
+              value_rub: parseRubToCents(marketValueStr),
+            });
+          } catch (mvErr: any) {
+            console.warn("Failed to create market value:", mvErr?.message);
+          }
+        }
         if (itemPhotoFile) {
           try {
             itemWithPhoto = await uploadItemPhoto(createdItem.id, itemPhotoFile);
@@ -1445,7 +1517,13 @@ export function AddEditItemFormModal({
                   <SelectField
                     label="Раздел"
                     value={sectionId}
-                    onValueChange={(value) => { setSectionId(value); setTypeCode(""); }}
+                    onValueChange={(value) => {
+                      setSectionId(value);
+                      const section = sectionOptions.find((s) => s.id === value);
+                      const firstType = section?.typeCodes?.[0] ?? "";
+                      setTypeCode(firstType);
+                      setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
+                    }}
                     options={sectionOptions.map((s) => ({ value: s.id, label: s.label }))}
                     placeholder={kind === "ASSET" ? "Выберите раздел актива" : "Выберите раздел обязательства"}
                   />
@@ -1453,7 +1531,10 @@ export function AddEditItemFormModal({
                 <SelectField
                   label="Вид"
                   value={typeCode}
-                  onValueChange={setTypeCode}
+                  onValueChange={(value) => {
+                    setTypeCode(value);
+                    if (!editingItem) setPrimaryValueKind(getDefaultPrimaryValueKind(value, kind));
+                  }}
                   disabled={isGeneralCreate && !sectionId}
                   options={typeOptions.map((t) => ({ value: t.code, label: t.label }))}
                   placeholder={isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"}
@@ -1585,6 +1666,12 @@ export function AddEditItemFormModal({
               placeholder="Например, Кошелёк"
               required
             />
+            <SelectField
+              label="Основная стоимость"
+              value={primaryValueKind}
+              onValueChange={(v) => setPrimaryValueKind(v as PrimaryValueKind)}
+              options={PRIMARY_VALUE_KIND_OPTIONS}
+            />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <TextField
                 label="Валюта"
@@ -1592,9 +1679,35 @@ export function AddEditItemFormModal({
                 onChange={(e) => setCurrencyCode(e.target.value.toUpperCase().slice(0, 3))}
                 placeholder="RUB"
               />
-              {!hideInitialAmountField && (
+              {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
+                <>
+                  <TextField
+                    label="Рыночная стоимость"
+                    value={marketValueStr}
+                    onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))}
+                    onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))}
+                    placeholder="0"
+                  />
+                  <TextField
+                    label="Стоимость приобретения"
+                    value={amountStr}
+                    onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+                    onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))}
+                    placeholder="0"
+                  />
+                </>
+              )}
+              {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType) && (
                 <TextField
-                  label="Начальный баланс"
+                  label={
+                    primaryValueKind === "BALANCE"
+                      ? "Баланс на дату появления"
+                      : primaryValueKind === "MARKET"
+                        ? "Рыночная стоимость на дату появления"
+                        : primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED"
+                          ? "Стоимость приобретения"
+                          : "Сумма на дату появления"
+                  }
                   value={amountStr}
                   onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                   onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))}
@@ -1609,10 +1722,32 @@ export function AddEditItemFormModal({
               )}
             </div>
             <DateField
-              label="Дата появления"
+              label={primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Дата приобретения" : "Дата появления"}
               value={openDate}
               onChange={(e) => setOpenDate(e.target.value)}
               placeholder="ГГГГ-ММ-ДД"
+            />
+            {showOpeningCounterparty && (
+              <div className="grid gap-2">
+                <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
+                <ItemSelector
+                  items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)}
+                  selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
+                  onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")}
+                  selectionMode="single"
+                  placeholder="Не выбирать"
+                  getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")}
+                />
+              </div>
+            )}
+            <ChipsInput
+              label="Синонимы"
+              labelHint="Добавьте альтернативные названия. При импорте транзакций актив/обязательство будет подбираться и по синонимам (например, *1234 для карты)."
+              value={synonyms}
+              onChange={setSynonyms}
+              placeholder="Введите синоним и нажмите Enter"
+              maxItems={50}
+              maxLengthPerItem={300}
             />
             {showBankAccountFields && (
               <TextField
@@ -1821,19 +1956,6 @@ export function AddEditItemFormModal({
                     )}
                   </>
                 )}
-              </div>
-            )}
-            {showOpeningCounterparty && (
-              <div className="grid gap-2">
-                <Label style={{ color: ACTIVE_TEXT_DARK }}>Актив открытия</Label>
-                <ItemSelector
-                  items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)}
-                  selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
-                  onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")}
-                  selectionMode="single"
-                  placeholder="Не выбирать"
-                  getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")}
-                />
               </div>
             )}
             {showCounterpartyField && (

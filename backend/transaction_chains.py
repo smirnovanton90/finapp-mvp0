@@ -173,7 +173,7 @@ def list_transaction_chains(
 ):
     query = db.query(TransactionChain).filter(TransactionChain.user_id == user.id)
     if linked_item_id is not None:
-        query = query.filter(TransactionChain.linked_item_id == linked_item_id)
+        query = query.filter(TransactionChain.related_item_id == linked_item_id)
     return query.order_by(TransactionChain.created_at.desc(), TransactionChain.id.desc()).all()
 
 
@@ -266,7 +266,6 @@ def create_transaction_chain(
         monthly_day=data.monthly_day,
         monthly_rule=data.monthly_rule,
         interval_days=data.interval_days,
-        linked_item_id=None,
         related_item_id=data.related_item_id,
         source="MANUAL",
         purpose=None,

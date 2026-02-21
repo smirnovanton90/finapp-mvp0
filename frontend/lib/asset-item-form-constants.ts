@@ -2,7 +2,30 @@
  * Constants for the asset/liability form (shared with Assets page and AddEditItemModal).
  */
 
-import type { ItemKind, MarketPriceOut } from "./api";
+import type { ItemKind, MarketPriceOut, PrimaryValueKind } from "./api";
+
+export const PRIMARY_VALUE_KIND_OPTIONS: { value: PrimaryValueKind; label: string }[] = [
+  { value: "BALANCE", label: "Балансовая стоимость" },
+  { value: "MARKET", label: "Рыночная стоимость" },
+  { value: "ACQUISITION", label: "Стоимость приобретения" },
+  { value: "INVESTED", label: "Стоимость вложенных средств" },
+];
+
+export function getPrimaryValueLabel(primaryValueKind: PrimaryValueKind | null | undefined): string {
+  if (!primaryValueKind) return "Балансовая стоимость";
+  const opt = PRIMARY_VALUE_KIND_OPTIONS.find((o) => o.value === primaryValueKind);
+  return opt?.label ?? "Балансовая стоимость";
+}
+
+export function getDefaultPrimaryValueKind(typeCode: string, kind: ItemKind): PrimaryValueKind {
+  if (kind === "LIABILITY") return "BALANCE";
+  if (typeCode === "deposit") return "BALANCE";
+  if (CASH_TYPES.includes(typeCode) || THIRD_PARTY_DEBT_TYPES.includes(typeCode) || PENSION_TYPES.includes(typeCode) || OTHER_ASSET_TYPES.includes(typeCode))
+    return "BALANCE";
+  if (INVESTMENT_TYPES.includes(typeCode) || REAL_ESTATE_TYPES.includes(typeCode) || TRANSPORT_TYPES.includes(typeCode) || VALUABLES_TYPES.includes(typeCode))
+    return "MARKET";
+  return "BALANCE";
+}
 
 export function getTodayDateKey(): string {
   const now = new Date();

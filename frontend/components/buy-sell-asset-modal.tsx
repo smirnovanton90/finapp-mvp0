@@ -8,11 +8,17 @@ import { FormField } from "@/components/ui/form-field";
 import { TextField, DateField } from "@/components/ui/form-field";
 import { ItemSelector } from "@/components/item-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
-import { createTransaction, ItemOut, CounterpartyOut, API_BASE } from "@/lib/api";
+import { createTransaction, fetchCategories, ItemOut, CounterpartyOut, API_BASE } from "@/lib/api";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { getEffectiveItemKind, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
+import { findCategoryIdByExactNameOrSynonym } from "@/lib/import-match-helpers";
+import type { CategoryNode } from "@/lib/categories";
 import { ACTIVE_TEXT_DARK } from "@/lib/colors";
+
+const CATEGORY_ACQUISITION = "Приобретение активов";
+const CATEGORY_SALE = "Продажа активов";
+const CATEGORY_COMMISSION = "Комиссии от торговли на финансовом рынке";
 
 function getTodayDateKey() {
   const now = new Date();
@@ -58,6 +64,7 @@ export function BuySellAssetModal({
   const [commissionItemId, setCommissionItemId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState<CategoryNode[] | null>(null);
 
   const selectableItems = React.useMemo(
     () => items.filter((item) => item.id !== asset.id && !item.archived_at && !item.closed_at),
@@ -76,6 +83,7 @@ export function BuySellAssetModal({
       setPaymentItemId(null);
       setCommissionItemId(null);
       setFormError(null);
+      fetchCategories().then(setCategories).catch(() => setCategories([]));
     }
   }, [open]);
 
@@ -130,6 +138,14 @@ export function BuySellAssetModal({
     const amountRubCents = Math.round((priceCents / 100) * quantity * 100);
     const transactionDate = date;
 
+    const categoryNodes = categories ?? [];
+    const categoryAcquisition =
+      findCategoryIdByExactNameOrSynonym(CATEGORY_ACQUISITION, categoryNodes);
+    const categorySale =
+      findCategoryIdByExactNameOrSynonym(CATEGORY_SALE, categoryNodes);
+    const categoryCommission =
+      findCategoryIdByExactNameOrSynonym(CATEGORY_COMMISSION, categoryNodes);
+
     setLoading(true);
     try {
       if (mode === "BUY") {
@@ -140,25 +156,10 @@ export function BuySellAssetModal({
           counterparty_id: null,
           amount_rub: amountRubCents,
           amount_counterparty: null,
-          primary_quantity_lots: null,
+          primary_quantity_lots: quantity,
           direction: "EXPENSE",
           transaction_type: "ACTUAL",
-          category_id: null,
-          comment: null,
-          related_item_id: asset.id,
-          asset_link_type: "ASSET_PURCHASE",
-        });
-        await createTransaction({
-          transaction_date: transactionDate,
-          primary_item_id: asset.id,
-          counterparty_item_id: null,
-          counterparty_id: null,
-          amount_rub: amountRubCents,
-          amount_counterparty: null,
-          primary_quantity_lots: quantity,
-          direction: "INCOME",
-          transaction_type: "ACTUAL",
-          category_id: null,
+          category_id: categoryAcquisition,
           comment: null,
           related_item_id: asset.id,
           asset_link_type: "ASSET_PURCHASE",
@@ -166,30 +167,15 @@ export function BuySellAssetModal({
       } else {
         await createTransaction({
           transaction_date: transactionDate,
-          primary_item_id: asset.id,
-          counterparty_item_id: null,
-          counterparty_id: null,
-          amount_rub: amountRubCents,
-          amount_counterparty: null,
-          primary_quantity_lots: quantity,
-          direction: "EXPENSE",
-          transaction_type: "ACTUAL",
-          category_id: null,
-          comment: null,
-          related_item_id: asset.id,
-          asset_link_type: "ASSET_EXPENSE",
-        });
-        await createTransaction({
-          transaction_date: transactionDate,
           primary_item_id: paymentItemId,
           counterparty_item_id: null,
           counterparty_id: null,
           amount_rub: amountRubCents,
           amount_counterparty: null,
-          primary_quantity_lots: null,
+          primary_quantity_lots: quantity,
           direction: "INCOME",
           transaction_type: "ACTUAL",
-          category_id: null,
+          category_id: categorySale,
           comment: null,
           related_item_id: asset.id,
           asset_link_type: "ASSET_SALE",
@@ -207,9 +193,10 @@ export function BuySellAssetModal({
           primary_quantity_lots: null,
           direction: "EXPENSE",
           transaction_type: "ACTUAL",
-          category_id: null,
+          category_id: categoryCommission,
           comment: null,
           related_item_id: asset.id,
+          asset_link_type: "ASSET_PURCHASE",
         });
       }
 

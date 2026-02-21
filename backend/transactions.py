@@ -497,16 +497,6 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
     primary_side = _resolve_effective_side(db, user, data.primary_item_id, True, "primary")
     primary = primary_side.effective_item
     primary_is_moex = is_moex_item(primary)
-    if primary_is_moex and data.primary_quantity_lots is None:
-        raise HTTPException(
-            status_code=400,
-            detail="primary_quantity_lots is required for MOEX items",
-        )
-    if not primary_is_moex and data.primary_quantity_lots is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="primary_quantity_lots is only allowed for MOEX items",
-        )
 
     tx_date = data.transaction_date.date()
     if tx_date < primary_side.start_date:
@@ -517,8 +507,23 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
 
     resolve_counterparty(db, user, data.counterparty_id)
 
-    if data.related_item_id is not None:
-        _load_item(db, user, data.related_item_id, False, "related_item")
+    related_item = (
+        _load_item(db, user, data.related_item_id, True, "related_item")
+        if data.related_item_id is not None
+        else None
+    )
+    related_is_moex = is_moex_item(related_item) if related_item else False
+
+    if primary_is_moex and data.primary_quantity_lots is None:
+        raise HTTPException(
+            status_code=400,
+            detail="primary_quantity_lots is required for MOEX items",
+        )
+    if not primary_is_moex and data.primary_quantity_lots is not None and not related_is_moex:
+        raise HTTPException(
+            status_code=400,
+            detail="primary_quantity_lots is only allowed for MOEX items",
+        )
 
     counter_side = None
     counter = None
@@ -685,6 +690,12 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
                         detail=balance_violation_detail(counter, -counter_delta, data.transaction_date),
                     )
                 counter.current_value_rub = counter_next
+
+        if related_item and related_is_moex and data.primary_quantity_lots is not None:
+            if data.direction == "EXPENSE":
+                _apply_position_delta(related_item, data.primary_quantity_lots or 0, data.transaction_date)
+            elif data.direction == "INCOME":
+                _apply_position_delta(related_item, -(data.primary_quantity_lots or 0), data.transaction_date)
 
     if data.direction == "TRANSFER" and counter:
         update_settlements_item_closed_status(db, primary)

@@ -41,7 +41,7 @@ import {
 } from "@/lib/api";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
-import { getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
+import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import {
   OVERDUE_TRANSACTIONS_GRADIENT,
   NO_OVERDUE_TRANSACTIONS_GRADIENT,
@@ -802,11 +802,11 @@ export default function DashboardPage() {
     });
   }, [fxRates, todayKey]);
 
-  /** Основная стоимость в рублях (копейках) для итогов по primary_value_kind. На дашборде пока используем баланс. */
+  /** Основная стоимость в рублях (копейках) для итогов по primary_value_kind. */
   function getPrimaryValueRubCents(item: ItemOut): number | null {
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
-    const amount = Math.abs(item.current_value_rub) / 100;
+    const amount = Math.abs(getItemPrimaryValueCents(item)) / 100;
     return Math.round(amount * rate * 100);
   }
 

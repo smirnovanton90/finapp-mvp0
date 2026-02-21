@@ -71,8 +71,12 @@ export type ItemOut = {
   photo_url: string | null;
   photo_updated_at: string | null;
   primary_value_kind?: PrimaryValueKind | null;
-  /** Последняя рыночная стоимость (копейки), для primary_value_kind=MARKET не-MOEX. Заполняется API в list/get. */
+  /** Последняя рыночная стоимость (копейки), для primary_value_kind=MARKET. Заполняется API в list/get. */
   latest_market_value_rub?: number | null;
+  /** Стоимость приобретения (копейки). Заполняется API в list/get. */
+  acquisition_rub?: number | null;
+  /** Стоимость вложенных средств (копейки). Заполняется API в list/get. */
+  invested_rub?: number | null;
 };
 
 export type ItemMarketValueOut = {

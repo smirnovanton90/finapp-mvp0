@@ -156,7 +156,7 @@ import {
   parseRubToCents,
   formatCentsForInput,
 } from "@/lib/format-rub";
-import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import {
@@ -2387,13 +2387,14 @@ function TransactionsView({
   };
   const itemBankLogoUrl = itemCounterpartyLogoUrl;
   const itemBankName = itemCounterpartyName;
+  /** Основная стоимость актива для отображения (по primary_value_kind). */
   const getItemDisplayBalanceCents = useCallback(
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
-        if (linked) return linked.current_value_rub;
+        if (linked) return getItemPrimaryValueCents(linked);
       }
-      return item.current_value_rub;
+      return getItemPrimaryValueCents(item);
     },
     [itemsById]
   );

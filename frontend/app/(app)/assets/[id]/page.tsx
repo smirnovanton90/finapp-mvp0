@@ -217,6 +217,12 @@ export default function AssetDetailPage() {
                   <dd>{item.interest_rate}%</dd>
                 </>
               )}
+              {item.position_lots != null && (
+                <>
+                  <dt className="text-muted-foreground">Количество лотов</dt>
+                  <dd>{new Intl.NumberFormat("ru-RU").format(item.position_lots)}</dd>
+                </>
+              )}
             </dl>
           </CardContent>
         </Card>

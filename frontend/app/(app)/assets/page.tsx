@@ -130,7 +130,7 @@ import {
 } from "@/lib/api";
 import { getDefaultPrimaryValueKind, PRIMARY_VALUE_KIND_OPTIONS, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
-import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, sortItemsByTransactionCount } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, getItemPrimaryValueCents, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { assetIconPath } from "@/lib/image-paths";
@@ -968,16 +968,9 @@ export default function Page() {
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
-        if (linked) return linked.current_value_rub;
+        if (linked) return getItemPrimaryValueCents(linked);
       }
-      // Для активов с основной стоимостью «Рыночная» показываем последнюю рыночную стоимость с API
-      if (
-        item.primary_value_kind === "MARKET" &&
-        item.latest_market_value_rub != null
-      ) {
-        return item.latest_market_value_rub;
-      }
-      return item.current_value_rub;
+      return getItemPrimaryValueCents(item);
     },
     [itemsById]
   );
@@ -1029,10 +1022,10 @@ export default function Page() {
       return null;
     }
     
-    // Для обычных активов/обязательств используем текущее значение из БД
+    // Для обычных активов/обязательств используем основную стоимость
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
-    const amount = Math.abs(getItemDisplayBalanceCents(item)) / 100;
+    const amount = Math.abs(getItemPrimaryValueCents(item)) / 100;
     return Math.round(amount * rate * 100);
   }
 
@@ -1040,10 +1033,9 @@ export default function Page() {
   function getPrimaryValueRubCents(item: ItemOut): number | null {
     const kind = item.primary_value_kind ?? "BALANCE";
     if (kind === "MARKET") return getRubEquivalentCents(item);
-    // BALANCE, ACQUISITION, INVESTED: пока используем баланс в рублях (для ACQUISITION/INVESTED позже — из /items/:id/costs)
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
-    const amount = Math.abs(getItemDisplayBalanceCents(item)) / 100;
+    const amount = Math.abs(getItemPrimaryValueCents(item)) / 100;
     return Math.round(amount * rate * 100);
   }
 
@@ -2976,11 +2968,8 @@ export default function Page() {
     const amountValue = hideInitialAmountField
       ? amountStr.trim() || "0"
       : amountStr;
-    const cents = isMoexType ? moexInitialValueCents ?? NaN : parseRubToCents(amountValue);
-      if (isMoexType && moexInitialValueCents == null) {
-        setFormError("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u0442\u044c \u0441\u0443\u043c\u043c\u0443 \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0435\u0439 \u0446\u0435\u043d\u0435.");
-        return;
-      }
+    // У рыночных (MOEX) активов нет начальной балансовой стоимости — отправляем 0
+    const cents = isMoexType ? 0 : parseRubToCents(amountValue);
     if (
       !Number.isFinite(cents) ||
       (cents < 0 && !(showBankCardFields && cardKind === "CREDIT"))

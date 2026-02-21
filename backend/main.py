@@ -855,14 +855,49 @@ def list_items(
         price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
         value = _compute_market_value_rub(item, price, db)
         if value is not None:
-            item.current_value_rub = value
+            setattr(item, "latest_market_value_rub", value)
     for item in items:
-        setattr(item, "latest_market_value_rub", None)
+        if not is_moex_item(item):
+            setattr(item, "latest_market_value_rub", None)
     for item in items:
         if getattr(item, "primary_value_kind", None) == "MARKET" and not is_moex_item(item):
             latest = _get_latest_item_market_value_rub(db, item.id, user.id)
             if latest is not None:
                 setattr(item, "latest_market_value_rub", latest)
+    # Стоимость приобретения и вложенных — для отображения основной стоимости (ACQUISITION / INVESTED)
+    item_ids = [it.id for it in items]
+    if item_ids:
+        acquisition_rows = (
+            db.query(Transaction.related_item_id, func.coalesce(func.sum(Transaction.amount_rub), 0).label("s"))
+            .filter(
+                Transaction.user_id == user.id,
+                Transaction.related_item_id.in_(item_ids),
+                Transaction.asset_link_type == "ASSET_PURCHASE",
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+            )
+            .group_by(Transaction.related_item_id)
+            .all()
+        )
+        investment_rows = (
+            db.query(Transaction.related_item_id, func.coalesce(func.sum(Transaction.amount_rub), 0).label("s"))
+            .filter(
+                Transaction.user_id == user.id,
+                Transaction.related_item_id.in_(item_ids),
+                Transaction.asset_link_type == "ASSET_INVESTMENT",
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+            )
+            .group_by(Transaction.related_item_id)
+            .all()
+        )
+        acquisition_by_id = {r.related_item_id: int(r.s) for r in acquisition_rows}
+        investment_by_id = {r.related_item_id: int(r.s) for r in investment_rows}
+        for item in items:
+            acq = acquisition_by_id.get(item.id, 0)
+            inv_sum = investment_by_id.get(item.id, 0)
+            setattr(item, "acquisition_rub", acq)
+            setattr(item, "invested_rub", acq + inv_sum)
     for item in items:
         _apply_item_photo_url(item)
     return items
@@ -886,11 +921,37 @@ def get_item(
         price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
         value = _compute_market_value_rub(item, price, db)
         if value is not None:
-            item.current_value_rub = value
+            setattr(item, "latest_market_value_rub", value)
     elif getattr(item, "primary_value_kind", None) == "MARKET":
         latest = _get_latest_item_market_value_rub(db, item.id, user.id)
         if latest is not None:
             setattr(item, "latest_market_value_rub", latest)
+    acq = (
+        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type == "ASSET_PURCHASE",
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    inv_sum = (
+        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type == "ASSET_INVESTMENT",
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    setattr(item, "acquisition_rub", int(acq))
+    setattr(item, "invested_rub", int(acq) + int(inv_sum))
     _apply_item_photo_url(item)
     return item
 
@@ -1073,6 +1134,8 @@ def create_item(
         else payload.initial_value_rub > 0
     )
     opening_price_cents = payload.opening_price_cents if is_moex else None
+    # У рыночных (MOEX) активов нет начальной балансовой стоимости — учитывается только рыночная
+    initial_value_rub_for_item = 0 if is_moex else payload.initial_value_rub
     opening_amount_rub = payload.initial_value_rub
     if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
@@ -1127,7 +1190,7 @@ def create_item(
         )
 
     min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
-    if payload.initial_value_rub < min_balance:
+    if initial_value_rub_for_item < min_balance:
         detail = "Initial balance must be non-negative."
         if min_balance < 0:
             detail = "Initial balance cannot be below credit limit."
@@ -1136,14 +1199,14 @@ def create_item(
     # Для элементов, созданных в день начала учета, current_value_rub должен быть равен initial_value_rub,
     # так как транзакции открытия не создаются (create_opening_transactions возвращается раньше).
     # Для элементов, созданных после дня начала учета, current_value_rub устанавливается в 0,
-    # и транзакция открытия обновит его.
+    # и транзакция открытия обновит его. У MOEX всегда 0 до подстановки рыночной стоимости.
     will_create_opening_tx = (
         history_status == "NEW"
         and has_opening_value
         and payload.open_date > accounting_start_date
     )
     initial_current_value_rub = (
-        0 if will_create_opening_tx else payload.initial_value_rub
+        0 if (will_create_opening_tx or is_moex) else initial_value_rub_for_item
     )
 
     synonyms_list = getattr(payload, "synonyms", None) or []
@@ -1179,7 +1242,7 @@ def create_item(
         else position_lots,
         lot_size=lot_size,
         face_value_cents=face_value_cents,
-        initial_value_rub=payload.initial_value_rub,
+        initial_value_rub=initial_value_rub_for_item,
         current_value_rub=initial_current_value_rub,
         start_date=accounting_start_date,
         history_status=history_status,
@@ -1206,8 +1269,7 @@ def create_item(
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
         )
-        if is_moex and opening_quantity_lots is not None:
-            item.position_lots = (item.position_lots or 0) + opening_quantity_lots
+        # position_lots уже обновляется в create_opening_transactions через _apply_position_delta
 
     if commission_requested and commission_enabled and commission_payment_item:
         instrument_label = item.instrument_id or item.name
@@ -1223,11 +1285,12 @@ def create_item(
             instrument_label=instrument_label,
         )
 
+    # Для рыночных активов баланс (current_value_rub) не подставляем — только транзакции
     if is_moex and item.instrument_id:
         price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
         value = _compute_market_value_rub(item, price, db)
         if value is not None:
-            item.current_value_rub = value
+            setattr(item, "latest_market_value_rub", value)
 
     db.commit()
     db.refresh(item)
@@ -1523,7 +1586,7 @@ def update_item(
         item.position_lots = position_lots
     item.lot_size = lot_size
     item.face_value_cents = face_value_cents
-    item.initial_value_rub = payload.initial_value_rub
+    item.initial_value_rub = 0 if is_moex else payload.initial_value_rub
     item.current_value_rub = next_current_value
     item.start_date = accounting_start_date
     item.history_status = new_history_status
@@ -1570,11 +1633,12 @@ def update_item(
             instrument_label=instrument_label,
         )
 
+    # Для рыночных активов баланс не подставляем — только транзакции
     if is_moex and item.instrument_id:
         price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
         value = _compute_market_value_rub(item, price, db)
         if value is not None:
-            item.current_value_rub = value
+            setattr(item, "latest_market_value_rub", value)
 
     db.commit()
     db.refresh(item)

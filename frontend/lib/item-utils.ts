@@ -1,5 +1,17 @@
 import { ItemKind, ItemOut, TransactionOut } from "@/lib/api";
 
+/**
+ * Возвращает основную стоимость актива в копейках (для отображения по primary_value_kind).
+ * Использовать везде: карточки, селекторы, отчёты, дашборд.
+ */
+export function getItemPrimaryValueCents(item: ItemOut): number {
+  const kind = item.primary_value_kind ?? "BALANCE";
+  if (kind === "MARKET" && item.latest_market_value_rub != null) return item.latest_market_value_rub;
+  if (kind === "ACQUISITION" && item.acquisition_rub != null) return item.acquisition_rub;
+  if (kind === "INVESTED" && item.invested_rub != null) return item.invested_rub;
+  return item.current_value_rub;
+}
+
 /** Build full item photo URL with cache-busting so updated images refresh without reload. */
 export function getItemPhotoUrl(
   item: { photo_url: string | null; photo_updated_at?: string | null } | null,

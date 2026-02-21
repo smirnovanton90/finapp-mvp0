@@ -1032,13 +1032,11 @@ export function AddEditItemFormModal({
     }
 
     const cents = amountCentsForSubmit;
-    if (isMoexType && moexInitialValueCents == null) {
-      setFormError("Не удалось рассчитать сумму по текущей цене.");
-      return;
-    }
+    // У рыночных (MOEX) активов нет начальной балансовой стоимости — в payload передаём 0
+    const initialValueRubForPayload = isMoexType ? 0 : cents;
     if (
-      !Number.isFinite(cents) ||
-      (cents < 0 && !(showBankCardFields && cardKind === "CREDIT"))
+      !Number.isFinite(initialValueRubForPayload) ||
+      (initialValueRubForPayload < 0 && !(showBankCardFields && cardKind === "CREDIT"))
     ) {
       setFormError("Сумма должна быть числом (например 1234,56)");
       return;
@@ -1047,7 +1045,7 @@ export function AddEditItemFormModal({
       showBankCardFields &&
       cardKind === "CREDIT" &&
       creditLimitCents !== null &&
-      cents < -creditLimitCents
+      initialValueRubForPayload < -creditLimitCents
     ) {
       setFormError("Сумма не может быть ниже кредитного лимита.");
       return;
@@ -1191,7 +1189,7 @@ export function AddEditItemFormModal({
         counterparty_id: showCounterpartyField ? counterpartyId : null,
         open_date: openDate,
         opening_counterparty_item_id: openingCounterpartyValue,
-        initial_value_rub: cents,
+        initial_value_rub: initialValueRubForPayload,
         primary_value_kind: primaryValueKind,
       };
       if (synonymsList.length > 0) payload.synonyms = synonymsList;

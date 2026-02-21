@@ -418,8 +418,12 @@ class ItemOut(BaseModel):
     photo_url: str | None = None
     photo_updated_at: datetime | None = None
     primary_value_kind: PrimaryValueKind | None = None
-    """Последняя рыночная стоимость (копейки), для primary_value_kind=MARKET не-MOEX. Заполняется в list/get."""
+    """Последняя рыночная стоимость (копейки), для primary_value_kind=MARKET. Заполняется в list/get."""
     latest_market_value_rub: int | None = None
+    """Стоимость приобретения (копейки), из транзакций ASSET_PURCHASE. Заполняется в list/get."""
+    acquisition_rub: int | None = None
+    """Стоимость вложенных средств (копейки), acquisition + ASSET_INVESTMENT. Заполняется в list/get."""
+    invested_rub: int | None = None
 
     @field_validator("synonyms", mode="before")
     @classmethod

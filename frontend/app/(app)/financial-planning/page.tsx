@@ -112,7 +112,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { PINK_GRADIENT as PINK_GRADIENT_CONST } from "@/lib/gradients";
 import { useOnboarding } from "@/components/onboarding-context";
-import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount } from "@/lib/item-utils";
+import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts, getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 
@@ -453,9 +453,9 @@ export default function FinancialPlanningPage() {
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
-        if (linked) return linked.current_value_rub;
+        if (linked) return getItemPrimaryValueCents(linked);
       }
-      return item.current_value_rub;
+      return getItemPrimaryValueCents(item);
     },
     [itemsById]
   );

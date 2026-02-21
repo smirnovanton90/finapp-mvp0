@@ -16,6 +16,7 @@ import { ItemKind, ItemOut, CounterpartyOut } from "@/lib/api";
 import { AssetItemIcon } from "@/components/asset-item-icon";
 import {
   formatAmount,
+  getItemPrimaryValueCents,
   normalizeItemSearch,
   sortItemsByTransactionCount,
 } from "@/lib/item-utils";
@@ -336,9 +337,8 @@ export function ItemSelector({
                     : null;
                 const bankName = getBankName ? getBankName(item.id) : "";
                 const typeLabel = getItemTypeLabel(item);
-                const balance = getItemBalance
-                  ? getItemBalance(item)
-                  : item.current_value_rub;
+                // Основная стоимость: при отсутствии getItemBalance — по primary_value_kind (баланс, рыночная, приобретение, вложенные)
+                const balance = getItemBalance ? getItemBalance(item) : getItemPrimaryValueCents(item);
                 const amount = formatAmount(Math.abs(balance));
                 const itemKind = getItemKind ? getItemKind(item) : item.kind;
                 const signedAmount =

@@ -217,6 +217,7 @@ export function AssetCard({
   const mainImageRef = imageRefs[0];
   const counterpartyLogoRef = imageRefs[1];
   const hasCalledOnReady = React.useRef(false);
+  const menuJustClosedRef = React.useRef(false);
 
   // Вызываем onReady один раз, когда карточка готова
   React.useEffect(() => {
@@ -252,7 +253,10 @@ export function AssetCard({
 
       <div
         className={`pt-[12px] pr-[12px] pb-[12px] pl-[19px] ${onNavigate ? "cursor-pointer" : ""}`}
-        onClick={() => onNavigate?.(item)}
+        onClick={() => {
+          if (menuJustClosedRef.current) return;
+          onNavigate?.(item);
+        }}
         role={onNavigate ? "button" : undefined}
       >
         {/* Header: иконка + основная информация + кнопка меню */}
@@ -352,7 +356,16 @@ export function AssetCard({
           {/* Кнопка меню — отдельный блок после картинки и информации (скрыта для Взаиморасчётов) */}
           {item.type_code !== "counterparty_settlements" && (
           <div className="shrink-0">
-            <DropdownMenu>
+            <DropdownMenu
+              onOpenChange={(open) => {
+                if (!open) {
+                  menuJustClosedRef.current = true;
+                  setTimeout(() => {
+                    menuJustClosedRef.current = false;
+                  }, 150);
+                }
+              }}
+            >
               <DropdownMenuTrigger asChild>
                 <div onClick={(e) => e.stopPropagation()}>
                   <IconButton aria-label="Открыть меню действий">
@@ -360,7 +373,12 @@ export function AssetCard({
                   </IconButton>
                 </div>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuContent
+                align="end"
+                className="w-56"
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
                 {onEdit && !isArchived && !isClosed && (
                   <DropdownMenuItem onClick={() => onEdit(item)}>
                     <Pencil className="mr-2 h-4 w-4" />

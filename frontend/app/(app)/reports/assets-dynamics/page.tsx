@@ -44,6 +44,7 @@ import { Info, MessageSquare } from "lucide-react";
 import {
   buildItemTransactionCounts,
   getEffectiveItemKind,
+  getItemPrimaryValueCents,
   sortItemsByTransactionCount,
 } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
@@ -619,9 +620,9 @@ export default function AssetsDynamicsPage() {
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
-        if (linked) return linked.current_value_rub;
+        if (linked) return getItemPrimaryValueCents(linked);
       }
-      return item.current_value_rub;
+      return getItemPrimaryValueCents(item);
     },
     [itemsById]
   );

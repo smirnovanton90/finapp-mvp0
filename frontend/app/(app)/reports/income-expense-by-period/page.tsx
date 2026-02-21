@@ -66,7 +66,7 @@ import {
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
-import { formatAmount, getEffectiveItemKind } from "@/lib/item-utils";
+import { formatAmount, getEffectiveItemKind, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { buildItemTransactionCounts } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts, getCounterpartyImageUrlCandidates } from "@/lib/counterparty-utils";
@@ -1296,9 +1296,9 @@ export default function IncomeExpenseDynamicsPage() {
     (item: ItemOut) => {
       if (item.type_code === "bank_card" && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
-        if (linked) return linked.current_value_rub;
+        if (linked) return getItemPrimaryValueCents(linked);
       }
-      return item.current_value_rub;
+      return getItemPrimaryValueCents(item);
     },
     [itemsById]
   );

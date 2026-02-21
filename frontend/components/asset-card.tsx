@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { CSSProperties } from "react";
-import { MoreVertical, Pencil, Trash2, Archive } from "lucide-react";
+import { MoreVertical, Pencil, Trash2, Archive, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -99,6 +99,8 @@ interface AssetCardProps {
   onDelete?: (item: ItemOut) => void;
   onArchive?: (item: ItemOut) => void;
   onClose?: (item: ItemOut) => void;
+  /** Для рыночных активов (instrument_id): открыть модалку «Купить/продать актив» */
+  onBuySell?: (item: ItemOut) => void;
   getItemDisplayBalanceCents: (item: ItemOut) => number;
   onReady?: () => void;
   /** При клике по карточке (не по меню) — переход на детальную страницу */
@@ -147,6 +149,7 @@ export function AssetCard({
   onDelete,
   onArchive,
   onClose,
+  onBuySell,
   getItemDisplayBalanceCents,
   onReady,
   onNavigate,
@@ -383,6 +386,12 @@ export function AssetCard({
                   <DropdownMenuItem onClick={() => onEdit(item)}>
                     <Pencil className="mr-2 h-4 w-4" />
                     Редактировать
+                  </DropdownMenuItem>
+                )}
+                {onBuySell && item.instrument_id && !isArchived && !isClosed && (
+                  <DropdownMenuItem onClick={() => onBuySell(item)}>
+                    <TrendingUp className="mr-2 h-4 w-4" />
+                    Купить/продать актив
                   </DropdownMenuItem>
                 )}
                 {onClose && !isArchived && !isClosed && (

@@ -47,6 +47,7 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterSection } from "@/components/filter-panel";
 import { AssetCard } from "@/components/asset-card";
+import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
@@ -649,6 +650,7 @@ export default function Page() {
   const [closeItemDialogOpen, setCloseItemDialogOpen] = useState(false);
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
   const [closingItem, setClosingItem] = useState<ItemOut | null>(null);
+  const [buySellAsset, setBuySellAsset] = useState<ItemOut | null>(null);
   const [closingDate, setClosingDate] = useState(() => getTodayDateKey());
   const [closeTransferItemId, setCloseTransferItemId] = useState<string>("");
   const [closeWriteOff, setCloseWriteOff] = useState(false);
@@ -3870,6 +3872,14 @@ export default function Page() {
                               <Pencil className="h-4 w-4" />
                               Редактировать
                             </DropdownMenuItem>
+                            {it.instrument_id && canEdit && (
+                              <DropdownMenuItem
+                                onSelect={() => setBuySellAsset(it)}
+                              >
+                                <TrendingUp className="h-4 w-4" />
+                                Купить/продать актив
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               onSelect={() => onClose(it)}
                               disabled={!canClose}
@@ -5493,6 +5503,7 @@ export default function Page() {
                                 onDelete={(item) => onArchive(item)}
                                 onArchive={(item) => onArchive(item)}
                                 onClose={(item) => onClose(item)}
+                                onBuySell={(item) => setBuySellAsset(item)}
                                 getItemDisplayBalanceCents={getItemDisplayBalanceCents}
                                 onNavigate={(it) => router.push(`/assets/${it.id}`)}
                               />
@@ -5527,6 +5538,26 @@ export default function Page() {
           }
         }}
       />
+
+      {buySellAsset && (
+        <BuySellAssetModal
+          open={buySellAsset !== null}
+          onOpenChange={(open) => {
+            if (!open) setBuySellAsset(null);
+          }}
+          asset={buySellAsset}
+          items={activeItems}
+          getCounterpartyForItemId={getCounterpartyForItemId}
+          getBankLogoUrl={itemCounterpartyLogoUrl}
+          getBankName={itemCounterpartyName}
+          getItemBalance={getItemDisplayBalanceCents}
+          itemCounts={itemTxCounts}
+          onSuccess={async () => {
+            await loadItems();
+            await loadTransactions();
+          }}
+        />
+      )}
     </main>
   );
 }

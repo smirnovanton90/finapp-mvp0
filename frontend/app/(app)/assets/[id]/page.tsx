@@ -1,28 +1,32 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/form-field";
 import {
   fetchItem,
+  fetchItems,
   fetchItemCosts,
   fetchItemMarketValues,
+  fetchCounterparties,
   updateItem,
   API_BASE,
   ItemOut,
   ItemCostsOut,
   ItemMarketValueOut,
+  CounterpartyOut,
   PrimaryValueKind,
 } from "@/lib/api";
 import { getItemTypeLabel } from "@/lib/item-types";
-import { formatAmount, getItemPhotoUrl } from "@/lib/item-utils";
+import { formatAmount, getItemPhotoUrl, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { PRIMARY_VALUE_KIND_OPTIONS, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
 import { ACCENT, ACTIVE_TEXT_DARK } from "@/lib/colors";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
+import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 
 function formatRub(cents: number) {
   return new Intl.NumberFormat("ru-RU", {
@@ -44,6 +48,9 @@ export default function AssetDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingPrimary, setSavingPrimary] = useState(false);
   const [costHistoryOpen, setCostHistoryOpen] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
+  const [buySellModalOpen, setBuySellModalOpen] = useState(false);
+  const [allItems, setAllItems] = useState<ItemOut[]>([]);
+  const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(id)) return;
@@ -68,6 +75,68 @@ export default function AssetDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadItemsAndCounterparties = useCallback(async () => {
+    try {
+      const [itemsRes, cpRes] = await Promise.all([
+        fetchItems(),
+        fetchCounterparties(),
+      ]);
+      setAllItems(itemsRes);
+      setCounterparties(cpRes);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (buySellModalOpen && item?.instrument_id) {
+      loadItemsAndCounterparties();
+    }
+  }, [buySellModalOpen, item?.instrument_id, loadItemsAndCounterparties]);
+
+  const counterpartiesById = useMemo(() => {
+    const map = new Map<number, CounterpartyOut>();
+    counterparties.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [counterparties]);
+
+  const getCounterpartyForItemId = useCallback(
+    (itemId: number) => {
+      const it = allItems.find((i) => i.id === itemId);
+      if (!it?.counterparty_id) return null;
+      return counterpartiesById.get(it.counterparty_id) ?? null;
+    },
+    [allItems, counterpartiesById]
+  );
+
+  const itemCounterpartyLogoUrl = useCallback(
+    (id: number | null | undefined) => {
+      if (!id) return null;
+      const it = allItems.find((i) => i.id === id);
+      if (!it?.counterparty_id) return null;
+      const cp = counterpartiesById.get(it.counterparty_id);
+      if (!cp) return null;
+      return cp.entity_type === "PERSON" ? cp.photo_url ?? null : cp.logo_url ?? null;
+    },
+    [allItems, counterpartiesById]
+  );
+
+  const itemCounterpartyName = useCallback(
+    (id: number | null | undefined) => {
+      if (!id) return "";
+      const it = allItems.find((i) => i.id === id);
+      if (!it?.counterparty_id) return "";
+      const cp = counterpartiesById.get(it.counterparty_id);
+      if (!cp) return "";
+      if (cp.entity_type === "PERSON") {
+        const parts = [cp.last_name, cp.first_name, cp.middle_name].filter(Boolean);
+        return parts.join(" ") || "";
+      }
+      return cp.name || cp.full_name || "";
+    },
+    [allItems, counterpartiesById]
+  );
 
   const buildItemCreatePayload = useCallback(
     (overrides: { primary_value_kind?: PrimaryValueKind }) => {
@@ -159,12 +228,25 @@ export default function AssetDetailPage() {
   return (
     <main className="min-h-screen pb-8 px-4">
       <div className="max-w-2xl mx-auto py-6">
-        <Button variant="ghost" size="sm" className="mb-4 -ml-2" asChild>
-          <Link href="/assets" className="flex items-center gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            К активам и обязательствам
-          </Link>
-        </Button>
+        <div className="mb-4 flex flex-wrap items-center gap-2 -ml-2">
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/assets" className="flex items-center gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              К активам и обязательствам
+            </Link>
+          </Button>
+          {item.instrument_id && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBuySellModalOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <TrendingUp className="h-4 w-4" />
+              Купить/продать актив
+            </Button>
+          )}
+        </div>
 
         <Card className="mb-6">
           <CardHeader className="flex flex-row items-start gap-4">
@@ -315,6 +397,20 @@ export default function AssetDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {item.instrument_id && (
+          <BuySellAssetModal
+            open={buySellModalOpen}
+            onOpenChange={setBuySellModalOpen}
+            asset={item}
+            items={allItems}
+            getCounterpartyForItemId={getCounterpartyForItemId}
+            getBankLogoUrl={itemCounterpartyLogoUrl}
+            getBankName={itemCounterpartyName}
+            getItemBalance={getItemPrimaryValueCents}
+            onSuccess={load}
+          />
+        )}
       </div>
     </main>
   );

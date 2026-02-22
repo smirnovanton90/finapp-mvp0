@@ -9,10 +9,7 @@ export type AssetLinkType =
   | "ASSET_INVESTMENT"
   | "ASSET_EXPENSE"
   | "ASSET_SALE"
-  | "ASSET_INCOME"
-  | "ASSET_RELATED_INCOME"
-  | "ASSET_RELATED_EXPENSE"
-  | "ACQUISITION_EXPENSE";
+  | "ASSET_INCOME";
 export type FirstPayoutRule = "OPEN_DATE" | "MONTH_END" | "SHIFT_ONE_MONTH";
 export type RepaymentType = "ANNUITY" | "DIFFERENTIATED";
 export type PaymentAmountKind = "TOTAL" | "PRINCIPAL";
@@ -97,6 +94,24 @@ export type ItemCostsOut = {
   acquisition_rub: number;
   invested_rub: number;
   market_rub: number | null;
+  income_rub: number;
+  expense_rub: number;
+};
+
+export type ItemCostHistoryPoint = {
+  date: string;
+  balance_rub: number;
+  acquisition_rub: number;
+  invested_rub: number;
+  market_rub: number | null;
+  /** Количество единиц на дату (для графика рыночной стоимости, MOEX) */
+  market_quantity_units?: number | null;
+  /** Цена за единицу на дату, копейки (для графика рыночной стоимости, MOEX) */
+  market_price_rub?: number | null;
+};
+
+export type ItemCostHistoryOut = {
+  points: ItemCostHistoryPoint[];
 };
 
 export type ItemCreate = {
@@ -1091,6 +1106,18 @@ export async function closeItem(
 
 export async function fetchItemCosts(itemId: number): Promise<ItemCostsOut> {
   const res = await authFetch(`${API_BASE}/items/${itemId}/costs`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchItemCostHistory(
+  itemId: number,
+  params?: { date_from?: string; date_to?: string }
+): Promise<ItemCostHistoryOut> {
+  const q = new URLSearchParams();
+  if (params?.date_from) q.set("date_from", params.date_from);
+  if (params?.date_to) q.set("date_to", params.date_to);
+  const res = await authFetch(`${API_BASE}/items/${itemId}/cost-history${q.toString() ? `?${q}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }

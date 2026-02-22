@@ -650,7 +650,7 @@ class Transaction(Base):
             name="ck_transactions_source",
         ),
         CheckConstraint(
-            "(asset_link_type is null) or (asset_link_type in ('ASSET_PURCHASE','ASSET_INVESTMENT','ASSET_EXPENSE','ASSET_SALE','ASSET_INCOME','ASSET_RELATED_INCOME','ASSET_RELATED_EXPENSE','ACQUISITION_EXPENSE'))",
+            "(asset_link_type is null) or (asset_link_type in ('ASSET_PURCHASE','ASSET_INVESTMENT','ASSET_EXPENSE','ASSET_SALE','ASSET_INCOME'))",
             name="ck_transactions_asset_link_type",
         ),
     )

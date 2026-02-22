@@ -668,28 +668,26 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
             if primary_is_moex:
                 _apply_position_delta(primary, -(data.primary_quantity_lots or 0), data.transaction_date)
-            else:
-                primary_delta = transfer_delta(primary.kind, True, amt)
-                primary_next = primary.current_value_rub + primary_delta
-                if primary_next < get_min_balance(primary):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=balance_violation_detail(primary, -primary_delta, data.transaction_date),
-                    )
-                primary.current_value_rub = primary_next
+            primary_delta = transfer_delta(primary.kind, True, amt)
+            primary_next = primary.current_value_rub + primary_delta
+            if primary_next < get_min_balance(primary):
+                raise HTTPException(
+                    status_code=400,
+                    detail=balance_violation_detail(primary, -primary_delta, data.transaction_date),
+                )
+            primary.current_value_rub = primary_next
 
             if counter_is_moex:
                 _apply_position_delta(counter, data.counterparty_quantity_lots or 0, data.transaction_date)
-            else:
-                amt_counterparty = amount_counterparty or amt
-                counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
-                counter_next = counter.current_value_rub + counter_delta
-                if counter_next < get_min_balance(counter):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=balance_violation_detail(counter, -counter_delta, data.transaction_date),
-                    )
-                counter.current_value_rub = counter_next
+            amt_counterparty = amount_counterparty or amt
+            counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
+            counter_next = counter.current_value_rub + counter_delta
+            if counter_next < get_min_balance(counter):
+                raise HTTPException(
+                    status_code=400,
+                    detail=balance_violation_detail(counter, -counter_delta, data.transaction_date),
+                )
+            counter.current_value_rub = counter_next
 
         if related_item and related_is_moex and data.primary_quantity_lots is not None:
             if data.direction == "EXPENSE":
@@ -882,14 +880,12 @@ def update_transaction(
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
             if old_primary_is_moex:
                 add_lot_delta(old_primary.id, tx.primary_quantity_lots or 0)
-            else:
-                old_primary_delta = transfer_delta(old_primary.kind, True, old_amt)
-                add_delta(old_primary.id, -old_primary_delta)
+            old_primary_delta = transfer_delta(old_primary.kind, True, old_amt)
+            add_delta(old_primary.id, -old_primary_delta)
             if old_counter_is_moex:
                 add_lot_delta(old_counter.id, -(tx.counterparty_quantity_lots or 0))
-            else:
-                old_counter_delta = transfer_delta(old_counter.kind, False, old_counter_amt)
-                add_delta(old_counter.id, -old_counter_delta)
+            old_counter_delta = transfer_delta(old_counter.kind, False, old_counter_amt)
+            add_delta(old_counter.id, -old_counter_delta)
 
     if data.transaction_type == "ACTUAL":
         new_amt = data.amount_rub
@@ -912,14 +908,12 @@ def update_transaction(
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
             if new_primary_is_moex:
                 add_lot_delta(new_primary.id, -(data.primary_quantity_lots or 0))
-            else:
-                new_primary_delta = transfer_delta(new_primary.kind, True, new_amt)
-                add_delta(new_primary.id, new_primary_delta)
+            new_primary_delta = transfer_delta(new_primary.kind, True, new_amt)
+            add_delta(new_primary.id, new_primary_delta)
             if new_counter_is_moex:
                 add_lot_delta(new_counter.id, data.counterparty_quantity_lots or 0)
-            else:
-                new_counter_delta = transfer_delta(new_counter.kind, False, new_counter_amt)
-                add_delta(new_counter.id, new_counter_delta)
+            new_counter_delta = transfer_delta(new_counter.kind, False, new_counter_amt)
+            add_delta(new_counter.id, new_counter_delta)
 
     items_by_id = {
         item.id: item
@@ -1046,25 +1040,23 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
         elif tx.direction == "TRANSFER":
             if primary_is_moex:
                 _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
-            else:
-                primary_delta = -transfer_delta(primary.kind, True, amt)
-                if primary.current_value_rub + primary_delta < get_min_balance(primary):
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Cannot delete: would make balance negative. Delete later transactions first.",
-                    )
-                primary.current_value_rub += primary_delta
+            primary_delta = -transfer_delta(primary.kind, True, amt)
+            if primary.current_value_rub + primary_delta < get_min_balance(primary):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete: would make balance negative. Delete later transactions first.",
+                )
+            primary.current_value_rub += primary_delta
 
             if counter_is_moex:
                 _apply_position_delta(counter, -(tx.counterparty_quantity_lots or 0), tx.transaction_date)
-            else:
-                counter_delta = -transfer_delta(counter.kind, False, amt_counterparty)
-                if counter.current_value_rub + counter_delta < get_min_balance(counter):
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Cannot delete: would make counterparty balance negative. Delete later transactions first.",
-                    )
-                counter.current_value_rub += counter_delta
+            counter_delta = -transfer_delta(counter.kind, False, amt_counterparty)
+            if counter.current_value_rub + counter_delta < get_min_balance(counter):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete: would make counterparty balance negative. Delete later transactions first.",
+                )
+            counter.current_value_rub += counter_delta
 
     tx.deleted_at = datetime.now(timezone.utc)
 

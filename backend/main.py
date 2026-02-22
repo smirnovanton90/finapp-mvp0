@@ -46,12 +46,15 @@ from schemas import (
     ItemMarketValueCreate,
     ItemMarketValueOut,
     ItemCostsOut,
+    ItemCostHistoryPoint,
+    ItemCostHistoryOut,
 )
 from auth import get_current_user, create_access_token, hash_password, verify_password
 
 from transactions import (
     router as transactions_router,
     purge_card_transactions as purge_card_transactions_fn,
+    transfer_delta,
 )
 from transaction_chains import router as transaction_chains_router
 from categories import router as categories_router
@@ -371,6 +374,30 @@ def _get_latest_market_price(
             .where(
                 MarketPrice.instrument_id == instrument_id,
                 MarketPrice.board_id == board_id,
+            )
+            .order_by(MarketPrice.price_date.desc())
+        )
+        .scalars()
+        .first()
+    )
+
+
+def _get_market_price_on_or_before(
+    db: Session,
+    instrument_id: str,
+    board_id: str | None,
+    on_or_before: date_type,
+) -> MarketPrice | None:
+    """Return the latest market price for instrument/board with price_date <= on_or_before."""
+    if not board_id:
+        return None
+    return (
+        db.execute(
+            select(MarketPrice)
+            .where(
+                MarketPrice.instrument_id == instrument_id,
+                MarketPrice.board_id == board_id,
+                MarketPrice.price_date <= on_or_before,
             )
             .order_by(MarketPrice.price_date.desc())
         )
@@ -1940,12 +1967,269 @@ def get_item_costs(
         )
         if latest:
             market_rub = latest.value_rub
+    income_rub = (
+        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type == "ASSET_INCOME",
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    expense_rub = (
+        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type == "ASSET_EXPENSE",
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
     return ItemCostsOut(
         balance_rub=balance_rub,
         acquisition_rub=acquisition_rub,
         invested_rub=invested_rub,
         market_rub=market_rub,
+        income_rub=income_rub,
+        expense_rub=expense_rub,
     )
+
+
+def _build_item_cost_history(
+    db: Session,
+    user_id: int,
+    item: Item,
+    date_from: date_type,
+    date_to: date_type,
+) -> list[ItemCostHistoryPoint]:
+    """Build daily cost history for one item from date_from to date_to (inclusive)."""
+    item_id = item.id
+    open_date = item.open_date
+    if open_date > date_to:
+        return []
+    start = max(date_from, open_date)
+    dates = []
+    current = start
+    while current <= date_to:
+        dates.append(current.isoformat())
+        current += timedelta(days=1)
+
+    # Acquisition: all ASSET_PURCHASE for this item
+    acq_txs = (
+        db.query(Transaction.transaction_date, Transaction.amount_rub)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type == "ASSET_PURCHASE",
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+        .all()
+    )
+    # Investment: all ASSET_INVESTMENT for this item
+    inv_txs = (
+        db.query(Transaction.transaction_date, Transaction.amount_rub)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type == "ASSET_INVESTMENT",
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+        .all()
+    )
+
+    # Balance: replay all transactions where item is primary or counterparty
+    balance_txs = (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+            or_(
+                Transaction.primary_item_id == item_id,
+                Transaction.counterparty_item_id == item_id,
+            ),
+        )
+        .order_by(Transaction.transaction_date.asc())
+        .all()
+    )
+    primary_ids = {t.primary_item_id for t in balance_txs}
+    counter_ids = {t.counterparty_item_id for t in balance_txs if t.counterparty_item_id is not None}
+    all_ids = primary_ids | counter_ids
+    items_by_id = {}
+    if all_ids:
+        item_rows = db.query(Item).filter(Item.id.in_(all_ids)).all()
+        items_by_id = {r.id: r for r in item_rows}
+
+    def balance_delta_for_item(tx: Transaction) -> int:
+        amt = tx.amount_rub or 0
+        amt_counter = tx.amount_counterparty if tx.amount_counterparty is not None else amt
+        if tx.primary_item_id == item_id:
+            if tx.direction == "INCOME":
+                return amt
+            if tx.direction == "EXPENSE":
+                return -amt
+            if tx.direction == "TRANSFER":
+                primary = items_by_id.get(tx.primary_item_id)
+                kind = primary.kind if primary else "ASSET"
+                return transfer_delta(kind, True, amt)
+        if tx.counterparty_item_id == item_id:
+            if tx.direction == "TRANSFER":
+                counter = items_by_id.get(tx.counterparty_item_id)
+                kind = counter.kind if counter else "ASSET"
+                return transfer_delta(kind, False, amt_counter)
+        return 0
+
+    # Market: for non-MOEX use manual ItemMarketValue; for MOEX use lots × price from API
+    market_rows = (
+        db.query(ItemMarketValue.value_date, ItemMarketValue.value_rub)
+        .filter(
+            ItemMarketValue.item_id == item_id,
+            ItemMarketValue.user_id == user_id,
+            ItemMarketValue.value_date <= date_to,
+        )
+        .order_by(ItemMarketValue.value_date.asc())
+        .all()
+    )
+    market_by_date = {}
+    for row in market_rows:
+        market_by_date[row.value_date.isoformat()] = row.value_rub
+    market_sorted_dates = sorted(market_by_date.keys())
+
+    # For MOEX: replay lot deltas to get position_lots per date
+    lot_txs = []
+    lot_initial = 0
+    if is_moex_item(item) and item.instrument_id and item.instrument_board_id:
+        lot_txs = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.related_item_id == item_id,
+                Transaction.asset_link_type.in_(["ASSET_PURCHASE", "ASSET_SALE"]),
+                Transaction.primary_quantity_lots.isnot(None),
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+            )
+            .order_by(Transaction.transaction_date.asc())
+            .all()
+        )
+        current_lots = item.position_lots or 0
+        total_delta = sum(
+            (tx.primary_quantity_lots or 0) if tx.asset_link_type == "ASSET_PURCHASE" else -(tx.primary_quantity_lots or 0)
+            for tx in lot_txs
+        )
+        lot_initial = current_lots - total_delta
+
+    result = []
+    # Если есть транзакция открытия, начальный баланс уже учтён в ней — не дублируем initial_value_rub
+    balance_cumul = (
+        0
+        if item.opening_counterparty_item_id is not None
+        else item.initial_value_rub
+    )
+    balance_tx_index = 0
+    lot_balance = lot_initial
+    lot_tx_index = 0
+    for d_str in dates:
+        d = date_type.fromisoformat(d_str)
+        while balance_tx_index < len(balance_txs):
+            tx = balance_txs[balance_tx_index]
+            tx_d = tx.transaction_date.date() if hasattr(tx.transaction_date, "date") else tx.transaction_date
+            if tx_d > d:
+                break
+            balance_cumul += balance_delta_for_item(tx)
+            balance_tx_index += 1
+
+        while lot_tx_index < len(lot_txs):
+            tx = lot_txs[lot_tx_index]
+            tx_d = tx.transaction_date.date() if hasattr(tx.transaction_date, "date") else tx.transaction_date
+            if tx_d > d:
+                break
+            delta = (tx.primary_quantity_lots or 0) if tx.asset_link_type == "ASSET_PURCHASE" else -(tx.primary_quantity_lots or 0)
+            lot_balance += delta
+            lot_tx_index += 1
+
+        acq_rub = sum(amount for (td, amount) in acq_txs if (td.date() if hasattr(td, "date") else td) <= d)
+        inv_extra = sum(amount for (td, amount) in inv_txs if (td.date() if hasattr(td, "date") else td) <= d)
+        invested_rub = acq_rub + inv_extra
+
+        market_rub = None
+        market_quantity_units = None
+        market_price_rub = None
+        if is_moex_item(item) and item.instrument_id and item.instrument_board_id:
+            price = _get_market_price_on_or_before(db, item.instrument_id, item.instrument_board_id, d)
+            if price is not None and lot_balance is not None and lot_balance >= 0:
+                class _ItemLike:
+                    pass
+                item_like = _ItemLike()
+                item_like.position_lots = lot_balance
+                item_like.lot_size = item.lot_size
+                item_like.type_code = item.type_code
+                item_like.face_value_cents = item.face_value_cents
+                item_like.currency_code = item.currency_code or "RUB"
+                market_rub = _compute_market_value_rub(item_like, price, db)
+                lot_size = item.lot_size or 1
+                units = lot_balance * lot_size
+                if units > 0 and market_rub is not None:
+                    market_quantity_units = units
+                    market_price_rub = market_rub // units
+        else:
+            for m_date in reversed(market_sorted_dates):
+                if m_date <= d_str:
+                    market_rub = market_by_date[m_date]
+                    break
+
+        result.append(
+            ItemCostHistoryPoint(
+                date=d_str,
+                balance_rub=balance_cumul,
+                acquisition_rub=acq_rub,
+                invested_rub=invested_rub,
+                market_rub=market_rub,
+                market_quantity_units=market_quantity_units,
+                market_price_rub=market_price_rub,
+            )
+        )
+    return result
+
+
+@app.get("/items/{item_id}/cost-history", response_model=ItemCostHistoryOut)
+def get_item_cost_history(
+    item_id: int,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    open_date = item.open_date
+    today = date_type.today()
+    start = open_date
+    if date_from:
+        try:
+            start = date_type.fromisoformat(date_from)
+        except ValueError:
+            pass
+    start = max(start, open_date)
+    end = today
+    if date_to:
+        try:
+            end = date_type.fromisoformat(date_to)
+        except ValueError:
+            pass
+    if start > end:
+        return ItemCostHistoryOut(points=[])
+    points = _build_item_cost_history(db, user.id, item, start, end)
+    return ItemCostHistoryOut(points=points)
 
 
 @app.get("/items/{item_id}/market-values", response_model=list[ItemMarketValueOut])

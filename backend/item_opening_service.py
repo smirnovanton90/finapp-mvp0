@@ -181,31 +181,27 @@ def _create_transfer(
     primary_is_moex = is_moex_item(primary)
     counter_is_moex = is_moex_item(counter)
     if transaction_type == "ACTUAL":
-        if primary_is_moex:
-            if primary_quantity_lots:
-                _apply_position_delta(primary, -(primary_quantity_lots or 0), tx_date)
-        else:
-            primary_delta = transfer_delta(primary.kind, True, amount)
-            primary_next = primary.current_value_rub + primary_delta
-            if primary_next < get_min_balance(primary):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Opening transfer would make balance negative.",
-                )
-            primary.current_value_rub = primary_next
+        if primary_is_moex and primary_quantity_lots:
+            _apply_position_delta(primary, -(primary_quantity_lots or 0), tx_date)
+        primary_delta = transfer_delta(primary.kind, True, amount)
+        primary_next = primary.current_value_rub + primary_delta
+        if primary_next < get_min_balance(primary):
+            raise HTTPException(
+                status_code=400,
+                detail="Opening transfer would make balance negative.",
+            )
+        primary.current_value_rub = primary_next
 
-        if counter_is_moex:
-            if counterparty_quantity_lots:
-                _apply_position_delta(counter, counterparty_quantity_lots or 0, tx_date)
-        else:
-            counter_delta = transfer_delta(counter.kind, False, amount)
-            counter_next = counter.current_value_rub + counter_delta
-            if counter_next < get_min_balance(counter):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Opening transfer would make balance negative.",
-                )
-            counter.current_value_rub = counter_next
+        if counter_is_moex and counterparty_quantity_lots:
+            _apply_position_delta(counter, counterparty_quantity_lots or 0, tx_date)
+        counter_delta = transfer_delta(counter.kind, False, amount)
+        counter_next = counter.current_value_rub + counter_delta
+        if counter_next < get_min_balance(counter):
+            raise HTTPException(
+                status_code=400,
+                detail="Opening transfer would make balance negative.",
+            )
+        counter.current_value_rub = counter_next
 
     tx = Transaction(
         user_id=user.id,

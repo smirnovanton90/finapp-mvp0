@@ -6137,20 +6137,17 @@ function TransactionsView({
                           onValueChange={(v) =>
                             setAssetLinkType(v === "__none" ? null : (v as AssetLinkType))
                           }
-                          options={[
+                            options={[
                             { value: "__none", label: "Не выбрано" },
                             ...(direction === "EXPENSE"
                               ? [
                                   { value: "ASSET_PURCHASE", label: "Приобретение актива" },
                                   { value: "ASSET_INVESTMENT", label: "Вложение в актив" },
                                   { value: "ASSET_EXPENSE", label: "Расход по активу" },
-                                  { value: "ACQUISITION_EXPENSE", label: "Расход на приобретение" },
-                                  { value: "ASSET_RELATED_EXPENSE", label: "Расход, связанный с активом" },
                                 ]
                               : [
                                   { value: "ASSET_SALE", label: "Продажа актива" },
                                   { value: "ASSET_INCOME", label: "Доход от актива" },
-                                  { value: "ASSET_RELATED_INCOME", label: "Доход, связанный с активом" },
                                 ]),
                           ]}
                           placeholder="Выберите тип"

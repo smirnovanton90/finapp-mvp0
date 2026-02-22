@@ -24,10 +24,6 @@ AssetLinkType = Literal[
     "ASSET_EXPENSE",
     "ASSET_SALE",
     "ASSET_INCOME",
-    # Legacy values (kept for existing DB rows)
-    "ASSET_RELATED_INCOME",
-    "ASSET_RELATED_EXPENSE",
-    "ACQUISITION_EXPENSE",
 ]
 CategoryScope = Literal["INCOME", "EXPENSE", "BOTH"]
 LimitPeriod = Literal["MONTHLY", "WEEKLY", "YEARLY", "CUSTOM"]
@@ -484,6 +480,28 @@ class ItemCostsOut(BaseModel):
     acquisition_rub: int
     invested_rub: int
     market_rub: int | None
+    # Суммы фактических транзакций по типу связи с активом (копейки)
+    income_rub: int = 0   # ASSET_INCOME
+    expense_rub: int = 0  # ASSET_EXPENSE
+
+
+class ItemCostHistoryPoint(BaseModel):
+    """One day in cost history (all in kopecks)."""
+
+    date: str  # YYYY-MM-DD
+    balance_rub: int
+    acquisition_rub: int
+    invested_rub: int
+    market_rub: int | None
+    # Для графика рыночной стоимости: количество единиц и цена за единицу на эту дату (MOEX)
+    market_quantity_units: int | None = None
+    market_price_rub: int | None = None  # копейки за одну единицу
+
+
+class ItemCostHistoryOut(BaseModel):
+    """Time series of cost types for charting."""
+
+    points: list[ItemCostHistoryPoint]
 
 
 class TransactionBase(BaseModel):
@@ -524,19 +542,16 @@ class TransactionCreate(TransactionBase):
                 "ASSET_PURCHASE",
                 "ASSET_INVESTMENT",
                 "ASSET_EXPENSE",
-                "ASSET_RELATED_EXPENSE",
-                "ACQUISITION_EXPENSE",
             ):
                 raise ValueError(
-                    "asset_link_type for EXPENSE must be ASSET_PURCHASE, ASSET_INVESTMENT, ASSET_EXPENSE, ASSET_RELATED_EXPENSE or ACQUISITION_EXPENSE"
+                    "asset_link_type for EXPENSE must be ASSET_PURCHASE, ASSET_INVESTMENT or ASSET_EXPENSE"
                 )
             if self.direction == "INCOME" and self.asset_link_type not in (
                 "ASSET_SALE",
                 "ASSET_INCOME",
-                "ASSET_RELATED_INCOME",
             ):
                 raise ValueError(
-                    "asset_link_type for INCOME must be ASSET_SALE, ASSET_INCOME or ASSET_RELATED_INCOME"
+                    "asset_link_type for INCOME must be ASSET_SALE or ASSET_INCOME"
                 )
             if self.direction == "TRANSFER":
                 raise ValueError("asset_link_type is not allowed for TRANSFER")

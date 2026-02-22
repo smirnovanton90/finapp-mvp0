@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, TrendingUp } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/form-field";
 import {
@@ -14,17 +13,19 @@ import {
   fetchItemMarketValues,
   fetchCounterparties,
   updateItem,
+  fetchTransactionsPage,
   API_BASE,
   ItemOut,
   ItemCostsOut,
   ItemMarketValueOut,
   CounterpartyOut,
   PrimaryValueKind,
+  TransactionOut,
 } from "@/lib/api";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { formatAmount, getItemPhotoUrl, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { PRIMARY_VALUE_KIND_OPTIONS, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
-import { ACCENT, ACTIVE_TEXT_DARK } from "@/lib/colors";
+import { ACCENT, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 
@@ -51,6 +52,8 @@ export default function AssetDetailPage() {
   const [buySellModalOpen, setBuySellModalOpen] = useState(false);
   const [allItems, setAllItems] = useState<ItemOut[]>([]);
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
+  const [quantityHistoryTx, setQuantityHistoryTx] = useState<TransactionOut[]>([]);
+  const [loadingQuantityHistory, setLoadingQuantityHistory] = useState(false);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(id)) return;
@@ -65,6 +68,22 @@ export default function AssetDetailPage() {
       setItem(itemRes);
       setCosts(costsRes);
       setMarketValues(marketRes);
+      if (itemRes.instrument_id) {
+        setLoadingQuantityHistory(true);
+        fetchTransactionsPage({ related_item_ids: [itemRes.id], limit: 200 })
+          .then((page) => {
+            const list = page.items.filter(
+              (tx) =>
+                tx.primary_quantity_lots != null &&
+                (tx.asset_link_type === "ASSET_PURCHASE" || tx.asset_link_type === "ASSET_SALE")
+            );
+            setQuantityHistoryTx(list);
+          })
+          .catch(() => setQuantityHistoryTx([]))
+          .finally(() => setLoadingQuantityHistory(false));
+      } else {
+        setQuantityHistoryTx([]);
+      }
     } catch (e: any) {
       setError(e?.message ?? "Ошибка загрузки");
     } finally {
@@ -138,6 +157,55 @@ export default function AssetDetailPage() {
     [allItems, counterpartiesById]
   );
 
+  const quantityHistoryRows = useMemo(() => {
+    const openDate = item?.open_date ?? "";
+    const fromOpen = openDate
+      ? quantityHistoryTx.filter((tx) => (tx.transaction_date || "").slice(0, 10) >= openDate)
+      : quantityHistoryTx;
+    // Одна строка на каждую операцию (не объединяем по дате): сортировка по дате/времени, затем по id
+    const sorted = [...fromOpen].sort((a, b) => {
+      const dateA = a.transaction_date || "";
+      const dateB = b.transaction_date || "";
+      const d = dateA.localeCompare(dateB);
+      if (d !== 0) return d;
+      return (a.id ?? 0) - (b.id ?? 0);
+    });
+    let totalBuy = 0;
+    let totalSell = 0;
+    sorted.forEach((tx) => {
+      const lots = tx.primary_quantity_lots ?? 0;
+      if (tx.asset_link_type === "ASSET_PURCHASE") totalBuy += lots;
+      else if (tx.asset_link_type === "ASSET_SALE") totalSell += lots;
+    });
+    const current = item?.position_lots ?? 0;
+    const startQty = current - totalBuy + totalSell;
+    let balance = startQty;
+    return sorted.map((tx) => {
+      const lots = tx.primary_quantity_lots ?? 0;
+      const isBuy = tx.asset_link_type === "ASSET_PURCHASE";
+      const delta = isBuy ? lots : -lots;
+      balance += delta;
+      return { tx, type: isBuy ? "Покупка" as const : "Продажа" as const, delta, balanceAfter: balance };
+    });
+  }, [quantityHistoryTx, item?.open_date, item?.position_lots]);
+
+  const quantitySummary = useMemo(() => {
+    const openDate = item?.open_date ?? "";
+    const fromOpen = openDate
+      ? quantityHistoryTx.filter((tx) => (tx.transaction_date || "").slice(0, 10) >= openDate)
+      : quantityHistoryTx;
+    let totalBuy = 0;
+    let totalSell = 0;
+    fromOpen.forEach((tx) => {
+      const lots = tx.primary_quantity_lots ?? 0;
+      if (tx.asset_link_type === "ASSET_PURCHASE") totalBuy += lots;
+      else if (tx.asset_link_type === "ASSET_SALE") totalSell += lots;
+    });
+    const current = item?.position_lots ?? 0;
+    const startQty = current - totalBuy + totalSell;
+    return { startQty, totalBuy, totalSell, current };
+  }, [quantityHistoryTx, item?.open_date, item?.position_lots]);
+
   const buildItemCreatePayload = useCallback(
     (overrides: { primary_value_kind?: PrimaryValueKind }) => {
       if (!item) return null;
@@ -190,16 +258,16 @@ export default function AssetDetailPage() {
 
   if (loading && !item) {
     return (
-      <main className="min-h-screen pb-8 px-4">
-        <div className="max-w-2xl mx-auto py-8">Загрузка...</div>
+      <main className="min-h-screen px-8 py-8">
+        <div className="mx-auto w-full max-w-6xl" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</div>
       </main>
     );
   }
 
   if (error && !item) {
     return (
-      <main className="min-h-screen pb-8 px-4">
-        <div className="max-w-2xl mx-auto py-8">
+      <main className="min-h-screen px-8 py-8">
+        <div className="mx-auto w-full max-w-6xl">
           <p className="text-red-600">{error}</p>
           <Button variant="outline" className="mt-4" asChild>
             <Link href="/assets">К активам</Link>
@@ -211,9 +279,9 @@ export default function AssetDetailPage() {
 
   if (!item) {
     return (
-      <main className="min-h-screen pb-8 px-4">
-        <div className="max-w-2xl mx-auto py-8">
-          <p className="text-muted-foreground">Актив не найден.</p>
+      <main className="min-h-screen px-8 py-8">
+        <div className="mx-auto w-full max-w-6xl">
+          <p style={{ color: PLACEHOLDER_COLOR_DARK }}>Актив не найден.</p>
           <Button variant="outline" className="mt-4" asChild>
             <Link href="/assets">К активам</Link>
           </Button>
@@ -226,9 +294,9 @@ export default function AssetDetailPage() {
   const photoUrl = getItemPhotoUrl(item, API_BASE);
 
   return (
-    <main className="min-h-screen pb-8 px-4">
-      <div className="max-w-2xl mx-auto py-6">
-        <div className="mb-4 flex flex-wrap items-center gap-2 -ml-2">
+    <main className="min-h-screen px-8 py-8">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+        <div className="flex flex-wrap items-center gap-2 -ml-2">
           <Button variant="ghost" size="sm" asChild>
             <Link href="/assets" className="flex items-center gap-2">
               <ArrowLeft className="h-4 w-4" />
@@ -248,71 +316,71 @@ export default function AssetDetailPage() {
           )}
         </div>
 
-        <Card className="mb-6">
-          <CardHeader className="flex flex-row items-start gap-4">
-            <div className="w-16 h-16 rounded-lg overflow-hidden bg-muted flex-shrink-0">
-              {photoUrl ? (
-                <img src={photoUrl} alt="" className="w-full h-full object-cover" />
-              ) : TypeIcon ? (
-                <div className="w-full h-full flex items-center justify-center" style={{ color: ACCENT }}>
-                  <TypeIcon className="w-8 h-8" strokeWidth={1.5} />
-                </div>
-              ) : null}
+        <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
+          <div className="p-6">
+            <div className="flex flex-row items-start gap-4">
+              <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0" style={{ backgroundColor: BACKGROUND_DT }}>
+                {photoUrl ? (
+                  <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+                ) : TypeIcon ? (
+                  <div className="w-full h-full flex items-center justify-center" style={{ color: ACCENT }}>
+                    <TypeIcon className="w-8 h-8" strokeWidth={1.5} />
+                  </div>
+                ) : null}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-xl font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>{item.name}</h2>
+                <p className="text-sm mt-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{getItemTypeLabel(item)}</p>
+                {item.currency_code && (
+                  <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>{item.currency_code}</p>
+                )}
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <CardTitle className="text-xl">{item.name}</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">{getItemTypeLabel(item)}</p>
-              {item.currency_code && (
-                <p className="text-sm text-muted-foreground">{item.currency_code}</p>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mt-4">
               {item.open_date && (
                 <>
-                  <dt className="text-muted-foreground">Дата появления</dt>
-                  <dd>{item.open_date}</dd>
+                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Дата появления</dt>
+                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.open_date}</dd>
                 </>
               )}
               {item.contract_number && (
                 <>
-                  <dt className="text-muted-foreground">Номер договора</dt>
-                  <dd>{item.contract_number}</dd>
+                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Номер договора</dt>
+                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.contract_number}</dd>
                 </>
               )}
               {item.account_last7 && (
                 <>
-                  <dt className="text-muted-foreground">Последние 4 цифры счёта</dt>
-                  <dd>****{item.account_last7}</dd>
+                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Последние 4 цифры счёта</dt>
+                  <dd style={{ color: ACTIVE_TEXT_DARK }}>****{item.account_last7}</dd>
                 </>
               )}
               {item.deposit_term_days != null && (
                 <>
-                  <dt className="text-muted-foreground">Срок вклада, дней</dt>
-                  <dd>{item.deposit_term_days}</dd>
+                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Срок вклада, дней</dt>
+                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.deposit_term_days}</dd>
                 </>
               )}
               {item.interest_rate != null && (
                 <>
-                  <dt className="text-muted-foreground">Процентная ставка</dt>
-                  <dd>{item.interest_rate}%</dd>
+                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Процентная ставка</dt>
+                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.interest_rate}%</dd>
                 </>
               )}
               {item.position_lots != null && (
                 <>
-                  <dt className="text-muted-foreground">Количество лотов</dt>
-                  <dd>{new Intl.NumberFormat("ru-RU").format(item.position_lots)}</dd>
+                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество лотов</dt>
+                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(item.position_lots)}</dd>
                 </>
               )}
             </dl>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Стоимости</CardTitle>
-            <div className="mt-2">
+        <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
+          <div className="p-6">
+            <h3 className="text-base font-semibold mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Стоимости</h3>
+            <div className="mt-2 mb-4">
               <SelectField
                 label="Основная стоимость"
                 value={item.primary_value_kind ?? "BALANCE"}
@@ -322,42 +390,44 @@ export default function AssetDetailPage() {
                 disabled={savingPrimary}
               />
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
             {costs && (
               <div className="grid grid-cols-2 gap-4">
                 <div
-                  className="rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="rounded-lg p-4 cursor-pointer transition-colors hover:opacity-90"
+                  style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
                   onClick={() => setCostHistoryOpen((v) => (v === "balance" ? null : "balance"))}
                 >
-                  <div className="text-xs text-muted-foreground mb-1">Балансовая стоимость</div>
+                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Балансовая стоимость</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
                     {formatRub(costs.balance_rub)}
                   </div>
                 </div>
                 <div
-                  className="rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="rounded-lg p-4 cursor-pointer transition-colors hover:opacity-90"
+                  style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
                   onClick={() => setCostHistoryOpen((v) => (v === "acquisition" ? null : "acquisition"))}
                 >
-                  <div className="text-xs text-muted-foreground mb-1">Стоимость приобретения</div>
+                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость приобретения</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
                     {formatRub(costs.acquisition_rub)}
                   </div>
                 </div>
                 <div
-                  className="rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="rounded-lg p-4 cursor-pointer transition-colors hover:opacity-90"
+                  style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
                   onClick={() => setCostHistoryOpen((v) => (v === "invested" ? null : "invested"))}
                 >
-                  <div className="text-xs text-muted-foreground mb-1">Стоимость вложенных средств</div>
+                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость вложенных средств</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
                     {formatRub(costs.invested_rub)}
                   </div>
                 </div>
                 <div
-                  className="rounded-lg border p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="rounded-lg p-4 cursor-pointer transition-colors hover:opacity-90"
+                  style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
                   onClick={() => setCostHistoryOpen((v) => (v === "market" ? null : "market"))}
                 >
-                  <div className="text-xs text-muted-foreground mb-1">Рыночная стоимость</div>
+                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Рыночная стоимость</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
                     {costs.market_rub != null ? formatRub(costs.market_rub) : "—"}
                   </div>
@@ -366,14 +436,14 @@ export default function AssetDetailPage() {
             )}
 
             {costHistoryOpen === "market" && (
-              <div className="mt-4 rounded-lg border p-4 bg-muted/30">
-                <div className="text-sm font-medium mb-2">История ручной рыночной стоимости</div>
+              <div className="mt-4 rounded-lg p-4" style={{ backgroundColor: BACKGROUND_DT }}>
+                <div className="text-sm font-medium mb-2" style={{ color: ACTIVE_TEXT_DARK }}>История ручной рыночной стоимости</div>
                 {marketValues.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Нет записей.</p>
+                  <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет записей.</p>
                 ) : (
                   <ul className="space-y-2 text-sm">
                     {[...marketValues].sort((a, b) => b.value_date.localeCompare(a.value_date)).map((mv) => (
-                      <li key={mv.id} className="flex justify-between">
+                      <li key={mv.id} className="flex justify-between" style={{ color: ACTIVE_TEXT_DARK }}>
                         <span>{mv.value_date}</span>
                         <span>{formatRub(mv.value_rub)}</span>
                       </li>
@@ -384,19 +454,85 @@ export default function AssetDetailPage() {
             )}
 
             {(costHistoryOpen === "balance" || costHistoryOpen === "acquisition" || costHistoryOpen === "invested") && (
-              <div className="mt-4 rounded-lg border p-4 bg-muted/30">
-                <div className="text-sm font-medium mb-2">
+              <div className="mt-4 rounded-lg p-4" style={{ backgroundColor: BACKGROUND_DT }}>
+                <div className="text-sm font-medium mb-2" style={{ color: ACTIVE_TEXT_DARK }}>
                   {costHistoryOpen === "balance" && "История балансовой стоимости"}
                   {costHistoryOpen === "acquisition" && "История стоимости приобретения"}
                   {costHistoryOpen === "invested" && "История стоимости вложенных средств"}
                 </div>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                   Детализация по транзакциям будет доступна в следующей версии.
                 </p>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+
+        {item.instrument_id && (
+          <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
+            <div className="p-6">
+              <h3 className="text-base font-semibold mb-4" style={{ color: ACTIVE_TEXT_DARK }}>История операций по количеству</h3>
+              {loadingQuantityHistory ? (
+                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+              ) : (
+                <>
+                  <div className="rounded-lg overflow-hidden">
+                    <table className="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
+                          <th className="pl-6 pr-4 py-3 text-sm font-medium">Дата</th>
+                          <th className="px-4 py-3 text-sm font-medium">Тип операции</th>
+                          <th className="px-4 py-3 text-sm font-medium text-right">Куплено / продано</th>
+                          <th className="px-6 py-3 text-sm font-medium text-right">Количество после операции</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {quantityHistoryRows.length === 0 ? (
+                          <tr style={{ backgroundColor: MODAL_BG }}>
+                            <td colSpan={4} className="px-6 py-4 text-center text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи</td>
+                          </tr>
+                        ) : (
+                          quantityHistoryRows.map(({ tx, type, delta, balanceAfter }) => {
+                            const dateStr = tx.transaction_date ? new Date(tx.transaction_date.replace("T", " ")).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                            const amountColor = type === "Покупка" ? GREEN : RED;
+                            return (
+                              <tr key={tx.id} className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
+                                <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{dateStr}</td>
+                                <td className="px-4 py-2 text-sm" style={{ color: amountColor }}>{type}</td>
+                                <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: amountColor }}>{delta > 0 ? `+${delta}` : delta}</td>
+                                <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(balanceAfter)}</td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex flex-wrap gap-4 mt-4">
+                    {(() => {
+                      const SummaryBlock = ({ title, value }: { title: string; value: number }) => (
+                        <div className="flex flex-1 min-w-[120px] flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+                          <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
+                          <div className="rounded-md px-2 py-1 flex justify-center text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}>
+                            {new Intl.NumberFormat("ru-RU").format(value)}
+                          </div>
+                        </div>
+                      );
+                      return (
+                        <>
+                          <SummaryBlock title="Количество на начало" value={quantitySummary.startQty} />
+                          <SummaryBlock title="Всего куплено" value={quantitySummary.totalBuy} />
+                          <SummaryBlock title="Всего продано" value={quantitySummary.totalSell} />
+                          <SummaryBlock title="Количество на текущую дату" value={quantitySummary.current} />
+                        </>
+                      );
+                    })()}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         {item.instrument_id && (
           <BuySellAssetModal

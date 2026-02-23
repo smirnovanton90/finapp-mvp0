@@ -369,16 +369,33 @@ function getRateForDate(
   dateKey: string,
   currencyCode: string,
   latestRatesByCurrency: Map<string, { dateKey: string; rate: number }>,
-  todayKey: string
+  todayKey: string,
+  sortedRateDateKeys: string[]
 ) {
   if (currencyCode === "RUB") return 1;
   if (dateKey > todayKey) {
     return latestRatesByCurrency.get(currencyCode)?.rate ?? null;
   }
+  // Try exact date first
   const rates = ratesByDate[dateKey];
-  if (!rates) return null;
-  const match = rates.find((rate) => rate.char_code === currencyCode);
-  return match?.rate ?? null;
+  if (rates) {
+    const match = rates.find((rate) => rate.char_code === currencyCode && rate.rate > 0);
+    if (match) return match.rate;
+  }
+  // Fallback: binary search for nearest available date strictly BEFORE dateKey
+  let lo = 0, hi = sortedRateDateKeys.length - 1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (sortedRateDateKeys[mid] < dateKey) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  // hi is now the index of the largest key < dateKey; walk backward for a valid rate
+  for (let i = hi; i >= 0; i--) {
+    const fallbackRates = ratesByDate[sortedRateDateKeys[i]];
+    const match = fallbackRates?.find((r) => r.char_code === currencyCode && r.rate > 0);
+    if (match) return match.rate;
+  }
+  return null;
 }
 
 function buildDeltasByDate(
@@ -949,6 +966,11 @@ export default function AssetsDynamicsPage() {
     return latest;
   }, [fxRatesByDate, todayKey]);
 
+  const sortedFxRateDateKeys = useMemo(
+    () => Object.keys(fxRatesByDate).sort(),
+    [fxRatesByDate]
+  );
+
   useEffect(() => {
     if (!needsRates || rateFetchKeys.length === 0) return;
 
@@ -1326,7 +1348,8 @@ export default function AssetsDynamicsPage() {
               dateKey,
               currency,
               latestRatesByCurrency,
-              todayKey
+              todayKey,
+              sortedFxRateDateKeys
             )
           );
         }
@@ -1481,6 +1504,7 @@ export default function AssetsDynamicsPage() {
     transactions,
     allSelectedAreMarketItems,
     costHistoryByItemId,
+    sortedFxRateDateKeys,
   ]);
 
   const chartData = useMemo(() => {
@@ -2529,7 +2553,7 @@ export default function AssetsDynamicsPage() {
                                           <tbody>
                                             {txsInRange.map(({ tx, deltaCents }) => {
                                               const d = toTxDateKey(tx.transaction_date);
-                                              const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey) : null;
+                                              const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
                                               // Для валютных счетов: в "В валюте" — сумма в валюте, в "Руб" — эта сумма × курс
                                               const currencyUnits = currencyCode !== "RUB" ? deltaCents / 100 : null;
                                               const rubCents = currencyCode !== "RUB" && rate != null ? Math.round(deltaCents * rate) : deltaCents;
@@ -2630,7 +2654,7 @@ export default function AssetsDynamicsPage() {
                                           let netFlowRub = 0;
                                           txsInRange.forEach(({ tx, deltaCents }) => {
                                             const d = toTxDateKey(tx.transaction_date);
-                                            const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey) : null;
+                                            const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
                                             const rubCents = currencyCode !== "RUB" && rate != null ? Math.round(deltaCents * rate) : deltaCents;
                                             netFlowRub += rubCents;
                                             if (tx.direction === "TRANSFER") {

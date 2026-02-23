@@ -334,6 +334,20 @@ def _get_fx_rates(date_req: str | None, db: Session) -> list[FxRateOut]:
             return cached[1]
         if stored:
             return stored
+        # Fallback: most recent rates in DB before requested_date
+        if requested_date:
+            try:
+                fallback_date = db.execute(
+                    select(func.max(FxRate.rate_date))
+                    .where(FxRate.rate_date < requested_date)
+                ).scalar()
+                if fallback_date:
+                    fallback_rates = _load_fx_rates(fallback_date, db)
+                    if fallback_rates:
+                        _FX_CACHE[cache_key] = (now, fallback_rates)
+                        return fallback_rates
+            except SQLAlchemyError:
+                pass
         raise
 
     store_date = requested_date or fetched_date
@@ -355,11 +369,25 @@ def _get_fx_rate_for_date(
     if currency_code == "RUB":
         return 1.0
     date_req = rate_date.strftime("%d/%m/%Y")
-    rates = _get_fx_rates(date_req, db)
+    try:
+        rates = _get_fx_rates(date_req, db)
+    except Exception:
+        rates = []
     for rate in rates:
-        if rate.char_code == currency_code:
+        if rate.char_code == currency_code and rate.rate > 0:
             return rate.rate
-    return None
+    # Fallback: most recent valid rate on or before this date
+    row = db.execute(
+        select(FxRate.rate)
+        .where(
+            FxRate.char_code == currency_code,
+            FxRate.rate_date <= rate_date,
+            FxRate.rate > 0,
+        )
+        .order_by(FxRate.rate_date.desc())
+        .limit(1)
+    ).scalar()
+    return row
 
 
 def _get_latest_market_price(

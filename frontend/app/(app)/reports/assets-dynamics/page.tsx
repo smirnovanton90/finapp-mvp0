@@ -2722,7 +2722,8 @@ export default function AssetsDynamicsPage() {
                                             const res = getTxDeltaForItem(tx, item.id, item.kind, item.currency_code);
                                             if (res !== null) return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
                                             if ((isMoexItem(item) || isCryptoItem(item)) && tx.related_item_id === item.id) {
-                                              return { tx, deltaCents: tx.amount_rub ?? 0, inCurrency: false };
+                                              const inCurrency = (item.currency_code ?? "RUB").toUpperCase() !== "RUB";
+                                              return { tx, deltaCents: tx.amount_rub ?? 0, inCurrency };
                                             }
                                             return { tx, deltaCents: 0, inCurrency: false };
                                           })
@@ -2969,35 +2970,61 @@ export default function AssetsDynamicsPage() {
                                           const initialValueCents = row0?.itemValues[item.id] ?? null;
                                           const initialRubCents = row0?.itemRubValues[item.id] ?? null;
                                           const effectiveKind = initialValueCents != null ? resolveItemEffectiveKind(item, initialValueCents) : item.kind;
-                                          const initialDisplayRub = initialRubCents != null && effectiveKind === "LIABILITY" ? Math.abs(initialRubCents) : initialRubCents ?? 0;
-                                          const initialDisplayCur = initialValueCents != null && effectiveKind === "LIABILITY" ? Math.abs(initialValueCents) : initialValueCents ?? 0;
+                                          const initialDisplayRub = initialRubCents != null && effectiveKind === "LIABILITY" ? Math.abs(initialRubCents) : initialRubCents ?? null;
+                                          const initialDisplayCur = initialValueCents != null ? (effectiveKind === "LIABILITY" ? Math.abs(initialValueCents) / 100 : initialValueCents / 100) : null;
                                           const finalValueCents = row1 != null ? (row1.itemValues[item.id] ?? initialValueCents) : initialValueCents;
                                           const finalRubCents = row1 != null ? (row1.itemRubValues[item.id] ?? initialRubCents) : initialRubCents;
-                                          const finalDisplayRub = finalRubCents != null && effectiveKind === "LIABILITY" ? Math.abs(finalRubCents) : finalRubCents ?? 0;
-                                          const finalDisplayCur = finalValueCents != null && effectiveKind === "LIABILITY" ? Math.abs(finalValueCents) : finalValueCents ?? 0;
+                                          const finalDisplayRub = finalRubCents != null && effectiveKind === "LIABILITY" ? Math.abs(finalRubCents) : finalRubCents ?? null;
+                                          const finalDisplayCur = finalValueCents != null ? (effectiveKind === "LIABILITY" ? Math.abs(finalValueCents) / 100 : finalValueCents / 100) : null;
+                                          const getRate = (dateKey: string) =>
+                                            currencyCode !== "RUB"
+                                              ? getRateForDate(fxRatesByDate, dateKey, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
+                                              : null;
                                           let totalIncomeRub = 0;
                                           let totalExpenseRub = 0;
                                           let totalIncomeCur = 0;
                                           let totalExpenseCur = 0;
                                           let totalTransferRub = 0;
                                           let totalTransferCur = 0;
-                                          let netFlowRub = 0;
-                                          txsInRange.forEach(({ tx, deltaCents }) => {
+                                          txsInRange.forEach(({ tx, deltaCents, inCurrency }) => {
                                             const d = toTxDateKey(tx.transaction_date);
-                                            const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
-                                            const rubCents = currencyCode !== "RUB" && rate != null ? Math.round(deltaCents * rate) : deltaCents;
-                                            netFlowRub += rubCents;
-                                            if (tx.direction === "TRANSFER") {
-                                              totalTransferRub += rubCents;
-                                              if (currencyCode !== "RUB") totalTransferCur += deltaCents / 100;
+                                            const rate = getRate(d);
+                                            let curUnits: number | null = null;
+                                            let rubCents: number;
+                                            if (currencyCode === "RUB") {
+                                              rubCents = deltaCents;
                                             } else {
-                                              if (rubCents > 0) totalIncomeRub += rubCents; else totalExpenseRub += Math.abs(rubCents);
-                                              if (currencyCode !== "RUB") {
-                                                const curUnits = deltaCents / 100;
-                                                if (curUnits > 0) totalIncomeCur += curUnits; else totalExpenseCur += Math.abs(curUnits);
+                                              if (inCurrency) {
+                                                curUnits = deltaCents / 100;
+                                                rubCents = rate != null ? Math.round(curUnits * rate * 100) : 0;
+                                              } else {
+                                                curUnits = rate != null ? (deltaCents / 100) / rate : null;
+                                                rubCents = curUnits != null && rate != null ? Math.round(curUnits * rate * 100) : 0;
                                               }
                                             }
+                                            if (tx.direction === "TRANSFER") {
+                                              totalTransferRub += rubCents;
+                                              if (curUnits != null) totalTransferCur += curUnits;
+                                              return;
+                                            }
+                                            if (tx.direction === "INCOME") {
+                                              totalIncomeRub += rubCents;
+                                              if (curUnits != null) totalIncomeCur += curUnits;
+                                              return;
+                                            }
+                                            if (tx.direction === "EXPENSE") {
+                                              totalExpenseRub += Math.abs(rubCents);
+                                              if (curUnits != null) totalExpenseCur += Math.abs(curUnits);
+                                            }
                                           });
+                                          const netFlowRub = totalIncomeRub - totalExpenseRub + totalTransferRub;
+                                          const signedInitialRub = initialRubCents != null && effectiveKind === "LIABILITY" ? -initialRubCents : initialRubCents ?? 0;
+                                          const signedFinalRub = finalRubCents != null && effectiveKind === "LIABILITY" ? -finalRubCents : finalRubCents ?? 0;
+                                          const courseDiffRub = currencyCode !== "RUB" ? (signedFinalRub - signedInitialRub) - netFlowRub : 0;
+                                          const profitLossFromPriceRub = signedFinalRub - signedInitialRub - netFlowRub;
+                                          const primaryValueKind = item.primary_value_kind ?? "BALANCE";
+                                          const isBalanceMode = primaryValueKind !== "MARKET";
+                                          const isMarketMode = primaryValueKind === "MARKET";
                                           const isMarketOrCryptoSummary = isMoexItem(item) || isCryptoItem(item);
                                           let totalBuyQty = 0;
                                           let totalSellQty = 0;
@@ -3019,12 +3046,8 @@ export default function AssetsDynamicsPage() {
                                               if (getIsBuy(tx)) totalBuyQty += qty; else totalSellQty += qty;
                                             });
                                           }
-                                          const signedInitialRub = initialRubCents != null && effectiveKind === "LIABILITY" ? -initialRubCents : initialRubCents ?? 0;
-                                          const signedFinalRub = finalRubCents != null && effectiveKind === "LIABILITY" ? -finalRubCents : finalRubCents ?? 0;
-                                          const courseDiffRub = currencyCode !== "RUB" ? (signedFinalRub - signedInitialRub) - netFlowRub : 0;
-                                          const profitLossFromPriceRub = signedFinalRub - signedInitialRub - netFlowRub;
                                           const formatCur = (v: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
-                                          const SummaryBlock = ({ title, qtyVal, curVal, rubVal, amountColor, showCurRow = true, showQtyRow = true, showEmptyQtyRow = false }: { title: string; qtyVal?: number | null; curVal: number | null; rubVal: number; amountColor?: string; showCurRow?: boolean; showQtyRow?: boolean; showEmptyQtyRow?: boolean }) => (
+                                          const SummaryBlock = ({ title, qtyVal, curVal, rubVal, amountColor, showCurRow = true, showQtyRow = true, showEmptyQtyRow = false }: { title: string; qtyVal?: number | null; curVal: number | null; rubVal: number | null; amountColor?: string; showCurRow?: boolean; showQtyRow?: boolean; showEmptyQtyRow?: boolean }) => (
                                             <div className="flex flex-1 min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
                                               <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
                                               <div className="flex flex-col gap-2">
@@ -3052,36 +3075,75 @@ export default function AssetsDynamicsPage() {
                                                 )}
                                                 <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
                                                   <CurrencyChip code="RUB" />
-                                                  <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{formatRub(rubVal)}</span>
+                                                  <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{rubVal != null ? formatRub(rubVal) : "–"}</span>
                                                 </div>
                                               </div>
                                             </div>
                                           );
-                                          const dateStartLabel = dateStart ? formatDateLabel(dateStart) : "";
-                                          const dateEndLabel = dateEnd ? formatDateLabel(dateEnd) : dateStartLabel;
+                                          const dateStartLabel = dateStart ? new Date(dateStart).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+                                          const dateEndLabel = dateEnd ? new Date(dateEnd).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : dateStartLabel;
                                           const qtyStart = dateSnapshotRows[0]?.itemQuantities?.[item.id] ?? null;
                                           const qtyEnd = dateSnapshotRows.length >= 2 ? (dateSnapshotRows[1]?.itemQuantities?.[item.id] ?? null) : null;
-                                          const rateEnd = dateEnd && currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, dateEnd, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
-                                          const profitLossFromPriceCur = currencyCode !== "RUB" && rateEnd != null ? profitLossFromPriceRub / 100 / rateEnd : null;
-                                          const showPriceChangeBlock = currencyCode !== "RUB" || isMarketOrCryptoSummary;
-                                          return (
-                                            <div className="flex w-full gap-4 mt-4 flex-wrap">
-                                              <SummaryBlock title={`На конец ${dateStartLabel}`} qtyVal={isMarketOrCryptoSummary ? qtyStart : undefined} curVal={currencyCode !== "RUB" ? (initialDisplayCur / 100) : null} rubVal={initialDisplayRub} showQtyRow={isMarketOrCryptoSummary} showCurRow={currencyCode !== "RUB"} />
-                                              {showPriceChangeBlock && (
+                                          const showCurRow = currencyCode !== "RUB";
+                                          const netFlowCur = totalIncomeCur - totalExpenseCur + totalTransferCur;
+                                          const profitLossFromPriceCur =
+                                            currencyCode !== "RUB" && initialValueCents != null && finalValueCents != null
+                                              ? (finalValueCents - initialValueCents) / 100 - netFlowCur
+                                              : null;
+                                          if (isBalanceMode) {
+                                            return (
+                                              <div className="flex w-full gap-4 mt-4 flex-wrap">
+                                                <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                                                <SummaryBlock title="Доходы" curVal={showCurRow ? totalIncomeCur : null} rubVal={totalIncomeRub} amountColor={GREEN} showQtyRow={false} showCurRow={showCurRow} />
+                                                <SummaryBlock title="Расходы" curVal={showCurRow ? -totalExpenseCur : null} rubVal={-totalExpenseRub} amountColor={RED} showQtyRow={false} showCurRow={showCurRow} />
+                                                <SummaryBlock title="Переводы" curVal={showCurRow ? totalTransferCur : null} rubVal={totalTransferRub} amountColor={totalTransferRub < 0 ? RED : totalTransferRub > 0 ? GREEN : undefined} showQtyRow={false} showCurRow={showCurRow} />
+                                                {showCurRow && (
+                                                  <SummaryBlock
+                                                    title="Курсовые разницы"
+                                                    curVal={null}
+                                                    rubVal={courseDiffRub}
+                                                    amountColor={courseDiffRub >= 0 ? GREEN : RED}
+                                                    showQtyRow={false}
+                                                    showCurRow={false}
+                                                  />
+                                                )}
+                                                <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                                              </div>
+                                            );
+                                          }
+                                          if (isMarketMode && isMarketOrCryptoSummary) {
+                                            return (
+                                              <div className="flex w-full gap-4 mt-4 flex-wrap">
+                                                <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={qtyStart} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
+                                                <SummaryBlock title="Куплено" qtyVal={totalBuyQty} curVal={showCurRow ? totalIncomeCur : null} rubVal={totalIncomeRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
+                                                <SummaryBlock title="Продано" qtyVal={-totalSellQty} curVal={showCurRow ? -totalExpenseCur : null} rubVal={-totalExpenseRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
                                                 <SummaryBlock
                                                   title="Изменение цены"
                                                   qtyVal={undefined}
-                                                  curVal={currencyCode !== "RUB" ? profitLossFromPriceCur : null}
+                                                  curVal={showCurRow && profitLossFromPriceCur != null ? profitLossFromPriceCur : null}
                                                   rubVal={currencyCode !== "RUB" ? courseDiffRub : profitLossFromPriceRub}
                                                   amountColor={profitLossFromPriceRub >= 0 ? GREEN : RED}
-                                                  showCurRow={currencyCode !== "RUB"}
+                                                  showCurRow={showCurRow}
                                                   showQtyRow={false}
-                                                  showEmptyQtyRow={isMarketOrCryptoSummary}
+                                                  showEmptyQtyRow={true}
                                                 />
-                                              )}
-                                              <SummaryBlock title="Куплено" qtyVal={isMarketOrCryptoSummary ? totalBuyQty : undefined} curVal={currencyCode !== "RUB" ? totalIncomeCur : null} rubVal={totalIncomeRub} amountColor={GREEN} showQtyRow={isMarketOrCryptoSummary} showCurRow={currencyCode !== "RUB"} />
-                                              <SummaryBlock title="Продано" qtyVal={isMarketOrCryptoSummary ? totalSellQty : undefined} curVal={currencyCode !== "RUB" ? -totalExpenseCur : null} rubVal={-totalExpenseRub} amountColor={RED} showQtyRow={isMarketOrCryptoSummary} showCurRow={currencyCode !== "RUB"} />
-                                              <SummaryBlock title={`На конец ${dateEndLabel}`} qtyVal={isMarketOrCryptoSummary ? qtyEnd : undefined} curVal={currencyCode !== "RUB" ? (finalDisplayCur / 100) : null} rubVal={finalDisplayRub} showQtyRow={isMarketOrCryptoSummary} showCurRow={currencyCode !== "RUB"} />
+                                                <SummaryBlock title={`На ${dateEndLabel}`} qtyVal={qtyEnd} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
+                                              </div>
+                                            );
+                                          }
+                                          return (
+                                            <div className="flex w-full gap-4 mt-4 flex-wrap">
+                                              <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                                              <SummaryBlock
+                                                title="Изменение цены"
+                                                qtyVal={undefined}
+                                                curVal={showCurRow && profitLossFromPriceCur != null ? profitLossFromPriceCur : null}
+                                                rubVal={currencyCode !== "RUB" ? courseDiffRub : profitLossFromPriceRub}
+                                                amountColor={profitLossFromPriceRub >= 0 ? GREEN : RED}
+                                                showCurRow={showCurRow}
+                                                showQtyRow={false}
+                                              />
+                                              <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
                                             </div>
                                           );
                                         })()}

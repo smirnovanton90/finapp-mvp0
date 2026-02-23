@@ -438,8 +438,11 @@ export default function AssetDetailPage() {
     });
 
     // Считаем netFlow из тех же слагаемых, что показываем в плашках, чтобы выполнялось равенство: На дату + Куплено + Продано + Переводы + Изменение цены = На текущую дату
-    netFlowRub = totalIncomeRub - totalExpenseRub + totalTransferRub;
-    const netFlowCur = totalIncomeCur - totalExpenseCur + totalTransferCur;
+    // В плашках: Куплено = totalExpense, Продано = -totalIncome, поэтому поток = totalExpense - totalIncome + transfer
+    const displayFlowRub = totalExpenseRub - totalIncomeRub + totalTransferRub;
+    const displayFlowCur = totalExpenseCur - totalIncomeCur + totalTransferCur;
+    netFlowRub = displayFlowRub;
+    const netFlowCur = displayFlowCur;
 
     const effectiveKind = getEffectiveItemKind(item, finalCurCents);
     const signedInitialRub = effectiveKind === "LIABILITY" ? -(initialRubCents ?? 0) : (initialRubCents ?? 0);
@@ -1383,8 +1386,8 @@ export default function AssetDetailPage() {
                       return (
                         <>
                           <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={dynamics.qtyStart} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
-                          <SummaryBlock title="Куплено" qtyVal={dynamics.totalBuyQty} curVal={showCurRow ? dynamics.totalIncomeCur : null} rubVal={dynamics.totalIncomeRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
-                          <SummaryBlock title="Продано" qtyVal={-dynamics.totalSellQty} curVal={showCurRow ? -dynamics.totalExpenseCur : null} rubVal={-dynamics.totalExpenseRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
+                          <SummaryBlock title="Куплено" qtyVal={dynamics.totalBuyQty} curVal={showCurRow ? dynamics.totalExpenseCur : null} rubVal={dynamics.totalExpenseRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
+                          <SummaryBlock title="Продано" qtyVal={-dynamics.totalSellQty} curVal={showCurRow ? -dynamics.totalIncomeCur : null} rubVal={-dynamics.totalIncomeRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
                           <SummaryBlock
                             title="Изменение цены"
                             qtyVal={undefined}

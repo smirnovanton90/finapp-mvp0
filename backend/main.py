@@ -436,9 +436,9 @@ def _get_market_price_on_or_before(
 
 
 def _get_latest_item_market_value_rub(
-    db: Session, item_id: int, user_id: int
+    db: Session, item_id: int, user_id: int, item: "Item | None" = None
 ) -> int | None:
-    """Последняя рыночная стоимость по item_market_values (копейки). Для не-MOEX активов."""
+    """Последняя рыночная стоимость по item_market_values в рублях. Для не-MOEX активов."""
     row = (
         db.query(ItemMarketValue)
         .filter(
@@ -450,7 +450,66 @@ def _get_latest_item_market_value_rub(
         .limit(1)
         .first()
     )
-    return row.value_rub if row else None
+    if not row:
+        return None
+    if getattr(row, "value_currency_cents", None) is not None:
+        it = item or db.get(Item, item_id)
+        if not it:
+            return None
+        currency = (it.currency_code or "RUB").upper()
+        if currency == "RUB":
+            return row.value_currency_cents
+        rate = _get_fx_rate_for_date(row.value_date, currency, db)
+        if rate is None:
+            return None
+        return int(round((row.value_currency_cents / 100) * rate * 100))
+    return row.value_rub
+
+
+def _item_market_value_storage_from_payload(
+    payload: ItemMarketValueCreate, item: Item, db: Session
+) -> tuple[int, int | None]:
+    """Returns (value_rub, value_currency_cents) for DB storage from create/update payload."""
+    if payload.value_currency_cents is not None:
+        vc = payload.value_currency_cents
+        currency = (item.currency_code or "RUB").upper()
+        if currency == "RUB":
+            return (vc, vc)
+        rate = _get_fx_rate_for_date(payload.value_date, currency, db)
+        vr = int(round((vc / 100) * rate * 100)) if rate else 0
+        return (vr, vc)
+    vr = payload.value_rub or 0
+    if (item.currency_code or "RUB").upper() == "RUB":
+        return (vr, vr)
+    return (vr, None)
+
+
+def _item_market_value_to_out(row: ItemMarketValue, item: Item, db: Session) -> ItemMarketValueOut:
+    """Build ItemMarketValueOut; value_rub is RUB equivalent when value_currency_cents is set."""
+    vc = getattr(row, "value_currency_cents", None)
+    if vc is not None:
+        currency = (item.currency_code or "RUB").upper()
+        if currency == "RUB":
+            value_rub_out = vc
+        else:
+            rate = _get_fx_rate_for_date(row.value_date, currency, db)
+            value_rub_out = int(round((vc / 100) * rate * 100)) if rate else row.value_rub
+        return ItemMarketValueOut(
+            id=row.id,
+            item_id=row.item_id,
+            value_date=row.value_date,
+            value_rub=value_rub_out,
+            value_currency_cents=vc,
+            created_at=row.created_at,
+        )
+    return ItemMarketValueOut(
+        id=row.id,
+        item_id=row.item_id,
+        value_date=row.value_date,
+        value_rub=row.value_rub,
+        value_currency_cents=None,
+        created_at=row.created_at,
+    )
 
 
 def _get_market_price_usd_cents(db: Session, price: MarketPrice) -> int | None:
@@ -966,7 +1025,7 @@ def list_items(
             and not is_moex_item(item)
             and not is_crypto_item(item)
         ):
-            latest = _get_latest_item_market_value_rub(db, item.id, user.id)
+            latest = _get_latest_item_market_value_rub(db, item.id, user.id, item)
             if latest is not None:
                 setattr(item, "latest_market_value_rub", latest)
     # Стоимость приобретения и вложенных — для отображения основной стоимости (ACQUISITION / INVESTED)
@@ -1048,7 +1107,7 @@ def get_item(
         except Exception:
             pass
     elif getattr(item, "primary_value_kind", None) == "MARKET":
-        latest = _get_latest_item_market_value_rub(db, item.id, user.id)
+        latest = _get_latest_item_market_value_rub(db, item.id, user.id, item)
         if latest is not None:
             setattr(item, "latest_market_value_rub", latest)
     acq = (
@@ -2213,7 +2272,18 @@ def get_item_costs(
             .first()
         )
         if latest:
-            market_rub = latest.value_rub
+            if getattr(latest, "value_currency_cents", None) is not None:
+                market_rub = latest.value_currency_cents
+            else:
+                item_currency = (item.currency_code or "RUB").upper()
+                if item_currency == "RUB":
+                    market_rub = latest.value_rub
+                else:
+                    rate = _get_fx_rate_for_date(date_type.today(), item_currency, db)
+                    if rate is not None and rate > 0:
+                        market_rub = int(round(latest.value_rub / rate * 100))
+                    else:
+                        market_rub = latest.value_rub
     # Эквивалент рыночной стоимости в рублях: для валюты != RUB пересчитываем по курсу
     market_value_rub: int | None = None
     if market_rub is not None:
@@ -2350,7 +2420,7 @@ def _build_item_cost_history(
 
     # Market: for non-MOEX use manual ItemMarketValue; for MOEX use lots × price from API
     market_rows = (
-        db.query(ItemMarketValue.value_date, ItemMarketValue.value_rub)
+        db.query(ItemMarketValue.value_date, ItemMarketValue.value_rub, ItemMarketValue.value_currency_cents)
         .filter(
             ItemMarketValue.item_id == item_id,
             ItemMarketValue.user_id == user_id,
@@ -2361,7 +2431,8 @@ def _build_item_cost_history(
     )
     market_by_date = {}
     for row in market_rows:
-        market_by_date[row.value_date.isoformat()] = row.value_rub
+        vc = getattr(row, "value_currency_cents", None)
+        market_by_date[row.value_date.isoformat()] = (vc, row.value_rub)
     market_sorted_dates = sorted(market_by_date.keys())
 
     # For MOEX: replay lot deltas to get position_lots per date
@@ -2505,7 +2576,19 @@ def _build_item_cost_history(
         if market_rub is None:
             for m_date in reversed(market_sorted_dates):
                 if m_date <= d_str:
-                    market_rub = market_by_date[m_date]
+                    vc, vr = market_by_date[m_date]
+                    if vc is not None:
+                        market_rub = vc
+                    else:
+                        item_currency = (item.currency_code or "RUB").upper()
+                        if item_currency == "RUB":
+                            market_rub = vr
+                        else:
+                            rate = _get_fx_rate_for_date(d, item_currency, db)
+                            if rate is not None and rate > 0:
+                                market_rub = int(round(vr / rate * 100))
+                            else:
+                                market_rub = vr
                     break
 
         result.append(
@@ -2569,7 +2652,7 @@ def list_item_market_values(
         .order_by(ItemMarketValue.value_date.asc())
         .all()
     )
-    return rows
+    return [_item_market_value_to_out(r, item, db) for r in rows]
 
 
 @app.post("/items/{item_id}/market-values", response_model=ItemMarketValueOut)
@@ -2582,6 +2665,7 @@ def create_item_market_value(
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
+    value_rub, value_currency_cents = _item_market_value_storage_from_payload(payload, item, db)
     existing = (
         db.query(ItemMarketValue)
         .filter(
@@ -2592,20 +2676,22 @@ def create_item_market_value(
         .first()
     )
     if existing:
-        existing.value_rub = payload.value_rub
+        existing.value_rub = value_rub
+        existing.value_currency_cents = value_currency_cents
         db.commit()
         db.refresh(existing)
-        return existing
+        return _item_market_value_to_out(existing, item, db)
     row = ItemMarketValue(
         user_id=user.id,
         item_id=item_id,
         value_date=payload.value_date,
-        value_rub=payload.value_rub,
+        value_rub=value_rub,
+        value_currency_cents=value_currency_cents,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return row
+    return _item_market_value_to_out(row, item, db)
 
 
 @app.patch("/items/{item_id}/market-values/{mv_id}", response_model=ItemMarketValueOut)
@@ -2619,6 +2705,7 @@ def update_item_market_value(
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
+    value_rub, value_currency_cents = _item_market_value_storage_from_payload(payload, item, db)
     row = (
         db.query(ItemMarketValue)
         .filter(
@@ -2631,10 +2718,11 @@ def update_item_market_value(
     if not row:
         raise HTTPException(status_code=404, detail="Market value record not found")
     row.value_date = payload.value_date
-    row.value_rub = payload.value_rub
+    row.value_rub = value_rub
+    row.value_currency_cents = value_currency_cents
     db.commit()
     db.refresh(row)
-    return row
+    return _item_market_value_to_out(row, item, db)
 
 
 @app.delete("/items/{item_id}/market-values/{mv_id}", status_code=204)

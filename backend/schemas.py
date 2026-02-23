@@ -464,7 +464,16 @@ class ItemSynonymsAdd(BaseModel):
 
 class ItemMarketValueCreate(BaseModel):
     value_date: date
-    value_rub: int = Field(..., ge=0)
+    value_rub: int | None = Field(default=None, ge=0)
+    """Legacy: value in RUB kopecks. Use value_currency_cents for value in asset currency."""
+    value_currency_cents: int | None = Field(default=None, ge=0)
+    """Value in asset currency (kopecks/cents). Preferred when item has a currency."""
+
+    @model_validator(mode="after")
+    def require_value(self) -> "ItemMarketValueCreate":
+        if self.value_currency_cents is None and self.value_rub is None:
+            raise ValueError("Either value_currency_cents or value_rub must be provided")
+        return self
 
 
 class ItemMarketValueOut(BaseModel):
@@ -472,6 +481,9 @@ class ItemMarketValueOut(BaseModel):
     item_id: int
     value_date: date
     value_rub: int
+    """RUB equivalent (computed from value_currency_cents when set)."""
+    value_currency_cents: int | None = None
+    """Value in asset currency when stored."""
     created_at: datetime
 
     class Config:

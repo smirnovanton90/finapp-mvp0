@@ -84,12 +84,17 @@ export type ItemMarketValueOut = {
   item_id: number;
   value_date: string;
   value_rub: number;
+  /** Value in asset currency (kopecks/cents) when stored. */
+  value_currency_cents?: number | null;
   created_at: string;
 };
 
 export type ItemMarketValueCreate = {
   value_date: string;
-  value_rub: number;
+  /** Legacy: value in RUB kopecks. Prefer value_currency_cents for value in asset currency. */
+  value_rub?: number;
+  /** Value in asset currency (kopecks/cents). Preferred when item has a currency. */
+  value_currency_cents?: number;
 };
 
 export type ItemCostsOut = {

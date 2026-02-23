@@ -1466,7 +1466,7 @@ export function AddEditItemFormModal({
           try {
             await createItemMarketValue(createdItem.id, {
               value_date: openDate,
-              value_rub: parseRubToCents(marketValueStr),
+              value_currency_cents: parseRubToCents(marketValueStr),
             });
           } catch (mvErr: any) {
             console.warn("Failed to create market value:", mvErr?.message);
@@ -1792,7 +1792,7 @@ export function AddEditItemFormModal({
               {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
                 <>
                   <TextField
-                    label="Рыночная стоимость"
+                    label="Рыночная стоимость (в валюте актива)"
                     value={marketValueStr}
                     onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))}
                     onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))}

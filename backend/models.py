@@ -496,6 +496,8 @@ class ItemMarketValue(Base):
     item: Mapped["Item"] = relationship(back_populates="market_values")
     value_date: Mapped[date] = mapped_column(Date, nullable=False)
     value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    value_currency_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """Value in asset currency (kopecks/cents). When set, value_rub is legacy or computed for API."""
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

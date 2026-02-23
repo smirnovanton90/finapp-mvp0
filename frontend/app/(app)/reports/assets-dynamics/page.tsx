@@ -291,18 +291,20 @@ function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number
 function getTxDeltaForItem(
   tx: TransactionOut,
   itemId: number,
-  itemKind: ItemOut["kind"]
+  itemKind: ItemOut["kind"],
+  itemCurrencyCode?: string | null
 ): { deltaCents: number; inCurrency: boolean } | null {
   const isPrimary = tx.primary_item_id === itemId || tx.primary_card_item_id === itemId;
   const isCounter = tx.counterparty_item_id === itemId || tx.counterparty_card_item_id === itemId;
+  const primaryAmountInCurrency = Boolean(itemCurrencyCode && itemCurrencyCode.toUpperCase() !== "RUB");
   if (isPrimary) {
-    if (tx.direction === "INCOME") return { deltaCents: tx.amount_rub, inCurrency: false };
+    if (tx.direction === "INCOME") return { deltaCents: tx.amount_rub, inCurrency: primaryAmountInCurrency };
     if (tx.direction === "EXPENSE") {
       const isOpening = tx.source === "AUTO_ITEM_OPENING";
       const amount = isOpening && itemKind === "LIABILITY" ? tx.amount_rub : -tx.amount_rub;
-      return { deltaCents: amount, inCurrency: false };
+      return { deltaCents: amount, inCurrency: primaryAmountInCurrency };
     }
-    if (tx.direction === "TRANSFER") return { deltaCents: transferDelta(itemKind, true, tx.amount_rub), inCurrency: false };
+    if (tx.direction === "TRANSFER") return { deltaCents: transferDelta(itemKind, true, tx.amount_rub), inCurrency: primaryAmountInCurrency };
   }
   if (isCounter && tx.direction === "TRANSFER") {
     const amount = tx.amount_counterparty ?? tx.amount_rub;
@@ -917,14 +919,14 @@ export default function AssetsDynamicsPage() {
   );
 
   useEffect(() => {
-    if (!allSelectedAreMarketItems || !rangeStartKey || !rangeEndKey) {
+    if (!rangeStartKey || !rangeEndKey || effectiveSelectedItems.length === 0) {
       setCostHistoryByItemId({});
       return;
     }
     let cancelled = false;
     setLoadingCostHistory(true);
     const itemIds = effectiveSelectedItems.map((item) => item.id);
-    Promise.all(
+    Promise.allSettled(
       itemIds.map((id) => {
         const item = effectiveSelectedItems.find((i) => i.id === id);
         const dateFrom = item?.open_date
@@ -938,11 +940,15 @@ export default function AssetsDynamicsPage() {
     )
       .then((results) => {
         if (cancelled) return;
-        const next: Record<number, ItemCostHistoryOut> = {};
-        itemIds.forEach((id, i) => {
-          next[id] = results[i];
+        setCostHistoryByItemId((prev) => {
+          const next: Record<number, ItemCostHistoryOut> = { ...prev };
+          itemIds.forEach((id, i) => {
+            const r = results[i];
+            if (r?.status === "fulfilled") next[id] = r.value;
+            else next[id] = { points: [] };
+          });
+          return next;
         });
-        setCostHistoryByItemId(next);
       })
       .catch(() => {
         if (!cancelled) setCostHistoryByItemId({});
@@ -953,7 +959,7 @@ export default function AssetsDynamicsPage() {
     return () => {
       cancelled = true;
     };
-  }, [allSelectedAreMarketItems, rangeStartKey, rangeEndKey, effectiveSelectedItems]);
+  }, [rangeStartKey, rangeEndKey, effectiveSelectedItems]);
 
   const dateKeys = useMemo(() => {
     if (!rangeStartKey || !rangeEndKey) return [];
@@ -1372,6 +1378,37 @@ export default function AssetsDynamicsPage() {
       itemsByStartDate.get(startKey)?.push(item);
     });
 
+    const pointByDateByItemNonMarket = new Map<
+      number,
+      Map<string, { market_rub: number | null }>
+    >();
+    effectiveSelectedItems.forEach((item) => {
+      const byDate = new Map<string, { market_rub: number | null }>();
+      (costHistoryByItemId[item.id]?.points ?? []).forEach((p) => {
+        byDate.set(p.date, { market_rub: p.market_rub ?? null });
+      });
+      pointByDateByItemNonMarket.set(item.id, byDate);
+    });
+
+    const getMarketValueForDate = (
+      itemId: number,
+      dateKey: string
+    ): number | null => {
+      const byDate = pointByDateByItemNonMarket.get(itemId);
+      if (!byDate) return null;
+      const exact = byDate.get(dateKey)?.market_rub;
+      if (exact != null) return exact;
+      const sortedDates = Array.from(byDate.keys()).sort();
+      for (let i = sortedDates.length - 1; i >= 0; i--) {
+        const d = sortedDates[i]!;
+        if (d <= dateKey) {
+          const v = byDate.get(d)?.market_rub;
+          if (v != null) return v;
+        }
+      }
+      return null;
+    };
+
     const deltasByDate = buildDeltasByDate(
       transactions,
       selectedIds,
@@ -1601,8 +1638,10 @@ export default function AssetsDynamicsPage() {
             itemValuesAtStart[item.id] = null;
           }
         } else {
+          const marketCents = getMarketValueForDate(item.id, dateKey);
           valueCents =
-            amountBalances.get(item.id) ?? getItemDisplayInitialCents(item);
+            marketCents ??
+            (amountBalances.get(item.id) ?? getItemDisplayInitialCents(item));
         }
 
         itemValues[item.id] = valueCents;
@@ -2260,7 +2299,7 @@ export default function AssetsDynamicsPage() {
             <div
               className="relative py-6"
               style={{
-                opacity: loading || (allSelectedAreMarketItems && loadingCostHistory) ? 0.6 : 1,
+                opacity: loading || loadingCostHistory ? 0.6 : 1,
                 transition: "opacity 0.3s ease-in-out",
               }}
             >
@@ -2573,7 +2612,15 @@ export default function AssetsDynamicsPage() {
           </div>
         </div>
 
-        {clickedChartDates.length >= 1 && dateSnapshotRows.length > 0 && (
+        {clickedChartDates.length >= 1 && !allSelectedAreMarketItems && loadingCostHistory && (
+          <div className="flex items-center justify-between py-2">
+            <h3 className="text-base font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
+              Остатки на выбранные даты
+            </h3>
+            <span className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка…</span>
+          </div>
+        )}
+        {clickedChartDates.length >= 1 && (allSelectedAreMarketItems || !loadingCostHistory) && dateSnapshotRows.length > 0 && (
           <>
             <div className="flex items-center justify-between py-2">
               <h3 className="text-base font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
@@ -2665,14 +2712,14 @@ export default function AssetsDynamicsPage() {
                                         const included = transactions.filter((tx) => {
                                           const d = toTxDateKey(tx.transaction_date);
                                           if (d <= dateStart || d > dateEnd) return false;
-                                          const delta = getTxDeltaForItem(tx, item.id, item.kind);
+                                          const delta = getTxDeltaForItem(tx, item.id, item.kind, item.currency_code);
                                           if (delta !== null) return true;
                                           if (isMarketOrCryptoItem && tx.related_item_id === item.id) return true;
                                           return false;
                                         });
                                         return included
                                           .map((tx) => {
-                                            const res = getTxDeltaForItem(tx, item.id, item.kind);
+                                            const res = getTxDeltaForItem(tx, item.id, item.kind, item.currency_code);
                                             if (res !== null) return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
                                             if ((isMoexItem(item) || isCryptoItem(item)) && tx.related_item_id === item.id) {
                                               return { tx, deltaCents: tx.amount_rub ?? 0, inCurrency: false };

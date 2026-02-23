@@ -3432,7 +3432,7 @@ export default function Page() {
           try {
             await createItemMarketValue(createdItem.id, {
               value_date: openDate,
-              value_rub: parseRubToCents(marketValueStr),
+              value_currency_cents: parseRubToCents(marketValueStr),
             });
           } catch (mvErr: any) {
             console.warn("Failed to create market value:", mvErr?.message);
@@ -4551,7 +4551,7 @@ export default function Page() {
             {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
               <div className="grid gap-2">
                 <TextField
-                  label="Рыночная стоимость"
+                  label="Рыночная стоимость (в валюте актива)"
                   value={marketValueStr}
                   onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))}
                   onBlur={() => setMarketValueStr((prev) => normalizeRubOnBlur(prev))}

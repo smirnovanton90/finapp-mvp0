@@ -66,6 +66,14 @@ type DailyRow = {
   rate: number | null;
   itemValues: Record<number, number | null>;
   itemRubValues: Record<number, number | null>;
+  /** Для рыночных активов и крипты: количество (лоты или единицы) на дату */
+  itemQuantities?: Record<number, number | null>;
+  /** Для рыночных активов и крипты: цена за единицу в валюте (копейки/центы) на дату */
+  itemUnitPriceCents?: Record<number, number | null>;
+  /** Для рыночных активов и крипты в таблице расшифровки: количество и стоимость на начало дня (плашки и колонки по выбранным датам) */
+  itemQuantitiesAtStart?: Record<number, number | null>;
+  itemValuesAtStart?: Record<number, number | null>;
+  itemRubValuesAtStart?: Record<number, number | null>;
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -440,7 +448,7 @@ function buildDeltasByDate(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey <= todayKey && !isRealized) return;
+    if (dateKey > todayKey && !isRealized) return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -511,7 +519,7 @@ function buildLotDeltasByDate(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey <= todayKey && !isRealized) return;
+    if (dateKey > todayKey && !isRealized) return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -527,7 +535,8 @@ function buildLotDeltasByDate(
     const counterSelectedIds = counterCandidates.filter(
       (id) => selectedIds.has(id) && moexItemIds.has(id)
     );
-    if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0) return;
+    const hasRelatedMoex = tx.related_item_id != null && selectedIds.has(tx.related_item_id) && moexItemIds.has(tx.related_item_id);
+    if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0 && !hasRelatedMoex) return;
 
     primarySelectedIds.forEach((itemId) => {
       let delta = 0;
@@ -543,6 +552,11 @@ function buildLotDeltasByDate(
         const delta = tx.counterparty_quantity_lots ?? 0;
         addDelta(dateKey, itemId, delta);
       });
+    }
+    if (tx.related_item_id != null && selectedIds.has(tx.related_item_id) && moexItemIds.has(tx.related_item_id)) {
+      const qty = tx.primary_quantity_lots ?? 0;
+      const delta = tx.asset_link_type === "ASSET_PURCHASE" ? qty : -qty;
+      if (delta !== 0) addDelta(dateKey, tx.related_item_id, delta);
     }
   });
 
@@ -567,7 +581,7 @@ function buildUnitsDeltasByDate(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey <= todayKey && !isRealized) return;
+    if (dateKey > todayKey && !isRealized) return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -583,7 +597,8 @@ function buildUnitsDeltasByDate(
     const counterSelectedIds = counterCandidates.filter(
       (id) => selectedIds.has(id) && cryptoItemIds.has(id)
     );
-    if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0) return;
+    const hasRelatedCrypto = tx.related_item_id != null && selectedIds.has(tx.related_item_id) && cryptoItemIds.has(tx.related_item_id);
+    if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0 && !hasRelatedCrypto) return;
 
     primarySelectedIds.forEach((itemId) => {
       let delta = 0;
@@ -599,6 +614,11 @@ function buildUnitsDeltasByDate(
         const delta = tx.counterparty_quantity_units ?? 0;
         addDelta(dateKey, itemId, delta);
       });
+    }
+    if (tx.related_item_id != null && selectedIds.has(tx.related_item_id) && cryptoItemIds.has(tx.related_item_id)) {
+      const qty = tx.primary_quantity_units ?? 0;
+      const delta = tx.asset_link_type === "ASSET_PURCHASE" ? qty : -qty;
+      if (delta !== 0) addDelta(dateKey, tx.related_item_id, delta);
     }
   });
 
@@ -1177,6 +1197,78 @@ export default function AssetsDynamicsPage() {
 
     if (allSelectedAreMarketItems && effectiveSelectedItems.every((item) => costHistoryByItemId[item.id]?.points?.length)) {
       const dateKeys = buildDateRange(rangeStartKey, rangeEndKey);
+      const moexItemsBranch = effectiveSelectedItems.filter((i) => isMoexItem(i));
+      const cryptoItemsBranch = effectiveSelectedItems.filter((i) => isCryptoItem(i));
+      const moexIdsBranch = new Set(moexItemsBranch.map((i) => i.id));
+      const cryptoIdsBranch = new Set(cryptoItemsBranch.map((i) => i.id));
+      const itemStartKeyById = new Map(effectiveSelectedItems.map((item) => [item.id, getEffectiveStartKey(item)]));
+      const lotDeltasByDateBranch = buildLotDeltasByDate(transactions, selectedIds, moexIdsBranch, todayKey);
+      const unitsDeltasByDateBranch = buildUnitsDeltasByDate(transactions, selectedIds, cryptoIdsBranch, todayKey);
+      const initialLotsByIdBranch = new Map<number, number>();
+      moexItemsBranch.forEach((item) => {
+        const currentLots = item.position_lots ?? 0;
+        const startKeyForItem = itemStartKeyById.get(item.id) ?? "";
+        let realizedDelta = 0;
+        lotDeltasByDateBranch.forEach((deltaMap, dKey) => {
+          if (dKey > todayKey) return;
+          if (startKeyForItem && dKey < startKeyForItem) return;
+          const delta = deltaMap.get(item.id);
+          if (delta) realizedDelta += delta;
+        });
+        initialLotsByIdBranch.set(item.id, currentLots - realizedDelta);
+      });
+      const initialUnitsByIdBranch = new Map<number, number>();
+      cryptoItemsBranch.forEach((item) => {
+        const currentUnits = item.quantity_units ?? 0;
+        const startKeyForItem = itemStartKeyById.get(item.id) ?? "";
+        let realizedDelta = 0;
+        unitsDeltasByDateBranch.forEach((deltaMap, dKey) => {
+          if (dKey > todayKey) return;
+          if (startKeyForItem && dKey < startKeyForItem) return;
+          const delta = deltaMap.get(item.id);
+          if (delta) realizedDelta += delta;
+        });
+        initialUnitsByIdBranch.set(item.id, currentUnits - realizedDelta);
+      });
+      const earliestStartKeyBranch =
+        effectiveSelectedItems.reduce<string | null>((acc, item) => {
+          const k = itemStartKeyById.get(item.id);
+          return k && (!acc || k < acc) ? k : acc;
+        }, null) ?? rangeStartKey;
+      const itemsByStartDateBranch = new Map<string, ItemOut[]>();
+      effectiveSelectedItems.forEach((item) => {
+        const startKey = itemStartKeyById.get(item.id);
+        if (!startKey) return;
+        if (!itemsByStartDateBranch.has(startKey)) itemsByStartDateBranch.set(startKey, []);
+        itemsByStartDateBranch.get(startKey)!.push(item);
+      });
+      const quantityByDate = new Map<string, Record<number, number>>();
+      const lotBalancesBranch = new Map<number, number>();
+      const unitsBalancesBranch = new Map<number, number>();
+      const dateKeysSet = new Set(dateKeys);
+      let currentDate = parseDateKey(earliestStartKeyBranch);
+      const endDate = parseDateKey(rangeEndKey);
+      if (currentDate > endDate) currentDate = endDate;
+      for (; currentDate <= endDate; currentDate = addDays(currentDate, 1)) {
+        const dateKey = toDateKey(currentDate);
+        const newItems = itemsByStartDateBranch.get(dateKey) ?? [];
+        newItems.forEach((item) => {
+          if (isMoexItem(item)) lotBalancesBranch.set(item.id, initialLotsByIdBranch.get(item.id) ?? item.position_lots ?? 0);
+          else if (isCryptoItem(item)) unitsBalancesBranch.set(item.id, initialUnitsByIdBranch.get(item.id) ?? item.quantity_units ?? 0);
+        });
+        if (dateKeysSet.has(dateKey)) {
+          const qtyRow: Record<number, number> = {};
+          effectiveSelectedItems.forEach((item) => {
+            if (isMoexItem(item)) qtyRow[item.id] = lotBalancesBranch.get(item.id) ?? 0;
+            else if (isCryptoItem(item)) qtyRow[item.id] = unitsBalancesBranch.get(item.id) ?? 0;
+          });
+          quantityByDate.set(dateKey, qtyRow);
+        }
+        const dayLotDeltas = lotDeltasByDateBranch.get(dateKey);
+        if (dayLotDeltas) dayLotDeltas.forEach((delta, itemId) => lotBalancesBranch.set(itemId, (lotBalancesBranch.get(itemId) ?? 0) + delta));
+        const dayUnitsDeltas = unitsDeltasByDateBranch.get(dateKey);
+        if (dayUnitsDeltas) dayUnitsDeltas.forEach((delta, itemId) => unitsBalancesBranch.set(itemId, (unitsBalancesBranch.get(itemId) ?? 0) + delta));
+      }
       const rows: DailyRow[] = [];
       const pointByDateByItem = new Map<number, Map<string, { market_rub: number | null }>>();
       effectiveSelectedItems.forEach((item) => {
@@ -1189,6 +1281,37 @@ export default function AssetsDynamicsPage() {
       dateKeys.forEach((dateKey) => {
         const itemValues: Record<number, number | null> = {};
         const itemRubValues: Record<number, number | null> = {};
+        const itemQuantities: Record<number, number | null> = {};
+        const itemUnitPriceCents: Record<number, number | null> = {};
+        const itemQuantitiesAtStart: Record<number, number | null> = {};
+        const itemValuesAtStart: Record<number, number | null> = {};
+        const itemRubValuesAtStart: Record<number, number | null> = {};
+        const qtyRow = quantityByDate.get(dateKey);
+        const dayLotDeltas = lotDeltasByDateBranch.get(dateKey);
+        const dayUnitsDeltas = unitsDeltasByDateBranch.get(dateKey);
+        effectiveSelectedItems.forEach((item) => {
+          let qty = qtyRow?.[item.id] ?? null;
+          if (qty != null) {
+            if (isMoexItem(item)) qty += dayLotDeltas?.get(item.id) ?? 0;
+            else if (isCryptoItem(item)) qty += dayUnitsDeltas?.get(item.id) ?? 0;
+          }
+          itemQuantities[item.id] = qty;
+          itemQuantitiesAtStart[item.id] = qtyRow?.[item.id] ?? null;
+          const byDate = pointByDateByItem.get(item.id);
+          const point = byDate?.get(dateKey);
+          const marketRub = point?.market_rub ?? null;
+          if (marketRub != null && qty != null && qty > 0) {
+            const unitPrice = Math.round(marketRub / qty);
+            itemUnitPriceCents[item.id] = unitPrice;
+            const qtyAtStart = qtyRow?.[item.id] ?? 0;
+            itemValuesAtStart[item.id] = unitPrice * qtyAtStart;
+            itemRubValuesAtStart[item.id] = unitPrice * qtyAtStart;
+          } else {
+            itemUnitPriceCents[item.id] = null;
+            itemValuesAtStart[item.id] = null;
+            itemRubValuesAtStart[item.id] = null;
+          }
+        });
         let totalRubCents: number | null = 0;
         let missing = false;
         effectiveSelectedItems.forEach((item) => {
@@ -1213,6 +1336,11 @@ export default function AssetsDynamicsPage() {
           rate: null,
           itemValues,
           itemRubValues,
+          itemQuantities,
+          itemUnitPriceCents,
+          itemQuantitiesAtStart,
+          itemValuesAtStart,
+          itemRubValuesAtStart,
         });
       });
       return rows;
@@ -1318,6 +1446,9 @@ export default function AssetsDynamicsPage() {
         });
       }
 
+      const lotsAtStartOfDay = new Map(lotBalances);
+      const unitsAtStartOfDay = new Map(unitsBalances);
+
       const dayLotDeltas = lotDeltasByDate.get(dateKey);
       if (dayLotDeltas) {
         dayLotDeltas.forEach((delta, itemId) => {
@@ -1358,6 +1489,11 @@ export default function AssetsDynamicsPage() {
 
       const itemValues: Record<number, number | null> = {};
       const itemRubValues: Record<number, number | null> = {};
+      const itemQuantities: Record<number, number | null> = {};
+      const itemUnitPriceCents: Record<number, number | null> = {};
+      const itemQuantitiesAtStart: Record<number, number | null> = {};
+      const itemValuesAtStart: Record<number, number | null> = {};
+      const itemRubValuesAtStart: Record<number, number | null> = {};
       let totalRubCents: number | null = 0;
       let totalCurrencyCents: number | null = showCurrencyColumns ? 0 : null;
       let missingRubValue = false;
@@ -1377,6 +1513,7 @@ export default function AssetsDynamicsPage() {
         if (isMoexItem(item)) {
           const lots =
             lotBalances.get(item.id) ?? initialLotsById.get(item.id) ?? 0;
+          const lotsAtStart = lotsAtStartOfDay.get(item.id) ?? initialLotsById.get(item.id) ?? 0;
           const priceKey = moexPriceKeyByItemId.get(item.id);
           let price: MarketPriceOut | null = null;
           
@@ -1404,10 +1541,21 @@ export default function AssetsDynamicsPage() {
             const lotSize = item.lot_size ?? 1;
             valueCents = unitPriceCents * lots * lotSize;
             valueCurrency = price?.currency_code ?? item.currency_code;
+            itemQuantities[item.id] = lots;
+            itemUnitPriceCents[item.id] = unitPriceCents;
+            itemQuantitiesAtStart[item.id] = lotsAtStart;
+            const valueAtStartCents = unitPriceCents * lotsAtStart * lotSize;
+            itemValuesAtStart[item.id] = valueAtStartCents;
+          } else {
+            itemQuantities[item.id] = lots;
+            itemUnitPriceCents[item.id] = null;
+            itemQuantitiesAtStart[item.id] = lotsAtStart;
+            itemValuesAtStart[item.id] = null;
           }
         } else if (isCryptoItem(item)) {
           const units =
             unitsBalances.get(item.id) ?? initialUnitsById.get(item.id) ?? 0;
+          const unitsAtStart = unitsAtStartOfDay.get(item.id) ?? initialUnitsById.get(item.id) ?? 0;
           const priceKey = marketPriceKeyByItemId.get(item.id);
           let price: MarketPriceOut | null = null;
           if (priceKey) {
@@ -1426,6 +1574,16 @@ export default function AssetsDynamicsPage() {
           if (unitPriceCents != null) {
             valueCents = unitPriceCents * units;
             valueCurrency = price?.currency_code ?? item.currency_code;
+            itemQuantities[item.id] = units;
+            itemUnitPriceCents[item.id] = unitPriceCents;
+            itemQuantitiesAtStart[item.id] = unitsAtStart;
+            const valueAtStartCents = unitPriceCents * unitsAtStart;
+            itemValuesAtStart[item.id] = valueAtStartCents;
+          } else {
+            itemQuantities[item.id] = units;
+            itemUnitPriceCents[item.id] = null;
+            itemQuantitiesAtStart[item.id] = unitsAtStart;
+            itemValuesAtStart[item.id] = null;
           }
         } else {
           valueCents =
@@ -1445,6 +1603,7 @@ export default function AssetsDynamicsPage() {
         if (rate === null) {
           itemRubValues[item.id] = null;
           if (valueCurrency !== "RUB") missingRubValue = true;
+          itemRubValuesAtStart[item.id] = itemValuesAtStart[item.id] != null && valueCurrency === "RUB" ? itemValuesAtStart[item.id] : null;
         } else {
           const rubValueCents = Math.round((valueCents / 100) * rate * 100);
           itemRubValues[item.id] = rubValueCents;
@@ -1452,6 +1611,11 @@ export default function AssetsDynamicsPage() {
           const signedRub =
             effectiveKind === "LIABILITY" ? -rubValueCents : rubValueCents;
           if (totalRubCents !== null) totalRubCents += signedRub;
+          if (itemValuesAtStart[item.id] != null) {
+            itemRubValuesAtStart[item.id] = Math.round((itemValuesAtStart[item.id]! / 100) * rate * 100);
+          } else {
+            itemRubValuesAtStart[item.id] = null;
+          }
         }
 
         if (showCurrencyColumns && singleCurrencyCode) {
@@ -1474,6 +1638,11 @@ export default function AssetsDynamicsPage() {
         rate,
         itemValues,
         itemRubValues,
+        itemQuantities,
+        itemUnitPriceCents,
+        itemQuantitiesAtStart,
+        itemValuesAtStart,
+        itemRubValuesAtStart,
       });
     }
 
@@ -2476,16 +2645,27 @@ export default function AssetsDynamicsPage() {
                                 const dateEnd = clickedChartDates[1];
                                 const txsInRange =
                                   dateStart && dateEnd && dateStart !== dateEnd
-                                    ? transactions
-                                        .filter((tx) => {
+                                    ? (() => {
+                                        const isMarketOrCryptoItem = isMoexItem(item) || isCryptoItem(item);
+                                        const included = transactions.filter((tx) => {
                                           const d = toTxDateKey(tx.transaction_date);
-                                          return d >= dateStart && d <= dateEnd && getTxDeltaForItem(tx, item.id, item.kind) !== null;
-                                        })
-                                        .map((tx) => {
-                                          const res = getTxDeltaForItem(tx, item.id, item.kind)!;
-                                          return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
-                                        })
-                                        .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)))
+                                          if (d <= dateStart || d > dateEnd) return false;
+                                          const delta = getTxDeltaForItem(tx, item.id, item.kind);
+                                          if (delta !== null) return true;
+                                          if (isMarketOrCryptoItem && tx.related_item_id === item.id) return true;
+                                          return false;
+                                        });
+                                        return included
+                                          .map((tx) => {
+                                            const res = getTxDeltaForItem(tx, item.id, item.kind);
+                                            if (res !== null) return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
+                                            if ((isMoexItem(item) || isCryptoItem(item)) && tx.related_item_id === item.id) {
+                                              return { tx, deltaCents: tx.amount_rub ?? 0, inCurrency: false };
+                                            }
+                                            return { tx, deltaCents: 0, inCurrency: false };
+                                          })
+                                          .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)));
+                                      })()
                                     : [];
                                 return (
                                   <Fragment key={item.id}>
@@ -2521,7 +2701,11 @@ export default function AssetsDynamicsPage() {
                                       const signedRub = rubCents != null && effectiveKind === "LIABILITY" ? -rubCents : rubCents;
                                       const formatCur = (cents: number) =>
                                         new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100);
+                                      const isMarketOrCrypto = isMoexItem(item) || isCryptoItem(item);
+                                      const qty = row.itemQuantities?.[item.id] ?? null;
+                                      const unitPrice = row.itemUnitPriceCents?.[item.id] ?? null;
                                       const showCurrencyAmount = currencyCode !== "RUB" && valueCents != null;
+                                      const showQtyPrice = isMarketOrCrypto && (qty != null || unitPrice != null);
                                       return (
                                         <Fragment key={row.date}>
                                           {dateIdx === 1 && dateSnapshotRows.length === 2 && (
@@ -2537,6 +2721,16 @@ export default function AssetsDynamicsPage() {
                                               {showCurrencyAmount && (
                                                 <span className="text-[10px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                                                   {isLiabilitySection ? formatCur(Math.abs(signedValue ?? 0)) : formatSignedValue(signedValue ?? 0, formatCur)} {currencyCode}
+                                                  {showQtyPrice && (
+                                                    <> · кол-во {isCryptoItem(item) && qty != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(qty) : qty != null ? new Intl.NumberFormat("ru-RU").format(qty) + " л." : "–"}
+                                                    {unitPrice != null && <> · цена {formatCur(unitPrice)} {currencyCode}</>}</>
+                                                  )}
+                                                </span>
+                                              )}
+                                              {!showCurrencyAmount && showQtyPrice && (
+                                                <span className="text-[10px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                                  кол-во {isCryptoItem(item) && qty != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(qty) : qty != null ? new Intl.NumberFormat("ru-RU").format(qty) + " л." : "–"}
+                                                  {unitPrice != null && <> · цена {formatCur(unitPrice)} {currencyCode}</>}
                                                 </span>
                                               )}
                                             </div>
@@ -2548,7 +2742,76 @@ export default function AssetsDynamicsPage() {
                                   {isExpanded && (
                                     <tr style={{ backgroundColor: BACKGROUND_DT }}>
                                       <td colSpan={colSpan} className="py-3 pl-8 pr-8 align-middle" style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                                        {txsInRange.length > 0 && (
+                                        {(() => {
+                                          const isMarketOrCryptoExp = isMoexItem(item) || isCryptoItem(item);
+                                          const quantityHistoryRowsExp = (() => {
+                                            if (!isMarketOrCryptoExp || !dateStart || !dateEnd) return [];
+                                            const isCrypto = isCryptoItem(item);
+                                            const getTxQty = (tx: TransactionOut) => {
+                                              if (tx.related_item_id === item.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+                                              if (tx.counterparty_item_id === item.id || tx.counterparty_card_item_id === item.id) return isCrypto ? (tx.counterparty_quantity_units ?? 0) : (tx.counterparty_quantity_lots ?? 0);
+                                              if (tx.primary_item_id === item.id || tx.primary_card_item_id === item.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+                                              return 0;
+                                            };
+                                            const getIsBuy = (tx: TransactionOut) => {
+                                              if (tx.related_item_id === item.id) return tx.asset_link_type === "ASSET_PURCHASE";
+                                              if (tx.counterparty_item_id === item.id || tx.counterparty_card_item_id === item.id) return true;
+                                              return false;
+                                            };
+                                            const withQty = txsInRange.filter(({ tx }) => getTxQty(tx) !== 0).map(({ tx }) => tx);
+                                            const sorted = [...withQty].sort((a, b) => {
+                                              const d = (a.transaction_date || "").localeCompare(b.transaction_date || "");
+                                              return d !== 0 ? d : (a.id ?? 0) - (b.id ?? 0);
+                                            });
+                                            const startBalance = (dateSnapshotRows[0]?.itemQuantities?.[item.id] ?? 0);
+                                            let balance = startBalance;
+                                            return sorted.map((tx) => {
+                                              const qty = getTxQty(tx);
+                                              const isBuy = getIsBuy(tx);
+                                              const delta = isBuy ? qty : -qty;
+                                              balance += delta;
+                                              const costCents = tx.amount_rub ?? 0;
+                                              const priceCents = qty > 0 ? Math.round(costCents / qty) : null;
+                                              return { tx, type: isBuy ? "Покупка" as const : "Продажа" as const, delta, balanceAfter: balance, priceCents, costCents };
+                                            });
+                                          })();
+                                          if (isMarketOrCryptoExp && quantityHistoryRowsExp.length > 0 ? true : txsInRange.length > 0) {
+                                            return (
+                                              <>
+                                                {isMarketOrCryptoExp && quantityHistoryRowsExp.length > 0 ? (
+                                                  <div className="rounded-lg overflow-hidden">
+                                                    <table className="w-full text-left border-collapse text-sm">
+                                                      <thead>
+                                                        <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
+                                                          <th className="pl-6 pr-4 py-3 text-sm font-medium">Дата</th>
+                                                          <th className="px-4 py-3 text-sm font-medium">Тип операции</th>
+                                                          <th className="px-4 py-3 text-sm font-medium text-right">Количество</th>
+                                                          <th className="px-4 py-3 text-sm font-medium text-right">Цена</th>
+                                                          <th className="px-4 py-3 text-sm font-medium text-right">Стоимость</th>
+                                                          <th className="px-6 py-3 text-sm font-medium text-right">Количество после операции</th>
+                                                        </tr>
+                                                      </thead>
+                                                      <tbody>
+                                                        {quantityHistoryRowsExp.map(({ tx, type, delta, balanceAfter, priceCents, costCents }) => {
+                                                          const dateStr = tx.transaction_date ? new Date(tx.transaction_date.replace("T", " ")).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                                                          const amountColor = type === "Покупка" ? GREEN : RED;
+                                                          return (
+                                                            <tr key={tx.id} className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
+                                                              <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{dateStr}</td>
+                                                              <td className="px-4 py-2 text-sm" style={{ color: amountColor }}>{type}</td>
+                                                              <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: amountColor }}>{delta > 0 ? `+${delta}` : delta}</td>
+                                                              <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{priceCents != null ? formatAmount(priceCents) : "—"}</td>
+                                                              <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(costCents)}</td>
+                                                              <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(balanceAfter)}</td>
+                                                            </tr>
+                                                          );
+                                                        })}
+                                                      </tbody>
+                                                    </table>
+                                                  </div>
+                                                ) : quantityHistoryRowsExp.length === 0 && isMarketOrCryptoExp ? (
+                                                  <p className="text-sm py-2" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи за выбранный период.</p>
+                                                ) : (
                                         <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                                           <tbody>
                                             {txsInRange.map(({ tx, deltaCents }) => {
@@ -2632,7 +2895,12 @@ export default function AssetsDynamicsPage() {
                                             })}
                                           </tbody>
                                         </table>
-                                        )}
+                                                )}
+                                              </>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
                                         {(() => {
                                           const row0 = dateSnapshotRows[0];
                                           const row1 = dateSnapshotRows.length >= 2 ? dateSnapshotRows[1] : null;
@@ -2641,8 +2909,8 @@ export default function AssetsDynamicsPage() {
                                           const effectiveKind = initialValueCents != null ? resolveItemEffectiveKind(item, initialValueCents) : item.kind;
                                           const initialDisplayRub = initialRubCents != null && effectiveKind === "LIABILITY" ? Math.abs(initialRubCents) : initialRubCents ?? 0;
                                           const initialDisplayCur = initialValueCents != null && effectiveKind === "LIABILITY" ? Math.abs(initialValueCents) : initialValueCents ?? 0;
-                                          const finalValueCents = row1?.itemValues[item.id] ?? initialValueCents;
-                                          const finalRubCents = row1?.itemRubValues[item.id] ?? initialRubCents;
+                                          const finalValueCents = row1 != null ? (row1.itemValues[item.id] ?? initialValueCents) : initialValueCents;
+                                          const finalRubCents = row1 != null ? (row1.itemRubValues[item.id] ?? initialRubCents) : initialRubCents;
                                           const finalDisplayRub = finalRubCents != null && effectiveKind === "LIABILITY" ? Math.abs(finalRubCents) : finalRubCents ?? 0;
                                           const finalDisplayCur = finalValueCents != null && effectiveKind === "LIABILITY" ? Math.abs(finalValueCents) : finalValueCents ?? 0;
                                           let totalIncomeRub = 0;
@@ -2668,14 +2936,46 @@ export default function AssetsDynamicsPage() {
                                               }
                                             }
                                           });
+                                          const isMarketOrCryptoSummary = isMoexItem(item) || isCryptoItem(item);
+                                          let totalBuyQty = 0;
+                                          let totalSellQty = 0;
+                                          if (isMarketOrCryptoSummary) {
+                                            const isCryptoQ = isCryptoItem(item);
+                                            const getTxQty = (tx: TransactionOut) => {
+                                              if (tx.related_item_id === item.id) return isCryptoQ ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+                                              if (tx.counterparty_item_id === item.id || tx.counterparty_card_item_id === item.id) return isCryptoQ ? (tx.counterparty_quantity_units ?? 0) : (tx.counterparty_quantity_lots ?? 0);
+                                              if (tx.primary_item_id === item.id || tx.primary_card_item_id === item.id) return isCryptoQ ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+                                              return 0;
+                                            };
+                                            const getIsBuy = (tx: TransactionOut) => {
+                                              if (tx.related_item_id === item.id) return tx.asset_link_type === "ASSET_PURCHASE";
+                                              if (tx.counterparty_item_id === item.id || tx.counterparty_card_item_id === item.id) return true;
+                                              return false;
+                                            };
+                                            txsInRange.forEach(({ tx }) => {
+                                              const qty = getTxQty(tx);
+                                              if (getIsBuy(tx)) totalBuyQty += qty; else totalSellQty += qty;
+                                            });
+                                          }
                                           const signedInitialRub = initialRubCents != null && effectiveKind === "LIABILITY" ? -initialRubCents : initialRubCents ?? 0;
                                           const signedFinalRub = finalRubCents != null && effectiveKind === "LIABILITY" ? -finalRubCents : finalRubCents ?? 0;
                                           const courseDiffRub = currencyCode !== "RUB" ? (signedFinalRub - signedInitialRub) - netFlowRub : 0;
+                                          const profitLossFromPriceRub = signedFinalRub - signedInitialRub - netFlowRub;
                                           const formatCur = (v: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
-                                          const SummaryBlock = ({ title, curVal, rubVal, amountColor, showCurRow = true }: { title: string; curVal: number | null; rubVal: number; amountColor?: string; showCurRow?: boolean }) => (
+                                          const SummaryBlock = ({ title, qtyVal, curVal, rubVal, amountColor, showCurRow = true, showQtyRow = true, showEmptyQtyRow = false }: { title: string; qtyVal?: number | null; curVal: number | null; rubVal: number; amountColor?: string; showCurRow?: boolean; showQtyRow?: boolean; showEmptyQtyRow?: boolean }) => (
                                             <div className="flex flex-1 min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
                                               <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
                                               <div className="flex flex-col gap-2">
+                                                {showEmptyQtyRow && (
+                                                  <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden>
+                                                    <span className="invisible select-none">0</span>
+                                                  </div>
+                                                )}
+                                                {showQtyRow && qtyVal != null && (
+                                                  <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                                                    <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{isCryptoItem(item) ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(qtyVal) : new Intl.NumberFormat("ru-RU").format(qtyVal) + (isMoexItem(item) ? " л." : "")}</span>
+                                                  </div>
+                                                )}
                                                 {currencyCode !== "RUB" && (
                                                   showCurRow ? (
                                                     <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
@@ -2697,16 +2997,29 @@ export default function AssetsDynamicsPage() {
                                           );
                                           const dateStartLabel = dateStart ? formatDateLabel(dateStart) : "";
                                           const dateEndLabel = dateEnd ? formatDateLabel(dateEnd) : dateStartLabel;
+                                          const qtyStart = dateSnapshotRows[0]?.itemQuantities?.[item.id] ?? null;
+                                          const qtyEnd = dateSnapshotRows.length >= 2 ? (dateSnapshotRows[1]?.itemQuantities?.[item.id] ?? null) : null;
+                                          const rateEnd = dateEnd && currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, dateEnd, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
+                                          const profitLossFromPriceCur = currencyCode !== "RUB" && rateEnd != null ? profitLossFromPriceRub / 100 / rateEnd : null;
+                                          const showPriceChangeBlock = currencyCode !== "RUB" || isMarketOrCryptoSummary;
                                           return (
-                                            <div className="flex w-full gap-4 mt-4">
-                                              <SummaryBlock title={`На ${dateStartLabel}`} curVal={currencyCode !== "RUB" ? initialDisplayCur / 100 : null} rubVal={initialDisplayRub} />
-                                              {currencyCode !== "RUB" && (
-                                                <SummaryBlock title="Курсовая разница" curVal={null} rubVal={courseDiffRub} showCurRow={false} />
+                                            <div className="flex w-full gap-4 mt-4 flex-wrap">
+                                              <SummaryBlock title={`На конец ${dateStartLabel}`} qtyVal={isMarketOrCryptoSummary ? qtyStart : undefined} curVal={currencyCode !== "RUB" ? (initialDisplayCur / 100) : null} rubVal={initialDisplayRub} showQtyRow={isMarketOrCryptoSummary} />
+                                              {showPriceChangeBlock && (
+                                                <SummaryBlock
+                                                  title="Изменение цены"
+                                                  qtyVal={undefined}
+                                                  curVal={currencyCode !== "RUB" ? profitLossFromPriceCur : null}
+                                                  rubVal={currencyCode !== "RUB" ? courseDiffRub : profitLossFromPriceRub}
+                                                  amountColor={profitLossFromPriceRub >= 0 ? GREEN : RED}
+                                                  showCurRow={currencyCode !== "RUB"}
+                                                  showQtyRow={false}
+                                                  showEmptyQtyRow={isMarketOrCryptoSummary}
+                                                />
                                               )}
-                                              <SummaryBlock title="Приход" curVal={currencyCode !== "RUB" ? totalIncomeCur : null} rubVal={totalIncomeRub} amountColor={GREEN} />
-                                              <SummaryBlock title="Расход" curVal={currencyCode !== "RUB" ? -totalExpenseCur : null} rubVal={-totalExpenseRub} amountColor={RED} />
-                                              <SummaryBlock title="Переводы" curVal={currencyCode !== "RUB" ? totalTransferCur : null} rubVal={totalTransferRub} />
-                                              <SummaryBlock title={`На ${dateEndLabel}`} curVal={currencyCode !== "RUB" ? finalDisplayCur / 100 : null} rubVal={finalDisplayRub} />
+                                              <SummaryBlock title="Куплено" qtyVal={isMarketOrCryptoSummary ? totalBuyQty : undefined} curVal={currencyCode !== "RUB" ? totalIncomeCur : null} rubVal={totalIncomeRub} amountColor={GREEN} showQtyRow={isMarketOrCryptoSummary} />
+                                              <SummaryBlock title="Продано" qtyVal={isMarketOrCryptoSummary ? totalSellQty : undefined} curVal={currencyCode !== "RUB" ? -totalExpenseCur : null} rubVal={-totalExpenseRub} amountColor={RED} showQtyRow={isMarketOrCryptoSummary} />
+                                              <SummaryBlock title={`На конец ${dateEndLabel}`} qtyVal={isMarketOrCryptoSummary ? qtyEnd : undefined} curVal={currencyCode !== "RUB" ? (finalDisplayCur / 100) : null} rubVal={finalDisplayRub} showQtyRow={isMarketOrCryptoSummary} />
                                             </div>
                                           );
                                         })()}

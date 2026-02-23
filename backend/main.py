@@ -11,7 +11,7 @@ from io import BytesIO
 from PIL import Image
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, delete, func, or_, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, ProgrammingError
 
 from db import get_db
 from models import (
@@ -61,12 +61,13 @@ from categories import router as categories_router
 from goals import router as goals_router
 from counterparties import router as counterparties_router
 from receipts import router as receipts_router
-from market import router as market_router, resolve_market_instrument
+from coingecko import get_market_chart_range, get_simple_price
+from market import router as market_router, resolve_coingecko_instrument, resolve_market_instrument
 from onboarding import router as onboarding_router
 from telegram_router import router as telegram_router
 from tg_bot.bot import run_bot as telegram_run_bot, stop_bot as telegram_stop_bot
 from tg_bot.scheduler import start_scheduler as telegram_start_scheduler, stop_scheduler as telegram_stop_scheduler
-from market_utils import is_moex_item, is_moex_type
+from market_utils import CRYPTO_BOARD_ID, is_crypto_item, is_crypto_type, is_moex_item, is_moex_type
 from item_plan_service import (
     create_item_chains,
     delete_auto_chains,
@@ -424,6 +425,22 @@ def _get_latest_item_market_value_rub(
     return row.value_rub if row else None
 
 
+def _get_market_price_usd_cents(db: Session, price: MarketPrice) -> int | None:
+    """Читает price_usd_cents из market_prices по id (колонка может отсутствовать до миграции).
+    Используется savepoint, чтобы при ошибке (нет колонки) не прерывать основную транзакцию."""
+    savepoint = db.begin_nested()
+    try:
+        row = db.execute(
+            text("SELECT price_usd_cents FROM market_prices WHERE id = :id"),
+            {"id": price.id},
+        ).fetchone()
+        savepoint.commit()
+        return int(row[0]) if row and row[0] is not None else None
+    except Exception:
+        savepoint.rollback()
+        return None
+
+
 def _compute_market_value_rub(
     item: Item,
     price: MarketPrice | None,
@@ -431,6 +448,14 @@ def _compute_market_value_rub(
 ) -> int | None:
     if not price:
         return None
+    if item.type_code == "crypto" and item.quantity_units is not None:
+        # Для крипты возвращаем стоимость в центах USD (валюта актива), не в рублях
+        price_usd_cents = _get_market_price_usd_cents(db, price)
+        if price_usd_cents is not None:
+            return int(round(float(item.quantity_units) * price_usd_cents))
+        if price.price_cents is None:
+            return None
+        return int(round(float(item.quantity_units) * price.price_cents))
     if item.position_lots is None:
         return None
     lot_size = item.lot_size or 1
@@ -877,17 +902,42 @@ def list_items(
     stmt = stmt.order_by(Item.created_at.desc())
     items = list(db.execute(stmt).scalars())
     for item in items:
-        if not is_moex_item(item):
+        if not (is_moex_item(item) or is_crypto_item(item)):
             continue
-        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
-        value = _compute_market_value_rub(item, price, db)
-        if value is not None:
-            setattr(item, "latest_market_value_rub", value)
+        try:
+            price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+            value = _compute_market_value_rub(item, price, db)
+            if value is not None:
+                if is_crypto_item(item) and (item.currency_code or "RUB").upper() != "RUB":
+                    # Крипта: value может быть в центах USD (если есть price_usd_cents) или в рублях (fallback)
+                    usd_cents = _get_market_price_usd_cents(db, price) if price else None
+                    if usd_cents is not None:
+                        setattr(item, "latest_market_value_currency_cents", value)
+                        rate = _get_fx_rate_for_date(date_type.today(), (item.currency_code or "USD").upper(), db)
+                        if rate is not None:
+                            setattr(item, "latest_market_value_rub", int(round((value / 100) * rate * 100)))
+                        else:
+                            setattr(item, "latest_market_value_rub", None)
+                    else:
+                        setattr(item, "latest_market_value_rub", value)
+                        rate = _get_fx_rate_for_date(date_type.today(), (item.currency_code or "USD").upper(), db)
+                        if rate is not None and rate > 0:
+                            setattr(item, "latest_market_value_currency_cents", int(round(value / rate)))
+                        else:
+                            setattr(item, "latest_market_value_currency_cents", None)
+                else:
+                    setattr(item, "latest_market_value_rub", value)
+        except Exception:
+            pass
     for item in items:
-        if not is_moex_item(item):
+        if not is_moex_item(item) and not is_crypto_item(item):
             setattr(item, "latest_market_value_rub", None)
     for item in items:
-        if getattr(item, "primary_value_kind", None) == "MARKET" and not is_moex_item(item):
+        if (
+            getattr(item, "primary_value_kind", None) == "MARKET"
+            and not is_moex_item(item)
+            and not is_crypto_item(item)
+        ):
             latest = _get_latest_item_market_value_rub(db, item.id, user.id)
             if latest is not None:
                 setattr(item, "latest_market_value_rub", latest)
@@ -944,11 +994,31 @@ def get_item(
     item = db.execute(stmt).scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    if is_moex_item(item):
-        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
-        value = _compute_market_value_rub(item, price, db)
-        if value is not None:
-            setattr(item, "latest_market_value_rub", value)
+    if is_moex_item(item) or is_crypto_item(item):
+        try:
+            price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+            value = _compute_market_value_rub(item, price, db)
+            if value is not None:
+                if is_crypto_item(item) and (item.currency_code or "RUB").upper() != "RUB":
+                    usd_cents = _get_market_price_usd_cents(db, price) if price else None
+                    if usd_cents is not None:
+                        setattr(item, "latest_market_value_currency_cents", value)
+                        rate = _get_fx_rate_for_date(date_type.today(), (item.currency_code or "USD").upper(), db)
+                        if rate is not None:
+                            setattr(item, "latest_market_value_rub", int(round((value / 100) * rate * 100)))
+                        else:
+                            setattr(item, "latest_market_value_rub", None)
+                    else:
+                        setattr(item, "latest_market_value_rub", value)
+                        rate = _get_fx_rate_for_date(date_type.today(), (item.currency_code or "USD").upper(), db)
+                        if rate is not None and rate > 0:
+                            setattr(item, "latest_market_value_currency_cents", int(round(value / rate)))
+                        else:
+                            setattr(item, "latest_market_value_currency_cents", None)
+                else:
+                    setattr(item, "latest_market_value_rub", value)
+        except Exception:
+            pass
     elif getattr(item, "primary_value_kind", None) == "MARKET":
         latest = _get_latest_item_market_value_rub(db, item.id, user.id)
         if latest is not None:
@@ -1065,11 +1135,13 @@ def create_item(
         )
     accounting_start_date = _ensure_accounting_start_date(user)
     is_moex = is_moex_type(payload.type_code)
+    is_crypto = is_crypto_type(payload.type_code)
     instrument_id = None
     instrument_board_id = None
     position_lots = None
     lot_size = None
     face_value_cents = None
+    quantity_units = None
     currency_code = payload.currency_code
 
     if is_moex:
@@ -1092,13 +1164,40 @@ def create_item(
         if instrument.currency_code and instrument.currency_code != payload.currency_code:
             raise HTTPException(status_code=400, detail="instrument currency must match item currency")
         currency_code = instrument.currency_code or payload.currency_code
+    elif is_crypto:
+        if not payload.instrument_id:
+            raise HTTPException(status_code=400, detail="instrument_id is required for crypto items")
+        if payload.quantity_units is None or payload.quantity_units < 0:
+            raise HTTPException(status_code=400, detail="quantity_units is required for crypto items and must be >= 0")
+        try:
+            instrument, boards, details = resolve_coingecko_instrument(db, payload.instrument_id)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        instrument_id = instrument.secid
+        instrument_board_id = CRYPTO_BOARD_ID
+        quantity_units = payload.quantity_units
+        if payload.position_lots is not None:
+            raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
+        if (
+            payload.commission_enabled is not None
+            or payload.commission_amount_rub is not None
+            or payload.commission_payment_item_id is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="commission fields are only allowed for MOEX items",
+            )
     else:
         if payload.instrument_id is not None:
-            raise HTTPException(status_code=400, detail="instrument_id is only allowed for MOEX items")
+            raise HTTPException(status_code=400, detail="instrument_id is only allowed for MOEX or crypto items")
         if payload.instrument_board_id is not None:
             raise HTTPException(status_code=400, detail="instrument_board_id is only allowed for MOEX items")
         if payload.position_lots is not None:
             raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
+        if payload.quantity_units is not None:
+            raise HTTPException(status_code=400, detail="quantity_units is only allowed for crypto items")
         if payload.opening_price_cents is not None:
             raise HTTPException(status_code=400, detail="opening_price_cents is only allowed for MOEX items")
         if (
@@ -1156,16 +1255,21 @@ def create_item(
     history_status = _resolve_history_status(payload.open_date, accounting_start_date)
     opening_quantity_lots = payload.position_lots if is_moex else None
     has_opening_value = (
-        opening_quantity_lots is not None and opening_quantity_lots > 0
+        (opening_quantity_lots is not None and opening_quantity_lots > 0)
         if is_moex
+        else (quantity_units is not None and quantity_units > 0)
+        if is_crypto
         else payload.initial_value_rub > 0
     )
-    opening_price_cents = payload.opening_price_cents if is_moex else None
-    # У рыночных (MOEX) активов нет начальной балансовой стоимости — учитывается только рыночная
-    initial_value_rub_for_item = 0 if is_moex else payload.initial_value_rub
+    opening_price_cents = payload.opening_price_cents if (is_moex or is_crypto) else None
+    # У рыночных (MOEX/crypto) активов нет начальной балансовой стоимости — учитывается только рыночная
+    initial_value_rub_for_item = 0 if (is_moex or is_crypto) else payload.initial_value_rub
     opening_amount_rub = payload.initial_value_rub
     if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
+    elif is_crypto and opening_price_cents is not None and quantity_units is not None and quantity_units > 0:
+        # Сумма расхода в USD (центы): Количество × Цена (USD). Транзакция не переводится в рубли.
+        opening_amount_rub = int(quantity_units * opening_price_cents)
     commission_requested = (
         payload.commission_enabled is not None
         or payload.commission_amount_rub is not None
@@ -1269,6 +1373,9 @@ def create_item(
         else position_lots,
         lot_size=lot_size,
         face_value_cents=face_value_cents,
+        quantity_units=0
+        if is_crypto and history_status == "NEW" and has_opening_value
+        else quantity_units,
         initial_value_rub=initial_value_rub_for_item,
         current_value_rub=initial_current_value_rub,
         start_date=accounting_start_date,
@@ -1293,10 +1400,11 @@ def create_item(
             counterparty=opening_counterparty,
             amount_rub=opening_amount_rub,
             quantity_lots=opening_quantity_lots,
+            quantity_units=quantity_units,
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
         )
-        # position_lots уже обновляется в create_opening_transactions через _apply_position_delta
+        # position_lots/quantity_units обновляются в create_opening_transactions через _apply_position_delta/_apply_quantity_units_delta
 
     if commission_requested and commission_enabled and commission_payment_item:
         instrument_label = item.instrument_id or item.name
@@ -1312,12 +1420,15 @@ def create_item(
             instrument_label=instrument_label,
         )
 
-    # Для рыночных активов баланс (current_value_rub) не подставляем — только транзакции
-    if is_moex and item.instrument_id:
-        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
-        value = _compute_market_value_rub(item, price, db)
-        if value is not None:
-            setattr(item, "latest_market_value_rub", value)
+    # Для рыночных активов (MOEX/crypto) подставляем latest_market_value_rub по текущей цене
+    if (is_moex or is_crypto) and item.instrument_id:
+        try:
+            price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+            value = _compute_market_value_rub(item, price, db)
+            if value is not None:
+                setattr(item, "latest_market_value_rub", value)
+        except Exception:
+            pass
 
     db.commit()
     db.refresh(item)
@@ -1350,11 +1461,13 @@ def update_item(
     old_signature = plan_signature(item, existing_settings)
     was_plan_enabled = existing_settings.enabled if existing_settings else False
     is_moex = is_moex_type(payload.type_code)
+    is_crypto = is_crypto_type(payload.type_code)
     instrument_id = None
     instrument_board_id = None
     position_lots = None
     lot_size = None
     face_value_cents = None
+    quantity_units = None
     currency_code = payload.currency_code
 
     if is_moex:
@@ -1377,13 +1490,31 @@ def update_item(
         if instrument.currency_code and instrument.currency_code != payload.currency_code:
             raise HTTPException(status_code=400, detail="instrument currency must match item currency")
         currency_code = instrument.currency_code or payload.currency_code
+    elif is_crypto:
+        if not payload.instrument_id:
+            raise HTTPException(status_code=400, detail="instrument_id is required for crypto items")
+        if payload.quantity_units is None or payload.quantity_units < 0:
+            raise HTTPException(status_code=400, detail="quantity_units is required for crypto items and must be >= 0")
+        try:
+            instrument, boards, details = resolve_coingecko_instrument(db, payload.instrument_id)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        instrument_id = instrument.secid
+        instrument_board_id = CRYPTO_BOARD_ID
+        quantity_units = payload.quantity_units
+        if payload.position_lots is not None:
+            raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
     else:
         if payload.instrument_id is not None:
-            raise HTTPException(status_code=400, detail="instrument_id is only allowed for MOEX items")
+            raise HTTPException(status_code=400, detail="instrument_id is only allowed for MOEX or crypto items")
         if payload.instrument_board_id is not None:
             raise HTTPException(status_code=400, detail="instrument_board_id is only allowed for MOEX items")
         if payload.position_lots is not None:
             raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
+        if payload.quantity_units is not None:
+            raise HTTPException(status_code=400, detail="quantity_units is only allowed for crypto items")
 
     counterparty_id = None
     if payload.counterparty_id is not None:
@@ -1437,7 +1568,8 @@ def update_item(
 
     changing_instrument = instrument_id != item.instrument_id
     changing_position = position_lots is not None and position_lots != item.position_lots
-    if changing_instrument or changing_position:
+    changing_quantity_units = quantity_units is not None and quantity_units != (item.quantity_units if item.quantity_units is not None else None)
+    if changing_instrument or changing_position or (is_crypto and changing_quantity_units):
         tx_exists = (
             db.query(Transaction.id)
             .filter(
@@ -1455,7 +1587,7 @@ def update_item(
         if tx_exists:
             raise HTTPException(
                 status_code=409,
-                detail="MOEX instrument/position can only be changed via transactions.",
+                detail="MOEX/crypto instrument or quantity can only be changed via transactions.",
             )
 
     card_kind, credit_limit, item_kind = _resolve_card_kind_and_limit(
@@ -1481,14 +1613,18 @@ def update_item(
     new_history_status = _resolve_history_status(payload.open_date, accounting_start_date)
     opening_quantity_lots = payload.position_lots if is_moex else None
     has_opening_value = (
-        opening_quantity_lots is not None and opening_quantity_lots > 0
+        (opening_quantity_lots is not None and opening_quantity_lots > 0)
         if is_moex
+        else (quantity_units is not None and quantity_units > 0)
+        if is_crypto
         else payload.initial_value_rub > 0
     )
-    opening_price_cents = payload.opening_price_cents if is_moex else None
+    opening_price_cents = payload.opening_price_cents if (is_moex or is_crypto) else None
     opening_amount_rub = payload.initial_value_rub
     if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
+    elif is_crypto and opening_price_cents is not None and quantity_units is not None and quantity_units > 0:
+        opening_amount_rub = int(quantity_units * opening_price_cents)
     commission_requested = (
         payload.commission_enabled is not None
         or payload.commission_amount_rub is not None
@@ -1541,8 +1677,10 @@ def update_item(
 
     open_date_changed = payload.open_date != item.open_date
     amount_changed = (
-        opening_quantity_lots != item.position_lots
+        (opening_quantity_lots != item.position_lots)
         if is_moex
+        else (quantity_units != (item.quantity_units if item.quantity_units is not None else None))
+        if is_crypto
         else payload.initial_value_rub != item.initial_value_rub
     )
     opening_counterparty_changed = (
@@ -1605,15 +1743,16 @@ def update_item(
     item.instrument_id = instrument_id
     item.instrument_board_id = instrument_board_id
     if not (
-        is_moex
+        (is_moex or is_crypto)
         and new_history_status == "NEW"
         and has_opening_value
         and should_rebuild_opening
     ):
         item.position_lots = position_lots
+        item.quantity_units = quantity_units
     item.lot_size = lot_size
     item.face_value_cents = face_value_cents
-    item.initial_value_rub = 0 if is_moex else payload.initial_value_rub
+    item.initial_value_rub = 0 if (is_moex or is_crypto) else payload.initial_value_rub
     item.current_value_rub = next_current_value
     item.start_date = accounting_start_date
     item.history_status = new_history_status
@@ -1642,6 +1781,7 @@ def update_item(
             counterparty=opening_counterparty,
             amount_rub=opening_amount_rub,
             quantity_lots=opening_quantity_lots,
+            quantity_units=quantity_units,
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
         )
@@ -1660,12 +1800,15 @@ def update_item(
             instrument_label=instrument_label,
         )
 
-    # Для рыночных активов баланс не подставляем — только транзакции
-    if is_moex and item.instrument_id:
-        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
-        value = _compute_market_value_rub(item, price, db)
-        if value is not None:
-            setattr(item, "latest_market_value_rub", value)
+    # Для рыночных активов (MOEX/crypto) подставляем latest_market_value_rub
+    if (is_moex or is_crypto) and item.instrument_id:
+        try:
+            price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+            value = _compute_market_value_rub(item, price, db)
+            if value is not None:
+                setattr(item, "latest_market_value_rub", value)
+        except Exception:
+            pass
 
     db.commit()
     db.refresh(item)
@@ -1913,6 +2056,78 @@ def close_item(
     return item
 
 
+def _compute_acquisition_cost_basis(
+    db: Session,
+    user_id: int,
+    item_id: int,
+    item: Item,
+    up_to_date: date_type | None = None,
+) -> int:
+    """Стоимость приобретения текущего количества (остаток базы после продаж, метод средневзвешенной).
+    Для MOEX использует primary_quantity_lots, для crypto — primary_quantity_units.
+    Если up_to_date задана, учитываются только транзакции с датой <= up_to_date (для истории по датам).
+    """
+    if not (is_moex_item(item) or is_crypto_item(item)):
+        # Для прочих активов — простая сумма покупок (без replay продаж)
+        q = (
+            db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.related_item_id == item_id,
+                Transaction.asset_link_type == "ASSET_PURCHASE",
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+            )
+        )
+        if up_to_date is not None:
+            q = q.filter(Transaction.transaction_date <= up_to_date)
+        return int(q.scalar() or 0)
+
+    txs = (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.related_item_id == item_id,
+            Transaction.asset_link_type.in_(["ASSET_PURCHASE", "ASSET_SALE"]),
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+        )
+    )
+    if is_moex_item(item):
+        txs = txs.filter(Transaction.primary_quantity_lots.isnot(None))
+    else:
+        txs = txs.filter(Transaction.primary_quantity_units.isnot(None))
+    if up_to_date is not None:
+        txs = txs.filter(Transaction.transaction_date <= up_to_date)
+    txs = txs.order_by(Transaction.transaction_date.asc(), Transaction.id.asc()).all()
+
+    cost_basis: int = 0
+    running_qty: int | float = 0
+
+    for tx in txs:
+        if tx.asset_link_type == "ASSET_PURCHASE":
+            cost_basis += tx.amount_rub or 0
+            if is_moex_item(item):
+                running_qty += tx.primary_quantity_lots or 0
+            else:
+                running_qty += float(tx.primary_quantity_units or 0)
+        else:
+            # ASSET_SALE
+            if is_moex_item(item):
+                qty_sold = tx.primary_quantity_lots or 0
+            else:
+                qty_sold = float(tx.primary_quantity_units or 0)
+            if running_qty > 0 and qty_sold > 0:
+                avg_price = cost_basis / running_qty
+                cost_of_sold = qty_sold * avg_price
+                cost_basis = int(round(cost_basis - cost_of_sold))
+                running_qty -= qty_sold
+            elif qty_sold > 0:
+                running_qty -= qty_sold
+
+    return max(0, cost_basis)
+
+
 @app.get("/items/{item_id}/costs", response_model=ItemCostsOut)
 def get_item_costs(
     item_id: int,
@@ -1923,18 +2138,7 @@ def get_item_costs(
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
     balance_rub = item.current_value_rub
-    acquisition_rub = (
-        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
-        .filter(
-            Transaction.user_id == user.id,
-            Transaction.related_item_id == item_id,
-            Transaction.asset_link_type == "ASSET_PURCHASE",
-            Transaction.transaction_type == "ACTUAL",
-            Transaction.deleted_at.is_(None),
-        )
-        .scalar()
-        or 0
-    )
+    acquisition_rub = _compute_acquisition_cost_basis(db, user.id, item_id, item)
     investment_sum = (
         db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
         .filter(
@@ -1949,11 +2153,26 @@ def get_item_costs(
     )
     invested_rub = acquisition_rub + investment_sum
     market_rub = None
-    if is_moex_item(item) and item.instrument_id and item.instrument_board_id:
-        price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
-        if price:
-            market_rub = _compute_market_value_rub(item, price, db)
-    else:
+    if (is_moex_item(item) or is_crypto_item(item)) and item.instrument_id and item.instrument_board_id:
+        try:
+            price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
+            if price:
+                if is_crypto_item(item) and _get_market_price_usd_cents(db, price) is None:
+                    # Старые записи без price_usd_cents: подставляем текущую цену в USD для корректного отображения
+                    try:
+                        prices = get_simple_price([item.instrument_id], vs_currencies="usd")
+                        data = prices.get(item.instrument_id) if isinstance(prices.get(item.instrument_id), dict) else None
+                        usd_val = data.get("usd") if data else None
+                        if usd_val is not None and isinstance(usd_val, (int, float)):
+                            price_usd_cents = int(round(float(usd_val) * 100))
+                            market_rub = int(round(float(item.quantity_units or 0) * price_usd_cents))
+                    except Exception:
+                        market_rub = _compute_market_value_rub(item, price, db)
+                else:
+                    market_rub = _compute_market_value_rub(item, price, db)
+        except Exception:
+            pass
+    if market_rub is None:
         latest = (
             db.query(ItemMarketValue)
             .filter(
@@ -1967,6 +2186,19 @@ def get_item_costs(
         )
         if latest:
             market_rub = latest.value_rub
+    # Эквивалент рыночной стоимости в рублях: для валюты != RUB пересчитываем по курсу
+    market_value_rub: int | None = None
+    if market_rub is not None:
+        item_currency = (item.currency_code or "RUB").upper()
+        if item_currency == "RUB":
+            market_value_rub = market_rub
+        else:
+            rate = _get_fx_rate_for_date(date_type.today(), item_currency, db)
+            if rate is not None:
+                # market_rub в наименьших единицах валюты (центы USD и т.д.)
+                market_value_rub = int(round((market_rub / 100) * rate * 100))
+            else:
+                market_value_rub = market_rub  # fallback: показываем как есть
     income_rub = (
         db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
         .filter(
@@ -1996,6 +2228,7 @@ def get_item_costs(
         acquisition_rub=acquisition_rub,
         invested_rub=invested_rub,
         market_rub=market_rub,
+        market_value_rub=market_value_rub,
         income_rub=income_rub,
         expense_rub=expense_rub,
     )
@@ -2127,6 +2360,39 @@ def _build_item_cost_history(
         )
         lot_initial = current_lots - total_delta
 
+    # For crypto: replay primary_quantity_units to get quantity_units per date
+    crypto_units_txs = []
+    units_initial: float = 0.0
+    crypto_chart_prices: dict[str, float] = {}
+    if is_crypto_item(item) and item.instrument_id:
+        crypto_units_txs = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.related_item_id == item_id,
+                Transaction.asset_link_type.in_(["ASSET_PURCHASE", "ASSET_SALE"]),
+                Transaction.primary_quantity_units.isnot(None),
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+            )
+            .order_by(Transaction.transaction_date.asc())
+            .all()
+        )
+        current_units = float(item.quantity_units or 0)
+        total_units_delta = sum(
+            (float(tx.primary_quantity_units or 0) if tx.asset_link_type == "ASSET_PURCHASE" else -float(tx.primary_quantity_units or 0))
+            for tx in crypto_units_txs
+        )
+        units_initial = current_units - total_units_delta
+        try:
+            # Для крипты берём цены в USD, чтобы рыночная стоимость в истории была в валюте актива
+            chart_data = get_market_chart_range(
+                item.instrument_id, start, date_to, vs_currency="usd" if is_crypto_item(item) else "rub"
+            )
+            crypto_chart_prices = {d.isoformat(): p for d, p in chart_data}
+        except Exception:
+            pass
+
     result = []
     # Если есть транзакция открытия, начальный баланс уже учтён в ней — не дублируем initial_value_rub
     balance_cumul = (
@@ -2137,6 +2403,8 @@ def _build_item_cost_history(
     balance_tx_index = 0
     lot_balance = lot_initial
     lot_tx_index = 0
+    units_balance = units_initial
+    units_tx_index = 0
     for d_str in dates:
         d = date_type.fromisoformat(d_str)
         while balance_tx_index < len(balance_txs):
@@ -2156,7 +2424,20 @@ def _build_item_cost_history(
             lot_balance += delta
             lot_tx_index += 1
 
-        acq_rub = sum(amount for (td, amount) in acq_txs if (td.date() if hasattr(td, "date") else td) <= d)
+        while units_tx_index < len(crypto_units_txs):
+            tx = crypto_units_txs[units_tx_index]
+            tx_d = tx.transaction_date.date() if hasattr(tx.transaction_date, "date") else tx.transaction_date
+            if tx_d > d:
+                break
+            delta = (float(tx.primary_quantity_units or 0) if tx.asset_link_type == "ASSET_PURCHASE" else -float(tx.primary_quantity_units or 0))
+            units_balance += delta
+            units_tx_index += 1
+
+        acq_rub = (
+            _compute_acquisition_cost_basis(db, user_id, item_id, item, up_to_date=d)
+            if (is_moex_item(item) or is_crypto_item(item))
+            else sum(amount for (td, amount) in acq_txs if (td.date() if hasattr(td, "date") else td) <= d)
+        )
         inv_extra = sum(amount for (td, amount) in inv_txs if (td.date() if hasattr(td, "date") else td) <= d)
         invested_rub = acq_rub + inv_extra
 
@@ -2180,7 +2461,20 @@ def _build_item_cost_history(
                 if units > 0 and market_rub is not None:
                     market_quantity_units = units
                     market_price_rub = market_rub // units
-        else:
+        elif is_crypto_item(item) and item.instrument_id and units_balance >= 0:
+            # Для крипты crypto_chart_prices в USD (см. vs_currency выше); считаем в центах USD
+            price_in_currency = crypto_chart_prices.get(d_str)
+            if price_in_currency is None and crypto_chart_prices:
+                sorted_dates = sorted(crypto_chart_prices.keys())
+                for m_date in reversed(sorted_dates):
+                    if m_date <= d_str:
+                        price_in_currency = crypto_chart_prices[m_date]
+                        break
+            if price_in_currency is not None and price_in_currency > 0:
+                market_rub = int(round(units_balance * price_in_currency * 100))
+                market_quantity_units = units_balance
+                market_price_rub = int(round(price_in_currency * 100))
+        if market_rub is None:
             for m_date in reversed(market_sorted_dates):
                 if m_date <= d_str:
                     market_rub = market_by_date[m_date]

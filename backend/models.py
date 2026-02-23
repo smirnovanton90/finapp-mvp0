@@ -195,6 +195,7 @@ class MarketPrice(Base):
     price_date: Mapped[date] = mapped_column(Date, nullable=False)
     price_time: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
     price_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # price_usd_cents не маппим в ORM, чтобы не ломать запросы при неприменённой миграции; читаем/пишем при необходимости через raw SQL
     price_percent_bp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     accint_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     yield_bp: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -397,6 +398,7 @@ class Item(Base):
     position_lots: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     lot_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     face_value_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    quantity_units: Mapped[float | None] = mapped_column(Numeric(20, 10), nullable=True)
 
     initial_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -472,6 +474,10 @@ class Item(Base):
         CheckConstraint(
             "(position_lots is null) or (position_lots >= 0)",
             name="ck_items_position_lots_non_negative",
+        ),
+        CheckConstraint(
+            "(quantity_units is null) or (quantity_units >= 0)",
+            name="ck_items_quantity_units_non_negative",
         ),
         CheckConstraint(
             "(primary_value_kind is null) or (primary_value_kind in ('BALANCE','ACQUISITION','INVESTED','MARKET'))",
@@ -608,6 +614,7 @@ class Transaction(Base):
     amount_counterparty: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     primary_quantity_lots: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     counterparty_quantity_lots: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    primary_quantity_units: Mapped[float | None] = mapped_column(Numeric(20, 10), nullable=True)
 
     direction: Mapped[str] = mapped_column(String(20), nullable=False)  # INCOME/EXPENSE/TRANSFER
     transaction_type: Mapped[str] = mapped_column(String(20), nullable=False)  # ACTUAL/PLANNED

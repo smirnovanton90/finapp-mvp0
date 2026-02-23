@@ -4,9 +4,19 @@ import { ItemKind, ItemOut, TransactionOut } from "@/lib/api";
  * Возвращает основную стоимость актива в копейках (для отображения по primary_value_kind).
  * Использовать везде: карточки, селекторы, отчёты, дашборд.
  */
+/**
+ * Возвращает основную стоимость актива в копейках (для отображения по primary_value_kind).
+ * Использовать везде: карточки, селекторы, отчёты, дашборд.
+ * Для рыночной крипты в валюте: возвращает значение в валюте (latest_market_value_currency_cents).
+ */
 export function getItemPrimaryValueCents(item: ItemOut): number {
   const kind = item.primary_value_kind ?? "BALANCE";
-  if (kind === "MARKET" && item.latest_market_value_rub != null) return item.latest_market_value_rub;
+  if (kind === "MARKET") {
+    if (item.currency_code && item.currency_code !== "RUB" && item.latest_market_value_currency_cents != null) {
+      return item.latest_market_value_currency_cents;
+    }
+    if (item.latest_market_value_rub != null) return item.latest_market_value_rub;
+  }
   if (kind === "ACQUISITION" && item.acquisition_rub != null) return item.acquisition_rub;
   if (kind === "INVESTED" && item.invested_rub != null) return item.invested_rub;
   return item.current_value_rub;

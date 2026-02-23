@@ -264,8 +264,13 @@ const MOEX_TYPE_CODES = new Set([
 ]);
 function isMoexItem(item?: ItemOut | null) {
   if (!item) return false;
+  if (item.type_code === "crypto") return false;
   if (item.instrument_id) return true;
   return MOEX_TYPE_CODES.has(item.type_code);
+}
+function isCryptoItem(item?: ItemOut | null) {
+  if (!item) return false;
+  return item.type_code === "crypto";
 }
 
 function buildCounterpartyName(counterparty: CounterpartyOut) {
@@ -1066,6 +1071,14 @@ function parseLots(input: string): number {
   const value = Number(cleaned);
   if (!Number.isFinite(value) || !Number.isInteger(value)) return NaN;
   return value;
+}
+
+function parseQuantityUnits(input: string): number {
+  const trimmed = input.trim().replace(/,/, ".");
+  if (!trimmed) return NaN;
+  const cleaned = trimmed.replace(/\s/g, "");
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : NaN;
 }
 
 type ParsedReceiptData = {
@@ -2063,6 +2076,8 @@ function TransactionsView({
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
   const [primaryQuantityLots, setPrimaryQuantityLots] = useState("");
   const [counterpartyQuantityLots, setCounterpartyQuantityLots] = useState("");
+  const [primaryQuantityUnitsStr, setPrimaryQuantityUnitsStr] = useState("");
+  const [counterpartyQuantityUnitsStr, setCounterpartyQuantityUnitsStr] = useState("");
   const [loanTotalStr, setLoanTotalStr] = useState("");
   const [loanInterestStr, setLoanInterestStr] = useState("");
   const [selectedCategoryPath, setSelectedCategoryPath] = useState<{
@@ -2448,6 +2463,8 @@ function TransactionsView({
   const isTransfer = direction === "TRANSFER";
   const primaryIsMoex = isMoexItem(primaryItem);
   const counterpartyIsMoex = isTransfer && isMoexItem(counterpartyItem);
+  const primaryIsCrypto = isCryptoItem(primaryItem);
+  const counterpartyIsCrypto = isTransfer && isCryptoItem(counterpartyItem);
   const isLoanRepayment = formMode === "LOAN_REPAYMENT";
   const isDebts = formMode === "DEBTS";
   const isActualTransaction = formTransactionType === "ACTUAL";
@@ -2533,6 +2550,14 @@ function TransactionsView({
       }
       return;
     }
+    // Для крипты заполняем поле "Количество (единиц)"
+    if (isCryptoItem(item)) {
+      const units = item.quantity_units ?? 0;
+      if (units > 0) {
+        setPrimaryQuantityUnitsStr(String(units));
+      }
+      return;
+    }
 
     // Для обычных активов заполняем поле "Сумма"
     const fullAmount = getFullAmountForTransfer();
@@ -2556,6 +2581,16 @@ function TransactionsView({
     if (isTransfer && counterpartyIsMoex) return;
     if (counterpartyQuantityLots) setCounterpartyQuantityLots("");
   }, [counterpartyIsMoex, counterpartyQuantityLots, isTransfer]);
+
+  useEffect(() => {
+    if (primaryIsCrypto) return;
+    if (primaryQuantityUnitsStr) setPrimaryQuantityUnitsStr("");
+  }, [primaryIsCrypto, primaryQuantityUnitsStr]);
+
+  useEffect(() => {
+    if (isTransfer && counterpartyIsCrypto) return;
+    if (counterpartyQuantityUnitsStr) setCounterpartyQuantityUnitsStr("");
+  }, [counterpartyIsCrypto, counterpartyQuantityUnitsStr, isTransfer]);
 
   const isDialogOpen = dialogMode !== null;
   const isEditMode = dialogMode === "edit";
@@ -2609,6 +2644,8 @@ function TransactionsView({
     setAmountCounterpartyStr("");
     setPrimaryQuantityLots("");
     setCounterpartyQuantityLots("");
+    setPrimaryQuantityUnitsStr("");
+    setCounterpartyQuantityUnitsStr("");
     setLoanTotalStr("");
     setLoanInterestStr("");
     applyCategorySelection("", "", "");
@@ -2988,6 +3025,14 @@ function TransactionsView({
         ? String(tx.counterparty_quantity_lots)
         : ""
     );
+    setPrimaryQuantityUnitsStr(
+      tx.primary_quantity_units != null ? String(tx.primary_quantity_units) : ""
+    );
+    setCounterpartyQuantityUnitsStr(
+      tx.direction === "TRANSFER" && tx.counterparty_quantity_units != null
+        ? String(tx.counterparty_quantity_units)
+        : ""
+    );
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
     setRelatedItemId(tx.related_item_id ?? null);
@@ -3060,6 +3105,14 @@ function TransactionsView({
         ? String(tx.counterparty_quantity_lots)
         : ""
     );
+    setPrimaryQuantityUnitsStr(
+      tx.primary_quantity_units != null ? String(tx.primary_quantity_units) : ""
+    );
+    setCounterpartyQuantityUnitsStr(
+      tx.direction === "TRANSFER" && tx.counterparty_quantity_units != null
+        ? String(tx.counterparty_quantity_units)
+        : ""
+    );
     applyCategorySelectionById(tx.category_id);
     setComment(tx.comment ?? "");
     setRelatedItemId(tx.related_item_id ?? null);
@@ -3100,6 +3153,14 @@ function TransactionsView({
     setCounterpartyQuantityLots(
       tx.direction === "TRANSFER" && tx.counterparty_quantity_lots != null
         ? String(tx.counterparty_quantity_lots)
+        : ""
+    );
+    setPrimaryQuantityUnitsStr(
+      tx.primary_quantity_units != null ? String(tx.primary_quantity_units) : ""
+    );
+    setCounterpartyQuantityUnitsStr(
+      tx.direction === "TRANSFER" && tx.counterparty_quantity_units != null
+        ? String(tx.counterparty_quantity_units)
         : ""
     );
     applyCategorySelectionById(tx.category_id);
@@ -3439,12 +3500,22 @@ function TransactionsView({
             ? changes.hasPrimaryQuantityLotsChanged
               ? parseLots(primaryQuantityLots)
               : tx.primary_quantity_lots ?? 0
-            : null;
+            : (tx.asset_link_type === "ASSET_PURCHASE" ||
+              tx.asset_link_type === "ASSET_SALE"
+                ? tx.primary_quantity_lots ?? null
+                : null);
           const nextCounterpartyLots = counterpartyMoex
             ? changes.hasCounterpartyQuantityLotsChanged
               ? parseLots(counterpartyQuantityLots)
               : tx.counterparty_quantity_lots ?? 0
             : null;
+          const nextPrimaryUnits =
+            tx.asset_link_type === "ASSET_PURCHASE" ||
+            tx.asset_link_type === "ASSET_SALE"
+              ? tx.primary_quantity_units ?? null
+              : null;
+          const nextCounterpartyUnits =
+            nextDirection === "TRANSFER" ? tx.counterparty_quantity_units ?? null : null;
 
           const payload: TransactionCreate = {
             transaction_date: nextDate,
@@ -3455,8 +3526,10 @@ function TransactionsView({
               ? (amountCents as number)
               : tx.amount_rub,
             amount_counterparty: nextAmountCounterparty,
-            primary_quantity_lots: primaryMoex ? nextPrimaryLots : null,
+            primary_quantity_lots: primaryMoex ? nextPrimaryLots : nextPrimaryLots,
             counterparty_quantity_lots: counterpartyMoex ? nextCounterpartyLots : null,
+            primary_quantity_units: nextPrimaryUnits,
+            counterparty_quantity_units: nextCounterpartyUnits,
             direction: nextDirection,
             transaction_type: tx.transaction_type,
             category_id: (() => {
@@ -5459,6 +5532,8 @@ function TransactionsView({
                       }
                       let primaryLotsValue: number | null = null;
                       let counterpartyLotsValue: number | null = null;
+                      let primaryUnitsValue: number | null = null;
+                      let counterpartyUnitsValue: number | null = null;
 
                       if (primaryIsMoex) {
                         const parsedLots = parseLots(primaryQuantityLots);
@@ -5472,6 +5547,18 @@ function TransactionsView({
                         return;
                       }
 
+                      if (primaryIsCrypto) {
+                        const parsedUnits = parseQuantityUnits(primaryQuantityUnitsStr);
+                        if (!Number.isFinite(parsedUnits) || parsedUnits <= 0) {
+                          setFormError("Укажите корректное количество (единиц) для криптовалюты.");
+                          return;
+                        }
+                        primaryUnitsValue = parsedUnits;
+                      } else if (primaryQuantityUnitsStr.trim()) {
+                        setFormError("Количество единиц можно указывать только для криптовалют.");
+                        return;
+                      }
+
                       if (isTransfer && counterpartyIsMoex) {
                         const parsedLots = parseLots(counterpartyQuantityLots);
                         if (!Number.isFinite(parsedLots) || parsedLots < 0) {
@@ -5481,6 +5568,18 @@ function TransactionsView({
                         counterpartyLotsValue = parsedLots;
                       } else if (counterpartyQuantityLots.trim()) {
                         setFormError("Количество лотов можно указывать только для MOEX инструментов.");
+                        return;
+                      }
+
+                      if (isTransfer && counterpartyIsCrypto) {
+                        const parsedUnits = parseQuantityUnits(counterpartyQuantityUnitsStr);
+                        if (!Number.isFinite(parsedUnits) || parsedUnits <= 0) {
+                          setFormError("Укажите корректное количество (единиц) для криптовалюты.");
+                          return;
+                        }
+                        counterpartyUnitsValue = parsedUnits;
+                      } else if (counterpartyQuantityUnitsStr.trim()) {
+                        setFormError("Количество единиц можно указывать только для криптовалют.");
                         return;
                       }
 
@@ -5553,8 +5652,26 @@ function TransactionsView({
                           counterparty_id: counterpartyId ?? null,
                           amount_rub: cents,
                           amount_counterparty: isTransfer ? counterpartyCents : null,
-                          primary_quantity_lots: primaryIsMoex ? primaryLotsValue : null,
+                          primary_quantity_lots:
+                            primaryIsMoex
+                              ? primaryLotsValue
+                              : isEditMode &&
+                                editingTx &&
+                                (editingTx.asset_link_type === "ASSET_PURCHASE" ||
+                                  editingTx.asset_link_type === "ASSET_SALE")
+                                ? editingTx.primary_quantity_lots ?? null
+                                : null,
                           counterparty_quantity_lots: isTransfer && counterpartyIsMoex ? counterpartyLotsValue : null,
+                          primary_quantity_units:
+                            primaryIsCrypto
+                              ? primaryUnitsValue
+                              : isEditMode &&
+                                editingTx &&
+                                (editingTx.asset_link_type === "ASSET_PURCHASE" ||
+                                  editingTx.asset_link_type === "ASSET_SALE")
+                                ? editingTx.primary_quantity_units ?? null
+                                : null,
+                          counterparty_quantity_units: isTransfer && counterpartyIsCrypto ? counterpartyUnitsValue : null,
                           direction,
                           transaction_type: payloadTransactionType,
                           category_id: resolvedCategoryId,
@@ -6063,7 +6180,9 @@ function TransactionsView({
                     )}
                     {!isBulkEdit &&
                       !isLoanRepayment &&
-                      (primaryIsMoex || (isTransfer && counterpartyIsMoex)) && (
+                      (primaryIsMoex ||
+                        primaryIsCrypto ||
+                        (isTransfer && (counterpartyIsMoex || counterpartyIsCrypto))) && (
                         <div className="grid gap-3 rounded-lg border border-dashed border-violet-200 bg-violet-50/40 p-3">
                           {primaryIsMoex && (
                             <TextField
@@ -6074,6 +6193,15 @@ function TransactionsView({
                               placeholder="Например: 10"
                             />
                           )}
+                          {primaryIsCrypto && (
+                            <TextField
+                              label="Количество (единиц) — основной актив"
+                              value={primaryQuantityUnitsStr}
+                              onChange={(e) => setPrimaryQuantityUnitsStr(e.target.value)}
+                              inputMode="decimal"
+                              placeholder="Например: 0.5"
+                            />
+                          )}
                           {isTransfer && counterpartyIsMoex && (
                             <TextField
                               label="Количество лотов (контрагент)"
@@ -6081,6 +6209,15 @@ function TransactionsView({
                               onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
                               inputMode="numeric"
                               placeholder="Например: 10"
+                            />
+                          )}
+                          {isTransfer && counterpartyIsCrypto && (
+                            <TextField
+                              label="Количество (единиц) — контрагент"
+                              value={counterpartyQuantityUnitsStr}
+                              onChange={(e) => setCounterpartyQuantityUnitsStr(e.target.value)}
+                              inputMode="decimal"
+                              placeholder="Например: 0.5"
                             />
                           )}
                         </div>

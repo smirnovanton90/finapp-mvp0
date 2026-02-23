@@ -140,7 +140,9 @@ export function AddEditItemFormModal({
   const [instrumentBoards, setInstrumentBoards] = useState<MarketBoardOut[]>([]);
   const [instrumentBoardId, setInstrumentBoardId] = useState("");
   const [positionLots, setPositionLots] = useState("");
+  const [quantityUnitsStr, setQuantityUnitsStr] = useState("");
   const [moexPurchasePrice, setMoexPurchasePrice] = useState("");
+  const [cryptoPurchasePrice, setCryptoPurchasePrice] = useState("");
   const [commissionEnabled, setCommissionEnabled] = useState(false);
   const [commissionAmount, setCommissionAmount] = useState("");
   const [commissionPaymentItemId, setCommissionPaymentItemId] = useState("");
@@ -230,15 +232,17 @@ export function AddEditItemFormModal({
       setSectionId("");
       setIsGeneralCreate(true);
       setTypeCode(editingItem.type_code);
-      setCurrencyCode(editingItem.currency_code);
+      setCurrencyCode(editingItem.type_code === "crypto" ? "USD" : editingItem.currency_code);
       setName(editingItem.name);
       setAmountStr(formatAmount(editingItem.initial_value_rub));
       setCounterpartyId(editingItem.counterparty_id);
       setOpenDate(editingItem.open_date ?? getTodayDateKey());
       setInstrumentQuery(editingItem.instrument_id ? `${editingItem.instrument_id} - ${editingItem.name ?? ""}`.trim() : "");
       setInstrumentOptions([]);
-      setSelectedInstrument(editingItem.instrument_id ? { secid: editingItem.instrument_id, provider: "MOEX", isin: null, short_name: editingItem.name, name: editingItem.name, type_code: editingItem.type_code, engine: null, market: null, default_board_id: editingItem.instrument_board_id, currency_code: editingItem.currency_code, lot_size: editingItem.lot_size, face_value_cents: editingItem.face_value_cents, is_traded: null } : null);
-      setInstrumentBoardId(editingItem.instrument_board_id ?? "");
+      const provider = editingItem.type_code === "crypto" ? "COINGECKO" : "MOEX";
+      setSelectedInstrument(editingItem.instrument_id ? { secid: editingItem.instrument_id, provider, isin: null, short_name: editingItem.name, name: editingItem.name, type_code: editingItem.type_code, engine: null, market: null, default_board_id: editingItem.instrument_board_id ?? "default", currency_code: editingItem.currency_code, lot_size: editingItem.lot_size, face_value_cents: editingItem.face_value_cents, is_traded: null } : null);
+      setInstrumentBoardId(editingItem.instrument_board_id ?? (editingItem.type_code === "crypto" ? "default" : ""));
+      setQuantityUnitsStr(editingItem.quantity_units != null ? String(editingItem.quantity_units) : "");
       setAccountLast7(editingItem.account_last7 ?? "");
       setContractNumber(editingItem.contract_number ?? "");
       setCardLast4(editingItem.card_last4 ?? "");
@@ -310,6 +314,11 @@ export function AddEditItemFormModal({
   );
 
   const isMoexType = useMemo(() => MOEX_TYPE_CODES.includes(typeCode), [typeCode]);
+  const isCryptoType = useMemo(() => typeCode === "crypto", [typeCode]);
+  const showInstrumentBlock = useMemo(
+    () => (isMoexType || isCryptoType) && kind === "ASSET",
+    [isMoexType, isCryptoType, kind]
+  );
 
   // При создании предвыбираем «Основная стоимость» по выбранному виду актива/обязательства
   useEffect(() => {
@@ -332,6 +341,14 @@ export function AddEditItemFormModal({
     if (!Number.isFinite(parsed) || parsed < 0) return null;
     return parsed;
   }, [isMoexType, moexPurchasePrice]);
+  const cryptoPurchasePriceCents = useMemo(() => {
+    if (!isCryptoType) return null;
+    const trimmed = cryptoPurchasePrice.trim();
+    if (!trimmed) return null;
+    const parsed = parseRubToCents(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return parsed;
+  }, [isCryptoType, cryptoPurchasePrice]);
   const commissionAmountCents = useMemo(() => {
     const trimmed = commissionAmount.trim();
     if (!trimmed) return null;
@@ -410,17 +427,31 @@ export function AddEditItemFormModal({
     ? amountStr.trim() || "0"
     : amountStr;
   const amountCentsForSubmit = useMemo(() => {
-    if (isMoexType) return moexInitialValueCents ?? NaN;
+    if (isMoexType || isCryptoType) return isMoexType ? (moexInitialValueCents ?? NaN) : 0;
     return parseRubToCents(normalizedAmountValue);
-  }, [isMoexType, moexInitialValueCents, normalizedAmountValue]);
+  }, [isMoexType, isCryptoType, moexInitialValueCents, normalizedAmountValue]);
   const hasNonZeroAmount = Number.isFinite(amountCentsForSubmit) && amountCentsForSubmit !== 0;
   const hasNonZeroLots = moexLots != null && moexLots > 0;
+  const cryptoQuantityUnits = useMemo(() => {
+    if (!isCryptoType) return null;
+    const raw = quantityUnitsStr.replace(/\s/g, "").replace(",", ".");
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }, [isCryptoType, quantityUnitsStr]);
+  const hasNonZeroCryptoQuantity = cryptoQuantityUnits != null && cryptoQuantityUnits > 0;
   const showOpeningCounterparty =
     (primaryValueKind === "BALANCE" ||
       primaryValueKind === "ACQUISITION" ||
       primaryValueKind === "INVESTED" ||
       primaryValueKind === "MARKET") &&
-    (resolvedHistoryStatus === "NEW" ? (isMoexType ? hasNonZeroLots : hasNonZeroAmount) : true);
+    (resolvedHistoryStatus === "NEW"
+      ? isMoexType
+        ? hasNonZeroLots
+        : isCryptoType
+          ? hasNonZeroCryptoQuantity
+          : hasNonZeroAmount
+      : true);
   const showMoexCommission =
     isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW" && hasNonZeroLots;
   const commissionAllowed = showMoexCommission;
@@ -513,7 +544,9 @@ export function AddEditItemFormModal({
     setInstrumentBoards([]);
     setInstrumentBoardId("");
     setPositionLots("");
+    setQuantityUnitsStr("");
     setMoexPurchasePrice("");
+    setCryptoPurchasePrice("");
     setCommissionEnabled(false);
     setCommissionAmount("");
     setCommissionPaymentItemId("");
@@ -600,7 +633,7 @@ export function AddEditItemFormModal({
   }, [editingItem, itemPhotoPreview]);
 
   useEffect(() => {
-    if (!open || !isMoexType) {
+    if (!open || (!isMoexType && !isCryptoType)) {
       setInstrumentOptions([]);
       return;
     }
@@ -633,7 +666,7 @@ export function AddEditItemFormModal({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [open, instrumentQuery, isMoexType, typeCode]);
+  }, [open, instrumentQuery, isMoexType, isCryptoType, typeCode]);
 
   useEffect(() => {
     if (!selectedInstrument) {
@@ -646,9 +679,11 @@ export function AddEditItemFormModal({
     fetchMarketInstrumentDetails(selectedInstrument.secid)
       .then((data) => {
         if (!active) return;
+        const isCrypto = selectedInstrument.provider === "COINGECKO";
         setInstrumentBoards(data.boards ?? []);
-        const defaultBoard =
-          data.instrument.default_board_id || data.boards?.[0]?.board_id || "";
+        const defaultBoard = isCrypto
+          ? "default"
+          : (data.instrument.default_board_id || data.boards?.[0]?.board_id || "");
         if (!instrumentBoardId) {
           setInstrumentBoardId(defaultBoard);
         } else if (
@@ -656,12 +691,17 @@ export function AddEditItemFormModal({
           !data.boards.some((board: MarketBoardOut) => board.board_id === instrumentBoardId)
         ) {
           setInstrumentBoardId(defaultBoard);
+        } else if (isCrypto && instrumentBoardId !== "default") {
+          setInstrumentBoardId("default");
         }
-        if (!name.trim()) {
-          const nextName = data.instrument.short_name || data.instrument.name || "";
-          if (nextName) setName(nextName);
+        const nextName = data.instrument.short_name || data.instrument.name || "";
+        if (nextName) setName(nextName);
+        if (isCrypto && data.instrument.short_name && data.instrument.name) {
+          setInstrumentQuery(`${data.instrument.short_name} - ${data.instrument.name}`);
         }
-        if (data.instrument.currency_code) {
+        if (isCrypto) {
+          setCurrencyCode("USD");
+        } else if (data.instrument.currency_code) {
           setCurrencyCode(data.instrument.currency_code);
         }
       })
@@ -699,7 +739,7 @@ export function AddEditItemFormModal({
       left: 0,
       right: 0,
       maxHeight: resolvedHeight,
-      zIndex: 50,
+      zIndex: 100,
     });
   }, []);
 
@@ -729,6 +769,11 @@ export function AddEditItemFormModal({
       .then((price) => {
         if (!active) return;
         setMarketPrice(price);
+        if (selectedInstrument.provider === "COINGECKO" && price?.price_usd_cents != null) {
+          setCryptoPurchasePrice((prev) =>
+            prev.trim() ? prev : (price.price_usd_cents! / 100).toFixed(2).replace(".", ",")
+          );
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -919,6 +964,20 @@ export function AddEditItemFormModal({
         }
       }
     }
+    if (isCryptoType) {
+      if (!selectedInstrument) {
+        setFormError("Выберите криптовалюту.");
+        return;
+      }
+      if (!quantityUnitsStr.trim()) {
+        setFormError("Укажите количество.");
+        return;
+      }
+      if (cryptoQuantityUnits == null || cryptoQuantityUnits <= 0) {
+        setFormError("Количество должно быть положительным числом.");
+        return;
+      }
+    }
 
     const todayKey = getTodayDateKey();
     if (!openDate) {
@@ -935,10 +994,20 @@ export function AddEditItemFormModal({
         primaryValueKind === "ACQUISITION" ||
         primaryValueKind === "INVESTED" ||
         primaryValueKind === "MARKET") &&
-      (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
+      (isMoexType ? hasNonZeroLots : isCryptoType ? hasNonZeroCryptoQuantity : hasNonZeroAmount);
     if (needsOpeningSource && !openingCounterpartyId) {
       setFormError("Укажите источник средств.");
       return;
+    }
+    if (needsOpeningSource && openingCounterpartyId && isCryptoType) {
+      if (!cryptoPurchasePrice.trim()) {
+        setFormError("Укажите цену за 1 ед. для расчёта суммы приобретения.");
+        return;
+      }
+      if (cryptoPurchasePriceCents == null || cryptoPurchasePriceCents <= 0) {
+        setFormError("Цена должна быть положительным числом в USD (например: 83,32).");
+        return;
+      }
     }
     const isMarketNonMoex = primaryValueKind === "MARKET" && !isMoexType;
     if (
@@ -1032,8 +1101,8 @@ export function AddEditItemFormModal({
     }
 
     const cents = amountCentsForSubmit;
-    // У рыночных (MOEX) активов нет начальной балансовой стоимости — в payload передаём 0
-    const initialValueRubForPayload = isMoexType ? 0 : cents;
+    // У рыночных (MOEX) и крипто активов нет начальной балансовой стоимости — в payload передаём 0
+    const initialValueRubForPayload = isMoexType || isCryptoType ? 0 : cents;
     if (
       !Number.isFinite(initialValueRubForPayload) ||
       (initialValueRubForPayload < 0 && !(showBankCardFields && cardKind === "CREDIT"))
@@ -1185,7 +1254,7 @@ export function AddEditItemFormModal({
         kind,
         type_code: typeCode,
         name: name.trim(),
-        currency_code: currencyCode,
+        currency_code: isCryptoType ? "USD" : currencyCode,
         counterparty_id: showCounterpartyField ? counterpartyId : null,
         open_date: openDate,
         opening_counterparty_item_id: openingCounterpartyValue,
@@ -1212,6 +1281,14 @@ export function AddEditItemFormModal({
             ? Number(commissionPaymentItemId)
             : null;
         }
+      }
+      if (isCryptoType && selectedInstrument && cryptoQuantityUnits != null) {
+        payload.instrument_id = selectedInstrument.secid;
+        payload.quantity_units = cryptoQuantityUnits;
+        if (resolvedHistoryStatus === "NEW" && cryptoPurchasePriceCents != null) {
+          payload.opening_price_cents = cryptoPurchasePriceCents;
+        }
+        // instrument_board_id не передаём — бэкенд подставит CRYPTO_BOARD_ID
       }
 
       if (showBankAccountFields) {
@@ -1531,6 +1608,7 @@ export function AddEditItemFormModal({
                   value={typeCode}
                   onValueChange={(value) => {
                     setTypeCode(value);
+                    if (value === "crypto") setCurrencyCode("USD");
                     if (!editingItem) setPrimaryValueKind(getDefaultPrimaryValueKind(value, kind));
                   }}
                   disabled={isGeneralCreate && !sectionId}
@@ -1540,13 +1618,13 @@ export function AddEditItemFormModal({
               </div>
             </div>
 
-            {/* MOEX block */}
-            <div className={cn("overflow-hidden transition-all duration-300", isMoexType ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0")}>
-              {isMoexType && (
+            {/* Instrument block (MOEX / Crypto) */}
+            <div className={cn("transition-all duration-300", showInstrumentBlock ? "max-h-[2000px] opacity-100 overflow-visible" : "max-h-0 opacity-0 overflow-hidden")}>
+              {showInstrumentBlock && (
                 <div className="grid gap-3">
                   <div className="grid gap-2">
                     <div className="flex items-center gap-2">
-                      <Label style={{ color: ACTIVE_TEXT_DARK }}>Ценная бумага</Label>
+                      <Label style={{ color: ACTIVE_TEXT_DARK }}>{isCryptoType ? "Криптовалюта" : "Ценная бумага"}</Label>
                     </div>
                     <div className="relative" ref={instrumentAnchorRef}>
                       <TextField
@@ -1559,19 +1637,22 @@ export function AddEditItemFormModal({
                         }}
                         onFocus={() => setInstrumentDropdownOpen(true)}
                         onBlur={() => setTimeout(() => setInstrumentDropdownOpen(false), 150)}
-                        placeholder="Введите тикер или название"
+                        placeholder={isCryptoType ? "Введите название или тикер" : "Введите тикер или название"}
                       />
                       {instrumentDropdownOpen && (
                         <div
-                          className="selector-dropdown absolute z-50 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
-                          style={instrumentDropdownStyle ?? { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: 256, zIndex: 50 }}
+                          className="selector-dropdown absolute z-[100] w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
+                          style={instrumentDropdownStyle ?? { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: 256, zIndex: 100 }}
                         >
                           <div className="relative rounded-lg p-1" style={{ backgroundColor: DROPDOWN_BG }}>
                             {instrumentLoading && <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загружаем инструменты...</div>}
                             {!instrumentLoading && instrumentError && <div className="px-2 py-1 text-sm text-red-600">{instrumentError}</div>}
                             {!instrumentLoading && !instrumentError && instrumentOptions.length === 0 && <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Ничего не найдено</div>}
                             {!instrumentLoading && !instrumentError && instrumentOptions.map((option) => {
-                              const title = option.short_name || option.name || option.secid;
+                              const isCrypto = option.type_code === "crypto";
+                              const label = isCrypto
+                                ? `${option.short_name ?? option.secid} - ${option.name ?? option.secid}`
+                                : `${option.secid} - ${option.short_name || option.name || option.secid}`;
                               return (
                                 <button
                                   key={option.secid}
@@ -1581,11 +1662,11 @@ export function AddEditItemFormModal({
                                   onMouseDown={(event) => event.preventDefault()}
                                   onClick={() => {
                                     setSelectedInstrument(option);
-                                    setInstrumentQuery(`${option.secid} - ${title}`);
+                                    setInstrumentQuery(label);
                                     setInstrumentDropdownOpen(false);
                                   }}
                                 >
-                                  <span className="text-sm font-normal" style={{ color: SIDEBAR_TEXT_ACTIVE }}>{option.secid} - {title}</span>
+                                  <span className="text-sm font-normal" style={{ color: SIDEBAR_TEXT_ACTIVE }}>{label}</span>
                                 </button>
                               );
                             })}
@@ -1594,22 +1675,24 @@ export function AddEditItemFormModal({
                       )}
                     </div>
                   </div>
-                  <SelectField
-                    label="Торговый режим"
-                    value={instrumentBoardId}
-                    onValueChange={setInstrumentBoardId}
-                    disabled={instrumentBoards.length === 0}
-                    options={instrumentBoards.map((board: MarketBoardOut) => ({ value: board.board_id, label: board.title ? `${board.board_id} - ${board.title}` : board.board_id }))}
-                    placeholder="Выберите режим"
-                  />
+                  {isMoexType && (
+                    <SelectField
+                      label="Торговый режим"
+                      value={instrumentBoardId}
+                      onValueChange={setInstrumentBoardId}
+                      disabled={instrumentBoards.length === 0}
+                      options={instrumentBoards.map((board: MarketBoardOut) => ({ value: board.board_id, label: board.title ? `${board.board_id} - ${board.title}` : board.board_id }))}
+                      placeholder="Выберите режим"
+                    />
+                  )}
                   <TextField
-                    label="Количество лотов"
-                    value={positionLots}
-                    onChange={(e) => setPositionLots(e.target.value)}
-                    inputMode="numeric"
-                    placeholder="Например: 10"
+                    label={isCryptoType ? "Количество" : "Количество лотов"}
+                    value={isCryptoType ? quantityUnitsStr : positionLots}
+                    onChange={(e) => (isCryptoType ? setQuantityUnitsStr(e.target.value) : setPositionLots(e.target.value))}
+                    inputMode="decimal"
+                    placeholder={isCryptoType ? "Например: 0.5" : "Например: 10"}
                   />
-                  {resolvedHistoryStatus === "NEW" && (
+                  {isMoexType && resolvedHistoryStatus === "NEW" && (
                     <TextField
                       label="Цена покупки (за 1 шт.)"
                       value={moexPurchasePrice}
@@ -1617,13 +1700,40 @@ export function AddEditItemFormModal({
                       placeholder="По умолчанию — рыночная цена на дату"
                     />
                   )}
-                  {moexDatePricesLoading && <p className="text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка цен...</p>}
-                  {marketPrice && moexInitialValueCents != null && (
+                  {isCryptoType && resolvedHistoryStatus === "NEW" && (
+                    <TextField
+                      label="Цена (за 1 ед., USD)"
+                      value={cryptoPurchasePrice}
+                      onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))}
+                      onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))}
+                      placeholder={
+                        marketPrice?.price_usd_cents != null
+                          ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",")
+                          : "Например: 83,32"
+                      }
+                    />
+                  )}
+                  {isMoexType && moexDatePricesLoading && <p className="text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка цен...</p>}
+                  {isMoexType && marketPrice && moexInitialValueCents != null && (
                     <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                       Сумма по текущей цене: {formatAmount(moexInitialValueCents)}
                     </p>
                   )}
-                  {commissionAllowed && (
+                  {isCryptoType && marketPrice && (marketPrice.price_usd_cents != null || marketPrice.price_cents != null) && (
+                    <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                      Текущая цена:{" "}
+                      {marketPrice.price_usd_cents != null && (
+                        <>{formatAmount(marketPrice.price_usd_cents)} USD</>
+                      )}
+                      {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && " ("}
+                      {marketPrice.price_cents != null && (
+                        <>{formatAmount(marketPrice.price_cents)} ₽</>
+                      )}
+                      {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && ")"}
+                      {" за 1 ед."}
+                    </p>
+                  )}
+                  {isMoexType && commissionAllowed && (
                     <div className="grid gap-2 rounded border border-border/50 p-2">
                       <div className="flex items-center gap-2">
                         <Switch checked={commissionEnabled} onCheckedChange={setCommissionEnabled} />
@@ -1671,12 +1781,14 @@ export function AddEditItemFormModal({
               options={PRIMARY_VALUE_KIND_OPTIONS}
             />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <TextField
-                label="Валюта"
-                value={currencyCode}
-                onChange={(e) => setCurrencyCode(e.target.value.toUpperCase().slice(0, 3))}
-                placeholder="RUB"
-              />
+              {!isCryptoType && (
+                <TextField
+                  label="Валюта"
+                  value={currencyCode}
+                  onChange={(e) => setCurrencyCode(e.target.value.toUpperCase().slice(0, 3))}
+                  placeholder="RUB"
+                />
+              )}
               {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
                 <>
                   <TextField

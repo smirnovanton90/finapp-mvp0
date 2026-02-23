@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     moex_base_url: str = "https://iss.moex.com/iss"
     moex_timeout_seconds: int = 20
 
+    # CoinGecko (optional API key; without key: 30 req/min limit)
+    coingecko_base_url: str = "https://api.coingecko.com/api/v3"
+    coingecko_api_key: str | None = None
+    coingecko_timeout_seconds: int = 15
+
     # Telegram bot
     telegram_bot_token: str | None = None
 

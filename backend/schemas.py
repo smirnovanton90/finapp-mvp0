@@ -244,6 +244,7 @@ class ItemCreate(BaseModel):
     instrument_id: str | None = None
     instrument_board_id: str | None = None
     position_lots: int | None = Field(default=None, ge=0)
+    quantity_units: float | None = Field(default=None, ge=0)
     opening_price_cents: int | None = Field(default=None, ge=0)
     commission_enabled: bool | None = None
     commission_amount_rub: int | None = Field(default=None, ge=0)
@@ -403,6 +404,7 @@ class ItemOut(BaseModel):
     position_lots: int | None
     lot_size: int | None
     face_value_cents: int | None
+    quantity_units: float | None = None
     initial_value_rub: int
     current_value_rub: int
     start_date: date
@@ -414,12 +416,15 @@ class ItemOut(BaseModel):
     photo_url: str | None = None
     photo_updated_at: datetime | None = None
     primary_value_kind: PrimaryValueKind | None = None
-    """Последняя рыночная стоимость (копейки), для primary_value_kind=MARKET. Заполняется в list/get."""
+    """Последняя рыночная стоимость в рублях (копейки), для primary_value_kind=MARKET. Заполняется в list/get."""
     latest_market_value_rub: int | None = None
-    """Стоимость приобретения (копейки), из транзакций ASSET_PURCHASE. Заполняется в list/get."""
+    """Эквивалент рыночной стоимости в рублях (копейки). Справа на карточке при валюте != RUB."""
+    latest_market_value_currency_cents: int | None = None
+    """Рыночная стоимость в валюте актива (центы), когда валюта не RUB. Слева на карточке."""
     acquisition_rub: int | None = None
-    """Стоимость вложенных средств (копейки), acquisition + ASSET_INVESTMENT. Заполняется в list/get."""
+    """Стоимость приобретения (копейки), из транзакций ASSET_PURCHASE. Заполняется в list/get."""
     invested_rub: int | None = None
+    """Стоимость вложенных средств (копейки), acquisition + ASSET_INVESTMENT. Заполняется в list/get."""
 
     @field_validator("synonyms", mode="before")
     @classmethod
@@ -480,6 +485,9 @@ class ItemCostsOut(BaseModel):
     acquisition_rub: int
     invested_rub: int
     market_rub: int | None
+    """Рыночная стоимость в валюте актива (центы/копейки). Для RUB — копейки, для USD — центы."""
+    market_value_rub: int | None = None
+    """Эквивалент рыночной стоимости в рублях (копейки)."""
     # Суммы фактических транзакций по типу связи с активом (копейки)
     income_rub: int = 0   # ASSET_INCOME
     expense_rub: int = 0  # ASSET_EXPENSE
@@ -513,6 +521,7 @@ class TransactionBase(BaseModel):
     amount_counterparty: int | None = Field(default=None, ge=0)
     primary_quantity_lots: int | None = Field(default=None, ge=0)
     counterparty_quantity_lots: int | None = Field(default=None, ge=0)
+    primary_quantity_units: float | None = Field(default=None, ge=0)
     direction: TransactionDirection
     transaction_type: TransactionType
     category_id: int | None = None
@@ -930,6 +939,7 @@ class MarketPriceOut(BaseModel):
     accint_cents: int | None
     yield_bp: int | None
     currency_code: str | None
+    price_usd_cents: int | None = None  # для крипты: цена в центах USD
 
 
 class FxRatesBatchRequest(BaseModel):

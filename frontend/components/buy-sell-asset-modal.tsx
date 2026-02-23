@@ -35,6 +35,8 @@ export interface BuySellAssetModalProps {
   onOpenChange: (open: boolean) => void;
   asset: ItemOut;
   items: ItemOut[];
+  /** @deprecated Не используется: сумма указывается в валюте актива без перевода в рубли. */
+  assetCurrencyToRubRateCents?: number | null;
   getCounterpartyForItemId?: (id: number) => CounterpartyOut | null;
   getBankLogoUrl?: (id: number | null | undefined) => string | null;
   getBankName?: (id: number | null | undefined) => string;
@@ -48,6 +50,7 @@ export function BuySellAssetModal({
   onOpenChange,
   asset,
   items,
+  assetCurrencyToRubRateCents,
   getCounterpartyForItemId,
   getBankLogoUrl,
   getBankName,
@@ -87,29 +90,86 @@ export function BuySellAssetModal({
     }
   }, [open]);
 
+  const assetCurrency = asset.currency_code || "RUB";
+  const isRub = assetCurrency === "RUB";
+
+  const isCrypto = asset.type_code === "crypto";
   const positionLots = asset.position_lots ?? 0;
+  const quantityUnits = asset.quantity_units ?? 0;
+
+  const showCommissionSourceField = React.useMemo(() => {
+    const trimmed = commissionStr.trim();
+    if (!trimmed) return false;
+    if (isRub) {
+      const cents = parseRubToCents(trimmed);
+      return Number.isFinite(cents) && cents > 0;
+    }
+    const normalized = trimmed.replace(/\s/g, "").replace(",", ".");
+    const value = normalized === "" ? NaN : Number(normalized);
+    return Number.isFinite(value) && value > 0;
+  }, [commissionStr, isRub]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormError(null);
 
-    const quantity = quantityStr.trim() === "" ? NaN : parseInt(quantityStr.trim(), 10);
-    if (!Number.isInteger(quantity) || quantity < 0) {
-      setFormError("Укажите корректное количество лотов (целое число ≥ 0).");
-      return;
+    let quantityNum: number;
+    if (isCrypto) {
+      const raw = quantityStr.trim().replace(/,/, ".");
+      quantityNum = raw === "" ? NaN : Number(raw);
+      if (!Number.isFinite(quantityNum) || quantityNum <= 0) {
+        setFormError("Укажите корректное количество (положительное число).");
+        return;
+      }
+      if (mode === "SELL" && quantityNum > quantityUnits) {
+        setFormError(
+          `Количество для продажи не может превышать текущее количество (${quantityUnits}).`
+        );
+        return;
+      }
+    } else {
+      const raw = quantityStr.trim().replace(/,/, ".");
+      quantityNum = raw === "" ? NaN : Number(raw);
+      if (!Number.isFinite(quantityNum) || quantityNum <= 0) {
+        setFormError("Укажите корректное количество лотов (положительное число).");
+        return;
+      }
+      const quantityLotsRounded = Math.round(quantityNum);
+      if (mode === "SELL" && quantityLotsRounded > positionLots) {
+        setFormError(
+          `Количество для продажи не может превышать текущее количество (${positionLots} лотов).`
+        );
+        return;
+      }
+      quantityNum = quantityLotsRounded;
     }
 
-    if (mode === "SELL" && quantity > positionLots) {
+    const priceCents = isRub
+      ? parseRubToCents(priceStr)
+      : (() => {
+          const normalized = priceStr.trim().replace(/\s/g, "").replace(",", ".");
+          const priceInCurrency = normalized === "" ? NaN : Number(normalized);
+          if (!Number.isFinite(priceInCurrency) || priceInCurrency <= 0) return NaN;
+          return Math.round(priceInCurrency * 100);
+        })();
+    if (!Number.isFinite(priceCents) || priceCents <= 0) {
       setFormError(
-        `Количество для продажи не может превышать текущее количество (${positionLots} лотов).`
+        isRub
+          ? (isCrypto
+              ? "Введите цену за единицу в формате 1234,56 (больше нуля)."
+              : "Введите цену за лот в формате 1234,56 (больше нуля).")
+          : `Введите цену в валюте ${assetCurrency} (положительное число).`
       );
       return;
     }
 
-    const priceCents = parseRubToCents(priceStr);
-    if (!Number.isFinite(priceCents) || priceCents <= 0) {
-      setFormError("Введите цену за лот в формате 1234,56 (больше нуля).");
-      return;
+    let amountRubCents: number;
+    if (isRub) {
+      amountRubCents = Math.round((priceCents / 100) * quantityNum * 100);
+    } else {
+      const normalized = priceStr.trim().replace(/\s/g, "").replace(",", ".");
+      const priceInCurrency = Number(normalized);
+      amountRubCents = Math.round(priceInCurrency * quantityNum * 100);
     }
 
     if (!paymentItemId) {
@@ -121,21 +181,34 @@ export function BuySellAssetModal({
       return;
     }
 
-    const hasCommission = commissionStr.trim() !== "";
+    const hasCommissionInput = commissionStr.trim() !== "";
     let commissionCents = 0;
-    if (hasCommission) {
-      commissionCents = parseRubToCents(commissionStr);
+    if (hasCommissionInput) {
+      if (isRub) {
+        commissionCents = parseRubToCents(commissionStr);
+      } else {
+        const normalized = commissionStr.trim().replace(/\s/g, "").replace(",", ".");
+        const commissionInCurrency = normalized === "" ? NaN : Number(normalized);
+        if (!Number.isFinite(commissionInCurrency) || commissionInCurrency < 0) {
+          setFormError(`Введите сумму комиссии в валюте ${assetCurrency} (неотрицательное число).`);
+          return;
+        }
+        commissionCents = Math.round(commissionInCurrency * 100);
+      }
       if (!Number.isFinite(commissionCents) || commissionCents < 0) {
-        setFormError("Введите корректную сумму комиссии в формате 1234,56.");
+        setFormError(
+          isRub
+            ? "Введите корректную сумму комиссии в формате 1234,56."
+            : `Введите сумму комиссии в валюте ${assetCurrency}.`
+        );
         return;
       }
-      if (!commissionItemId) {
+      if (commissionCents > 0 && !commissionItemId) {
         setFormError("Выберите, откуда списать сумму комиссии.");
         return;
       }
     }
 
-    const amountRubCents = Math.round((priceCents / 100) * quantity * 100);
     const transactionDate = date;
 
     const categoryNodes = categories ?? [];
@@ -156,7 +229,10 @@ export function BuySellAssetModal({
           counterparty_id: null,
           amount_rub: amountRubCents,
           amount_counterparty: null,
-          primary_quantity_lots: quantity,
+          primary_quantity_lots: isCrypto ? null : quantityNum,
+          counterparty_quantity_lots: null,
+          primary_quantity_units: isCrypto ? quantityNum : null,
+          counterparty_quantity_units: null,
           direction: "EXPENSE",
           transaction_type: "ACTUAL",
           category_id: categoryAcquisition,
@@ -172,7 +248,10 @@ export function BuySellAssetModal({
           counterparty_id: null,
           amount_rub: amountRubCents,
           amount_counterparty: null,
-          primary_quantity_lots: quantity,
+          primary_quantity_lots: isCrypto ? null : quantityNum,
+          counterparty_quantity_lots: null,
+          primary_quantity_units: isCrypto ? quantityNum : null,
+          counterparty_quantity_units: null,
           direction: "INCOME",
           transaction_type: "ACTUAL",
           category_id: categorySale,
@@ -182,7 +261,7 @@ export function BuySellAssetModal({
         });
       }
 
-      if (hasCommission && commissionCents > 0 && commissionItemId) {
+      if (hasCommissionInput && commissionCents > 0 && commissionItemId) {
         await createTransaction({
           transaction_date: transactionDate,
           primary_item_id: commissionItemId,
@@ -191,6 +270,9 @@ export function BuySellAssetModal({
           amount_rub: commissionCents,
           amount_counterparty: null,
           primary_quantity_lots: null,
+          counterparty_quantity_lots: null,
+          primary_quantity_units: null,
+          counterparty_quantity_units: null,
           direction: "EXPENSE",
           transaction_type: "ACTUAL",
           category_id: categoryCommission,
@@ -241,33 +323,39 @@ export function BuySellAssetModal({
         />
 
         <TextField
-          label="Количество (лотов)"
+          label={isCrypto ? "Количество" : "Количество (лотов)"}
           value={quantityStr}
           onChange={(e) => {
-            const v = e.target.value.replace(/\D/g, "");
+            let v = e.target.value.replace(/\./g, ",");
+            v = v.replace(/[^\d,]/g, "");
+            const commaCount = (v.match(/,/g) || []).length;
+            if (commaCount > 1) {
+              const [intPart, ...decParts] = v.split(",");
+              v = intPart + "," + decParts.join("");
+            }
             setQuantityStr(v);
           }}
           onBlur={() => {}}
-          inputMode="numeric"
-          placeholder="0"
+          inputMode="decimal"
+          placeholder={isCrypto ? "0,5" : "10"}
         />
 
         <TextField
-          label="Цена за лот (руб.)"
+          label={`Цена (${assetCurrency})`}
           value={priceStr}
           onChange={(e) => setPriceStr(formatRubInput(e.target.value))}
           onBlur={() => setPriceStr((prev) => normalizeRubOnBlur(prev))}
           inputMode="decimal"
-          placeholder="Например: 1 234,56"
+          placeholder={isRub ? "Например: 1 234,56" : `Например: 1 234,56 ${assetCurrency}`}
         />
 
         <TextField
-          label="Сумма комиссии (необязательно)"
+          label={`Сумма комиссии, ${assetCurrency}`}
           value={commissionStr}
           onChange={(e) => setCommissionStr(formatRubInput(e.target.value))}
           onBlur={() => setCommissionStr((prev) => normalizeRubOnBlur(prev))}
           inputMode="decimal"
-          placeholder="Например: 1 234,56"
+          placeholder={isRub ? "Например: 1 234,56" : `Например: 1 234,56 ${assetCurrency}`}
         />
 
         <FormField
@@ -294,7 +382,7 @@ export function BuySellAssetModal({
           />
         </FormField>
 
-        {commissionStr.trim() !== "" && (
+        {showCommissionSourceField && (
           <FormField label="Откуда списать сумму комиссии">
             <ItemSelector
               items={selectableItems}

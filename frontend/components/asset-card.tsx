@@ -36,6 +36,7 @@ import { CardIcon } from "@/components/card-icon";
 import { CurrencyChip } from "@/components/currency-chip";
 
 const MOEX_TYPE_CODES = ["securities", "bonds", "etf", "bpif", "pif"];
+const isCryptoItem = (item: ItemOut) => item.type_code === "crypto";
 
 /** Кредитные обязательства: consumer_loan, mortgage, car_loan, education_loan, installment, microloan */
 const CREDIT_LIABILITY_TYPE_CODES = new Set([
@@ -175,9 +176,14 @@ export function AssetCard({
   const ps = item.plan_settings;
   const showBalanceAndRate =
     ((currencyCode && currencyCode !== "RUB") || isMoexItem) && !isDeleted;
+  const isMarketOrCryptoCard = (isMoexItem || isCryptoItem(item)) && Boolean(item.instrument_id) && !isDeleted;
   const moexUnitPriceCents = isMoexItem
     ? getMoexUnitPriceCents(item, moexMarketPrice ?? null)
     : null;
+  const cryptoUnitPriceCents =
+    isCryptoItem(item) && (item.quantity_units ?? 0) > 0 && displayBalanceCents !== 0
+      ? Math.round(displayBalanceCents / (item.quantity_units ?? 1))
+      : null;
   
   const historyStatus =
     item.history_status ??
@@ -567,6 +573,57 @@ export function AssetCard({
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Рыночные активы и крипта: количество и текущая цена в валюте актива */}
+        {isMarketOrCryptoCard && (
+          <div className="flex items-center justify-center gap-6 mt-3 flex-wrap">
+            <div className="flex flex-col items-center gap-0.5 text-center">
+              <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                Количество
+              </span>
+              <span className="text-lg font-normal" style={{ color: textColor }}>
+                {isMoexItem
+                  ? item.position_lots != null
+                    ? `${new Intl.NumberFormat("ru-RU").format(item.position_lots)} л.`
+                    : "-"
+                  : item.quantity_units != null
+                    ? new Intl.NumberFormat("ru-RU", {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 8,
+                      }).format(item.quantity_units)
+                    : "-"}
+              </span>
+            </div>
+            <div className="flex flex-col items-center gap-0.5 text-center">
+              <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                Цена за ед.
+              </span>
+              <div className="flex items-center gap-1.5">
+                {isMoexItem ? (
+                  moexUnitPriceCents != null ? (
+                    <>
+                      <CurrencyChip code={currencyCode || "RUB"} style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined} />
+                      <span className="text-lg font-normal" style={{ color: textColor }}>
+                        {formatAmount(moexUnitPriceCents)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-lg font-normal" style={{ color: textColor }}>-</span>
+                  )
+                ) : cryptoUnitPriceCents != null ? (
+                  <>
+                    <CurrencyChip code={currencyCode || "USD"} style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined} />
+                    <span className="text-lg font-normal" style={{ color: textColor }}>
+                      {formatAmount(cryptoUnitPriceCents)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-lg font-normal" style={{ color: textColor }}>-</span>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

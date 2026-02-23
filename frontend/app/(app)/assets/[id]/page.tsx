@@ -28,6 +28,7 @@ import { formatAmount, getItemPhotoUrl, getItemPrimaryValueCents } from "@/lib/i
 import { PRIMARY_VALUE_KIND_OPTIONS, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
 import { ACCENT, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
+import { CurrencyChip } from "@/components/currency-chip";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 
 type ChartPoint = { x: number; y: number; value: number };
@@ -74,13 +75,23 @@ function formatChartDate(date: Date) {
   return `${day}.${month}.${year}`;
 }
 
-function formatRub(cents: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(cents / 100);
+/** Блок: чип валюты слева, сумма справа (значение в копейках/центах валюты актива). */
+function AmountWithCurrency({
+  valueCents,
+  currencyCode,
+  className = "",
+}: {
+  valueCents: number;
+  currencyCode: string | null | undefined;
+  className?: string;
+}) {
+  const code = currencyCode ?? "RUB";
+  return (
+    <div className={`flex items-center gap-2 ${className}`}>
+      <CurrencyChip code={code} className="shrink-0" />
+      <span className="tabular-nums">{formatAmount(valueCents)}</span>
+    </div>
+  );
 }
 
 export default function AssetDetailPage() {
@@ -127,14 +138,18 @@ export default function AssetDetailPage() {
       if (itemRes.instrument_id) {
         setLoadingQuantityHistory(true);
         try {
-          const page = await fetchTransactionsPage({
-            related_item_ids: [itemRes.id],
-            limit: 200,
-          });
-          const list = page.items.filter(
+          const [pageRelated, pageByItems] = await Promise.all([
+            fetchTransactionsPage({ related_item_ids: [itemRes.id], limit: 200 }),
+            fetchTransactionsPage({ item_ids: [itemRes.id], limit: 200 }),
+          ]);
+          const byId = new Map<number, TransactionOut>();
+          [...pageRelated.items, ...pageByItems.items].forEach((tx) => byId.set(tx.id, tx));
+          const list = Array.from(byId.values()).filter(
             (tx) =>
-              tx.primary_quantity_lots != null &&
-              (tx.asset_link_type === "ASSET_PURCHASE" || tx.asset_link_type === "ASSET_SALE")
+              (tx.asset_link_type === "ASSET_PURCHASE" || tx.asset_link_type === "ASSET_SALE" || tx.direction === "TRANSFER") &&
+              ((tx.related_item_id === itemRes.id && (tx.primary_quantity_lots != null || tx.primary_quantity_units != null)) ||
+                (tx.counterparty_item_id === itemRes.id && (tx.counterparty_quantity_lots != null || tx.counterparty_quantity_units != null)) ||
+                (tx.primary_item_id === itemRes.id && (tx.primary_quantity_lots != null || tx.primary_quantity_units != null)))
           );
           setQuantityHistoryTx(list);
         } catch (e: unknown) {
@@ -248,7 +263,6 @@ export default function AssetDetailPage() {
     const fromOpen = openDate
       ? quantityHistoryTx.filter((tx) => (tx.transaction_date || "").slice(0, 10) >= openDate)
       : quantityHistoryTx;
-    // Одна строка на каждую операцию (не объединяем по дате): сортировка по дате/времени, затем по id
     const sorted = [...fromOpen].sort((a, b) => {
       const dateA = a.transaction_date || "";
       const dateB = b.transaction_date || "";
@@ -256,41 +270,85 @@ export default function AssetDetailPage() {
       if (d !== 0) return d;
       return (a.id ?? 0) - (b.id ?? 0);
     });
+    const isCrypto = item?.type_code === "crypto";
+    const itemId = item?.id;
+    const getTxQty = (tx: TransactionOut) => {
+      if (itemId == null) return 0;
+      if (tx.related_item_id === itemId) {
+        return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+      }
+      if (tx.counterparty_item_id === itemId) {
+        return isCrypto ? (tx.counterparty_quantity_units ?? 0) : (tx.counterparty_quantity_lots ?? 0);
+      }
+      if (tx.primary_item_id === itemId) {
+        return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+      }
+      return 0;
+    };
+    const getIsBuy = (tx: TransactionOut) => {
+      if (itemId == null) return false;
+      if (tx.related_item_id === itemId) return tx.asset_link_type === "ASSET_PURCHASE";
+      if (tx.counterparty_item_id === itemId) return true;
+      return false;
+    };
     let totalBuy = 0;
     let totalSell = 0;
     sorted.forEach((tx) => {
-      const lots = tx.primary_quantity_lots ?? 0;
-      if (tx.asset_link_type === "ASSET_PURCHASE") totalBuy += lots;
-      else if (tx.asset_link_type === "ASSET_SALE") totalSell += lots;
+      const qty = getTxQty(tx);
+      if (getIsBuy(tx)) totalBuy += qty;
+      else totalSell += qty;
     });
-    const current = item?.position_lots ?? 0;
+    const current = isCrypto ? (item?.quantity_units ?? 0) : (item?.position_lots ?? 0);
     const startQty = current - totalBuy + totalSell;
     let balance = startQty;
     return sorted.map((tx) => {
-      const lots = tx.primary_quantity_lots ?? 0;
-      const isBuy = tx.asset_link_type === "ASSET_PURCHASE";
-      const delta = isBuy ? lots : -lots;
+      const qty = getTxQty(tx);
+      const isBuy = getIsBuy(tx);
+      const delta = isBuy ? qty : -qty;
       balance += delta;
-      return { tx, type: isBuy ? "Покупка" as const : "Продажа" as const, delta, balanceAfter: balance };
+      const costCents = tx.amount_rub ?? 0;
+      const priceCents = qty > 0 ? Math.round(costCents / qty) : null;
+      return { tx, type: isBuy ? "Покупка" as const : "Продажа" as const, delta, balanceAfter: balance, priceCents, costCents };
     });
-  }, [quantityHistoryTx, item?.open_date, item?.position_lots]);
+  }, [quantityHistoryTx, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code]);
 
   const quantitySummary = useMemo(() => {
     const openDate = item?.open_date ?? "";
     const fromOpen = openDate
       ? quantityHistoryTx.filter((tx) => (tx.transaction_date || "").slice(0, 10) >= openDate)
       : quantityHistoryTx;
+    const isCrypto = item?.type_code === "crypto";
+    const itemId = item?.id;
+    const getTxQty = (tx: TransactionOut) => {
+      if (itemId == null) return 0;
+      if (tx.related_item_id === itemId) {
+        return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+      }
+      if (tx.counterparty_item_id === itemId) {
+        return isCrypto ? (tx.counterparty_quantity_units ?? 0) : (tx.counterparty_quantity_lots ?? 0);
+      }
+      if (tx.primary_item_id === itemId) {
+        return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+      }
+      return 0;
+    };
+    const getIsBuy = (tx: TransactionOut) => {
+      if (itemId == null) return false;
+      if (tx.related_item_id === itemId) return tx.asset_link_type === "ASSET_PURCHASE";
+      if (tx.counterparty_item_id === itemId) return true;
+      return false;
+    };
     let totalBuy = 0;
     let totalSell = 0;
     fromOpen.forEach((tx) => {
-      const lots = tx.primary_quantity_lots ?? 0;
-      if (tx.asset_link_type === "ASSET_PURCHASE") totalBuy += lots;
-      else if (tx.asset_link_type === "ASSET_SALE") totalSell += lots;
+      const qty = getTxQty(tx);
+      if (getIsBuy(tx)) totalBuy += qty;
+      else totalSell += qty;
     });
-    const current = item?.position_lots ?? 0;
+    const current = isCrypto ? (item?.quantity_units ?? 0) : (item?.position_lots ?? 0);
     const startQty = current - totalBuy + totalSell;
     return { startQty, totalBuy, totalSell, current };
-  }, [quantityHistoryTx, item?.open_date, item?.position_lots]);
+  }, [quantityHistoryTx, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code]);
 
   const costChartSeries = useMemo(() => {
     if (!costHistoryOpen || !costHistoryData?.points.length) return [];
@@ -577,7 +635,9 @@ export default function AssetDetailPage() {
                 <h2 className="text-xl font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>{item.name}</h2>
                 <p className="text-sm mt-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{getItemTypeLabel(item)}</p>
                 {item.currency_code && (
-                  <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>{item.currency_code}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <CurrencyChip code={item.currency_code} />
+                  </div>
                 )}
               </div>
             </div>
@@ -612,7 +672,13 @@ export default function AssetDetailPage() {
                   <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.interest_rate}%</dd>
                 </>
               )}
-              {item.position_lots != null && (
+              {item.type_code === "crypto" && item.quantity_units != null && (
+                <>
+                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество</dt>
+                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(item.quantity_units)}</dd>
+                </>
+              )}
+              {item.type_code !== "crypto" && item.position_lots != null && (
                 <>
                   <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество лотов</dt>
                   <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(item.position_lots)}</dd>
@@ -644,7 +710,7 @@ export default function AssetDetailPage() {
                 >
                   <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Балансовая стоимость</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    {formatRub(costs.balance_rub)}
+                    <AmountWithCurrency valueCents={costs.balance_rub} currencyCode={item.currency_code} />
                   </div>
                 </div>
                 <div
@@ -654,7 +720,7 @@ export default function AssetDetailPage() {
                 >
                   <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость приобретения</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    {formatRub(costs.acquisition_rub)}
+                    <AmountWithCurrency valueCents={costs.acquisition_rub} currencyCode={item.currency_code} />
                   </div>
                 </div>
                 <div
@@ -664,7 +730,7 @@ export default function AssetDetailPage() {
                 >
                   <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость вложенных средств</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    {formatRub(costs.invested_rub)}
+                    <AmountWithCurrency valueCents={costs.invested_rub} currencyCode={item.currency_code} />
                   </div>
                 </div>
                 <div
@@ -674,11 +740,76 @@ export default function AssetDetailPage() {
                 >
                   <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Рыночная стоимость</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    {costs.market_rub != null ? formatRub(costs.market_rub) : "—"}
+                    {costs.market_rub != null ? (
+                      <AmountWithCurrency valueCents={costs.market_rub} currencyCode={item.currency_code} />
+                    ) : (
+                      "—"
+                    )}
                   </div>
+                  {item.currency_code && item.currency_code !== "RUB" && costs.market_value_rub != null && (
+                    <div className="text-sm mt-1.5" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      В рублях: <AmountWithCurrency valueCents={costs.market_value_rub} currencyCode="RUB" />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
+
+            {item.instrument_id && costs && (() => {
+              const isCrypto = item.type_code === "crypto";
+              const quantity = isCrypto ? (item.quantity_units ?? 0) : (item.position_lots ?? 0);
+              const hasQuantity = quantity > 0;
+              const acquisitionCents = costs.acquisition_rub ?? 0;
+              const currentValueCents = costs.market_rub != null ? costs.market_rub : costs.balance_rub;
+              const avgPriceCents = hasQuantity ? acquisitionCents / quantity : null;
+              const profitLossCents = currentValueCents - acquisitionCents;
+              const currencyCode = item.currency_code ?? "RUB";
+              return hasQuantity ? (
+                <div className="mt-6 pt-6 border-t border-white/10">
+                  <h4 className="text-sm font-semibold mb-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                    Прибыль/убыток от стоимости актива
+                  </h4>
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+                    <div>
+                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Средняя цена приобретения ({currencyCode})</dt>
+                      <dd className="mt-0.5 font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
+                        {avgPriceCents != null ? (
+                          <AmountWithCurrency valueCents={Math.round(avgPriceCents)} currencyCode={currencyCode} />
+                        ) : (
+                          "—"
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость приобретения текущего количества ({currencyCode})</dt>
+                      <dd className="mt-0.5 font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
+                        <AmountWithCurrency valueCents={acquisitionCents} currencyCode={currencyCode} />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Текущая стоимость ({currencyCode})</dt>
+                      <dd className="mt-0.5 font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
+                        <AmountWithCurrency valueCents={currentValueCents} currencyCode={currencyCode} />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Текущее количество</dt>
+                      <dd className="mt-0.5 font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
+                        {isCrypto
+                          ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(quantity)
+                          : new Intl.NumberFormat("ru-RU").format(quantity) + " л."}
+                      </dd>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Прибыль/убыток ({currencyCode})</dt>
+                      <dd className="mt-0.5 font-semibold tabular-nums" style={{ color: profitLossCents >= 0 ? GREEN : RED }}>
+                        <AmountWithCurrency valueCents={profitLossCents} currencyCode={currencyCode} />
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              ) : null;
+            })()}
 
             {costHistoryOpen && (
               <div className="mt-4 rounded-lg p-4" style={{ backgroundColor: BACKGROUND_DT }}>
@@ -722,7 +853,13 @@ export default function AssetDetailPage() {
                             {costHistoryOpen === "invested" && "Стоимость вложенных средств"}
                             {costHistoryOpen === "market" && "Рыночная стоимость"}
                           </span>
-                          <span>{formatRub(Math.round(costChartSeries[costChartHoverIndex]!.valueRub * 100))}</span>
+                          <div className="flex items-center justify-end gap-2">
+                            <AmountWithCurrency
+                              valueCents={Math.round(costChartSeries[costChartHoverIndex]!.valueRub * 100)}
+                              currencyCode={item.currency_code}
+                              className="justify-end"
+                            />
+                          </div>
                         </div>
                         {costHistoryOpen === "market" && (() => {
                           const pt = costChartSeries[costChartHoverIndex!] as { marketQuantityUnits?: number; marketPriceRub?: number };
@@ -733,7 +870,9 @@ export default function AssetDetailPage() {
                                   <div>Количество: {pt.marketQuantityUnits.toLocaleString("ru-RU")} шт.</div>
                                 )}
                                 {pt.marketPriceRub != null && (
-                                  <div>Цена на дату: {formatRub(pt.marketPriceRub)}</div>
+                                  <div className="flex items-center gap-2">
+                                    Цена на дату: <AmountWithCurrency valueCents={pt.marketPriceRub} currencyCode={item.currency_code} />
+                                  </div>
                                 )}
                               </div>
                             );
@@ -829,13 +968,13 @@ export default function AssetDetailPage() {
                 <div className="rounded-lg p-4" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
                   <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Доход</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    {formatRub(costs.income_rub)}
+                    <AmountWithCurrency valueCents={costs.income_rub} currencyCode={item.currency_code} />
                   </div>
                 </div>
                 <div className="rounded-lg p-4" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
                   <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Расход</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    {formatRub(costs.expense_rub)}
+                    <AmountWithCurrency valueCents={costs.expense_rub} currencyCode={item.currency_code} />
                   </div>
                 </div>
               </div>
@@ -859,17 +998,19 @@ export default function AssetDetailPage() {
                         <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
                           <th className="pl-6 pr-4 py-3 text-sm font-medium">Дата</th>
                           <th className="px-4 py-3 text-sm font-medium">Тип операции</th>
-                          <th className="px-4 py-3 text-sm font-medium text-right">Куплено / продано</th>
+                          <th className="px-4 py-3 text-sm font-medium text-right">Количество</th>
+                          <th className="px-4 py-3 text-sm font-medium text-right">Цена</th>
+                          <th className="px-4 py-3 text-sm font-medium text-right">Стоимость</th>
                           <th className="px-6 py-3 text-sm font-medium text-right">Количество после операции</th>
                         </tr>
                       </thead>
                       <tbody>
                         {quantityHistoryRows.length === 0 ? (
                           <tr style={{ backgroundColor: MODAL_BG }}>
-                            <td colSpan={4} className="px-6 py-4 text-center text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи</td>
+                            <td colSpan={6} className="px-6 py-4 text-center text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи</td>
                           </tr>
                         ) : (
-                          quantityHistoryRows.map(({ tx, type, delta, balanceAfter }) => {
+                          quantityHistoryRows.map(({ tx, type, delta, balanceAfter, priceCents, costCents }) => {
                             const dateStr = tx.transaction_date ? new Date(tx.transaction_date.replace("T", " ")).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
                             const amountColor = type === "Покупка" ? GREEN : RED;
                             return (
@@ -877,6 +1018,8 @@ export default function AssetDetailPage() {
                                 <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{dateStr}</td>
                                 <td className="px-4 py-2 text-sm" style={{ color: amountColor }}>{type}</td>
                                 <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: amountColor }}>{delta > 0 ? `+${delta}` : delta}</td>
+                                <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{priceCents != null ? formatAmount(priceCents) : "—"}</td>
+                                <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(costCents)}</td>
                                 <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(balanceAfter)}</td>
                               </tr>
                             );

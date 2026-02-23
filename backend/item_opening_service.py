@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session
 
 from category_service import resolve_category_or_400
 from models import Category, Item, Transaction, User
-from market_utils import is_moex_item
+from market_utils import is_crypto_item, is_moex_item
 from transactions import (
     ResolvedSide,
     _apply_position_delta,
+    _apply_quantity_units_delta,
     _apply_transaction_soft_delete,
     _resolve_effective_side,
     get_min_balance,
@@ -154,6 +155,7 @@ def _create_transfer(
     transaction_type: str = "ACTUAL",
     primary_quantity_lots: int | None = None,
     counterparty_quantity_lots: int | None = None,
+    primary_quantity_units: float | None = None,
     counterparty_id: int | None = None,
 ) -> None:
     primary_side = _resolve_effective_side(db, user, primary_item_id, True, "primary")
@@ -180,9 +182,13 @@ def _create_transfer(
     amount = amount_rub
     primary_is_moex = is_moex_item(primary)
     counter_is_moex = is_moex_item(counter)
+    primary_is_crypto = is_crypto_item(primary)
+    counter_is_crypto = is_crypto_item(counter)
     if transaction_type == "ACTUAL":
         if primary_is_moex and primary_quantity_lots:
             _apply_position_delta(primary, -(primary_quantity_lots or 0), tx_date)
+        elif primary_is_crypto and primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, -(primary_quantity_units or 0), tx_date)
         primary_delta = transfer_delta(primary.kind, True, amount)
         primary_next = primary.current_value_rub + primary_delta
         if primary_next < get_min_balance(primary):
@@ -194,6 +200,8 @@ def _create_transfer(
 
         if counter_is_moex and counterparty_quantity_lots:
             _apply_position_delta(counter, counterparty_quantity_lots or 0, tx_date)
+        elif counter_is_crypto and primary_quantity_units is not None:
+            _apply_quantity_units_delta(counter, primary_quantity_units or 0, tx_date)
         counter_delta = transfer_delta(counter.kind, False, amount)
         counter_next = counter.current_value_rub + counter_delta
         if counter_next < get_min_balance(counter):
@@ -218,6 +226,7 @@ def _create_transfer(
         amount_counterparty=amount,
         primary_quantity_lots=primary_quantity_lots,
         counterparty_quantity_lots=counterparty_quantity_lots,
+        primary_quantity_units=primary_quantity_units,
         direction="TRANSFER",
         transaction_type=transaction_type,
         status="CONFIRMED",
@@ -242,6 +251,7 @@ def _create_income_expense(
     related_item_id: int,
     comment: str | None = None,
     primary_quantity_lots: int | None = None,
+    primary_quantity_units: float | None = None,
     source: str = AUTO_OPENING_SOURCE,
     counterparty_id: int | None = None,
     asset_link_type: str | None = None,
@@ -254,12 +264,16 @@ def _create_income_expense(
         if is_moex_item(primary):
             if primary_quantity_lots:
                 _apply_position_delta(primary, primary_quantity_lots or 0, tx_date)
+        elif is_crypto_item(primary) and primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, primary_quantity_units or 0, tx_date)
         else:
             primary.current_value_rub += amount_rub
     else:
         if is_moex_item(primary):
             if primary_quantity_lots:
                 _apply_position_delta(primary, -(primary_quantity_lots or 0), tx_date)
+        elif is_crypto_item(primary) and primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, -(primary_quantity_units or 0), tx_date)
         elif primary.kind == "LIABILITY":
             primary.current_value_rub += amount_rub
         else:
@@ -285,6 +299,7 @@ def _create_income_expense(
         amount_counterparty=None,
         primary_quantity_lots=primary_quantity_lots,
         counterparty_quantity_lots=None,
+        primary_quantity_units=primary_quantity_units,
         direction=direction,
         transaction_type="ACTUAL",
         status="CONFIRMED",
@@ -317,8 +332,9 @@ def create_opening_transactions(
     counterparty: Item | None,
     amount_rub: int,
     quantity_lots: int | None,
-    deposit_end_date: date | None,
-    plan_settings,
+    quantity_units: float | None = None,
+    deposit_end_date: date | None = None,
+    plan_settings=None,
 ) -> None:
     # Не создаем транзакции открытия, если дата открытия равна дате начала учета
     # Транзакции открытия создаются только для активов/обязательств с типом "Новый" (позже даты начала учета)
@@ -328,8 +344,12 @@ def create_opening_transactions(
         return
     
     is_moex = is_moex_item(item)
+    is_crypto = is_crypto_item(item)
     if is_moex:
         if quantity_lots is None or quantity_lots <= 0:
+            return
+    elif is_crypto:
+        if quantity_units is None or quantity_units <= 0:
             return
     elif amount_rub <= 0:
         return
@@ -353,17 +373,21 @@ def create_opening_transactions(
                 category_name=ACQUISITION_CATEGORY_NAME,
                 related_item_id=item.id,
                 comment=opening_comment,
-                primary_quantity_lots=None,
+                primary_quantity_lots=quantity_lots if is_moex else None,
+                primary_quantity_units=quantity_units if is_crypto else None,
                 source=AUTO_OPENING_SOURCE,
                 counterparty_id=item.counterparty_id,
                 asset_link_type="ASSET_PURCHASE",
             )
             if is_moex and quantity_lots:
                 _apply_position_delta(item, quantity_lots, tx_date)
+            elif is_crypto and quantity_units is not None:
+                _apply_quantity_units_delta(item, quantity_units, tx_date)
             primary_id = counterparty.id
             counter_id = item.id
             primary_lots = None
             counter_lots = quantity_lots if is_moex else None
+            primary_units = quantity_units if is_crypto else None
         else:
             # Балансовая стоимость (BALANCE) или обязательство: перевод с источника на актив / с актива на источник
             if item.kind == "ASSET":
@@ -371,11 +395,13 @@ def create_opening_transactions(
                 counter_id = item.id
                 primary_lots = None
                 counter_lots = quantity_lots if is_moex else None
+                primary_units = quantity_units if is_crypto else None
             else:
                 primary_id = item.id
                 counter_id = counterparty.id
                 primary_lots = quantity_lots if is_moex else None
                 counter_lots = None
+                primary_units = quantity_units if is_crypto else None
             _create_transfer(
                 db=db,
                 user=user,
@@ -388,6 +414,7 @@ def create_opening_transactions(
                 comment=opening_comment,
                 primary_quantity_lots=primary_lots,
                 counterparty_quantity_lots=counter_lots,
+                primary_quantity_units=primary_units,
                 counterparty_id=item.counterparty_id,
             )
 
@@ -406,6 +433,7 @@ def create_opening_transactions(
                 transaction_type="PLANNED",
                 primary_quantity_lots=counter_lots,
                 counterparty_quantity_lots=primary_lots,
+                primary_quantity_units=primary_units if is_crypto else None,
                 counterparty_id=item.counterparty_id,
             )
         return
@@ -428,6 +456,7 @@ def create_opening_transactions(
         comment=opening_comment,
         related_item_id=item.id,
         primary_quantity_lots=quantity_lots if is_moex else None,
+        primary_quantity_units=quantity_units if is_crypto else None,
         counterparty_id=item.counterparty_id,
     )
 

@@ -57,6 +57,7 @@ export type ItemOut = {
   position_lots: number | null;
   lot_size: number | null;
   face_value_cents: number | null;
+  quantity_units: number | null;
   initial_value_rub: number;
   current_value_rub: number;
   start_date: string;
@@ -70,6 +71,8 @@ export type ItemOut = {
   primary_value_kind?: PrimaryValueKind | null;
   /** Последняя рыночная стоимость (копейки), для primary_value_kind=MARKET. Заполняется API в list/get. */
   latest_market_value_rub?: number | null;
+  /** Рыночная стоимость в валюте актива (центы), когда валюта не RUB. Слева на карточке. */
+  latest_market_value_currency_cents?: number | null;
   /** Стоимость приобретения (копейки). Заполняется API в list/get. */
   acquisition_rub?: number | null;
   /** Стоимость вложенных средств (копейки). Заполняется API в list/get. */
@@ -94,6 +97,8 @@ export type ItemCostsOut = {
   acquisition_rub: number;
   invested_rub: number;
   market_rub: number | null;
+  /** Эквивалент рыночной стоимости в рублях (копейки). */
+  market_value_rub?: number | null;
   income_rub: number;
   expense_rub: number;
 };
@@ -136,6 +141,7 @@ export type ItemCreate = {
   instrument_id?: string | null;
   instrument_board_id?: string | null;
   position_lots?: number | null;
+  quantity_units?: number | null;
   opening_price_cents?: number | null;
   commission_enabled?: boolean | null;
   commission_amount_rub?: number | null;
@@ -279,6 +285,7 @@ export type MarketPriceOut = {
   accint_cents: number | null;
   yield_bp: number | null;
   currency_code: string | null;
+  price_usd_cents?: number | null;
 };
 
 export type CategoryScope = "INCOME" | "EXPENSE" | "BOTH";
@@ -333,6 +340,8 @@ export type TransactionOut = {
   amount_counterparty: number | null;
   primary_quantity_lots: number | null;
   counterparty_quantity_lots: number | null;
+  primary_quantity_units: number | null;
+  counterparty_quantity_units: number | null;
   direction: TransactionDirection;
   transaction_type: TransactionType;
   status: TransactionStatus;
@@ -484,6 +493,8 @@ export type TransactionCreate = {
   amount_counterparty?: number | null;
   primary_quantity_lots?: number | null;
   counterparty_quantity_lots?: number | null;
+  primary_quantity_units?: number | null;
+  counterparty_quantity_units?: number | null;
   direction: TransactionDirection;
   transaction_type: TransactionType;
   status?: TransactionStatus;

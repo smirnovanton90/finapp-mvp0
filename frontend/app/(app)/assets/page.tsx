@@ -692,7 +692,9 @@ export default function Page() {
   const [instrumentBoards, setInstrumentBoards] = useState<MarketBoardOut[]>([]);
   const [instrumentBoardId, setInstrumentBoardId] = useState("");
   const [positionLots, setPositionLots] = useState("");
+  const [quantityUnitsStr, setQuantityUnitsStr] = useState("");
   const [moexPurchasePrice, setMoexPurchasePrice] = useState("");
+  const [cryptoPurchasePrice, setCryptoPurchasePrice] = useState("");
   const [commissionEnabled, setCommissionEnabled] = useState(false);
   const [commissionAmount, setCommissionAmount] = useState("");
   const [commissionPaymentItemId, setCommissionPaymentItemId] = useState("");
@@ -821,6 +823,7 @@ export default function Page() {
     setInstrumentBoards([]);
     setInstrumentBoardId("");
     setPositionLots("");
+    setQuantityUnitsStr("");
     setMoexPurchasePrice("");
     setCommissionEnabled(false);
     setCommissionAmount("");
@@ -1004,6 +1007,9 @@ export default function Page() {
   }
 
   function getRubEquivalentCents(item: ItemOut): number | null {
+    if (item.primary_value_kind === "MARKET" && item.latest_market_value_rub != null) {
+      return item.latest_market_value_rub;
+    }
     // Для MOEX активов используем текущие рыночные цены (как на вкладке "Динамика стоимости активов")
     const isMoexItem = MOEX_TYPE_CODES.includes(item.type_code);
     if (isMoexItem && item.instrument_id && item.instrument_board_id) {
@@ -1074,6 +1080,11 @@ export default function Page() {
     [typeCode]
   );
   const isMoexType = useMemo(() => MOEX_TYPE_CODES.includes(typeCode), [typeCode]);
+  const isCryptoType = useMemo(() => typeCode === "crypto", [typeCode]);
+  const showInstrumentBlock = useMemo(
+    () => (isMoexType || isCryptoType) && kind === "ASSET",
+    [isMoexType, isCryptoType, kind]
+  );
   const moexLots = useMemo(() => {
     if (!isMoexType) return null;
     const rawLots = positionLots.replace(/\s/g, "");
@@ -1090,6 +1101,14 @@ export default function Page() {
     if (!Number.isFinite(parsed) || parsed < 0) return null;
     return parsed;
   }, [isMoexType, moexPurchasePrice]);
+  const cryptoPurchasePriceCents = useMemo(() => {
+    if (!isCryptoType) return null;
+    const trimmed = cryptoPurchasePrice.trim();
+    if (!trimmed) return null;
+    const parsed = parseRubToCents(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return parsed;
+  }, [isCryptoType, cryptoPurchasePrice]);
   const commissionAmountCents = useMemo(() => {
     const trimmed = commissionAmount.trim();
     if (!trimmed) return null;
@@ -1108,6 +1127,14 @@ export default function Page() {
     const accint = typeCode === "bonds" ? marketPrice.accint_cents ?? 0 : 0;
     return Math.round((unitPrice + accint) * moexLots * lotSize);
   }, [isMoexType, marketPrice, moexLots, selectedInstrument?.lot_size, typeCode]);
+  const cryptoQuantityUnits = useMemo(() => {
+    if (!isCryptoType) return null;
+    const raw = quantityUnitsStr.replace(/\s/g, "").replace(",", ".");
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }, [isCryptoType, quantityUnitsStr]);
+  const hasNonZeroCryptoQuantity = cryptoQuantityUnits != null && cryptoQuantityUnits > 0;
   const showBankAccountFields = useMemo(
     () => typeCode === "bank_account" || typeCode === "savings_account",
     [typeCode]
@@ -1160,7 +1187,7 @@ export default function Page() {
     [showLoanPlanSettings, kind]
   );
   const hideInitialAmountField =
-    (showBankCardFields && Boolean(cardAccountId)) || isMoexType;
+    (showBankCardFields && Boolean(cardAccountId)) || isMoexType || isCryptoType;
   const showContractNumberField = useMemo(
     () =>
       typeCode === "bank_account" ||
@@ -1296,7 +1323,13 @@ export default function Page() {
       primaryValueKind === "ACQUISITION" ||
       primaryValueKind === "INVESTED" ||
       primaryValueKind === "MARKET") &&
-    (resolvedHistoryStatus === "NEW" ? (isMoexType ? hasNonZeroLots : hasNonZeroAmount) : true);
+    (resolvedHistoryStatus === "NEW"
+      ? isMoexType
+        ? hasNonZeroLots
+        : isCryptoType
+          ? hasNonZeroCryptoQuantity
+          : hasNonZeroAmount
+      : true);
   const showMoexPricing = isMoexType && kind === "ASSET";
   const showMoexCommission =
     isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW" && hasNonZeroLots;
@@ -2304,7 +2337,7 @@ export default function Page() {
   }, [currencies, currencyCode]);
 
   useEffect(() => {
-    if (!isMoexType) {
+    if (!isMoexType && !isCryptoType) {
       setInstrumentOptions([]);
       setInstrumentQuery("");
       setInstrumentError(null);
@@ -2312,7 +2345,9 @@ export default function Page() {
       setInstrumentBoards([]);
       setInstrumentBoardId("");
       setPositionLots("");
+      setQuantityUnitsStr("");
       setMoexPurchasePrice("");
+      setCryptoPurchasePrice("");
       setMarketPrice(null);
       return;
     }
@@ -2345,7 +2380,7 @@ export default function Page() {
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [instrumentQuery, isMoexType, typeCode]);
+  }, [instrumentQuery, isMoexType, isCryptoType, typeCode]);
 
   useEffect(() => {
     if (!selectedInstrument) {
@@ -2355,12 +2390,14 @@ export default function Page() {
       return;
     }
     let active = true;
+    const isCrypto = selectedInstrument.provider === "COINGECKO";
     fetchMarketInstrumentDetails(selectedInstrument.secid)
       .then((data) => {
         if (!active) return;
         setInstrumentBoards(data.boards ?? []);
-        const defaultBoard =
-          data.instrument.default_board_id || data.boards?.[0]?.board_id || "";
+        const defaultBoard = isCrypto
+          ? "default"
+          : (data.instrument.default_board_id || data.boards?.[0]?.board_id || "");
         if (!instrumentBoardId) {
           setInstrumentBoardId(defaultBoard);
         } else if (
@@ -2368,12 +2405,17 @@ export default function Page() {
           !data.boards.some((board) => board.board_id === instrumentBoardId)
         ) {
           setInstrumentBoardId(defaultBoard);
+        } else if (isCrypto && instrumentBoardId !== "default") {
+          setInstrumentBoardId("default");
         }
-        if (!name.trim()) {
-          const nextName = data.instrument.short_name || data.instrument.name || "";
-          if (nextName) setName(nextName);
+        const nextName = data.instrument.short_name || data.instrument.name || "";
+        if (nextName) setName(nextName);
+        if (isCrypto && data.instrument.short_name && data.instrument.name) {
+          setInstrumentQuery(`${data.instrument.short_name} - ${data.instrument.name}`);
         }
-        if (data.instrument.currency_code) {
+        if (isCrypto) {
+          setCurrencyCode("USD");
+        } else if (data.instrument.currency_code) {
           setCurrencyCode(data.instrument.currency_code);
         }
       })
@@ -2411,7 +2453,7 @@ export default function Page() {
       left: 0,
       right: 0,
       maxHeight: resolvedHeight,
-      zIndex: 50,
+      zIndex: 100,
     });
   }, []);
 
@@ -2432,15 +2474,21 @@ export default function Page() {
   }, [instrumentDropdownOpen, updateInstrumentDropdownPosition]);
 
   useEffect(() => {
-    if (!selectedInstrument || !instrumentBoardId) {
+    const boardId = selectedInstrument?.provider === "COINGECKO" ? "default" : instrumentBoardId;
+    if (!selectedInstrument || !boardId) {
       setMarketPrice(null);
       return;
     }
     let active = true;
-    fetchMarketInstrumentPrice(selectedInstrument.secid, instrumentBoardId)
+    fetchMarketInstrumentPrice(selectedInstrument.secid, boardId)
       .then((price) => {
         if (!active) return;
         setMarketPrice(price);
+        if (selectedInstrument?.provider === "COINGECKO" && price?.price_usd_cents != null) {
+          setCryptoPurchasePrice((prev) =>
+            prev.trim() ? prev : (price.price_usd_cents / 100).toFixed(2).replace(".", ",")
+          );
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -2558,6 +2606,7 @@ export default function Page() {
     setInstrumentBoardId("");
     setPositionLots("");
     setMoexPurchasePrice("");
+    setCryptoPurchasePrice("");
     setMarketPrice(null);
     setMoexDatePrices({});
     setMoexDatePricesLoading(false);
@@ -2633,7 +2682,7 @@ export default function Page() {
     setKind(item.kind);
     setAllowedTypeCodes(item.kind === "ASSET" ? ASSET_TYPE_CODES : LIABILITY_TYPE_CODES);
     setTypeCode(item.type_code);
-    setCurrencyCode(item.currency_code);
+    setCurrencyCode(item.type_code === "crypto" ? "USD" : item.currency_code);
     setName(item.name);
     setSynonyms(item.synonyms ?? []);
     setAmountStr(formatAmount(item.initial_value_rub));
@@ -2647,22 +2696,24 @@ export default function Page() {
     setInstrumentLoading(false);
     setInstrumentError(null);
     if (item.instrument_id) {
+      const provider = item.type_code === "crypto" ? "COINGECKO" : "MOEX";
       setSelectedInstrument({
         secid: item.instrument_id,
-        provider: "MOEX",
+        provider,
         isin: null,
         short_name: item.name,
         name: item.name,
         type_code: item.type_code,
         engine: null,
         market: null,
-        default_board_id: item.instrument_board_id,
+        default_board_id: item.instrument_board_id ?? (item.type_code === "crypto" ? "default" : undefined),
         currency_code: item.currency_code,
         lot_size: item.lot_size,
         face_value_cents: item.face_value_cents,
         is_traded: null,
       });
-      setInstrumentBoardId(item.instrument_board_id ?? "");
+      setInstrumentBoardId(item.instrument_board_id ?? (item.type_code === "crypto" ? "default" : ""));
+      setQuantityUnitsStr(item.quantity_units != null ? String(item.quantity_units) : "");
     } else {
       setSelectedInstrument(null);
       setInstrumentBoardId("");
@@ -2678,7 +2729,9 @@ export default function Page() {
     setCreditLimit(item.credit_limit != null ? formatAmount(item.credit_limit) : "");
     setDepositTermDays(item.deposit_term_days != null ? String(item.deposit_term_days) : "");
     setPositionLots(item.position_lots != null ? String(item.position_lots) : "");
+    setQuantityUnitsStr(item.quantity_units != null ? String(item.quantity_units) : "");
     setMoexPurchasePrice("");
+    setCryptoPurchasePrice("");
     if (item.instrument_id && item.history_status === "NEW") {
       const commissionTx = txs.find(
         (tx) => tx.related_item_id === item.id && tx.source === "AUTO_ITEM_COMMISSION"
@@ -2849,6 +2902,21 @@ export default function Page() {
       }
     }
 
+    if (isCryptoType) {
+      if (!selectedInstrument) {
+        setFormError("Выберите криптовалюту.");
+        return;
+      }
+      if (!quantityUnitsStr.trim()) {
+        setFormError("Укажите количество.");
+        return;
+      }
+      if (cryptoQuantityUnits == null || cryptoQuantityUnits <= 0) {
+        setFormError("Количество должно быть положительным числом.");
+        return;
+      }
+    }
+
     const todayKey = getTodayDateKey();
     if (!openDate) {
       setFormError("\u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u0434\u0430\u0442\u0443 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f.");
@@ -2864,12 +2932,22 @@ export default function Page() {
         primaryValueKind === "ACQUISITION" ||
         primaryValueKind === "INVESTED" ||
         primaryValueKind === "MARKET") &&
-      (isMoexType ? hasNonZeroLots : hasNonZeroAmount);
+      (isMoexType ? hasNonZeroLots : isCryptoType ? hasNonZeroCryptoQuantity : hasNonZeroAmount);
     if (needsOpeningSource && !openingCounterpartyId) {
       setFormError("Укажите источник средств.");
       return;
     }
-    const isMarketNonMoex = primaryValueKind === "MARKET" && !isMoexType;
+    if (needsOpeningSource && openingCounterpartyId && isCryptoType) {
+      if (!cryptoPurchasePrice.trim()) {
+        setFormError("Укажите цену за 1 ед. для расчёта суммы приобретения.");
+        return;
+      }
+      if (cryptoPurchasePriceCents == null || cryptoPurchasePriceCents <= 0) {
+        setFormError("Цена должна быть положительным числом в USD (например: 83,32).");
+        return;
+      }
+    }
+    const isMarketNonMoex = primaryValueKind === "MARKET" && !isMoexType && !isCryptoType;
     if (
       resolvedHistoryStatus === "NEW" &&
       isMarketNonMoex &&
@@ -2970,8 +3048,8 @@ export default function Page() {
     const amountValue = hideInitialAmountField
       ? amountStr.trim() || "0"
       : amountStr;
-    // У рыночных (MOEX) активов нет начальной балансовой стоимости — отправляем 0
-    const cents = isMoexType ? 0 : parseRubToCents(amountValue);
+    // У рыночных (MOEX) и крипто активов нет начальной балансовой стоимости — отправляем 0
+    const cents = isMoexType || isCryptoType ? 0 : parseRubToCents(amountValue);
     if (
       !Number.isFinite(cents) ||
       (cents < 0 && !(showBankCardFields && cardKind === "CREDIT"))
@@ -3128,7 +3206,7 @@ export default function Page() {
         kind,
         type_code: typeCode,
         name: name.trim(),
-        currency_code: currencyCode,
+        currency_code: isCryptoType ? "USD" : currencyCode,
         counterparty_id: showCounterpartyField ? counterpartyId : null,
         open_date: openDate,
         opening_counterparty_item_id: openingCounterpartyValue,
@@ -3158,6 +3236,13 @@ export default function Page() {
           payload.commission_payment_item_id = commissionPaymentItemId
             ? Number(commissionPaymentItemId)
             : null;
+        }
+      }
+      if (isCryptoType && selectedInstrument && cryptoQuantityUnits != null) {
+        payload.instrument_id = selectedInstrument.secid;
+        payload.quantity_units = cryptoQuantityUnits;
+        if (resolvedHistoryStatus === "NEW" && cryptoPurchasePriceCents != null) {
+          payload.opening_price_cents = cryptoPurchasePriceCents;
         }
       }
 
@@ -4101,6 +4186,7 @@ export default function Page() {
                   value={typeCode}
                   onValueChange={(value) => {
                     setTypeCode(value);
+                    if (value === "crypto") setCurrencyCode("USD");
                     if (!editingItem) setPrimaryValueKind(getDefaultPrimaryValueKind(value, kind));
                     setIcon3dFormat("png");
                     setShow2dIcon(false);
@@ -4119,15 +4205,15 @@ export default function Page() {
 
 
             <div
-              className={`overflow-hidden transition-all duration-300 ${
-                isMoexType ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
+              className={`transition-all duration-300 ${
+                showInstrumentBlock ? "max-h-[2000px] opacity-100 overflow-visible" : "max-h-0 opacity-0 overflow-hidden"
               }`}
             >
-              {isMoexType && (
+              {showInstrumentBlock && (
                 <div className="grid gap-3">
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
-                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Ценная бумага</Label>
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>{isCryptoType ? "Криптовалюта" : "Ценная бумага"}</Label>
                     <div className="group relative">
                       <Info className="h-4 w-4 text-muted-foreground cursor-help" />
                       <div className="absolute left-0 top-6 z-50 hidden w-64 rounded-md border border-border/60 bg-white p-2 text-xs text-muted-foreground shadow-lg group-hover:block">
@@ -4146,18 +4232,18 @@ export default function Page() {
                       }}
                       onFocus={() => setInstrumentDropdownOpen(true)}
                       onBlur={() => setTimeout(() => setInstrumentDropdownOpen(false), 150)}
-                      placeholder="Введите тикер или название"
+                      placeholder={isCryptoType ? "Введите название или тикер" : "Введите тикер или название"}
                     />
                     {instrumentDropdownOpen && (
                       <div
-                        className="selector-dropdown absolute z-50 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
+                        className="selector-dropdown absolute z-[100] w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
                         style={instrumentDropdownStyle ?? {
                           position: "absolute",
                           top: "calc(100% + 4px)",
                           left: 0,
                           right: 0,
                           maxHeight: 256,
-                          zIndex: 50,
+                          zIndex: 100,
                         }}
                       >
                         {/* Gradient border wrapper */}
@@ -4192,13 +4278,10 @@ export default function Page() {
                             {!instrumentLoading &&
                               !instrumentError &&
                               instrumentOptions.map((option) => {
-                                const title = option.short_name || option.name || option.secid;
-                                const subtitle =
-                                  option.name &&
-                                  option.short_name &&
-                                  option.name !== option.short_name
-                                    ? option.name
-                                    : null;
+                                const isCrypto = option.type_code === "crypto";
+                                const label = isCrypto
+                                  ? `${option.short_name ?? option.secid} - ${option.name ?? option.secid}`
+                                  : `${option.secid} - ${option.short_name || option.name || option.secid}`;
                                 return (
                                   <button
                                     key={option.secid}
@@ -4217,18 +4300,13 @@ export default function Page() {
                                     onMouseDown={(event) => event.preventDefault()}
                                     onClick={() => {
                                       setSelectedInstrument(option);
-                                      setInstrumentQuery(`${option.secid} - ${title}`);
+                                      setInstrumentQuery(label);
                                       setInstrumentDropdownOpen(false);
                                     }}
                                   >
                                     <span className="text-sm font-normal" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
-                                      {option.secid} - {title}
+                                      {label}
                                     </span>
-                                    {subtitle && (
-                                      <span className="text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
-                                        {subtitle}
-                                      </span>
-                                    )}
                                   </button>
                                 );
                               })}
@@ -4239,32 +4317,34 @@ export default function Page() {
                   </div>
                 </div>
 
-                <SelectField
-                  label="Торговый режим"
-                  value={instrumentBoardId}
-                  onValueChange={setInstrumentBoardId}
-                  disabled={instrumentBoards.length === 0}
-                  options={instrumentBoards.map((board) => {
-                    const boardLabel = board.title
-                      ? `${board.board_id} - ${board.title}`
-                      : board.board_id;
-                    return {
-                      value: board.board_id,
-                      label: boardLabel,
-                    };
-                  })}
-                  placeholder="Выберите режим"
-                />
+                {isMoexType && (
+                  <SelectField
+                    label="Торговый режим"
+                    value={instrumentBoardId}
+                    onValueChange={setInstrumentBoardId}
+                    disabled={instrumentBoards.length === 0}
+                    options={instrumentBoards.map((board) => {
+                      const boardLabel = board.title
+                        ? `${board.board_id} - ${board.title}`
+                        : board.board_id;
+                      return {
+                        value: board.board_id,
+                        label: boardLabel,
+                      };
+                    })}
+                    placeholder="Выберите режим"
+                  />
+                )}
 
                 <TextField
-                  label="Количество лотов"
-                  value={positionLots}
-                  onChange={(e) => setPositionLots(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="Например: 10"
+                  label={isCryptoType ? "Количество" : "Количество лотов"}
+                  value={isCryptoType ? quantityUnitsStr : positionLots}
+                  onChange={(e) => (isCryptoType ? setQuantityUnitsStr(e.target.value) : setPositionLots(e.target.value))}
+                  inputMode={isCryptoType ? "decimal" : "numeric"}
+                  placeholder={isCryptoType ? "Например: 0.5" : "Например: 10"}
                 />
 
-                {resolvedHistoryStatus === "NEW" && (
+                {isMoexType && resolvedHistoryStatus === "NEW" && (
                   <TextField
                     label="Цена покупки (за 1 шт.)"
                     value={moexPurchasePrice}
@@ -4278,6 +4358,34 @@ export default function Page() {
                     inputMode="decimal"
                     placeholder="Например: 123,45"
                   />
+                )}
+                {isCryptoType && resolvedHistoryStatus === "NEW" && (
+                  <TextField
+                    label="Цена (за 1 ед., USD)"
+                    value={cryptoPurchasePrice}
+                    onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))}
+                    onBlur={() => setCryptoPurchasePrice((prev) => normalizeRubOnBlur(prev))}
+                    inputMode="decimal"
+                    placeholder={
+                      marketPrice?.price_usd_cents != null
+                        ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",")
+                        : "Например: 83,32"
+                    }
+                  />
+                )}
+                {isCryptoType && marketPrice && (marketPrice.price_usd_cents != null || marketPrice.price_cents != null) && (
+                  <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                    Текущая цена:{" "}
+                    {marketPrice.price_usd_cents != null && (
+                      <>{formatAmount(marketPrice.price_usd_cents)} USD</>
+                    )}
+                    {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && " ("}
+                    {marketPrice.price_cents != null && (
+                      <>{formatAmount(marketPrice.price_cents)} ₽</>
+                    )}
+                    {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && ")"}
+                    {" за 1 ед."}
+                  </p>
                 )}
                 </div>
               )}
@@ -4408,6 +4516,7 @@ export default function Page() {
 
 
 
+            {!isCryptoType && (
             <SelectField
               label="Валюта"
               value={currencyCode}
@@ -4424,6 +4533,7 @@ export default function Page() {
               }))}
               placeholder="Выберите валюту"
             />
+            )}
 
             {typeCode && (
               <SelectField
@@ -5547,6 +5657,13 @@ export default function Page() {
           }}
           asset={buySellAsset}
           items={activeItems}
+          assetCurrencyToRubRateCents={
+            buySellAsset.currency_code && buySellAsset.currency_code !== "RUB"
+              ? (rateByCode[buySellAsset.currency_code] != null
+                  ? rateByCode[buySellAsset.currency_code]! * 100
+                  : undefined)
+              : undefined
+          }
           getCounterpartyForItemId={getCounterpartyForItemId}
           getBankLogoUrl={itemCounterpartyLogoUrl}
           getBankName={itemCounterpartyName}

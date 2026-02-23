@@ -11,12 +11,14 @@ import {
   fetchMarketInstrumentPrice,
   fetchMarketInstrumentPrices,
   fetchTransactions,
+  fetchItemCostHistory,
   API_BASE,
   CounterpartyOut,
   FxRateOut,
   ItemOut,
   MarketPriceOut,
   TransactionOut,
+  ItemCostHistoryOut,
 } from "@/lib/api";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -303,12 +305,17 @@ function getTxDeltaForItem(
 }
 
 function isMoexItem(item: ItemOut) {
+  if (item.type_code === "crypto") return false;
   return Boolean(item.instrument_id);
+}
+
+function isCryptoItem(item: ItemOut) {
+  return item.type_code === "crypto";
 }
 
 function getMarketPriceKey(item: ItemOut) {
   if (!item.instrument_id) return null;
-  const board = item.instrument_board_id ?? "";
+  const board = item.instrument_board_id ?? (item.type_code === "crypto" ? "default" : "");
   return `${item.instrument_id}|${board}`;
 }
 
@@ -507,8 +514,9 @@ function buildLotDeltasByDate(
 
     primarySelectedIds.forEach((itemId) => {
       let delta = 0;
-      if (tx.direction === "INCOME") delta = tx.primary_quantity_lots ?? 0;
-      if (tx.direction === "EXPENSE") delta = -(tx.primary_quantity_lots ?? 0);
+      // Позиция primary: покупка (EXPENSE) — прирост лотов (+), продажа (INCOME) — уменьшение (-)
+      if (tx.direction === "INCOME") delta = -(tx.primary_quantity_lots ?? 0);
+      if (tx.direction === "EXPENSE") delta = tx.primary_quantity_lots ?? 0;
       if (tx.direction === "TRANSFER") delta = -(tx.primary_quantity_lots ?? 0);
       addDelta(dateKey, itemId, delta);
     });
@@ -516,6 +524,62 @@ function buildLotDeltasByDate(
     if (tx.direction === "TRANSFER") {
       counterSelectedIds.forEach((itemId) => {
         const delta = tx.counterparty_quantity_lots ?? 0;
+        addDelta(dateKey, itemId, delta);
+      });
+    }
+  });
+
+  return map;
+}
+
+function buildUnitsDeltasByDate(
+  txs: TransactionOut[],
+  selectedIds: Set<number>,
+  cryptoItemIds: Set<number>,
+  todayKey: string
+) {
+  const map = new Map<string, Map<number, number>>();
+  const addDelta = (dateKey: string, itemId: number, delta: number) => {
+    if (!map.has(dateKey)) map.set(dateKey, new Map());
+    const bucket = map.get(dateKey);
+    if (!bucket) return;
+    bucket.set(itemId, (bucket.get(itemId) ?? 0) + delta);
+  };
+
+  txs.forEach((tx) => {
+    const dateKey = toTxDateKey(tx.transaction_date);
+    if (!dateKey) return;
+    const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
+    if (dateKey <= todayKey && !isRealized) return;
+
+    const primaryCandidates = [
+      tx.primary_item_id,
+      tx.primary_card_item_id ?? null,
+    ].filter(Boolean) as number[];
+    const counterCandidates = [
+      tx.counterparty_item_id,
+      tx.counterparty_card_item_id ?? null,
+    ].filter(Boolean) as number[];
+    const primarySelectedIds = primaryCandidates.filter(
+      (id) => selectedIds.has(id) && cryptoItemIds.has(id)
+    );
+    const counterSelectedIds = counterCandidates.filter(
+      (id) => selectedIds.has(id) && cryptoItemIds.has(id)
+    );
+    if (primarySelectedIds.length === 0 && counterSelectedIds.length === 0) return;
+
+    primarySelectedIds.forEach((itemId) => {
+      let delta = 0;
+      // Позиция primary: покупка (EXPENSE) — прирост единиц (+), продажа (INCOME) — уменьшение (-)
+      if (tx.direction === "INCOME") delta = -(tx.primary_quantity_units ?? 0);
+      if (tx.direction === "EXPENSE") delta = tx.primary_quantity_units ?? 0;
+      if (tx.direction === "TRANSFER") delta = -(tx.primary_quantity_units ?? 0);
+      addDelta(dateKey, itemId, delta);
+    });
+
+    if (tx.direction === "TRANSFER") {
+      counterSelectedIds.forEach((itemId) => {
+        const delta = tx.counterparty_quantity_units ?? 0;
         addDelta(dateKey, itemId, delta);
       });
     }
@@ -559,6 +623,8 @@ export default function AssetsDynamicsPage() {
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [chartContainerReady, setChartContainerReady] = useState(false);
   const [chartSize, setChartSize] = useState({ width: 720, height: 280 });
+  const [costHistoryByItemId, setCostHistoryByItemId] = useState<Record<number, ItemCostHistoryOut>>({});
+  const [loadingCostHistory, setLoadingCostHistory] = useState(false);
   const setChartRef = useCallback((el: HTMLDivElement | null) => {
     chartRef.current = el;
     setChartContainerReady(!!el);
@@ -716,14 +782,27 @@ export default function AssetsDynamicsPage() {
     () => new Set(moexItems.map((item) => item.id)),
     [moexItems]
   );
-  const moexPriceKeyByItemId = useMemo(() => {
+  const cryptoItems = useMemo(
+    () => effectiveSelectedItems.filter((item) => isCryptoItem(item)),
+    [effectiveSelectedItems]
+  );
+  const cryptoItemIds = useMemo(
+    () => new Set(cryptoItems.map((item) => item.id)),
+    [cryptoItems]
+  );
+  const marketPriceKeyByItemId = useMemo(() => {
     const map = new Map<number, string>();
     moexItems.forEach((item) => {
       const key = getMarketPriceKey(item);
       if (key) map.set(item.id, key);
     });
+    cryptoItems.forEach((item) => {
+      const key = getMarketPriceKey(item);
+      if (key) map.set(item.id, key);
+    });
     return map;
-  }, [moexItems]);
+  }, [moexItems, cryptoItems]);
+  const moexPriceKeyByItemId = marketPriceKeyByItemId;
 
   const selectedCurrencyCodes = useMemo(() => {
     const set = new Set<string>();
@@ -793,6 +872,52 @@ export default function AssetsDynamicsPage() {
     return end < rangeStartKey ? rangeStartKey : end;
   }, [defaultEndKey, effectiveRangeEnd, rangeStartKey]);
 
+  const allSelectedAreMarketItems = useMemo(
+    () =>
+      effectiveSelectedItems.length > 0 &&
+      effectiveSelectedItems.every((item) => isMoexItem(item) || isCryptoItem(item)),
+    [effectiveSelectedItems]
+  );
+
+  useEffect(() => {
+    if (!allSelectedAreMarketItems || !rangeStartKey || !rangeEndKey) {
+      setCostHistoryByItemId({});
+      return;
+    }
+    let cancelled = false;
+    setLoadingCostHistory(true);
+    const itemIds = effectiveSelectedItems.map((item) => item.id);
+    Promise.all(
+      itemIds.map((id) => {
+        const item = effectiveSelectedItems.find((i) => i.id === id);
+        const dateFrom = item?.open_date
+          ? (rangeStartKey > item.open_date ? rangeStartKey : item.open_date)
+          : rangeStartKey;
+        return fetchItemCostHistory(id, {
+          date_from: dateFrom,
+          date_to: rangeEndKey,
+        });
+      })
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const next: Record<number, ItemCostHistoryOut> = {};
+        itemIds.forEach((id, i) => {
+          next[id] = results[i];
+        });
+        setCostHistoryByItemId(next);
+      })
+      .catch(() => {
+        if (!cancelled) setCostHistoryByItemId({});
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCostHistory(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allSelectedAreMarketItems, rangeStartKey, rangeEndKey, effectiveSelectedItems]);
+
   const dateKeys = useMemo(() => {
     if (!rangeStartKey || !rangeEndKey) return [];
     return buildDateRange(rangeStartKey, rangeEndKey);
@@ -861,8 +986,13 @@ export default function AssetsDynamicsPage() {
     };
   }, [fxRatesByDate, needsRates, rateFetchKeys]);
 
+  const marketItems = useMemo(
+    () => [...moexItems, ...cryptoItems],
+    [moexItems, cryptoItems]
+  );
+
   useEffect(() => {
-    if (!moexItems.length || !rangeStartKey || !rangeEndKey) return;
+    if (!marketItems.length || !rangeStartKey || !rangeEndKey) return;
     const toKey = rangeEndKey < todayKey ? rangeEndKey : todayKey;
     const historyFromKey = toDateKey(addDays(parseDateKey(rangeStartKey), -14));
     if (!toKey || rangeStartKey > toKey) return;
@@ -872,15 +1002,16 @@ export default function AssetsDynamicsPage() {
       setMarketPricesLoading(true);
       const next: Record<string, Record<string, MarketPriceOut>> = {};
 
-      for (const item of moexItems) {
+      for (const item of marketItems) {
         if (!item.instrument_id) continue;
         const key = getMarketPriceKey(item);
         if (!key) continue;
+        const boardId = item.instrument_board_id ?? (item.type_code === "crypto" ? "default" : undefined);
         try {
           const prices = await fetchMarketInstrumentPrices(item.instrument_id, {
             from: historyFromKey,
             to: toKey,
-            boardId: item.instrument_board_id ?? undefined,
+            boardId,
           });
           if (cancelled) return;
           const byDate: Record<string, MarketPriceOut> = {};
@@ -920,31 +1051,33 @@ export default function AssetsDynamicsPage() {
     return () => {
       cancelled = true;
     };
-  }, [moexItems, rangeEndKey, rangeStartKey, todayKey]);
+  }, [marketItems, rangeEndKey, rangeStartKey, todayKey]);
 
   useEffect(() => {
-    if (moexItems.length === 0 && marketPricesLoading) {
+    if (marketItems.length === 0 && marketPricesLoading) {
       setMarketPricesLoading(false);
     }
-  }, [moexItems.length, marketPricesLoading]);
+  }, [marketItems.length, marketPricesLoading]);
 
-  // Загружаем текущие цены для MOEX активов (для сегодняшней даты)
+  // Загружаем текущие цены для рыночных активов (MOEX и крипта, для сегодняшней даты)
   useEffect(() => {
-    if (moexItems.length === 0) return;
+    if (marketItems.length === 0) return;
 
     let cancelled = false;
     const loadLatestPrices = async () => {
       const latest = new Map<string, MarketPriceOut>();
       
-      for (const item of moexItems) {
-        if (!item.instrument_id || !item.instrument_board_id) continue;
+      for (const item of marketItems) {
+        if (!item.instrument_id) continue;
+        const boardId = item.instrument_board_id ?? (item.type_code === "crypto" ? "default" : "");
+        if (!boardId) continue;
         const key = getMarketPriceKey(item);
         if (!key) continue;
         
         try {
           const price = await fetchMarketInstrumentPrice(
             item.instrument_id,
-            item.instrument_board_id
+            boardId
           );
           if (cancelled) return;
           latest.set(key, price);
@@ -979,7 +1112,7 @@ export default function AssetsDynamicsPage() {
     return () => {
       cancelled = true;
     };
-  }, [moexItems, todayKey]);
+  }, [marketItems, todayKey]);
 
   const latestMarketPriceByKey = useMemo(() => {
     const latest = new Map<string, MarketPriceOut>();
@@ -1019,6 +1152,50 @@ export default function AssetsDynamicsPage() {
 
     const selectedIds = new Set(effectiveSelectedItems.map((item) => item.id));
     const itemKindById = new Map(effectiveSelectedItems.map((item) => [item.id, item.kind]));
+
+    if (allSelectedAreMarketItems && effectiveSelectedItems.every((item) => costHistoryByItemId[item.id]?.points?.length)) {
+      const dateKeys = buildDateRange(rangeStartKey, rangeEndKey);
+      const rows: DailyRow[] = [];
+      const pointByDateByItem = new Map<number, Map<string, { market_rub: number | null }>>();
+      effectiveSelectedItems.forEach((item) => {
+        const byDate = new Map<string, { market_rub: number | null }>();
+        (costHistoryByItemId[item.id]?.points ?? []).forEach((p) => {
+          byDate.set(p.date, { market_rub: p.market_rub ?? null });
+        });
+        pointByDateByItem.set(item.id, byDate);
+      });
+      dateKeys.forEach((dateKey) => {
+        const itemValues: Record<number, number | null> = {};
+        const itemRubValues: Record<number, number | null> = {};
+        let totalRubCents: number | null = 0;
+        let missing = false;
+        effectiveSelectedItems.forEach((item) => {
+          const byDate = pointByDateByItem.get(item.id);
+          const point = byDate?.get(dateKey);
+          const marketRub = point?.market_rub ?? null;
+          itemRubValues[item.id] = marketRub;
+          itemValues[item.id] = marketRub;
+          if (marketRub != null) {
+            const effectiveKind = item.kind === "LIABILITY" ? "LIABILITY" : "ASSET";
+            const signed = effectiveKind === "LIABILITY" ? -marketRub : marketRub;
+            totalRubCents = (totalRubCents ?? 0) + signed;
+          } else {
+            missing = true;
+          }
+        });
+        if (missing) totalRubCents = null;
+        rows.push({
+          date: dateKey,
+          totalRubCents,
+          totalCurrencyCents: null,
+          rate: null,
+          itemValues,
+          itemRubValues,
+        });
+      });
+      return rows;
+    }
+
     const itemStartKeyById = new Map(
       effectiveSelectedItems.map((item) => [item.id, getEffectiveStartKey(item)])
     );
@@ -1044,6 +1221,12 @@ export default function AssetsDynamicsPage() {
       moexItemIds,
       todayKey
     );
+    const unitsDeltasByDate = buildUnitsDeltasByDate(
+      transactions,
+      selectedIds,
+      cryptoItemIds,
+      todayKey
+    );
     const initialLotsById = new Map<number, number>();
     moexItems.forEach((item) => {
       const currentLots = item.position_lots ?? 0;
@@ -1057,6 +1240,19 @@ export default function AssetsDynamicsPage() {
       });
       initialLotsById.set(item.id, currentLots - realizedDelta);
     });
+    const initialUnitsById = new Map<number, number>();
+    cryptoItems.forEach((item) => {
+      const currentUnits = item.quantity_units ?? 0;
+      const startKeyForItem = itemStartKeyById.get(item.id) ?? "";
+      let realizedDelta = 0;
+      unitsDeltasByDate.forEach((deltaMap, dateKey) => {
+        if (dateKey > todayKey) return;
+        if (startKeyForItem && dateKey < startKeyForItem) return;
+        const delta = deltaMap.get(item.id);
+        if (delta) realizedDelta += delta;
+      });
+      initialUnitsById.set(item.id, currentUnits - realizedDelta);
+    });
     const startKey = earliestStartKey || rangeStartKey;
     let startDate = parseDateKey(startKey);
     const endDate = parseDateKey(rangeEndKey);
@@ -1064,6 +1260,7 @@ export default function AssetsDynamicsPage() {
 
     const amountBalances = new Map<number, number>();
     const lotBalances = new Map<number, number>();
+    const unitsBalances = new Map<number, number>();
     const rows: DailyRow[] = [];
 
     for (
@@ -1078,6 +1275,13 @@ export default function AssetsDynamicsPage() {
           lotBalances.set(
             item.id,
             initialLotsById.get(item.id) ?? item.position_lots ?? 0
+          );
+          return;
+        }
+        if (isCryptoItem(item)) {
+          unitsBalances.set(
+            item.id,
+            initialUnitsById.get(item.id) ?? item.quantity_units ?? 0
           );
           return;
         }
@@ -1098,6 +1302,15 @@ export default function AssetsDynamicsPage() {
           const currentLots =
             lotBalances.get(itemId) ?? initialLotsById.get(itemId) ?? 0;
           lotBalances.set(itemId, currentLots + delta);
+        });
+      }
+
+      const dayUnitsDeltas = unitsDeltasByDate.get(dateKey);
+      if (dayUnitsDeltas) {
+        dayUnitsDeltas.forEach((delta, itemId) => {
+          const currentUnits =
+            unitsBalances.get(itemId) ?? initialUnitsById.get(itemId) ?? 0;
+          unitsBalances.set(itemId, currentUnits + delta);
         });
       }
 
@@ -1169,6 +1382,28 @@ export default function AssetsDynamicsPage() {
             valueCents = unitPriceCents * lots * lotSize;
             valueCurrency = price?.currency_code ?? item.currency_code;
           }
+        } else if (isCryptoItem(item)) {
+          const units =
+            unitsBalances.get(item.id) ?? initialUnitsById.get(item.id) ?? 0;
+          const priceKey = marketPriceKeyByItemId.get(item.id);
+          let price: MarketPriceOut | null = null;
+          if (priceKey) {
+            if (dateKey >= todayKey) {
+              price = latestPricesByKey.get(priceKey) ?? null;
+              if (!price) price = latestMarketPriceByKey.get(priceKey) ?? null;
+            } else {
+              const priceByDate = marketPricesByKey[priceKey];
+              const priceDates = marketPriceDatesByKey.get(priceKey);
+              if (priceByDate) {
+                price = findPriceOnOrBefore(priceByDate, priceDates, dateKey);
+              }
+            }
+          }
+          const unitPriceCents = computeInstrumentUnitPriceCents(item, price);
+          if (unitPriceCents != null) {
+            valueCents = unitPriceCents * units;
+            valueCurrency = price?.currency_code ?? item.currency_code;
+          }
         } else {
           valueCents =
             amountBalances.get(item.id) ?? getItemDisplayInitialCents(item);
@@ -1236,11 +1471,16 @@ export default function AssetsDynamicsPage() {
     moexItemIds,
     moexItems,
     moexPriceKeyByItemId,
+    cryptoItemIds,
+    cryptoItems,
+    marketPriceKeyByItemId,
     effectiveSelectedItems,
     showCurrencyColumns,
     singleCurrencyCode,
     todayKey,
     transactions,
+    allSelectedAreMarketItems,
+    costHistoryByItemId,
   ]);
 
   const chartData = useMemo(() => {
@@ -1812,7 +2052,7 @@ export default function AssetsDynamicsPage() {
             <div
               className="relative py-6"
               style={{
-                opacity: loading ? 0 : 1,
+                opacity: loading || (allSelectedAreMarketItems && loadingCostHistory) ? 0.6 : 1,
                 transition: "opacity 0.3s ease-in-out",
               }}
             >

@@ -6,7 +6,7 @@ from db import get_db
 from auth import get_current_user
 from category_service import resolve_category_or_400
 from models import Transaction, Item, User, Counterparty, Category
-from market_utils import is_moex_item
+from market_utils import is_crypto_item, is_moex_item
 from schemas import (
     TransactionCreate,
     TransactionDebtsCreate,
@@ -195,6 +195,19 @@ def _apply_position_delta(item: Item, delta_lots: int, tx_date) -> None:
             detail=f"Insufficient lots for item '{item.name}' on {format_tx_datetime(tx_date)}.",
         )
     item.position_lots = next_value
+
+
+def _apply_quantity_units_delta(item: Item, delta_units: float, tx_date) -> None:
+    if delta_units == 0:
+        return
+    current = float(item.quantity_units or 0)
+    next_value = current + delta_units
+    if next_value < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient quantity for item '{item.name}' on {format_tx_datetime(tx_date)}.",
+        )
+    item.quantity_units = next_value
 
 
 @router.get("", response_model=list[TransactionOut])
@@ -513,16 +526,32 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         else None
     )
     related_is_moex = is_moex_item(related_item) if related_item else False
+    primary_is_crypto = is_crypto_item(primary)
+    related_is_crypto = is_crypto_item(related_item) if related_item else False
 
-    if primary_is_moex and data.primary_quantity_lots is None:
+    needs_primary_quantity = (
+        data.direction in ("INCOME", "EXPENSE")
+        and data.asset_link_type in ("ASSET_PURCHASE", "ASSET_SALE")
+    )
+    if primary_is_moex and needs_primary_quantity and data.primary_quantity_lots is None:
         raise HTTPException(
             status_code=400,
             detail="primary_quantity_lots is required for MOEX items",
+        )
+    if primary_is_crypto and needs_primary_quantity and data.primary_quantity_units is None:
+        raise HTTPException(
+            status_code=400,
+            detail="primary_quantity_units is required for crypto items",
         )
     if not primary_is_moex and data.primary_quantity_lots is not None and not related_is_moex:
         raise HTTPException(
             status_code=400,
             detail="primary_quantity_lots is only allowed for MOEX items",
+        )
+    if not primary_is_crypto and data.primary_quantity_units is not None and not related_is_crypto:
+        raise HTTPException(
+            status_code=400,
+            detail="primary_quantity_units is only allowed for crypto items",
         )
 
     counter_side = None
@@ -633,6 +662,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         amount_counterparty=amount_counterparty,
         primary_quantity_lots=data.primary_quantity_lots,
         counterparty_quantity_lots=data.counterparty_quantity_lots,
+        primary_quantity_units=data.primary_quantity_units,
         direction=data.direction,
         transaction_type=data.transaction_type,
         status=status_value,
@@ -648,12 +678,16 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         if data.direction == "INCOME":
             if primary_is_moex:
                 _apply_position_delta(primary, data.primary_quantity_lots or 0, data.transaction_date)
+            elif primary_is_crypto and data.primary_quantity_units is not None:
+                _apply_quantity_units_delta(primary, data.primary_quantity_units or 0, data.transaction_date)
             else:
                 primary.current_value_rub += amt
 
         elif data.direction == "EXPENSE":
             if primary_is_moex:
                 _apply_position_delta(primary, -(data.primary_quantity_lots or 0), data.transaction_date)
+            elif primary_is_crypto and data.primary_quantity_units is not None:
+                _apply_quantity_units_delta(primary, -(data.primary_quantity_units or 0), data.transaction_date)
             else:
                 next_balance = primary.current_value_rub - amt
                 if next_balance < get_min_balance(primary):
@@ -668,6 +702,8 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
             if primary_is_moex:
                 _apply_position_delta(primary, -(data.primary_quantity_lots or 0), data.transaction_date)
+            elif primary_is_crypto and data.primary_quantity_units is not None:
+                _apply_quantity_units_delta(primary, -(data.primary_quantity_units or 0), data.transaction_date)
             primary_delta = transfer_delta(primary.kind, True, amt)
             primary_next = primary.current_value_rub + primary_delta
             if primary_next < get_min_balance(primary):
@@ -694,6 +730,11 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
                 _apply_position_delta(related_item, data.primary_quantity_lots or 0, data.transaction_date)
             elif data.direction == "INCOME":
                 _apply_position_delta(related_item, -(data.primary_quantity_lots or 0), data.transaction_date)
+        if related_item and related_is_crypto and data.primary_quantity_units is not None:
+            if data.direction == "EXPENSE":
+                _apply_quantity_units_delta(related_item, data.primary_quantity_units or 0, data.transaction_date)
+            elif data.direction == "INCOME":
+                _apply_quantity_units_delta(related_item, -(data.primary_quantity_units or 0), data.transaction_date)
 
     if data.direction == "TRANSFER" and counter:
         update_settlements_item_closed_status(db, primary)
@@ -752,15 +793,30 @@ def update_transaction(
     )
     new_primary = new_primary_side.effective_item
     new_primary_is_moex = is_moex_item(new_primary)
-    if new_primary_is_moex and data.primary_quantity_lots is None:
+    new_primary_is_crypto = is_crypto_item(new_primary)
+    needs_primary_quantity = (
+        data.direction in ("INCOME", "EXPENSE")
+        and data.asset_link_type in ("ASSET_PURCHASE", "ASSET_SALE")
+    )
+    if new_primary_is_moex and needs_primary_quantity and data.primary_quantity_lots is None:
         raise HTTPException(
             status_code=400,
             detail="primary_quantity_lots is required for MOEX items",
+        )
+    if new_primary_is_crypto and needs_primary_quantity and data.primary_quantity_units is None:
+        raise HTTPException(
+            status_code=400,
+            detail="primary_quantity_units is required for crypto items",
         )
     if not new_primary_is_moex and data.primary_quantity_lots is not None:
         raise HTTPException(
             status_code=400,
             detail="primary_quantity_lots is only allowed for MOEX items",
+        )
+    if not new_primary_is_crypto and data.primary_quantity_units is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="primary_quantity_units is only allowed for crypto items",
         )
 
     new_tx_date = data.transaction_date.date()
@@ -846,8 +902,12 @@ def update_transaction(
                 detail="counterparty_quantity_lots is only allowed for TRANSFER",
             )
 
+    old_primary_is_crypto = is_crypto_item(old_primary)
+    old_counter_is_crypto = is_crypto_item(old_counter) if old_counter else False
+
     deltas: dict[int, int] = {}
     lot_deltas: dict[int, int] = {}
+    units_deltas: dict[int, float] = {}
 
     def add_delta(item_id: int, delta: int) -> None:
         if delta == 0:
@@ -859,6 +919,11 @@ def update_transaction(
             return
         lot_deltas[item_id] = lot_deltas.get(item_id, 0) + delta
 
+    def add_units_delta(item_id: int, delta: float) -> None:
+        if delta == 0:
+            return
+        units_deltas[item_id] = units_deltas.get(item_id, 0.0) + delta
+
     if tx.transaction_type == "ACTUAL":
         old_amt = tx.amount_rub
         old_counter_amt = (
@@ -868,11 +933,15 @@ def update_transaction(
         if tx.direction == "INCOME":
             if old_primary_is_moex:
                 add_lot_delta(old_primary.id, -(tx.primary_quantity_lots or 0))
+            elif old_primary_is_crypto and tx.primary_quantity_units is not None:
+                add_units_delta(old_primary.id, -(float(tx.primary_quantity_units or 0)))
             else:
                 add_delta(old_primary.id, -old_amt)
         elif tx.direction == "EXPENSE":
             if old_primary_is_moex:
                 add_lot_delta(old_primary.id, tx.primary_quantity_lots or 0)
+            elif old_primary_is_crypto and tx.primary_quantity_units is not None:
+                add_units_delta(old_primary.id, float(tx.primary_quantity_units or 0))
             else:
                 add_delta(old_primary.id, old_amt)
         elif tx.direction == "TRANSFER":
@@ -880,6 +949,8 @@ def update_transaction(
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
             if old_primary_is_moex:
                 add_lot_delta(old_primary.id, tx.primary_quantity_lots or 0)
+            elif old_primary_is_crypto and tx.primary_quantity_units is not None:
+                add_units_delta(old_primary.id, float(tx.primary_quantity_units or 0))
             old_primary_delta = transfer_delta(old_primary.kind, True, old_amt)
             add_delta(old_primary.id, -old_primary_delta)
             if old_counter_is_moex:
@@ -896,11 +967,15 @@ def update_transaction(
         if data.direction == "INCOME":
             if new_primary_is_moex:
                 add_lot_delta(new_primary.id, data.primary_quantity_lots or 0)
+            elif new_primary_is_crypto and data.primary_quantity_units is not None:
+                add_units_delta(new_primary.id, float(data.primary_quantity_units or 0))
             else:
                 add_delta(new_primary.id, new_amt)
         elif data.direction == "EXPENSE":
             if new_primary_is_moex:
                 add_lot_delta(new_primary.id, -(data.primary_quantity_lots or 0))
+            elif new_primary_is_crypto and data.primary_quantity_units is not None:
+                add_units_delta(new_primary.id, -float(data.primary_quantity_units or 0))
             else:
                 add_delta(new_primary.id, -new_amt)
         elif data.direction == "TRANSFER":
@@ -908,6 +983,8 @@ def update_transaction(
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
             if new_primary_is_moex:
                 add_lot_delta(new_primary.id, -(data.primary_quantity_lots or 0))
+            elif new_primary_is_crypto and data.primary_quantity_units is not None:
+                add_units_delta(new_primary.id, -float(data.primary_quantity_units or 0))
             new_primary_delta = transfer_delta(new_primary.kind, True, new_amt)
             add_delta(new_primary.id, new_primary_delta)
             if new_counter_is_moex:
@@ -946,12 +1023,27 @@ def update_transaction(
                 detail="Cannot update: would make position negative. Update later transactions first.",
             )
 
+    for item_id, delta in units_deltas.items():
+        item = items_by_id.get(item_id)
+        if not item:
+            raise HTTPException(status_code=400, detail="Item not found")
+        current = float(item.quantity_units or 0)
+        if current + delta < 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot update: would make quantity negative. Update later transactions first.",
+            )
+
     for item_id, delta in deltas.items():
         items_by_id[item_id].current_value_rub += delta
 
     for item_id, delta in lot_deltas.items():
         item = items_by_id[item_id]
         item.position_lots = (item.position_lots or 0) + delta
+
+    for item_id, delta in units_deltas.items():
+        item = items_by_id[item_id]
+        item.quantity_units = float(item.quantity_units or 0) + delta
 
     category = resolve_category_or_400(db, user, data.category_id)
 
@@ -969,8 +1061,12 @@ def update_transaction(
     tx.counterparty_id = data.counterparty_id
     tx.amount_rub = data.amount_rub
     tx.amount_counterparty = amount_counterparty if data.direction == "TRANSFER" else None
-    tx.primary_quantity_lots = data.primary_quantity_lots
-    tx.counterparty_quantity_lots = data.counterparty_quantity_lots
+    if data.primary_quantity_lots is not None or tx.asset_link_type not in ("ASSET_PURCHASE", "ASSET_SALE"):
+        tx.primary_quantity_lots = data.primary_quantity_lots
+    if data.primary_quantity_units is not None or tx.asset_link_type not in ("ASSET_PURCHASE", "ASSET_SALE"):
+        tx.primary_quantity_units = data.primary_quantity_units
+    tx.counterparty_quantity_lots = data.counterparty_quantity_lots if data.direction == "TRANSFER" else None
+    tx.counterparty_quantity_units = data.counterparty_quantity_units if data.direction == "TRANSFER" else None
     tx.direction = data.direction
     tx.transaction_type = data.transaction_type
     if data.status is not None:
@@ -1016,6 +1112,8 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
             raise HTTPException(status_code=400, detail="Counterparty item not found")
     primary_is_moex = is_moex_item(primary)
     counter_is_moex = is_moex_item(counter) if counter else False
+    primary_is_crypto = is_crypto_item(primary)
+    counter_is_crypto = is_crypto_item(counter) if counter else False
 
     if tx.transaction_type == "ACTUAL":
         amt = tx.amount_rub
@@ -1024,6 +1122,8 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
         if tx.direction == "INCOME":
             if primary_is_moex:
                 _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx.transaction_date)
+            elif primary_is_crypto and tx.primary_quantity_units is not None:
+                _apply_quantity_units_delta(primary, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
             else:
                 next_balance = primary.current_value_rub - amt
                 if next_balance < get_min_balance(primary):
@@ -1035,11 +1135,15 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
         elif tx.direction == "EXPENSE":
             if primary_is_moex:
                 _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
+            elif primary_is_crypto and tx.primary_quantity_units is not None:
+                _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
             else:
                 primary.current_value_rub += amt
         elif tx.direction == "TRANSFER":
             if primary_is_moex:
                 _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
+            elif primary_is_crypto and tx.primary_quantity_units is not None:
+                _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
             primary_delta = -transfer_delta(primary.kind, True, amt)
             if primary.current_value_rub + primary_delta < get_min_balance(primary):
                 raise HTTPException(

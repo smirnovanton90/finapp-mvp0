@@ -38,7 +38,14 @@ type ReportMetrics = {
   expenseAcquisition: number;
   investmentInAsset: number;
   netProfit: number;
-  yieldAnnual: number | null;
+  /** Доходность актива (для активов без рыночной основной стоимости), годовая */
+  yieldBalanceAnnual: number | null;
+  /** Доходность по рыночной стоимости (для активов с primary_value_kind=MARKET), годовая */
+  yieldMarketAnnual: number | null;
+  /** Доходность вложений в актив (для активов с primary_value_kind=MARKET), годовая */
+  yieldInvestmentsAnnual: number | null;
+  /** Есть ли среди выбранных активов хотя бы один с primary_value_kind=MARKET */
+  hasMarketPrimary: boolean;
   revaluationProfitRub: number | null;
   fxProfitRub: number | null;
 };
@@ -422,13 +429,33 @@ export default function AssetsProfitabilityPage() {
       expenseAcquisition -
       investmentInAsset;
 
-    let yieldAnnual: number | null = null;
-    if (avgDaily > 0 && daysCount > 0) {
-      yieldAnnual = (netProfit / avgDaily) * (365 / daysCount);
+    const hasMarketPrimary = effectiveItems.some(
+      (item) => (item.primary_value_kind ?? "BALANCE") === "MARKET"
+    );
+
+    const incomeMinusExpense = incomeFromAsset - expenseForAsset;
+    const investedBase = expenseAcquisition + investmentInAsset;
+    const annualFactor = daysCount > 0 ? 365 / daysCount : 0;
+
+    let yieldBalanceAnnual: number | null = null;
+    let yieldMarketAnnual: number | null = null;
+    let yieldInvestmentsAnnual: number | null = null;
+
+    if (avgDaily > 0 && annualFactor > 0) {
+      // Доходность актива в годовом выражении (для балансовой / нерыночной основной стоимости)
+      yieldBalanceAnnual = (incomeMinusExpense / avgDaily) * annualFactor;
+
+      if (hasMarketPrimary) {
+        // Доходность актива по рыночной стоимости в годовом выражении
+        yieldMarketAnnual = (incomeMinusExpense / avgDaily) * annualFactor;
+      }
     }
 
-    const startTotal = dayValues[0] ?? 0;
-    const endTotal = dayValues[dayValues.length - 1] ?? 0;
+    if (hasMarketPrimary && investedBase > 0 && annualFactor > 0) {
+      // Доходность вложений в актив в годовом выражении
+      const investedFlows = incomeMinusExpense + incomeFromSale;
+      yieldInvestmentsAnnual = (investedFlows / investedBase) * annualFactor;
+    }
 
     let revaluationSum = 0;
     let fxSum = 0;
@@ -518,7 +545,10 @@ export default function AssetsProfitabilityPage() {
       expenseAcquisition,
       investmentInAsset,
       netProfit,
-      yieldAnnual,
+      yieldBalanceAnnual,
+      yieldMarketAnnual,
+      yieldInvestmentsAnnual,
+      hasMarketPrimary,
       revaluationProfitRub,
       fxProfitRub,
     };
@@ -741,24 +771,73 @@ export default function AssetsProfitabilityPage() {
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Доходность (годовая)
-                    </span>
-                    <span
-                      className="font-medium"
-                      style={{
-                        color:
-                          metrics.yieldAnnual != null && metrics.yieldAnnual > 0
-                            ? GREEN
-                            : metrics.yieldAnnual != null && metrics.yieldAnnual < 0
-                              ? RED
-                              : undefined,
-                      }}
-                    >
-                      {formatPercent(metrics.yieldAnnual)}%
-                    </span>
-                  </div>
+                  {!metrics.hasMarketPrimary && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Доходность актива в годовом выражении
+                      </span>
+                      <span
+                        className="font-medium"
+                        style={{
+                          color:
+                            metrics.yieldBalanceAnnual != null &&
+                            metrics.yieldBalanceAnnual > 0
+                              ? GREEN
+                              : metrics.yieldBalanceAnnual != null &&
+                                  metrics.yieldBalanceAnnual < 0
+                                ? RED
+                                : undefined,
+                        }}
+                      >
+                        {formatPercent(metrics.yieldBalanceAnnual)}%
+                      </span>
+                    </div>
+                  )}
+
+                  {metrics.hasMarketPrimary && (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">
+                          Доходность актива по рыночной стоимости в годовом выражении
+                        </span>
+                        <span
+                          className="font-medium"
+                          style={{
+                            color:
+                              metrics.yieldMarketAnnual != null &&
+                              metrics.yieldMarketAnnual > 0
+                                ? GREEN
+                                : metrics.yieldMarketAnnual != null &&
+                                    metrics.yieldMarketAnnual < 0
+                                  ? RED
+                                  : undefined,
+                          }}
+                        >
+                          {formatPercent(metrics.yieldMarketAnnual)}%
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">
+                          Доходность вложений в актив в годовом выражении
+                        </span>
+                        <span
+                          className="font-medium"
+                          style={{
+                            color:
+                              metrics.yieldInvestmentsAnnual != null &&
+                              metrics.yieldInvestmentsAnnual > 0
+                                ? GREEN
+                                : metrics.yieldInvestmentsAnnual != null &&
+                                    metrics.yieldInvestmentsAnnual < 0
+                                  ? RED
+                                  : undefined,
+                          }}
+                        >
+                          {formatPercent(metrics.yieldInvestmentsAnnual)}%
+                        </span>
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-muted-foreground">

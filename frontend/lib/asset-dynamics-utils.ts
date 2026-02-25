@@ -14,7 +14,7 @@ export function getTxDeltaForItem(
   tx: TransactionOut,
   itemId: number,
   itemKind: ItemOut["kind"],
-  /** Валюта актива (ISO). Если не RUB, то amount_rub для primary считается в валюте актива. */
+  /** Валюта актива (ISO). Если не RUB, то amount для primary — в валюте актива (центы). */
   itemCurrencyCode?: string | null
 ): { deltaCents: number; inCurrency: boolean } | null {
   const isPrimary = tx.primary_item_id === itemId || tx.primary_card_item_id === itemId;

@@ -421,6 +421,7 @@ function buildCategoryRows(
   return rows;
 }
 
+/** Возвращает эквивалент суммы транзакции в рублях (копейки). tx.amount — в валюте primary-счёта (копейки/центы). */
 function getRubEquivalentCents(
   tx: TransactionOut,
   currencyCode: string,

@@ -73,6 +73,7 @@ import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
 import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
 import { CardIcon } from "@/components/card-icon";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import {
   toTxDateKey,
@@ -593,6 +594,7 @@ export default function AssetDetailPage() {
         }
       } else {
         if (isMarketOrCrypto) {
+          // costs.market — в валюте актива (копейки/центы)
           finalCurCents = costs.market ?? 0;
           const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
           finalRubCents =
@@ -603,6 +605,7 @@ export default function AssetDetailPage() {
           if (item.type_code === "crypto" && item.quantity_units != null) qtyEnd = item.quantity_units;
           else if (item.position_lots != null) qtyEnd = item.position_lots;
         } else {
+          // costs.balance — в валюте актива (копейки/центы)
           finalCurCents = costs.balance ?? 0;
           const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
           finalRubCents =
@@ -1113,22 +1116,45 @@ export default function AssetDetailPage() {
     );
     if (pointsInRange.length === 0) return null;
 
-    const selectValueRub = (p: (typeof costHistoryData.points)[number]): number => {
+    // API: balance/acquisition/invested — в рублёвых копейках; market для не-RUB — в центах валюты актива.
+    // Приводим к рублям для avgDailyRub (для валютного актива — по курсу на дату точки).
+    const itemCurrency = (item.currency_code ?? "RUB").toUpperCase();
+    const isCurrencyAsset = itemCurrency !== "RUB";
+    const selectValueInRub = (p: (typeof costHistoryData.points)[number]): number => {
+      let raw = 0;
       if (primaryKind === "MARKET") {
-        return p.market ?? p.balance ?? 0;
+        raw = p.market ?? p.balance ?? 0;
+      } else if (primaryKind === "ACQUISITION") {
+        raw = p.acquisition ?? 0;
+      } else if (primaryKind === "INVESTED") {
+        raw = p.invested ?? 0;
+      } else {
+        raw = p.balance ?? 0;
       }
-      if (primaryKind === "ACQUISITION") {
-        return p.acquisition ?? 0;
+      if (primaryKind === "MARKET" && isCurrencyAsset && raw !== 0) {
+        const rate = getRateForDateKey(p.date);
+        return (raw / 100) * (rate ?? 0);
       }
-      if (primaryKind === "INVESTED") {
-        return p.invested ?? 0;
-      }
-      return p.balance ?? 0;
+      return raw / 100;
     };
 
-    const values = pointsInRange.map((p) => selectValueRub(p));
+    const values = pointsInRange.map((p) => selectValueInRub(p));
     const sumValues = values.reduce((acc, v) => acc + v, 0);
     const avgDailyRub = values.length > 0 ? sumValues / values.length : 0;
+
+    // Среднедневная стоимость в валюте актива: только по рыночной стоимости (market), без пересчёта по курсу.
+    let avgDailyCurrency: number | null = null;
+    if (isCurrencyAsset) {
+      let sumCurrency = 0;
+      let countCurrency = 0;
+      pointsInRange.forEach((p) => {
+        if (p.market != null) {
+          sumCurrency += p.market / 100;
+          countCurrency += 1;
+        }
+      });
+      avgDailyCurrency = countCurrency > 0 ? sumCurrency / countCurrency : null;
+    }
 
     const daysCount = daysBetween(dateStart, dateEnd);
     const annualFactor = daysCount > 0 ? 365 / daysCount : 0;
@@ -1144,23 +1170,19 @@ export default function AssetDetailPage() {
       return Boolean(tx.asset_link_type);
     });
 
-    let incomeFromAsset = 0;
+    // Для расчёта рентабельности берём уже посчитанные доход/расход из costs (те же, что в блоке «Рентабельность»)
+    const rateForDisplay = isCurrencyAsset ? getRateForDateKey(todayKey) : null;
+    const incomeFromAsset = costs ? costs.income : 0;
+    const expenseForAsset = costs ? costs.expense : 0;
+
     let incomeFromSale = 0;
-    let expenseForAsset = 0;
     let expenseAcquisition = 0;
     let investmentInAsset = 0;
-
     txs.forEach((tx) => {
       const amt = tx.amount ?? 0;
       switch (tx.asset_link_type) {
-        case "ASSET_INCOME":
-          incomeFromAsset += amt;
-          break;
         case "ASSET_SALE":
           incomeFromSale += amt;
-          break;
-        case "ASSET_EXPENSE":
-          expenseForAsset += amt;
           break;
         case "ASSET_PURCHASE":
           expenseAcquisition += amt;
@@ -1174,9 +1196,31 @@ export default function AssetDetailPage() {
     });
 
     const incomeMinusExpense = incomeFromAsset - expenseForAsset;
-    let yieldAssetAnnual: number | null = null;
+    // В валюте актива — те же значения, что отображаются (rubTotalCents/rate в центах → в единицах)
+    let incomeFromAssetInCurrency: number | null = null;
+    let expenseForAssetInCurrency: number | null = null;
+    if (isCurrencyAsset && costs && rateForDisplay != null && rateForDisplay > 0) {
+      incomeFromAssetInCurrency = costs.income / 100 / rateForDisplay;
+      expenseForAssetInCurrency = costs.expense / 100 / rateForDisplay;
+    }
+
+    // Рентабельность = (Доход − Расход) / среднедневная стоимость за период, в годовом выражении
+    let yieldAssetAnnualRub: number | null = null;
     if (avgDailyRub > 0 && annualFactor > 0) {
-      yieldAssetAnnual = (incomeMinusExpense / avgDailyRub) * annualFactor;
+      const incomeMinusExpenseRub = incomeMinusExpense / 100;
+      yieldAssetAnnualRub = (incomeMinusExpenseRub / avgDailyRub) * annualFactor;
+    }
+    let yieldAssetAnnualCurrency: number | null = null;
+    if (
+      isCurrencyAsset &&
+      avgDailyCurrency != null &&
+      avgDailyCurrency > 0 &&
+      annualFactor > 0 &&
+      incomeFromAssetInCurrency != null &&
+      expenseForAssetInCurrency != null
+    ) {
+      const incomeMinusExpenseCurrency = incomeFromAssetInCurrency - expenseForAssetInCurrency;
+      yieldAssetAnnualCurrency = (incomeMinusExpenseCurrency / avgDailyCurrency) * annualFactor;
     }
 
     const acquisitionRub = costs?.acquisition ?? 0;
@@ -1219,14 +1263,20 @@ export default function AssetDetailPage() {
     return {
       dateStart,
       dateEnd,
+      daysCount,
+      annualFactor,
       primaryKind,
       avgDailyRub,
+      avgDailyCurrency,
       incomeFromAsset,
       incomeFromSale,
       expenseForAsset,
       expenseAcquisition,
+      incomeFromAssetInCurrency: incomeFromAssetInCurrency ?? null,
+      expenseForAssetInCurrency: expenseForAssetInCurrency ?? null,
       investmentInAsset,
-      yieldAssetAnnual,
+      yieldAssetAnnualRub,
+      yieldAssetAnnualCurrency,
       acquisitionRub,
       investedRub,
       hasMarketPrimary,
@@ -1235,7 +1285,7 @@ export default function AssetDetailPage() {
       revaluationProfitRub,
       fxProfitRub,
     };
-  }, [item, todayKey, costHistoryData, dynamicsTxs, dynamics, costs]);
+  }, [item, todayKey, costHistoryData, dynamicsTxs, dynamics, costs, getRateForDateKey]);
 
   useEffect(() => {
     if (!costChartHoverPoint || !costChartContainerRef.current || !costChartTooltipRef.current) {
@@ -1603,6 +1653,7 @@ export default function AssetDetailPage() {
             <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Стоимость</h3>
             {costs && (
               <div className="flex flex-col gap-2">
+                {/* valueCents — в валюте актива (рубли в копейках или иностранная валюта в центах) */}
                 {([
                   { key: "balance" as const, kind: "BALANCE" as PrimaryValueKind, label: "Балансовая стоимость", valueCents: costs.balance, extra: null },
                   { key: "market" as const, kind: "MARKET" as PrimaryValueKind, label: "Рыночная стоимость", valueCents: costs.market, extra: item.currency_code && item.currency_code !== "RUB" && costs.market_value_rub != null ? { rub: costs.market_value_rub } : null },
@@ -1905,6 +1956,7 @@ export default function AssetDetailPage() {
               const isCrypto = item.type_code === "crypto";
               const quantity = isCrypto ? (item.quantity_units ?? 0) : (item.position_lots ?? 0);
               const hasQuantity = quantity > 0;
+              // costs.acquisition, costs.market, costs.balance — в валюте актива (копейки/центы)
               const acquisitionCents = costs.acquisition ?? 0;
               const currentValueCents = costs.market != null ? costs.market : costs.balance;
               const avgPriceCents = hasQuantity ? acquisitionCents / quantity : null;
@@ -1967,7 +2019,7 @@ export default function AssetDetailPage() {
               <div className="flex flex-col gap-2">
                 {(["income", "expense"] as const).map((key) => {
                   const label = key === "income" ? "Доход" : "Расход";
-                  // costs.income / costs.expense — в рублях (копейки), эквивалент суммы транзакций по активу
+                  // costs.income / costs.expense — в валюте актива (копейки/центы), сумма транзакций по активу
                   const rubTotalCents = key === "income" ? costs.income : costs.expense;
                   const isExpanded = rentabilityOpen === key;
                   const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
@@ -1982,11 +2034,19 @@ export default function AssetDetailPage() {
                     <div key={key} className="w-full">
                       <div
                         className="rounded-[9px] overflow-hidden"
-                        style={{ backgroundColor: BACKGROUND_DT }}
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderLeftWidth: 7,
+                          borderLeftStyle: "solid",
+                          borderLeftColor: amountColor,
+                        }}
                       >
                         <div
                           className="flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90"
                           onClick={() => setRentabilityOpen((v) => (v === key ? null : key))}
+                          style={{
+                            backgroundImage: `linear-gradient(90deg, ${amountColor}22, transparent 50%)`,
+                          }}
                         >
                           <IconButton
                             aria-label={isExpanded ? "Свернуть" : "Развернуть"}
@@ -1999,11 +2059,11 @@ export default function AssetDetailPage() {
                           <div className="text-2xl font-medium shrink-0 text-right" style={{ color: amountColor }}>
                             {isCurrencyAsset && assetTotalCents != null ? (
                               <div className="flex flex-col items-end gap-0.5">
-                                <AmountWithCurrency valueCents={rubTotalCents} currencyCode="RUB" amountStyle={{ color: amountColor }} />
-                                <AmountWithCurrency valueCents={assetTotalCents} currencyCode={item.currency_code} amountStyle={{ color: amountColor }} />
+                                <AmountWithCurrency valueCents={key === "expense" ? -rubTotalCents : rubTotalCents} currencyCode="RUB" amountStyle={{ color: amountColor }} />
+                                <AmountWithCurrency valueCents={key === "expense" ? -assetTotalCents : assetTotalCents} currencyCode={item.currency_code} amountStyle={{ color: amountColor }} />
                               </div>
                             ) : (
-                              <AmountWithCurrency valueCents={rubTotalCents} currencyCode="RUB" amountStyle={{ color: amountColor }} />
+                              <AmountWithCurrency valueCents={key === "expense" ? -rubTotalCents : rubTotalCents} currencyCode="RUB" amountStyle={{ color: amountColor }} />
                             )}
                           </div>
                         </div>
@@ -2074,7 +2134,7 @@ export default function AssetDetailPage() {
                                             <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
                                               <div className="flex items-center gap-2 tabular-nums w-full">
                                                 <CurrencyChip code={currencyCode} />
-                                                <span className="ml-auto" style={{ color: amountColor }}>{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"}</span>
+                                                <span className="ml-auto" style={{ color: amountColor }}>{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(key === "expense" ? -currencyUnits : currencyUnits) : "–"}</span>
                                               </div>
                                             </td>
                                             <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>{rateAsset != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rateAsset) : "–"}</td>
@@ -2083,7 +2143,7 @@ export default function AssetDetailPage() {
                                         <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
                                           <div className="flex items-center gap-2 tabular-nums w-full">
                                             <CurrencyChip code="RUB" />
-                                            <span className="ml-auto" style={{ color: amountColor }}>{formatRub(rubCentsTx)}</span>
+                                            <span className="ml-auto" style={{ color: amountColor }}>{formatRub(key === "expense" ? -rubCentsTx : rubCentsTx)}</span>
                                           </div>
                                         </td>
                                       </tr>
@@ -2099,6 +2159,71 @@ export default function AssetDetailPage() {
                   );
                 })}
               </div>
+              {profitability && (() => {
+                const currencyCode = (item?.currency_code ?? "RUB").toUpperCase();
+                const isCurrencyAsset = currencyCode !== "RUB";
+                const hasRub = profitability.yieldAssetAnnualRub != null;
+                const hasCur = isCurrencyAsset && profitability.yieldAssetAnnualCurrency != null;
+                const gradientStyle = { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } as React.CSSProperties;
+                const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+                const rubTooltipContent = (
+                  <div className="space-y-1.5 text-left">
+                    <div className="font-medium">Рентабельность (RUB)</div>
+                    <div>Формула: (Доход − Расход) / Среднедневная стоимость × (365 / дней в периоде)</div>
+                    <div>Доход: {formatAmount(profitability.incomeFromAsset)} ₽</div>
+                    <div>Расход: {formatAmount(profitability.expenseForAsset)} ₽</div>
+                    <div>Среднедневная стоимость: {formatAmount(Math.round(profitability.avgDailyRub * 100))} ₽</div>
+                    <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
+                    <div className="pt-0.5 border-t border-white/10">
+                      Расчёт: ({fmt((profitability.incomeFromAsset - profitability.expenseForAsset) / 100)} / {fmt(profitability.avgDailyRub)}) × {fmt(profitability.annualFactor)} = {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldAssetAnnualRub! * 100)}%
+                    </div>
+                  </div>
+                );
+                const curTooltipContent = profitability.incomeFromAssetInCurrency != null && profitability.expenseForAssetInCurrency != null && profitability.avgDailyCurrency != null ? (
+                  <div className="space-y-1.5 text-left">
+                    <div className="font-medium">Рентабельность ({currencyCode})</div>
+                    <div>Формула: (Доход − Расход) / Среднедневная стоимость × (365 / дней в периоде)</div>
+                    <div>Доход: {fmt(profitability.incomeFromAssetInCurrency)} {currencyCode}</div>
+                    <div>Расход: {fmt(profitability.expenseForAssetInCurrency)} {currencyCode}</div>
+                    <div>Среднедневная стоимость: {fmt(profitability.avgDailyCurrency)} {currencyCode}</div>
+                    <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
+                    <div className="pt-0.5 border-t border-white/10">
+                      Расчёт: ({fmt(profitability.incomeFromAssetInCurrency - profitability.expenseForAssetInCurrency)} / {fmt(profitability.avgDailyCurrency)}) × {fmt(profitability.annualFactor)} = {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldAssetAnnualCurrency! * 100)}%
+                    </div>
+                  </div>
+                ) : null;
+                return (
+                  <div className="flex w-full items-center justify-center gap-6 py-4 mt-2">
+                    {hasRub && (
+                      <div className="flex items-center gap-2">
+                        <CurrencyChip code="RUB" className="shrink-0" />
+                        <Tooltip content={rubTooltipContent} side="top">
+                          <span
+                            className="tabular-nums italic text-5xl font-semibold cursor-help"
+                            style={profitability.yieldAssetAnnualRub! >= 0 ? gradientStyle : { color: RED }}
+                          >
+                            {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldAssetAnnualRub! * 100)}%
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
+                    {hasCur && (
+                      <div className="flex items-center gap-2">
+                        <CurrencyChip code={item?.currency_code ?? "RUB"} className="shrink-0" />
+                        <Tooltip content={curTooltipContent ?? ""} side="top">
+                          <span
+                            className="tabular-nums italic text-5xl font-semibold cursor-help"
+                            style={profitability.yieldAssetAnnualCurrency! >= 0 ? gradientStyle : { color: RED }}
+                          >
+                            {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldAssetAnnualCurrency! * 100)}%
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
+                    {!hasRub && !hasCur && <span className="text-lg italic" style={{ color: PLACEHOLDER_COLOR_DARK }}>—</span>}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -2118,7 +2243,7 @@ export default function AssetDetailPage() {
                     </span>
                     <span className="font-medium">
                       {profitability.avgDailyRub > 0
-                        ? formatAmount(Math.round(profitability.avgDailyRub))
+                        ? formatAmount(Math.round(profitability.avgDailyRub * 100))
                         : "—"}
                     </span>
                   </div>
@@ -2131,33 +2256,44 @@ export default function AssetDetailPage() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-muted-foreground">Расходы по активу</span>
                     <span className="font-medium">
-                      {formatAmount(profitability.expenseForAsset)}
+                      {formatAmount(-profitability.expenseForAsset)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-muted-foreground">
                       Прибыльность актива в годовом выражении
                     </span>
-                    <span
-                      className="font-medium"
-                      style={{
-                        color:
-                          profitability.yieldAssetAnnual != null &&
-                          profitability.yieldAssetAnnual > 0
-                            ? GREEN
-                            : profitability.yieldAssetAnnual != null &&
-                                profitability.yieldAssetAnnual < 0
-                              ? RED
-                              : undefined,
-                      }}
-                    >
-                      {profitability.yieldAssetAnnual != null
-                        ? `${new Intl.NumberFormat("ru-RU", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          }).format(profitability.yieldAssetAnnual * 100)}%`
-                        : "—"}
-                    </span>
+                    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 tabular-nums font-medium">
+                      {profitability.yieldAssetAnnualRub != null && (
+                        <span
+                          style={{
+                            color:
+                              profitability.yieldAssetAnnualRub > 0
+                                ? GREEN
+                                : profitability.yieldAssetAnnualRub < 0
+                                  ? RED
+                                  : undefined,
+                          }}
+                        >
+                          RUB {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(profitability.yieldAssetAnnualRub * 100)}%
+                        </span>
+                      )}
+                      {profitability.yieldAssetAnnualCurrency != null && (
+                        <span
+                          style={{
+                            color:
+                              profitability.yieldAssetAnnualCurrency > 0
+                                ? GREEN
+                                : profitability.yieldAssetAnnualCurrency < 0
+                                  ? RED
+                                  : undefined,
+                          }}
+                        >
+                          {(item?.currency_code ?? "RUB").toUpperCase()} {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(profitability.yieldAssetAnnualCurrency * 100)}%
+                        </span>
+                      )}
+                      {profitability.yieldAssetAnnualRub == null && profitability.yieldAssetAnnualCurrency == null && "—"}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2174,7 +2310,7 @@ export default function AssetDetailPage() {
                         Расходы по приобретению актива
                       </span>
                       <span className="font-medium">
-                        {formatAmount(profitability.acquisitionRub)}
+                        {formatAmount(-profitability.acquisitionRub)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">

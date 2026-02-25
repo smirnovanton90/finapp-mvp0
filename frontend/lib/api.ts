@@ -73,9 +73,9 @@ export type ItemOut = {
   latest_market_value_rub?: number | null;
   /** Рыночная стоимость в валюте актива (центы), когда валюта не RUB. Слева на карточке. */
   latest_market_value_currency_cents?: number | null;
-  /** Стоимость приобретения (копейки). Заполняется API в list/get. */
+  /** Стоимость приобретения в валюте актива (копейки для RUB, центы для иностранной валюты). Заполняется API в list/get. */
   acquisition_rub?: number | null;
-  /** Стоимость вложенных средств (копейки). Заполняется API в list/get. */
+  /** Стоимость вложенных средств в валюте актива (копейки для RUB, центы для иностранной валюты). Заполняется API в list/get. */
   invested_rub?: number | null;
 };
 
@@ -97,7 +97,11 @@ export type ItemMarketValueCreate = {
   value_currency_cents?: number;
 };
 
-/** Стоимости актива. Все суммы в копейках/центах в валюте актива (RUB или валюта счёта). */
+/**
+ * Стоимости актива.
+ * Все числовые поля (balance, acquisition, invested, market, income, expense) — значения в валюте актива:
+ * для рублёвого актива — рубли в копейках, для актива в иностранной валюте — сумма в этой валюте в центах.
+ */
 export type ItemCostsOut = {
   /** Балансовая стоимость в валюте актива (копейки/центы). */
   balance: number;
@@ -115,7 +119,10 @@ export type ItemCostsOut = {
   expense: number;
 };
 
-/** Точка истории стоимостей. Суммы в копейках/центах в валюте актива. */
+/**
+ * Точка истории стоимостей актива.
+ * Поля balance, acquisition, invested, market — значения в валюте актива (рубли в копейках или иностранная валюта в центах).
+ */
 export type ItemCostHistoryPoint = {
   date: string;
   /** Балансовая стоимость в валюте актива (копейки/центы). */
@@ -355,7 +362,7 @@ export type TransactionOut = {
   chain_id: number | null;
   chain_name: string | null;
 
-  /** Сумма в копейках/центах в валюте primary-счёта (RUB или валюта счёта; для related_item — в валюте актива). */
+  /** Сумма в валюте primary-счёта: рубли в копейках или иностранная валюта в центах; для related_item — в валюте актива. */
   amount: number;
   amount_counterparty: number | null;
   primary_quantity_lots: number | null;
@@ -439,7 +446,7 @@ export type TransactionChainCreate = {
   primary_item_id: number;
   counterparty_item_id?: number | null;
   counterparty_id?: number | null;
-  /** Сумма в копейках/центах в валюте primary-счёта. */
+  /** Сумма в валюте primary-счёта: рубли в копейках или иностранная валюта в центах. */
   amount: number;
   amount_counterparty?: number | null;
   primary_quantity_lots?: number | null;
@@ -465,6 +472,7 @@ export type TransactionChainOut = {
   primary_card_item_id: number | null;
   counterparty_card_item_id: number | null;
   counterparty_id: number | null;
+  /** Сумма в валюте primary-счёта: рубли в копейках или иностранная валюта в центах. */
   amount: number;
   amount_counterparty: number | null;
   direction: TransactionDirection;
@@ -490,7 +498,7 @@ export type GoalOut = {
   custom_start_date: string | null;
   custom_end_date: string | null;
   category_id: number;
-  /** Сумма в копейках/центах в валюте. */
+  /** Сумма в валюте цели: рубли в копейках или иностранная валюта в центах. */
   amount: number;
   created_at: string;
   deleted_at: string | null;
@@ -502,7 +510,7 @@ export type GoalCreate = {
   custom_start_date?: string | null;
   custom_end_date?: string | null;
   category_id: number;
-  /** Сумма в копейках/центах в валюте. */
+  /** Сумма в валюте цели: рубли в копейках или иностранная валюта в центах. */
   amount: number;
 };
 
@@ -512,7 +520,7 @@ export type TransactionCreate = {
   counterparty_item_id?: number | null;
   counterparty_id?: number | null;
 
-  /** Сумма в копейках/центах в валюте primary-счёта. */
+  /** Сумма в валюте primary-счёта: рубли в копейках или иностранная валюта в центах. */
   amount: number;
   amount_counterparty?: number | null;
   primary_quantity_lots?: number | null;
@@ -1143,6 +1151,7 @@ export async function closeItem(
   return res.json();
 }
 
+/** Маппинг ответа API: *_rub → поля в валюте актива (balance, acquisition, invested, market, income, expense). */
 function mapItemCostsFromApi(raw: unknown): ItemCostsOut {
   const r = raw as Record<string, unknown>;
   return {
@@ -1156,6 +1165,7 @@ function mapItemCostsFromApi(raw: unknown): ItemCostsOut {
   };
 }
 
+/** Маппинг точки истории: *_rub → поля в валюте актива (balance, acquisition, invested, market). */
 function mapItemCostHistoryPointFromApi(raw: unknown): ItemCostHistoryPoint {
   const r = raw as Record<string, unknown>;
   return {
@@ -1169,6 +1179,7 @@ function mapItemCostHistoryPointFromApi(raw: unknown): ItemCostHistoryPoint {
   };
 }
 
+/** Маппинг транзакции: amount_rub → amount (сумма в валюте primary-счёта, копейки/центы). */
 function mapTransactionFromApi(raw: unknown): TransactionOut {
   const r = raw as Record<string, unknown>;
   return { ...r, amount: (r.amount ?? r.amount_rub) as number } as TransactionOut;

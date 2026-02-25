@@ -329,6 +329,7 @@ export default function AssetsProfitabilityPage() {
       const map = new Map<string, number>();
       if (history?.points?.length) {
         const kind = item.primary_value_kind ?? "BALANCE";
+        // p.balance, p.acquisition, p.invested, p.market — в валюте актива (копейки/центы)
         history.points.forEach((p) => {
           let v: number | null = null;
           if (kind === "MARKET") v = p.market ?? null;
@@ -399,6 +400,7 @@ export default function AssetsProfitabilityPage() {
           expense_acquisition: 0,
           investment_in_asset: 0,
         };
+      // tx.amount — сумма в валюте primary-счёта (копейки/центы)
       const amt = tx.amount ?? 0;
       switch (tx.asset_link_type) {
         case "ASSET_INCOME":
@@ -803,7 +805,7 @@ export default function AssetsProfitabilityPage() {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-muted-foreground">Расходы по активу</span>
                   <span className="font-medium">
-                    {formatRub(metrics.expenseForAsset)}
+                    {formatRub(-metrics.expenseForAsset)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
@@ -844,7 +846,7 @@ export default function AssetsProfitabilityPage() {
                       Расходы по приобретению актива
                     </span>
                     <span className="font-medium">
-                      {formatRub(metrics.expenseAcquisition)}
+                      {formatRub(-metrics.expenseAcquisition)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2">

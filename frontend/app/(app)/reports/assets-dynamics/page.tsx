@@ -1282,6 +1282,7 @@ export default function AssetsDynamicsPage() {
       >();
       effectiveSelectedItems.forEach((item) => {
         const byDate = new Map<string, { market: number | null; market_price_rub: number | null }>();
+        // p.market — в валюте актива (копейки/центы)
         (costHistoryByItemId[item.id]?.points ?? []).forEach((p) => {
           byDate.set(p.date, { market: p.market ?? null, market_price_rub: p.market_price_rub ?? null });
         });

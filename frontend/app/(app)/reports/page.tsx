@@ -180,11 +180,6 @@ export default function ReportsPage() {
             imageSrc="/reports/assets-dynamics.png"
           />
           <ReportCard
-            href="/reports/assets-profitability"
-            title="Доходность активов"
-            description="Отчет о доходности одного или нескольких активов за выбранный период с учетом операций, переоценки и курсовых разниц"
-          />
-          <ReportCard
             href="/reports/income-expense-dynamics"
             title="Доходы и расходы по категориям"
             description="Таблица фактических доходов и расходов по категориям с помесячной разбивкой"

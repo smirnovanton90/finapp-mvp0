@@ -3,9 +3,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, TrendingUp } from "lucide-react";
+import {
+  ArrowLeft,
+  TrendingUp,
+  Camera,
+  Upload,
+  MoreVertical,
+  Pencil,
+  Archive,
+  Trash2,
+  User,
+  Building2,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SelectField } from "@/components/ui/form-field";
+import { IconButton } from "@/components/ui/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   fetchItem,
   fetchItems,
@@ -16,6 +36,9 @@ import {
   fetchTransactionsPage,
   fetchCounterparties,
   fetchFxRatesBatch,
+  uploadItemPhoto,
+  archiveItem,
+  closeItem,
   API_BASE,
   ItemOut,
   ItemCostsOut,
@@ -27,13 +50,25 @@ import {
   FxRateOut,
 } from "@/lib/api";
 import { getItemTypeLabel } from "@/lib/item-types";
+import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
 import { formatAmount, getItemPhotoUrl, getItemPrimaryValueCents, getEffectiveItemKind } from "@/lib/item-utils";
-import { PRIMARY_VALUE_KIND_OPTIONS, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
-import { ACCENT, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
+import {
+  MAX_PHOTO_BYTES,
+  MAX_PHOTO_DIM,
+  ALLOWED_PHOTO_TYPES,
+  formatSize,
+} from "@/lib/asset-item-form-constants";
+import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
+import { PINK_GRADIENT } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
+import { assetIconPath } from "@/lib/image-paths";
 import { CurrencyChip } from "@/components/currency-chip";
+import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
+import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
+import { CardIcon } from "@/components/card-icon";
+import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import {
   toTxDateKey,
   getTxDeltaForItem,
@@ -87,21 +122,34 @@ function formatChartDate(date: Date) {
   return `${day}.${month}.${year}`;
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function daysBetween(startKey: string, endKey: string): number {
+  const [sy, sm, sd] = startKey.split("-").map(Number);
+  const [ey, em, ed] = endKey.split("-").map(Number);
+  const start = Date.UTC(sy || 0, (sm || 1) - 1, sd || 1);
+  const end = Date.UTC(ey || 0, (em || 1) - 1, ed || 1);
+  const diff = Math.max(0, end - start);
+  return Math.floor(diff / MS_PER_DAY) + 1;
+}
+
 /** Блок: чип валюты слева, сумма справа (значение в копейках/центах валюты актива). */
 function AmountWithCurrency({
   valueCents,
   currencyCode,
   className = "",
+  amountStyle,
 }: {
   valueCents: number;
   currencyCode: string | null | undefined;
   className?: string;
+  amountStyle?: React.CSSProperties;
 }) {
   const code = currencyCode ?? "RUB";
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <CurrencyChip code={code} className="shrink-0" />
-      <span className="tabular-nums">{formatAmount(valueCents)}</span>
+      <span className="tabular-nums" style={amountStyle}>{formatAmount(valueCents)}</span>
     </div>
   );
 }
@@ -117,6 +165,7 @@ export default function AssetDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingPrimary, setSavingPrimary] = useState(false);
   const [costHistoryOpen, setCostHistoryOpen] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
+  const [costRowHover, setCostRowHover] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
   const [buySellModalOpen, setBuySellModalOpen] = useState(false);
   const [editMarketValueModalOpen, setEditMarketValueModalOpen] = useState(false);
   const [allItems, setAllItems] = useState<ItemOut[]>([]);
@@ -129,13 +178,19 @@ export default function AssetDetailPage() {
   const [dynamicsTxs, setDynamicsTxs] = useState<TransactionOut[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
   const [loadingDynamics, setLoadingDynamics] = useState(false);
+  const [iconFormat, setIconFormat] = useState<"png" | null>("png");
+  const [itemPhotoError, setItemPhotoError] = useState<string | null>(null);
+  const [itemPhotoUploading, setItemPhotoUploading] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const costChartContainerRef = useRef<HTMLDivElement | null>(null);
   const costChartSvgRef = useRef<SVGSVGElement | null>(null);
   const costChartTooltipRef = useRef<HTMLDivElement | null>(null);
+  const itemPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [costChartSize, setCostChartSize] = useState({ width: 720, height: 280 });
   const [costChartHoverIndex, setCostChartHoverIndex] = useState<number | null>(null);
   const [costChartTooltipLeft, setCostChartTooltipLeft] = useState<number | null>(null);
   const [costChartContainerReady, setCostChartContainerReady] = useState(false);
+  const [costChartCurrency, setCostChartCurrency] = useState<"RUB" | "CURRENCY">("RUB");
 
   const load = useCallback(async () => {
     if (!Number.isFinite(id)) return;
@@ -184,6 +239,16 @@ export default function AssetDetailPage() {
     }
   }, [id]);
 
+  const askConfirm = useCallback((title: string, message: string): Promise<boolean> => {
+    if (typeof window === "undefined") {
+      // SSR / safety fallback: don't block, just resolve false
+      return Promise.resolve(false);
+    }
+    // Простое системное подтверждение только для детальной страницы
+    const ok = window.confirm(`${title}\n\n${message}`);
+    return Promise.resolve(ok);
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
@@ -206,6 +271,12 @@ export default function AssetDetailPage() {
       loadItemsAndCounterparties();
     }
   }, [buySellModalOpen, item?.instrument_id, loadItemsAndCounterparties]);
+
+  useEffect(() => {
+    if (!item?.counterparty_id) return;
+    if (counterparties.length > 0) return;
+    loadItemsAndCounterparties();
+  }, [item?.counterparty_id, counterparties.length, loadItemsAndCounterparties]);
 
   useEffect(() => {
     if (!item?.id || !item?.open_date) {
@@ -519,11 +590,118 @@ export default function AssetDetailPage() {
     };
   }, [item, costs, costHistoryData, dynamicsTxs, fxRatesByDate, latestRatesByCurrency, sortedFxRateDateKeys, todayKey]);
 
+  const handleEditClick = useCallback(() => {
+    if (!item) return;
+    setEditModalOpen(true);
+  }, [item]);
+
+  const handleBuySellClick = useCallback(() => {
+    if (!item?.instrument_id) return;
+    setBuySellModalOpen(true);
+  }, [item?.instrument_id]);
+
+  const handleArchiveClick = useCallback(async () => {
+    if (!item) return;
+    const ok = await askConfirm(
+      "Архивировать актив?",
+      "Актив будет перенесён в архив. Его можно будет найти в разделе архива."
+    );
+    if (!ok) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await archiveItem(item.id);
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "Ошибка архивации");
+    } finally {
+      setLoading(false);
+    }
+  }, [item, askConfirm, load]);
+
+  const handleCloseClick = useCallback(async () => {
+    if (!item) return;
+    const ok = await askConfirm(
+      "Закрыть актив?",
+      "Актив будет помечен как закрытый. Его баланс и история операций сохранятся."
+    );
+    if (!ok) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await closeItem(item.id);
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "Не удалось закрыть актив");
+    } finally {
+      setLoading(false);
+    }
+  }, [item, askConfirm, load]);
+
+  const handleItemPhotoChange = useCallback(
+    (file: File | null) => {
+      if (!item) return;
+      setItemPhotoError(null);
+      if (!file) return;
+
+      if (!(ALLOWED_PHOTO_TYPES as readonly string[]).includes(file.type)) {
+        setItemPhotoError("Разрешены PNG, JPG или WEBP.");
+        return;
+      }
+      if (file.size > MAX_PHOTO_BYTES) {
+        setItemPhotoError(`Размер фотографии не больше ${formatSize(MAX_PHOTO_BYTES)}.`);
+        return;
+      }
+
+      const objectUrl = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        if (image.width > MAX_PHOTO_DIM || image.height > MAX_PHOTO_DIM) {
+          setItemPhotoError(`Разрешение не больше ${MAX_PHOTO_DIM}px.`);
+          return;
+        }
+        setItemPhotoUploading(true);
+        uploadItemPhoto(item.id, file)
+          .then((updated) => {
+            setItem(updated);
+          })
+          .catch((e: any) => {
+            setItemPhotoError(e?.message ?? "Не удалось загрузить фотографию.");
+          })
+          .finally(() => {
+            setItemPhotoUploading(false);
+          });
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        setItemPhotoError("Не удалось прочитать изображение.");
+      };
+      image.src = objectUrl;
+    },
+    [item]
+  );
+
   const counterpartiesById = useMemo(() => {
     const map = new Map<number, CounterpartyOut>();
     counterparties.forEach((c) => map.set(c.id, c));
     return map;
   }, [counterparties]);
+
+  const itemCounterparty: CounterpartyOut | null =
+    item?.counterparty_id != null ? counterpartiesById.get(item.counterparty_id) ?? null : null;
+
+  const {
+    currentSrc: counterpartyCurrentSrc,
+    onError: counterpartyOnError,
+    showFallbackIcon: showCounterpartyIcon,
+  } = useCounterpartyImage(itemCounterparty, API_BASE);
+
+  const CounterpartyFallbackIcon = itemCounterparty
+    ? itemCounterparty.entity_type === "PERSON"
+      ? User
+      : Building2
+    : null;
 
   const getRateForDateKey = useCallback(
     (dateKey: string): number | null => {
@@ -690,9 +868,24 @@ export default function AssetDetailPage() {
     return raw;
   }, [costHistoryOpen, costHistoryData]);
 
+  const costChartDisplaySeries = useMemo(() => {
+    if (costChartCurrency !== "CURRENCY" || !item?.currency_code || item.currency_code === "RUB") return costChartSeries;
+    return costChartSeries.map((p) => {
+      const rate = getRateForDateKey(p.date);
+      const valueDisplay = rate != null && rate > 0 ? p.valueRub / rate : p.valueRub;
+      return { ...p, valueRub: valueDisplay };
+    });
+  }, [costChartSeries, costChartCurrency, item?.currency_code, getRateForDateKey]);
+
   useEffect(() => {
     if (!costHistoryOpen || costChartSeries.length === 0) setCostChartContainerReady(false);
   }, [costHistoryOpen, costChartSeries.length]);
+
+  useEffect(() => {
+    setCostChartHoverIndex(null);
+    setCostChartTooltipLeft(null);
+    setCostChartCurrency("RUB");
+  }, [costHistoryOpen]);
 
   useEffect(() => {
     if (!costChartContainerReady || !costChartContainerRef.current) return;
@@ -710,21 +903,21 @@ export default function AssetDetailPage() {
     const observer = new ResizeObserver(updateSize);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [costChartContainerReady]);
+  }, [costChartContainerReady, costHistoryOpen]);
 
-  const costChartPadding = useMemo(() => ({ top: 24, right: 0, bottom: 44, left: 56 }), []);
+  const costChartPadding = useMemo(() => ({ top: 24, right: 0, bottom: 44, left: 0 }), []);
   const costChartGeometry = useMemo(() => {
-    if (costChartSeries.length === 0) return null;
+    if (costChartDisplaySeries.length === 0) return null;
     const width = costChartSize.width;
     const height = costChartSize.height;
     const padding = costChartPadding;
     const innerWidth = width - padding.left - padding.right;
     const innerHeight = height - padding.top - padding.bottom;
-    const values = costChartSeries.map((p) => p.valueRub);
+    const values = costChartDisplaySeries.map((p) => p.valueRub);
     const minVal = values.length ? Math.min(...values) : 0;
     const maxVal = values.length ? Math.max(...values) : 0;
     const rangePadding = Math.max(Math.max(maxVal, Math.abs(minVal)) * 0.12, 1);
-    const paddedMin = minVal - rangePadding;
+    const paddedMin = minVal < 0 ? minVal - rangePadding : 0;
     const paddedMax = maxVal + rangePadding;
     const ticks = buildTicks(paddedMin, paddedMax);
     const chartMin = ticks[0] ?? 0;
@@ -732,24 +925,24 @@ export default function AssetDetailPage() {
     const valueToRatio = (v: number) => (v - chartMin) / (chartMax - chartMin || 1);
     const zeroRatio = Math.max(0, Math.min(1, valueToRatio(0)));
     const baselineY = padding.top + innerHeight - innerHeight * zeroRatio;
-    const points: ChartPoint[] = costChartSeries.map((p, i) => {
-      const progress = costChartSeries.length <= 1 ? 0 : i / (costChartSeries.length - 1);
+    const points: ChartPoint[] = costChartDisplaySeries.map((p, i) => {
+      const progress = costChartDisplaySeries.length <= 1 ? 0 : i / (costChartDisplaySeries.length - 1);
       const x = padding.left + innerWidth * progress;
       const y = padding.top + innerHeight - innerHeight * valueToRatio(p.valueRub);
       return { x, y, value: p.valueRub };
     });
     const dayMarks: { label: string; x: number }[] = [];
-    const step = Math.max(1, Math.ceil(costChartSeries.length / 7));
-    for (let i = 0; i < costChartSeries.length; i += step) {
-      const p = costChartSeries[i];
+    const step = Math.max(1, Math.ceil(costChartDisplaySeries.length / 7));
+    for (let i = 0; i < costChartDisplaySeries.length; i += step) {
+      const p = costChartDisplaySeries[i];
       if (!p) continue;
-      const progress = costChartSeries.length <= 1 ? 0 : i / (costChartSeries.length - 1);
+      const progress = costChartDisplaySeries.length <= 1 ? 0 : i / (costChartDisplaySeries.length - 1);
       dayMarks.push({ label: formatChartDate(new Date(p.date)), x: padding.left + innerWidth * progress });
     }
-    if (costChartSeries.length > 0 && dayMarks.length > 0) {
+    if (costChartDisplaySeries.length > 0 && dayMarks.length > 0) {
       const lastX = padding.left + innerWidth;
       if (Math.abs((dayMarks[dayMarks.length - 1]?.x ?? 0) - lastX) > 2) {
-        const last = costChartSeries[costChartSeries.length - 1]!;
+        const last = costChartDisplaySeries[costChartDisplaySeries.length - 1]!;
         dayMarks.push({ label: formatChartDate(new Date(last.date)), x: lastX });
       }
     }
@@ -769,19 +962,176 @@ export default function AssetDetailPage() {
       chartMin,
       chartMax,
     };
-  }, [costChartSeries, costChartSize, costChartPadding]);
+  }, [costChartDisplaySeries, costChartSize, costChartPadding]);
+
+  const costChartDividers = useMemo(() => {
+    if (!costChartGeometry || costChartSeries.length <= 1) return [];
+    const divs: { x: number; type: "month" | "year" }[] = [];
+    const n = costChartSeries.length;
+    const { padding, innerWidth } = costChartGeometry;
+    for (let i = 1; i < n; i++) {
+      const prevDate = costChartSeries[i - 1]!.date;
+      const currDate = costChartSeries[i]!.date;
+      const prevYear = parseInt(prevDate.slice(0, 4), 10);
+      const prevMonth = parseInt(prevDate.slice(5, 7), 10);
+      const currYear = parseInt(currDate.slice(0, 4), 10);
+      const currMonth = parseInt(currDate.slice(5, 7), 10);
+      const progress = (n - 1) > 0 ? i / (n - 1) : 0;
+      const x = padding.left + innerWidth * progress;
+      if (currYear !== prevYear) divs.push({ x, type: "year" });
+      else if (currMonth !== prevMonth) divs.push({ x, type: "month" });
+    }
+    return divs;
+  }, [costChartGeometry, costChartSeries]);
 
   const costChartHoverPoint = useMemo(() => {
-    if (costChartHoverIndex == null || !costChartGeometry || costChartSeries.length === 0) return null;
-    const progress = costChartSeries.length <= 1 ? 0 : costChartHoverIndex / (costChartSeries.length - 1);
+    if (costChartHoverIndex == null || !costChartGeometry || costChartDisplaySeries.length === 0) return null;
+    const progress = costChartDisplaySeries.length <= 1 ? 0 : costChartHoverIndex / (costChartDisplaySeries.length - 1);
     const x = costChartGeometry.padding.left + costChartGeometry.innerWidth * progress;
-    const value = costChartSeries[costChartHoverIndex]!.valueRub;
+    const value = costChartDisplaySeries[costChartHoverIndex]!.valueRub;
     const y =
       costChartGeometry.padding.top +
       costChartGeometry.innerHeight -
       costChartGeometry.innerHeight * costChartGeometry.valueToRatio(value);
     return { x, y, value };
-  }, [costChartHoverIndex, costChartSeries, costChartGeometry]);
+  }, [costChartHoverIndex, costChartDisplaySeries, costChartGeometry]);
+
+  const profitability = useMemo(() => {
+    if (!item || !costHistoryData?.points?.length) return null;
+
+    const dateStart = item.open_date ?? todayKey;
+    const dateEnd = todayKey;
+    if (!dateStart || !dateEnd) return null;
+
+    const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind | "BALANCE";
+    const pointsInRange = costHistoryData.points.filter(
+      (p) => p.date >= dateStart && p.date <= dateEnd
+    );
+    if (pointsInRange.length === 0) return null;
+
+    const selectValueRub = (p: (typeof costHistoryData.points)[number]): number => {
+      if (primaryKind === "MARKET") {
+        return p.market_rub ?? p.balance_rub ?? 0;
+      }
+      if (primaryKind === "ACQUISITION") {
+        return p.acquisition_rub ?? 0;
+      }
+      if (primaryKind === "INVESTED") {
+        return p.invested_rub ?? 0;
+      }
+      return p.balance_rub ?? 0;
+    };
+
+    const values = pointsInRange.map((p) => selectValueRub(p));
+    const sumValues = values.reduce((acc, v) => acc + v, 0);
+    const avgDailyRub = values.length > 0 ? sumValues / values.length : 0;
+
+    const daysCount = daysBetween(dateStart, dateEnd);
+    const annualFactor = daysCount > 0 ? 365 / daysCount : 0;
+
+    const itemId = item.id;
+    const txs = dynamicsTxs.filter((tx) => {
+      const dKey = toTxDateKey(tx.transaction_date);
+      if (!dKey || dKey < dateStart || dKey > dateEnd) return false;
+      if (tx.related_item_id !== itemId) return false;
+      const isRealized =
+        tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
+      if (!isRealized) return false;
+      return Boolean(tx.asset_link_type);
+    });
+
+    let incomeFromAsset = 0;
+    let incomeFromSale = 0;
+    let expenseForAsset = 0;
+    let expenseAcquisition = 0;
+    let investmentInAsset = 0;
+
+    txs.forEach((tx) => {
+      const amt = tx.amount_rub ?? 0;
+      switch (tx.asset_link_type) {
+        case "ASSET_INCOME":
+          incomeFromAsset += amt;
+          break;
+        case "ASSET_SALE":
+          incomeFromSale += amt;
+          break;
+        case "ASSET_EXPENSE":
+          expenseForAsset += amt;
+          break;
+        case "ASSET_PURCHASE":
+          expenseAcquisition += amt;
+          break;
+        case "ASSET_INVESTMENT":
+          investmentInAsset += amt;
+          break;
+        default:
+          break;
+      }
+    });
+
+    const incomeMinusExpense = incomeFromAsset - expenseForAsset;
+    let yieldAssetAnnual: number | null = null;
+    if (avgDailyRub > 0 && annualFactor > 0) {
+      yieldAssetAnnual = (incomeMinusExpense / avgDailyRub) * annualFactor;
+    }
+
+    const acquisitionRub = costs?.acquisition_rub ?? 0;
+    const investedRub = costs?.invested_rub ?? 0;
+    const investedBase = acquisitionRub + investedRub;
+
+    const hasMarketPrimary = primaryKind === "MARKET";
+    let currentMarketValueRub: number | null = null;
+    if (hasMarketPrimary) {
+      currentMarketValueRub =
+        costs?.market_rub ?? costs?.market_value_rub ?? null;
+    }
+
+    let yieldInvestmentsAnnual: number | null = null;
+    if (hasMarketPrimary && investedBase > 0 && annualFactor > 0) {
+      let returnInvestments: number | null = null;
+      if (incomeFromSale === 0 && currentMarketValueRub != null) {
+        // Без продажи: доходы - расходы + текущая рыночная стоимость - вложения
+        returnInvestments =
+          incomeMinusExpense +
+          currentMarketValueRub -
+          acquisitionRub -
+          investedRub;
+      } else if (incomeFromSale !== 0) {
+        // С продажей: доходы - расходы + доходы от продажи - вложения
+        returnInvestments =
+          incomeMinusExpense +
+          incomeFromSale -
+          acquisitionRub -
+          investedRub;
+      }
+      if (returnInvestments != null) {
+        yieldInvestmentsAnnual = (returnInvestments / investedBase) * annualFactor;
+      }
+    }
+
+    const revaluationProfitRub = dynamics?.profitLossFromPriceRub ?? null;
+    const fxProfitRub = dynamics?.courseDiffRub ?? null;
+
+    return {
+      dateStart,
+      dateEnd,
+      primaryKind,
+      avgDailyRub,
+      incomeFromAsset,
+      incomeFromSale,
+      expenseForAsset,
+      expenseAcquisition,
+      investmentInAsset,
+      yieldAssetAnnual,
+      acquisitionRub,
+      investedRub,
+      hasMarketPrimary,
+      currentMarketValueRub,
+      yieldInvestmentsAnnual,
+      revaluationProfitRub,
+      fxProfitRub,
+    };
+  }, [item, todayKey, costHistoryData, dynamicsTxs, dynamics, costs]);
 
   useEffect(() => {
     if (!costChartHoverPoint || !costChartContainerRef.current || !costChartTooltipRef.current) {
@@ -915,6 +1265,17 @@ export default function AssetDetailPage() {
 
   const TypeIcon = TYPE_ICON_BY_CODE[item.type_code];
   const photoUrl = getItemPhotoUrl(item, API_BASE);
+  const icon3dPath = assetIconPath(item.type_code, iconFormat);
+  const isArchived = Boolean(item.archived_at);
+  const isClosed = Boolean(item.closed_at);
+  const openDateLabel =
+    item.open_date
+      ? new Date(`${item.open_date}T00:00:00`).toLocaleDateString("ru-RU", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        })
+      : "";
 
   return (
     <main className="min-h-screen px-8 py-8">
@@ -949,141 +1310,400 @@ export default function AssetDetailPage() {
           )}
         </div>
 
-        <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
-          <div className="p-6">
-            <div className="flex flex-row items-start gap-4">
-              <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0" style={{ backgroundColor: BACKGROUND_DT }}>
+        <div className="flex flex-col gap-4">
+        <div className="flex flex-row items-center gap-4">
+            <div className="relative flex-shrink-0">
+              <div
+                className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer group"
+                onClick={() => itemPhotoInputRef.current?.click()}
+              >
                 {photoUrl ? (
                   <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+                ) : icon3dPath ? (
+                  <img
+                    src={icon3dPath}
+                    alt=""
+                    className="w-full h-full object-contain"
+                    onError={() => setIconFormat(null)}
+                  />
                 ) : TypeIcon ? (
                   <div className="w-full h-full flex items-center justify-center" style={{ color: ACCENT }}>
-                    <TypeIcon className="w-8 h-8" strokeWidth={1.5} />
+                    <TypeIcon className="w-24 h-24" strokeWidth={1.5} />
                   </div>
-                ) : null}
-              </div>
-              <div className="min-w-0 flex-1">
-                <h2 className="text-xl font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>{item.name}</h2>
-                <p className="text-sm mt-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{getItemTypeLabel(item)}</p>
-                {item.currency_code && (
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <CurrencyChip code={item.currency_code} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
+                    <Camera className="w-12 h-12" style={{ color: PLACEHOLDER_COLOR_DARK }} />
                   </div>
                 )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                  <Upload className="w-8 h-8 text-white" />
+                </div>
+              </div>
+              <input
+                ref={itemPhotoInputRef}
+                type="file"
+                accept={ALLOWED_PHOTO_TYPES.join(",")}
+                className="hidden"
+                disabled={itemPhotoUploading}
+                onChange={(e) => handleItemPhotoChange(e.target.files?.[0] ?? null)}
+              />
+              {itemPhotoError && (
+                <p className="mt-1 text-xs" style={{ color: "#FB4C4F" }}>
+                  {itemPhotoError}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-4 flex-1 min-w-0">
+              <div className="flex flex-col items-center justify-center flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap justify-center max-w-full break-words">
+                  <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    {getItemTypeLabel(item)}
+                  </span>
+                  {item.currency_code && (
+                    <CurrencyChip code={item.currency_code} />
+                  )}
+                </div>
+                <h2
+                  className="text-2xl font-medium mb-1 text-center break-words max-w-full"
+                  style={{ color: ACTIVE_TEXT_DARK }}
+                >
+                  {item.name}
+                </h2>
+                {itemCounterparty && CounterpartyFallbackIcon && (
+                  <div className="flex items-center gap-2 mb-1 justify-center">
+                    <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">
+                      <CardIcon
+                        src={counterpartyCurrentSrc && !showCounterpartyIcon ? counterpartyCurrentSrc : null}
+                        alt={buildCounterpartyDisplayName(itemCounterparty)}
+                        fallbackIcon={CounterpartyFallbackIcon}
+                        size={20}
+                        shadow={false}
+                        objectFit="contain"
+                        fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                        onError={counterpartyOnError}
+                      />
+                    </div>
+                    <span
+                      className="text-sm font-normal text-center"
+                      style={{ color: PLACEHOLDER_COLOR_DARK }}
+                    >
+                      {buildCounterpartyDisplayName(itemCounterparty)}
+                    </span>
+                  </div>
+                )}
+              {openDateLabel && (
+                <p className="text-sm mt-1 text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                  Дата появления: {openDateLabel}
+                </p>
+              )}
+              {item.synonyms && item.synonyms.length > 0 && (
+                <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+                  {item.synonyms.map((chip, i) => (
+                    <span
+                      key={`${i}-${chip}`}
+                      className="inline-flex items-center rounded-md border px-2 py-1 text-sm font-normal shrink-0 max-w-[200px] truncate"
+                      style={{
+                        borderColor: ACCENT2,
+                        backgroundColor: "rgba(85, 68, 209, 0.15)",
+                        color: ACTIVE_TEXT_DARK,
+                      }}
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              )}
+              </div>
+              <div className="shrink-0">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <div>
+                      <IconButton aria-label="Открыть меню действий">
+                        <MoreVertical />
+                      </IconButton>
+                    </div>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    {!isArchived && !isClosed && (
+                      <DropdownMenuItem onClick={handleEditClick}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Редактировать
+                      </DropdownMenuItem>
+                    )}
+                    {item.instrument_id && !isArchived && !isClosed && (
+                      <DropdownMenuItem onClick={handleBuySellClick}>
+                        <TrendingUp className="mr-2 h-4 w-4" />
+                        Купить/продать актив
+                      </DropdownMenuItem>
+                    )}
+                    {!isArchived && !isClosed && (
+                      <DropdownMenuItem onClick={handleCloseClick}>
+                        <Archive className="mr-2 h-4 w-4" />
+                        Закрыть
+                      </DropdownMenuItem>
+                    )}
+                    {!isArchived && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={handleArchiveClick}>
+                          <Archive className="mr-2 h-4 w-4" />
+                          Архивировать
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={handleArchiveClick}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Удалить
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mt-4">
-              {item.open_date && (
-                <>
-                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Дата появления</dt>
-                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.open_date}</dd>
-                </>
-              )}
-              {item.contract_number && (
-                <>
-                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Номер договора</dt>
-                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.contract_number}</dd>
-                </>
-              )}
-              {item.account_last7 && (
-                <>
-                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Последние 4 цифры счёта</dt>
-                  <dd style={{ color: ACTIVE_TEXT_DARK }}>****{item.account_last7}</dd>
-                </>
-              )}
-              {item.deposit_term_days != null && (
-                <>
-                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Срок вклада, дней</dt>
-                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.deposit_term_days}</dd>
-                </>
-              )}
-              {item.interest_rate != null && (
-                <>
-                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Процентная ставка</dt>
-                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.interest_rate}%</dd>
-                </>
-              )}
-              {item.type_code === "crypto" && item.quantity_units != null && (
-                <>
-                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество</dt>
-                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(item.quantity_units)}</dd>
-                </>
-              )}
-              {item.type_code !== "crypto" && item.position_lots != null && (
-                <>
-                  <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество лотов</dt>
-                  <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(item.position_lots)}</dd>
-                </>
-              )}
-            </dl>
           </div>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            {item.contract_number && (
+              <>
+                <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Номер договора</dt>
+                <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.contract_number}</dd>
+              </>
+            )}
+            {item.account_last7 && (
+              <>
+                <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Последние 4 цифры счёта</dt>
+                <dd style={{ color: ACTIVE_TEXT_DARK }}>****{item.account_last7}</dd>
+              </>
+            )}
+            {item.deposit_term_days != null && (
+              <>
+                <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Срок вклада, дней</dt>
+                <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.deposit_term_days}</dd>
+              </>
+            )}
+            {item.interest_rate != null && (
+              <>
+                <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Процентная ставка</dt>
+                <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.interest_rate}%</dd>
+              </>
+            )}
+            {item.type_code === "crypto" && item.quantity_units != null && (
+              <>
+                <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество</dt>
+                <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(item.quantity_units)}</dd>
+              </>
+            )}
+            {item.type_code !== "crypto" && item.position_lots != null && (
+              <>
+                <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество лотов</dt>
+                <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(item.position_lots)}</dd>
+              </>
+            )}
+          </dl>
         </div>
 
         <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
           <div className="p-6">
-            <h3 className="text-base font-semibold mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Стоимости</h3>
-            <div className="mt-2 mb-4">
-              <SelectField
-                label="Основная стоимость"
-                value={item.primary_value_kind ?? "BALANCE"}
-                onValueChange={(v) => handlePrimaryValueKindChange(v as PrimaryValueKind)}
-                options={PRIMARY_VALUE_KIND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-                placeholder="Выберите"
-                disabled={savingPrimary}
-              />
-            </div>
+            <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Стоимость</h3>
             {costs && (
-              <div className="grid grid-cols-2 gap-4">
-                <div
-                  className="rounded-lg p-4 cursor-pointer transition-colors hover:opacity-90"
-                  style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
-                  onClick={() => setCostHistoryOpen((v) => (v === "balance" ? null : "balance"))}
-                >
-                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Балансовая стоимость</div>
-                  <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    <AmountWithCurrency valueCents={costs.balance_rub} currencyCode={item.currency_code} />
-                  </div>
-                </div>
-                <div
-                  className="rounded-lg p-4 cursor-pointer transition-colors hover:opacity-90"
-                  style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
-                  onClick={() => setCostHistoryOpen((v) => (v === "acquisition" ? null : "acquisition"))}
-                >
-                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость приобретения</div>
-                  <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    <AmountWithCurrency valueCents={costs.acquisition_rub} currencyCode={item.currency_code} />
-                  </div>
-                </div>
-                <div
-                  className="rounded-lg p-4 cursor-pointer transition-colors hover:opacity-90"
-                  style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
-                  onClick={() => setCostHistoryOpen((v) => (v === "invested" ? null : "invested"))}
-                >
-                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость вложенных средств</div>
-                  <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    <AmountWithCurrency valueCents={costs.invested_rub} currencyCode={item.currency_code} />
-                  </div>
-                </div>
-                <div
-                  className="rounded-lg p-4 cursor-pointer transition-colors hover:opacity-90"
-                  style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
-                  onClick={() => setCostHistoryOpen((v) => (v === "market" ? null : "market"))}
-                >
-                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Рыночная стоимость</div>
-                  <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    {costs.market_rub != null ? (
-                      <AmountWithCurrency valueCents={costs.market_rub} currencyCode={item.currency_code} />
-                    ) : (
-                      "—"
-                    )}
-                  </div>
-                  {item.currency_code && item.currency_code !== "RUB" && costs.market_value_rub != null && (
-                    <div className="text-sm mt-1.5" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                      В рублях: <AmountWithCurrency valueCents={costs.market_value_rub} currencyCode="RUB" />
+              <div className="flex flex-col gap-2">
+                {([
+                  { key: "balance" as const, kind: "BALANCE" as PrimaryValueKind, label: "Балансовая стоимость", valueCents: costs.balance_rub, extra: null },
+                  { key: "market" as const, kind: "MARKET" as PrimaryValueKind, label: "Рыночная стоимость", valueCents: costs.market_rub, extra: item.currency_code && item.currency_code !== "RUB" && costs.market_value_rub != null ? { rub: costs.market_value_rub } : null },
+                  { key: "acquisition" as const, kind: "ACQUISITION" as PrimaryValueKind, label: "Стоимость приобретения", valueCents: costs.acquisition_rub, extra: null },
+                  { key: "invested" as const, kind: "INVESTED" as PrimaryValueKind, label: "Стоимость вложенных средств", valueCents: costs.invested_rub, extra: null },
+                ] as const).map(({ key, kind, label, valueCents, extra }) => {
+                  const isPrimary = (item.primary_value_kind ?? "BALANCE") === kind;
+                  const isHovered = costRowHover === key;
+                  const isExpanded = costHistoryOpen === key;
+                  const isZero = valueCents == null || valueCents === 0;
+                  return (
+                    <div
+                      key={key}
+                      className="w-full"
+                      onMouseEnter={() => setCostRowHover(key)}
+                      onMouseLeave={() => setCostRowHover(null)}
+                    >
+                      <div
+                        className={`rounded-[9px]${isPrimary ? " p-[2px]" : ""}`}
+                        style={isPrimary ? { backgroundImage: PINK_GRADIENT } : undefined}
+                      >
+                        <div
+                          className="rounded-[9px] overflow-hidden"
+                          style={{ backgroundColor: BACKGROUND_DT }}
+                        >
+                          <div
+                            className="flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90"
+                            onClick={() => setCostHistoryOpen((v) => (v === key ? null : key))}
+                          >
+                          <IconButton
+                            aria-label={isExpanded ? "Свернуть" : "Развернуть"}
+                            onClick={(e) => { e.stopPropagation(); setCostHistoryOpen((v) => (v === key ? null : key)); }}
+                          >
+                            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                          </IconButton>
+                          <span className="text-sm shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>{label}</span>
+                          {isPrimary && (
+                            <span className="rounded-md px-2 py-0.5 text-sm font-normal shrink-0" style={{ backgroundColor: ACCENT2, color: "#fff" }}>Основная</span>
+                          )}
+                          {!isPrimary && isHovered && (
+                            <span
+                              className="rounded-md px-2 py-0.5 text-sm font-normal shrink-0 cursor-pointer hover:opacity-90"
+                              style={{ backgroundColor: ACCENT2, color: "#fff" }}
+                              onClick={(e) => { e.stopPropagation(); handlePrimaryValueKindChange(kind); }}
+                            >
+                              Сделать основной
+                            </span>
+                          )}
+                          <div className="flex-1 min-w-0" />
+                          <div className="text-2xl font-medium shrink-0 text-right">
+                            {valueCents != null ? (
+                              item.currency_code && item.currency_code !== "RUB" ? (
+                                (() => {
+                                  const rate = getRateForDateKey(todayKey);
+                                  const rubCentsAtCurrentRate = rate != null && rate > 0 ? Math.round(valueCents * rate) : null;
+                                  return (
+                                    <div className="flex flex-col items-end gap-0.5">
+                                      {rubCentsAtCurrentRate != null ? (
+                                        <AmountWithCurrency valueCents={rubCentsAtCurrentRate} currencyCode="RUB" amountStyle={isPrimary ? { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } : { color: ACTIVE_TEXT_DARK }} />
+                                      ) : null}
+                                      <AmountWithCurrency
+                                        valueCents={valueCents}
+                                        currencyCode={item.currency_code}
+                                        amountStyle={isPrimary ? { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } : { color: ACTIVE_TEXT_DARK }}
+                                      />
+                                    </div>
+                                  );
+                                })()
+                              ) : (
+                                <AmountWithCurrency
+                                  valueCents={valueCents}
+                                  currencyCode={item.currency_code}
+                                  amountStyle={isPrimary ? { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } : { color: ACTIVE_TEXT_DARK }}
+                                />
+                              )
+                            ) : (
+                              <span style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                            )}
+                          </div>
+                        </div>
+                        {extra && key === "market" && (
+                          <div className="text-sm pl-10 pr-3 py-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                            В рублях: <AmountWithCurrency valueCents={extra.rub} currencyCode="RUB" />
+                          </div>
+                        )}
+                        {isExpanded && costHistoryOpen === key && (
+                          <div className="p-4 pt-0" style={{ backgroundColor: "transparent" }}>
+                          {key !== "balance" && (
+                            <div className="text-sm font-medium mb-2" style={{ color: ACTIVE_TEXT_DARK }}>
+                              {key === "acquisition" && "История стоимости приобретения"}
+                              {key === "invested" && "История стоимости вложенных средств"}
+                              {key === "market" && "История рыночной стоимости"}
+                            </div>
+                          )}
+                          {loadingCostHistory ? (
+                            <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+                          ) : costChartSeries.length === 0 ? (
+                            <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период.</p>
+                          ) : costChartGeometry ? (
+                            <>
+                              {item.currency_code && item.currency_code !== "RUB" && (
+                                <div className="mb-3 flex justify-end">
+                                  <SegmentedSelector
+                                    options={[
+                                      { value: "RUB", label: "RUB" },
+                                      { value: "CURRENCY", label: item.currency_code },
+                                    ]}
+                                    value={costChartCurrency}
+                                    onChange={(v) => setCostChartCurrency(v === "RUB" || v === "CURRENCY" ? v : "RUB")}
+                                    segmentWidth="auto"
+                                    className="w-fit"
+                                  />
+                                </div>
+                              )}
+                              <div
+                                ref={(el) => { costChartContainerRef.current = el; setCostChartContainerReady(!!el); }}
+                                className="relative w-full min-w-0"
+                                style={costHistoryOpen === "balance" ? { height: 400 } : { aspectRatio: `${costChartSize.width}/${costChartSize.height}` }}
+                              >
+                              {costChartHoverPoint != null && costChartHoverIndex != null && costChartDisplaySeries[costChartHoverIndex] && (
+                                <div
+                                  ref={costChartTooltipRef}
+                                  className="pointer-events-none absolute z-20 whitespace-nowrap rounded-[9px] px-4 py-3 text-[14px] font-normal text-right"
+                                  style={{ left: costChartTooltipLeft != null ? `${costChartTooltipLeft}px` : `${costChartHoverPoint.x}px`, top: 0, transform: "translate(-50%, 0)", backgroundColor: MODAL_BG }}
+                                >
+                                  <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartDate(new Date(costChartDisplaySeries[costChartHoverIndex]!.date))}</div>
+                                  <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                                    <span>
+                                      {costHistoryOpen === "balance" && "Балансовая стоимость"}
+                                      {costHistoryOpen === "acquisition" && "Стоимость приобретения"}
+                                      {costHistoryOpen === "invested" && "Стоимость вложенных средств"}
+                                      {costHistoryOpen === "market" && "Рыночная стоимость"}
+                                    </span>
+                                    <div className="flex items-center justify-end gap-2">
+                                      <AmountWithCurrency valueCents={Math.round(costChartDisplaySeries[costChartHoverIndex]!.valueRub * 100)} currencyCode={costChartCurrency === "RUB" ? "RUB" : item.currency_code} className="justify-end" />
+                                    </div>
+                                  </div>
+                                  {costHistoryOpen === "market" && (() => {
+                                    const pt = costChartSeries[costChartHoverIndex!] as { marketQuantityUnits?: number; marketPriceRub?: number };
+                                    if (pt?.marketQuantityUnits != null || pt?.marketPriceRub != null) {
+                                      return (
+                                        <div className="mt-2 space-y-1 text-[13px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                          {pt.marketQuantityUnits != null && <div>Количество: {pt.marketQuantityUnits.toLocaleString("ru-RU")} шт.</div>}
+                                          {pt.marketPriceRub != null && <div className="flex items-center gap-2">Цена на дату: <AmountWithCurrency valueCents={pt.marketPriceRub} currencyCode={item.currency_code} /></div>}
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                              )}
+                              <svg ref={costChartSvgRef} viewBox={`0 0 ${costChartGeometry.width} ${costChartGeometry.height}`} className="h-full w-full cursor-pointer" style={{ overflow: "visible" }} onMouseMove={handleCostChartPointerMove} onMouseLeave={() => setCostChartHoverIndex(null)}>
+                                <defs>
+                                  <linearGradient id="asset-detail-chart-area" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={ACCENT} stopOpacity={0.35} />
+                                    <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <path d={costChartGeometry.areaPath} fill="url(#asset-detail-chart-area)" />
+                                <path d={costChartGeometry.linePath} fill="none" stroke={ACCENT} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                                {costChartDividers.map((div, idx) => (
+                                  <line
+                                    key={`div-${idx}-${div.x}`}
+                                    x1={div.x}
+                                    x2={div.x}
+                                    y1={costChartGeometry.padding.top}
+                                    y2={costChartGeometry.padding.top + costChartGeometry.innerHeight}
+                                    stroke={PLACEHOLDER_COLOR_DARK}
+                                    strokeWidth={div.type === "year" ? 1.5 : 1}
+                                    strokeOpacity={div.type === "year" ? 0.9 : 0.5}
+                                  />
+                                ))}
+                                <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.baselineY} y2={costChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1} strokeDasharray="4 4" strokeOpacity={0.7} />
+                                {costChartHoverPoint && (
+                                  <>
+                                    <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
+                                    <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={6} fill={ACCENT} stroke="#fff" strokeWidth={2} />
+                                  </>
+                                )}
+                                {costChartGeometry.dayMarks.map((mark, idx) => (
+                                  <text key={idx} x={mark.x} y={costChartGeometry.height - 12} textAnchor={idx === 0 ? "start" : idx === costChartGeometry.dayMarks.length - 1 ? "end" : "middle"} fontSize={14} fill={ACTIVE_TEXT_DARK}>{mark.label}</text>
+                                ))}
+                              </svg>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })}
+          </div>
+        )}
 
             {item.instrument_id && costs && (() => {
               const isCrypto = item.type_code === "crypto";
@@ -1141,152 +1761,6 @@ export default function AssetDetailPage() {
               ) : null;
             })()}
 
-            {costHistoryOpen && (
-              <div className="mt-4 rounded-lg p-4" style={{ backgroundColor: BACKGROUND_DT }}>
-                <div className="text-sm font-medium mb-2" style={{ color: ACTIVE_TEXT_DARK }}>
-                  {costHistoryOpen === "balance" && "История балансовой стоимости"}
-                  {costHistoryOpen === "acquisition" && "История стоимости приобретения"}
-                  {costHistoryOpen === "invested" && "История стоимости вложенных средств"}
-                  {costHistoryOpen === "market" && "История рыночной стоимости"}
-                </div>
-                {loadingCostHistory ? (
-                  <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
-                ) : costChartSeries.length === 0 ? (
-                  <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период.</p>
-                ) : costChartGeometry ? (
-                  <div
-                    ref={(el) => {
-                      costChartContainerRef.current = el;
-                      setCostChartContainerReady(!!el);
-                    }}
-                    className="relative w-full min-w-0"
-                    style={{ aspectRatio: `${costChartSize.width}/${costChartSize.height}` }}
-                  >
-                    {costChartHoverPoint != null && costChartHoverIndex != null && costChartSeries[costChartHoverIndex] && (
-                      <div
-                        ref={costChartTooltipRef}
-                        className="pointer-events-none absolute z-20 whitespace-nowrap rounded-[9px] px-4 py-3 text-[14px] font-normal text-right"
-                        style={{
-                          left: costChartTooltipLeft != null ? `${costChartTooltipLeft}px` : `${costChartHoverPoint.x}px`,
-                          top: 0,
-                          transform: "translate(-50%, 0)",
-                          backgroundColor: MODAL_BG,
-                        }}
-                      >
-                        <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                          {formatChartDate(new Date(costChartSeries[costChartHoverIndex]!.date))}
-                        </div>
-                        <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
-                          <span>
-                            {costHistoryOpen === "balance" && "Балансовая стоимость"}
-                            {costHistoryOpen === "acquisition" && "Стоимость приобретения"}
-                            {costHistoryOpen === "invested" && "Стоимость вложенных средств"}
-                            {costHistoryOpen === "market" && "Рыночная стоимость"}
-                          </span>
-                          <div className="flex items-center justify-end gap-2">
-                            <AmountWithCurrency
-                              valueCents={Math.round(costChartSeries[costChartHoverIndex]!.valueRub * 100)}
-                              currencyCode={item.currency_code}
-                              className="justify-end"
-                            />
-                          </div>
-                        </div>
-                        {costHistoryOpen === "market" && (() => {
-                          const pt = costChartSeries[costChartHoverIndex!] as { marketQuantityUnits?: number; marketPriceRub?: number };
-                          if (pt?.marketQuantityUnits != null || pt?.marketPriceRub != null) {
-                            return (
-                              <div className="mt-2 space-y-1 text-[13px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                {pt.marketQuantityUnits != null && (
-                                  <div>Количество: {pt.marketQuantityUnits.toLocaleString("ru-RU")} шт.</div>
-                                )}
-                                {pt.marketPriceRub != null && (
-                                  <div className="flex items-center gap-2">
-                                    Цена на дату: <AmountWithCurrency valueCents={pt.marketPriceRub} currencyCode={item.currency_code} />
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </div>
-                    )}
-                    <svg
-                      ref={costChartSvgRef}
-                      viewBox={`0 0 ${costChartGeometry.width} ${costChartGeometry.height}`}
-                      className="h-full w-full cursor-pointer"
-                      style={{ overflow: "visible" }}
-                      onMouseMove={handleCostChartPointerMove}
-                      onMouseLeave={() => setCostChartHoverIndex(null)}
-                    >
-                      <defs>
-                        <linearGradient id="asset-detail-chart-area" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={ACCENT} stopOpacity={0.35} />
-                          <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      {costChartGeometry.ticks.map((tick, idx) => (
-                        <g key={idx}>
-                          <line
-                            x1={costChartGeometry.padding.left - 6}
-                            x2={costChartGeometry.padding.left}
-                            y1={costChartGeometry.padding.top + costChartGeometry.innerHeight - costChartGeometry.innerHeight * costChartGeometry.valueToRatio(tick)}
-                            y2={costChartGeometry.padding.top + costChartGeometry.innerHeight - costChartGeometry.innerHeight * costChartGeometry.valueToRatio(tick)}
-                            stroke={PLACEHOLDER_COLOR_DARK}
-                            strokeOpacity={0.7}
-                          />
-                          <text
-                            x={costChartGeometry.padding.left - 10}
-                            y={costChartGeometry.padding.top + costChartGeometry.innerHeight - costChartGeometry.innerHeight * costChartGeometry.valueToRatio(tick)}
-                            textAnchor="end"
-                            dominantBaseline="middle"
-                            fontSize={11}
-                            fill={PLACEHOLDER_COLOR_DARK}
-                          >
-                            {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(tick)}
-                          </text>
-                        </g>
-                      ))}
-                      <path d={costChartGeometry.areaPath} fill="url(#asset-detail-chart-area)" />
-                      <path d={costChartGeometry.linePath} fill="none" stroke={ACCENT} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
-                      <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.baselineY} y2={costChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1} strokeDasharray="4 4" strokeOpacity={0.7} />
-                      {costChartHoverPoint && (
-                        <>
-                          <line
-                            x1={costChartHoverPoint.x}
-                            x2={costChartHoverPoint.x}
-                            y1={costChartGeometry.padding.top}
-                            y2={costChartGeometry.padding.top + costChartGeometry.innerHeight}
-                            stroke={PLACEHOLDER_COLOR_DARK}
-                            strokeDasharray="4 6"
-                          />
-                          <circle
-                            cx={costChartHoverPoint.x}
-                            cy={costChartHoverPoint.y}
-                            r={6}
-                            fill={ACCENT}
-                            stroke="#fff"
-                            strokeWidth={2}
-                          />
-                        </>
-                      )}
-                      {costChartGeometry.dayMarks.map((mark, idx) => (
-                        <text
-                          key={idx}
-                          x={mark.x}
-                          y={costChartGeometry.height - 12}
-                          textAnchor={idx === 0 ? "start" : idx === costChartGeometry.dayMarks.length - 1 ? "end" : "middle"}
-                          fontSize={14}
-                          fill={ACTIVE_TEXT_DARK}
-                        >
-                          {mark.label}
-                        </text>
-                      ))}
-                    </svg>
-                  </div>
-                ) : null}
-              </div>
-            )}
           </div>
         </div>
 
@@ -1448,6 +1922,180 @@ export default function AssetDetailPage() {
           </div>
         )}
 
+        {profitability && (
+          <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
+            <div className="p-6 space-y-4">
+              {/* Прибыльность актива */}
+              <div className="space-y-2">
+                <h3 className="text-base font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
+                  Прибыльность актива
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      Среднедневная стоимость за период
+                    </span>
+                    <span className="font-medium">
+                      {profitability.avgDailyRub > 0
+                        ? formatAmount(Math.round(profitability.avgDailyRub))
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Доходы от актива</span>
+                    <span className="font-medium">
+                      {formatAmount(profitability.incomeFromAsset)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Расходы по активу</span>
+                    <span className="font-medium">
+                      {formatAmount(profitability.expenseForAsset)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      Прибыльность актива в годовом выражении
+                    </span>
+                    <span
+                      className="font-medium"
+                      style={{
+                        color:
+                          profitability.yieldAssetAnnual != null &&
+                          profitability.yieldAssetAnnual > 0
+                            ? GREEN
+                            : profitability.yieldAssetAnnual != null &&
+                                profitability.yieldAssetAnnual < 0
+                              ? RED
+                              : undefined,
+                      }}
+                    >
+                      {profitability.yieldAssetAnnual != null
+                        ? `${new Intl.NumberFormat("ru-RU", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          }).format(profitability.yieldAssetAnnual * 100)}%`
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Доходность вложений в актив */}
+              {profitability.hasMarketPrimary && (
+                <div className="space-y-2">
+                  <h3 className="text-base font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
+                    Доходность вложений в актив
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Расходы по приобретению актива
+                      </span>
+                      <span className="font-medium">
+                        {formatAmount(profitability.acquisitionRub)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Вложения в актив</span>
+                      <span className="font-medium">
+                        {formatAmount(profitability.investedRub)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Текущая рыночная стоимость
+                      </span>
+                      <span className="font-medium">
+                        {profitability.currentMarketValueRub != null
+                          ? formatAmount(profitability.currentMarketValueRub)
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Доходы от продажи актива
+                      </span>
+                      <span className="font-medium">
+                        {formatAmount(profitability.incomeFromSale)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Прибыль от изменения стоимости актива
+                      </span>
+                      <span
+                        className="font-medium"
+                        style={{
+                          color:
+                            profitability.revaluationProfitRub != null &&
+                            profitability.revaluationProfitRub > 0
+                              ? GREEN
+                              : profitability.revaluationProfitRub != null &&
+                                  profitability.revaluationProfitRub < 0
+                                ? RED
+                                : undefined,
+                        }}
+                      >
+                        {profitability.revaluationProfitRub != null
+                          ? formatAmount(profitability.revaluationProfitRub)
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Прибыль от изменения курса валюты
+                      </span>
+                      <span
+                        className="font-medium"
+                        style={{
+                          color:
+                            profitability.fxProfitRub != null &&
+                            profitability.fxProfitRub > 0
+                              ? GREEN
+                              : profitability.fxProfitRub != null &&
+                                  profitability.fxProfitRub < 0
+                                ? RED
+                                : undefined,
+                        }}
+                      >
+                        {profitability.fxProfitRub != null
+                          ? formatAmount(profitability.fxProfitRub)
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Рентабельность вложений в актив в годовом выражении
+                      </span>
+                      <span
+                        className="font-medium"
+                        style={{
+                          color:
+                            profitability.yieldInvestmentsAnnual != null &&
+                            profitability.yieldInvestmentsAnnual > 0
+                              ? GREEN
+                              : profitability.yieldInvestmentsAnnual != null &&
+                                  profitability.yieldInvestmentsAnnual < 0
+                                ? RED
+                                : undefined,
+                        }}
+                      >
+                        {profitability.yieldInvestmentsAnnual != null
+                          ? `${new Intl.NumberFormat("ru-RU", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }).format(profitability.yieldInvestmentsAnnual * 100)}%`
+                          : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {item.instrument_id && (
           <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
@@ -1518,6 +2166,24 @@ export default function AssetDetailPage() {
               )}
             </div>
           </div>
+        )}
+
+        {item && editModalOpen && (
+          <AddEditItemFormModal
+            open={true}
+            onOpenChange={(next) => {
+              if (!next) setEditModalOpen(false);
+            }}
+            onSuccess={(updated) => {
+              setItem(updated);
+              setEditModalOpen(false);
+              load();
+            }}
+            editingItem={item}
+            onClearEditingItem={() => {}}
+            initialCreateOptions={null}
+            askConfirm={askConfirm}
+          />
         )}
 
         {item.instrument_id && (

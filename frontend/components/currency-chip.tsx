@@ -3,7 +3,7 @@
 import React, { type CSSProperties } from "react";
 
 const CURRENCY_BADGE_CLASSES: Record<string, string> = {
-  RUB: "bg-[#C46A2F]/20 text-[#C46A2F]",
+  RUB: "bg-[#5544D1]/20 text-[#5544D1]",
   USD: "bg-[#2E7D32]/20 text-[#2E7D32]",
   EUR: "bg-[#003399]/20 text-[#003399]",
   JPY: "bg-[#BC002D]/20 text-[#BC002D]",

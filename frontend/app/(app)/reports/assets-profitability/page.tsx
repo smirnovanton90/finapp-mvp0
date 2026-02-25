@@ -26,11 +26,16 @@ import {
   getEffectiveItemKind,
   buildItemTransactionCounts,
 } from "@/lib/item-utils";
+import { getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
 
 type ReportMetrics = {
   hasData: boolean;
   singleItemName: string | null;
   primaryValueEndRub: number | null;
+  /** Лейбл типа основной стоимости (как в карточке актива / дропдауне) или агрегированное «Разные типы основной стоимости» */
+  primaryValueKindLabel: string | null;
+  /** Признак того, что среди выбранных активов несколько разных типов основной стоимости */
+  hasMixedPrimaryKinds: boolean;
   avgDailyRub: number | null;
   incomeFromAsset: number;
   incomeFromSale: number;
@@ -38,14 +43,14 @@ type ReportMetrics = {
   expenseAcquisition: number;
   investmentInAsset: number;
   netProfit: number;
-  /** Доходность актива (для активов без рыночной основной стоимости), годовая */
-  yieldBalanceAnnual: number | null;
-  /** Доходность по рыночной стоимости (для активов с primary_value_kind=MARKET), годовая */
-  yieldMarketAnnual: number | null;
-  /** Доходность вложений в актив (для активов с primary_value_kind=MARKET), годовая */
+  /** Прибыльность актива в годовом выражении */
+  yieldAssetAnnual: number | null;
+  /** Рентабельность вложений в актив в годовом выражении */
   yieldInvestmentsAnnual: number | null;
   /** Есть ли среди выбранных активов хотя бы один с primary_value_kind=MARKET */
   hasMarketPrimary: boolean;
+  /** Текущая рыночная стоимость на конец периода (агрегированно по рыночным активам) */
+  currentMarketValueRub: number | null;
   revaluationProfitRub: number | null;
   fxProfitRub: number | null;
 };
@@ -433,33 +438,27 @@ export default function AssetsProfitabilityPage() {
       (item) => (item.primary_value_kind ?? "BALANCE") === "MARKET"
     );
 
+    // Прибыльность актива (всегда: доходы - расходы относительно среднедневной стоимости)
     const incomeMinusExpense = incomeFromAsset - expenseForAsset;
-    const investedBase = expenseAcquisition + investmentInAsset;
     const annualFactor = daysCount > 0 ? 365 / daysCount : 0;
 
-    let yieldBalanceAnnual: number | null = null;
-    let yieldMarketAnnual: number | null = null;
+    let yieldAssetAnnual: number | null = null;
+    if (avgDaily > 0 && annualFactor > 0) {
+      yieldAssetAnnual = (incomeMinusExpense / avgDaily) * annualFactor;
+    }
+
+    // Рентабельность вложений в актив (две формулы в зависимости от наличия продажи)
+    const investedBase = expenseAcquisition + investmentInAsset;
     let yieldInvestmentsAnnual: number | null = null;
 
-    if (avgDaily > 0 && annualFactor > 0) {
-      // Доходность актива в годовом выражении (для балансовой / нерыночной основной стоимости)
-      yieldBalanceAnnual = (incomeMinusExpense / avgDaily) * annualFactor;
+    // currentMarketValueRub будет посчитан ниже, когда появятся данные по рыночной стоимости
 
-      if (hasMarketPrimary) {
-        // Доходность актива по рыночной стоимости в годовом выражении
-        yieldMarketAnnual = (incomeMinusExpense / avgDaily) * annualFactor;
-      }
-    }
-
-    if (hasMarketPrimary && investedBase > 0 && annualFactor > 0) {
-      // Доходность вложений в актив в годовом выражении
-      const investedFlows = incomeMinusExpense + incomeFromSale;
-      yieldInvestmentsAnnual = (investedFlows / investedBase) * annualFactor;
-    }
-
+    // Расчёт переоценки и FX, а также текущей рыночной стоимости
     let revaluationSum = 0;
     let fxSum = 0;
     let hasMissingFx = false;
+
+    let currentMarketValueRub: number | null = null;
 
     effectiveItems.forEach((item) => {
       const startKeyForItem = itemStartKeyById.get(item.id) ?? rangeStartKey;
@@ -481,6 +480,24 @@ export default function AssetsProfitabilityPage() {
         : 0;
 
       const totalChangeMinusFlows = endValueRub - startValueRub - netCashRub;
+
+      // Для рыночных активов считаем текущую рыночную стоимость как market_rub на конец периода
+      const history = costHistoryByItemId[item.id];
+      if (history?.points?.length) {
+        let lastMarket: number | null = null;
+        let lastMarketDate: string | null = null;
+        history.points.forEach((p) => {
+          if (p.date <= rangeEndKey && p.market_rub != null) {
+            if (!lastMarketDate || p.date > lastMarketDate) {
+              lastMarketDate = p.date;
+              lastMarket = p.market_rub;
+            }
+          }
+        });
+        if (lastMarket != null) {
+          currentMarketValueRub = (currentMarketValueRub ?? 0) + lastMarket;
+        }
+      }
 
       if (!item.currency_code || item.currency_code.toUpperCase() === "RUB") {
         revaluationSum += totalChangeMinusFlows;
@@ -527,6 +544,29 @@ export default function AssetsProfitabilityPage() {
     const revaluationProfitRub = hasMissingFx ? null : revaluationSum;
     const fxProfitRub = hasMissingFx ? null : fxSum;
 
+    // Теперь, когда известна текущая рыночная стоимость и денежные потоки, считаем рентабельность вложений
+    if (hasMarketPrimary && investedBase > 0 && annualFactor > 0) {
+      let returnInvestments: number | null = null;
+      if (incomeFromSale === 0 && currentMarketValueRub != null) {
+        // Случай без продажи: доход от владения + текущая рыночная стоимость - вложения
+        returnInvestments =
+          incomeMinusExpense +
+          currentMarketValueRub -
+          expenseAcquisition -
+          investmentInAsset;
+      } else {
+        // Есть продажа: доход от владения + доход от продажи - вложения
+        returnInvestments =
+          incomeMinusExpense +
+          incomeFromSale -
+          expenseAcquisition -
+          investmentInAsset;
+      }
+      if (returnInvestments != null) {
+        yieldInvestmentsAnnual = (returnInvestments / investedBase) * annualFactor;
+      }
+    }
+
     const singleItemName =
       effectiveItems.length === 1 ? effectiveItems[0]?.name ?? null : null;
     const primaryValueEndRub =
@@ -534,10 +574,32 @@ export default function AssetsProfitabilityPage() {
         ? valueByDate.get(effectiveItems[0].id)?.get(rangeEndKey) ?? null
         : null;
 
+    // Лейбл типа основной стоимости для общей части
+    let primaryValueKindLabel: string | null = null;
+    let hasMixedPrimaryKinds = false;
+    if (effectiveItems.length > 0) {
+      const kinds = new Set(
+        effectiveItems.map((item) => item.primary_value_kind ?? "BALANCE")
+      );
+      hasMixedPrimaryKinds = kinds.size > 1;
+      if (hasMixedPrimaryKinds) {
+        primaryValueKindLabel = "Разные типы основной стоимости";
+      } else {
+        const onlyKind = kinds.values().next().value as
+          | "BALANCE"
+          | "MARKET"
+          | "ACQUISITION"
+          | "INVESTED";
+        primaryValueKindLabel = getPrimaryValueLabel(onlyKind);
+      }
+    }
+
     return {
       hasData: true,
       singleItemName,
       primaryValueEndRub,
+      primaryValueKindLabel,
+      hasMixedPrimaryKinds,
       avgDailyRub: avgDaily,
       incomeFromAsset,
       incomeFromSale,
@@ -545,10 +607,10 @@ export default function AssetsProfitabilityPage() {
       expenseAcquisition,
       investmentInAsset,
       netProfit,
-      yieldBalanceAnnual,
-      yieldMarketAnnual,
+      yieldAssetAnnual,
       yieldInvestmentsAnnual,
       hasMarketPrimary,
+      currentMarketValueRub,
       revaluationProfitRub,
       fxProfitRub,
     };
@@ -653,106 +715,130 @@ export default function AssetsProfitabilityPage() {
           </div>
         </div>
 
-        <div
-          className="relative rounded-lg overflow-hidden border-0 outline-none"
-          style={{ backgroundColor: MODAL_BG }}
-        >
+        {/* Карточка с ошибкой / сообщением об отсутствии отчёта */}
+        {(error || (!canShowReport && !loading && !loadingCostHistory)) && (
           <div
-            className="px-6 pt-6 pb-6 transition-opacity duration-300"
-            style={{ opacity: loading || loadingCostHistory ? 0.6 : 1 }}
+            className="relative rounded-lg overflow-hidden border-0 outline-none"
+            style={{ backgroundColor: MODAL_BG }}
           >
-            {error && (
-              <div className="flex min-h-[200px] items-center justify-center text-sm text-red-600">
-                {error}
-              </div>
-            )}
+            <div
+              className="px-6 pt-6 pb-6 transition-opacity duration-300"
+              style={{ opacity: loading || loadingCostHistory ? 0.6 : 1 }}
+            >
+              {error && (
+                <div className="flex min-h-[200px] items-center justify-center text-sm text-red-600">
+                  {error}
+                </div>
+              )}
 
-            {!error && !canShowReport && !loading && !loadingCostHistory && (
-              <div className="flex min-h-[200px] items-center justify-center text-sm text-muted-foreground">
-                {effectiveItems.length === 0
-                  ? "Нет активов для построения отчёта."
-                  : "Недостаточно данных для построения отчёта за указанный период."}
-              </div>
-            )}
+              {!error && !canShowReport && !loading && !loadingCostHistory && (
+                <div className="flex min-h-[200px] items-center justify-center text-sm text-muted-foreground">
+                  {effectiveItems.length === 0
+                    ? "Нет активов для построения отчёта."
+                    : "Недостаточно данных для построения отчёта за указанный период."}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
-            {canShowReport && metrics && (
-              <div className="flex flex-col gap-4">
+        {/* Основные блоки отчёта на отдельных подложках */}
+        {canShowReport && metrics && (
+          <div className="flex flex-col gap-4 text-sm">
+            {/* Общая часть */}
+            <div
+              className="relative rounded-lg overflow-hidden border-0 outline-none px-6 pt-4 pb-4"
+              style={{ backgroundColor: MODAL_BG }}
+            >
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+                  Общая часть
+                </span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Тип основной стоимости</span>
+                  <span className="font-medium">
+                    {metrics.primaryValueKindLabel ?? "—"}
+                  </span>
+                </div>
                 {metrics.singleItemName && metrics.primaryValueEndRub != null && (
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-sm text-muted-foreground">
-                        Основная стоимость на {rangeEndKey.split("-").reverse().join(".")}
-                      </span>
-                      <span className="text-base font-medium">
-                        {metrics.singleItemName}
-                      </span>
-                    </div>
-                    <span className="text-base font-medium">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      Основная стоимость на {rangeEndKey.split("-").reverse().join(".")}
+                    </span>
+                    <span className="font-medium">
                       {formatRub(metrics.primaryValueEndRub)}
                     </span>
                   </div>
                 )}
+              </div>
+            </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Среднедневная стоимость за период
-                    </span>
-                    <span className="font-medium">
-                      {formatRub(
-                        metrics.avgDailyRub != null
-                          ? Math.round(metrics.avgDailyRub)
-                          : null
-                      )}
-                    </span>
-                  </div>
+            {/* Прибыльность актива */}
+            <div
+              className="relative rounded-lg overflow-hidden border-0 outline-none px-6 pt-4 pb-4"
+              style={{ backgroundColor: MODAL_BG }}
+            >
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+                  Прибыльность актива
+                </span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">
+                    Среднедневная стоимость за период
+                  </span>
+                  <span className="font-medium">
+                    {formatRub(
+                      metrics.avgDailyRub != null
+                        ? Math.round(metrics.avgDailyRub)
+                        : null
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Доходы от актива</span>
+                  <span className="font-medium">
+                    {formatRub(metrics.incomeFromAsset)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Расходы по активу</span>
+                  <span className="font-medium">
+                    {formatRub(metrics.expenseForAsset)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">
+                    Прибыльность актива в годовом выражении
+                  </span>
+                  <span
+                    className="font-medium"
+                    style={{
+                      color:
+                        metrics.yieldAssetAnnual != null &&
+                        metrics.yieldAssetAnnual > 0
+                          ? GREEN
+                          : metrics.yieldAssetAnnual != null &&
+                              metrics.yieldAssetAnnual < 0
+                            ? RED
+                            : undefined,
+                    }}
+                  >
+                    {formatPercent(metrics.yieldAssetAnnual)}%
+                  </span>
+                </div>
+              </div>
+            </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Чистая прибыль
-                    </span>
-                    <span
-                      className="font-medium"
-                      style={{
-                        color:
-                          metrics.netProfit > 0
-                            ? GREEN
-                            : metrics.netProfit < 0
-                              ? RED
-                              : undefined,
-                      }}
-                    >
-                      {formatSignedRub(metrics.netProfit)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Доходы от актива
-                    </span>
-                    <span className="font-medium">
-                      {formatRub(metrics.incomeFromAsset)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Доходы от продажи актива
-                    </span>
-                    <span className="font-medium">
-                      {formatRub(metrics.incomeFromSale)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Расходы по активу
-                    </span>
-                    <span className="font-medium">
-                      {formatRub(metrics.expenseForAsset)}
-                    </span>
-                  </div>
-
+            {/* Доходность вложений в актив */}
+            {metrics.hasMarketPrimary && (
+              <div
+                className="relative rounded-lg overflow-hidden border-0 outline-none px-6 pt-4 pb-4"
+                style={{ backgroundColor: MODAL_BG }}
+              >
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+                    Доходность вложений в актив
+                  </span>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-muted-foreground">
                       Расходы по приобретению актива
@@ -761,84 +847,28 @@ export default function AssetsProfitabilityPage() {
                       {formatRub(metrics.expenseAcquisition)}
                     </span>
                   </div>
-
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Вложения в актив
-                    </span>
+                    <span className="text-muted-foreground">Вложения в актив</span>
                     <span className="font-medium">
                       {formatRub(metrics.investmentInAsset)}
                     </span>
                   </div>
-
-                  {!metrics.hasMarketPrimary && (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        Доходность актива в годовом выражении
-                      </span>
-                      <span
-                        className="font-medium"
-                        style={{
-                          color:
-                            metrics.yieldBalanceAnnual != null &&
-                            metrics.yieldBalanceAnnual > 0
-                              ? GREEN
-                              : metrics.yieldBalanceAnnual != null &&
-                                  metrics.yieldBalanceAnnual < 0
-                                ? RED
-                                : undefined,
-                        }}
-                      >
-                        {formatPercent(metrics.yieldBalanceAnnual)}%
-                      </span>
-                    </div>
-                  )}
-
-                  {metrics.hasMarketPrimary && (
-                    <>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-muted-foreground">
-                          Доходность актива по рыночной стоимости в годовом выражении
-                        </span>
-                        <span
-                          className="font-medium"
-                          style={{
-                            color:
-                              metrics.yieldMarketAnnual != null &&
-                              metrics.yieldMarketAnnual > 0
-                                ? GREEN
-                                : metrics.yieldMarketAnnual != null &&
-                                    metrics.yieldMarketAnnual < 0
-                                  ? RED
-                                  : undefined,
-                          }}
-                        >
-                          {formatPercent(metrics.yieldMarketAnnual)}%
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-muted-foreground">
-                          Доходность вложений в актив в годовом выражении
-                        </span>
-                        <span
-                          className="font-medium"
-                          style={{
-                            color:
-                              metrics.yieldInvestmentsAnnual != null &&
-                              metrics.yieldInvestmentsAnnual > 0
-                                ? GREEN
-                                : metrics.yieldInvestmentsAnnual != null &&
-                                    metrics.yieldInvestmentsAnnual < 0
-                                  ? RED
-                                  : undefined,
-                          }}
-                        >
-                          {formatPercent(metrics.yieldInvestmentsAnnual)}%
-                        </span>
-                      </div>
-                    </>
-                  )}
-
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      Текущая рыночная стоимость
+                    </span>
+                    <span className="font-medium">
+                      {formatRub(metrics.currentMarketValueRub)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      Доходы от продажи актива
+                    </span>
+                    <span className="font-medium">
+                      {formatRub(metrics.incomeFromSale)}
+                    </span>
+                  </div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-muted-foreground">
                       Прибыль от изменения стоимости актива
@@ -861,7 +891,6 @@ export default function AssetsProfitabilityPage() {
                         : "—"}
                     </span>
                   </div>
-
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-muted-foreground">
                       Прибыль от изменения курса валюты
@@ -882,11 +911,31 @@ export default function AssetsProfitabilityPage() {
                         : "—"}
                     </span>
                   </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      Рентабельность вложений в актив в годовом выражении
+                    </span>
+                    <span
+                      className="font-medium"
+                      style={{
+                        color:
+                          metrics.yieldInvestmentsAnnual != null &&
+                          metrics.yieldInvestmentsAnnual > 0
+                            ? GREEN
+                            : metrics.yieldInvestmentsAnnual != null &&
+                                metrics.yieldInvestmentsAnnual < 0
+                              ? RED
+                              : undefined,
+                      }}
+                    >
+                      {formatPercent(metrics.yieldInvestmentsAnnual)}%
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
           </div>
-        </div>
+        )}
       </div>
     </main>
   );

@@ -498,7 +498,7 @@ function formatChainAmount(chain: TransactionChainOut) {
     }
     return `${formatAmount(chain.amount_min_rub)}-${formatAmount(chain.amount_max_rub)}`;
   }
-  return formatAmount(chain.amount_rub);
+  return formatAmount(chain.amount);
 }
 
 function formatChainFrequency(chain: TransactionChainOut) {
@@ -2738,7 +2738,7 @@ export default function Page() {
       );
       if (commissionTx) {
         setCommissionEnabled(true);
-        setCommissionAmount(formatAmount(commissionTx.amount_rub));
+        setCommissionAmount(formatAmount(commissionTx.amount));
         setCommissionPaymentItemId(String(commissionTx.primary_item_id));
       } else {
         setCommissionEnabled(false);

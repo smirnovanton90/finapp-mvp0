@@ -1219,8 +1219,8 @@ function TransactionCardRow({
   const counterpartyDisplayId =
     tx.counterparty_card_item_id ?? tx.counterparty_item_id;
 
-  const amountValue = formatAmount(tx.amount_rub);
-  const counterpartyAmountValue = formatAmount(tx.amount_counterparty ?? tx.amount_rub);
+  const amountValue = formatAmount(tx.amount);
+  const counterpartyAmountValue = formatAmount(tx.amount_counterparty ?? tx.amount);
   const currencyCode = itemCurrencyCode(primaryDisplayId);
   const rubEquivalent = getRubEquivalentCents(tx, currencyCode);
   const showRubEquivalent =
@@ -1246,8 +1246,8 @@ function TransactionCardRow({
       ? (counterpartyItemCounterparty.entity_type === "PERSON" ? User : Building2)
       : undefined;
   const counterpartyBankName = itemBankName(counterpartyDisplayId);
-  const primaryAmountCents = tx.amount_rub;
-  const counterpartyAmountCents = tx.amount_counterparty ?? tx.amount_rub;
+  const primaryAmountCents = tx.amount;
+  const counterpartyAmountCents = tx.amount_counterparty ?? tx.amount;
   const isCrossWithRub =
     isTransfer &&
     ((primaryCurrency === "RUB" &&
@@ -2456,7 +2456,7 @@ function TransactionsView({
   const getRubEquivalentCents = (tx: TransactionCard, currencyCode: string) => {
     const rate = getFxRateForDate(tx.transaction_date, currencyCode);
     if (!rate) return null;
-    const amount = tx.amount_rub / 100;
+    const amount = tx.amount / 100;
     return Math.round(amount * rate * 100);
   };
 
@@ -2791,7 +2791,7 @@ function TransactionsView({
       const expensePayload = {
         ...basePayload,
         counterparty_item_id: null,
-        amount_rub: interestCents,
+        amount: interestCents,
         amount_counterparty: null,
         direction: "EXPENSE" as const,
         category_id: expenseCategoryId,
@@ -2799,7 +2799,7 @@ function TransactionsView({
       const transferPayload = {
         ...basePayload,
         counterparty_item_id: counterpartyItemId,
-        amount_rub: principalCents,
+        amount: principalCents,
         amount_counterparty: null,
         direction: "TRANSFER" as const,
         category_id: null,
@@ -2853,7 +2853,7 @@ function TransactionsView({
         if (commentParts.length) setComment(commentParts.join(", "));
       } else if (ocrResult) {
         if (ocrResult.transaction_date) setDate(ocrResult.transaction_date);
-        if (ocrResult.amount_rub != null) setAmountStr(formatCentsForInput(ocrResult.amount_rub));
+        if (ocrResult.amount != null) setAmountStr(formatCentsForInput(ocrResult.amount));
       }
 
       if (ocrResult) {
@@ -3011,7 +3011,7 @@ function TransactionsView({
     setDialogMode("edit");
     setDate(getDateKey(tx.transaction_date));
     setFormTransactionType(tx.transaction_type);
-    setAmountStr(formatCentsForInput(tx.amount_rub));
+    setAmountStr(formatCentsForInput(tx.amount));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
         ? formatCentsForInput(tx.amount_counterparty)
@@ -3091,7 +3091,7 @@ function TransactionsView({
       tx.direction === "TRANSFER" ? getDisplayCounterpartyItemId(tx) : null
     );
     setCounterpartyId(tx.counterparty_id);
-    setAmountStr(formatCentsForInput(tx.amount_rub));
+    setAmountStr(formatCentsForInput(tx.amount));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
         ? formatCentsForInput(tx.amount_counterparty)
@@ -3141,7 +3141,7 @@ function TransactionsView({
       tx.direction === "TRANSFER" ? getDisplayCounterpartyItemId(tx) : null
     );
     setCounterpartyId(tx.counterparty_id);
-    setAmountStr(formatCentsForInput(tx.amount_rub));
+    setAmountStr(formatCentsForInput(tx.amount));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
         ? formatCentsForInput(tx.amount_counterparty)
@@ -3186,7 +3186,7 @@ function TransactionsView({
       primaryItemId: getDisplayPrimaryItemId(baselineTx),
       counterpartyItemId: getDisplayCounterpartyItemId(baselineTx),
       counterpartyId: baselineTx.counterparty_id,
-      amountStr: formatCentsForInput(baselineTx.amount_rub),
+      amountStr: formatCentsForInput(baselineTx.amount),
       amountCounterpartyStr:
         baselineTx.direction === "TRANSFER" &&
         baselineTx.amount_counterparty != null
@@ -3522,9 +3522,9 @@ function TransactionsView({
             primary_item_id: resolvedPrimaryItemId ?? basePrimaryItemId,
             counterparty_item_id: nextCounterpartyItemId,
             counterparty_id: nextCounterpartyId ?? null,
-            amount_rub: changes.hasAmountChanged
+            amount: changes.hasAmountChanged
               ? (amountCents as number)
-              : tx.amount_rub,
+              : tx.amount,
             amount_counterparty: nextAmountCounterparty,
             primary_quantity_lots: primaryMoex ? nextPrimaryLots : nextPrimaryLots,
             counterparty_quantity_lots: counterpartyMoex ? nextCounterpartyLots : null,
@@ -3797,7 +3797,7 @@ function TransactionsView({
             payload: {
               transaction_date: transactionDate,
               primary_item_id: selectedImportItemId,
-              amount_rub: amountCents,
+              amount: amountCents,
               direction,
               transaction_type: importTxType,
               status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
@@ -3899,7 +3899,7 @@ function TransactionsView({
             payload: {
               transaction_date: formatDateTimeForApi(parsedDate),
               primary_item_id: selectedImportItemId,
-              amount_rub: amountMeta.amountCents,
+              amount: amountMeta.amountCents,
               direction: amountMeta.isIncome ? "INCOME" : "EXPENSE",
               transaction_type: importTxType,
               status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
@@ -5307,7 +5307,7 @@ function TransactionsView({
                           createTransaction({
                             ...basePayload,
                             counterparty_item_id: null,
-                            amount_rub: interestCents,
+                            amount: interestCents,
                             amount_counterparty: null,
                             direction: "EXPENSE",
                             category_id: expenseCategoryId,
@@ -5315,7 +5315,7 @@ function TransactionsView({
                           createTransaction({
                             ...basePayload,
                             counterparty_item_id: counterpartyItemId,
-                            amount_rub: principalCents,
+                            amount: principalCents,
                             amount_counterparty: null,
                             direction: "TRANSFER",
                             category_id: null,
@@ -5365,7 +5365,7 @@ function TransactionsView({
                         await createTheyPaidForMeTransaction({
                           who_paid_counterparty_id: counterpartyId,
                           where_paid_counterparty_id: wherePaidCounterpartyId,
-                          amount_rub: theyPaidCents,
+                          amount: theyPaidCents,
                           transaction_date: transactionDate,
                           category_id: theyPaidCategoryId,
                           comment: comment || null,
@@ -5434,7 +5434,7 @@ function TransactionsView({
                             primary_item_id: primaryItemId,
                             counterparty_item_id: null,
                             counterparty_id: counterpartyId,
-                            amount_rub: expenseCents,
+                            amount: expenseCents,
                             amount_counterparty: null,
                             primary_quantity_lots: null,
                             counterparty_quantity_lots: null,
@@ -5451,7 +5451,7 @@ function TransactionsView({
                             transaction_counterparty_id: counterpartyId,
                             primary_item_id: primaryItemId,
                             transaction_date: transactionDate,
-                            amount_rub: splitCents,
+                            amount: splitCents,
                             transaction_type: formTransactionType,
                             comment: comment || null,
                           });
@@ -5509,7 +5509,7 @@ function TransactionsView({
                           counterparty_id: counterpartyId,
                           primary_item_id: primaryItemId,
                           transaction_date: transactionDate,
-                          amount_rub: debtCents,
+                          amount: debtCents,
                           transaction_type: formTransactionType,
                           comment: comment || null,
                         });
@@ -5650,7 +5650,7 @@ function TransactionsView({
                             ? counterpartyItemId
                             : null,
                           counterparty_id: counterpartyId ?? null,
-                          amount_rub: cents,
+                          amount: cents,
                           amount_counterparty: isTransfer ? counterpartyCents : null,
                           primary_quantity_lots:
                             primaryIsMoex
@@ -5754,7 +5754,7 @@ function TransactionsView({
                             if (v === "DEBTS") setDebtDirection("I_PAID");
                             if (v === "STANDARD") setDirection(editingTx?.direction ?? "EXPENSE");
                             if (v === "LOAN_REPAYMENT" && editingTx) {
-                              setLoanTotalStr(formatCentsForInput(editingTx.amount_rub));
+                              setLoanTotalStr(formatCentsForInput(editingTx.amount));
                               setLoanInterestStr("");
                             }
                           }}

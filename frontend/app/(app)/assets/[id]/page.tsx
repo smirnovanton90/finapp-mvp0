@@ -341,6 +341,28 @@ export default function AssetDetailPage() {
     };
   }, [item?.id, item?.open_date]);
 
+  // Догружаем курсы на каждую дату из истории стоимости, чтобы рублёвый эквивалент в графике считался по курсу на дату, а не по ближайшей известной.
+  useEffect(() => {
+    if (!item?.id || !costHistoryData?.points?.length) return;
+    const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
+    if (currencyCode === "RUB") return;
+
+    const pointDates = new Set(costHistoryData.points.map((p) => p.date));
+    const existingSet = new Set(Object.keys(fxRatesByDate));
+    const missingDates = Array.from(pointDates).filter((d) => !existingSet.has(d)).sort();
+    if (missingDates.length === 0) return;
+
+    let cancelled = false;
+    fetchFxRatesBatch(missingDates).then((rates) => {
+      if (!cancelled && rates && Object.keys(rates).length > 0) {
+        setFxRatesByDate((prev) => ({ ...prev, ...rates }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item?.id, item?.currency_code, costHistoryData?.points, fxRatesByDate]);
+
   const todayKey = new Date().toISOString().slice(0, 10);
   const sortedFxRateDateKeys = useMemo(() => Object.keys(fxRatesByDate).sort(), [fxRatesByDate]);
   const latestRatesByCurrency = useMemo(() => {
@@ -355,8 +377,9 @@ export default function AssetDetailPage() {
     return map;
   }, [fxRatesByDate]);
 
-  const dynamics = useMemo(() => {
-    if (!item || !costs) return null;
+  // Динамика по периоду (дата начала = дата появления актива, конец = сегодня). Отдельно для балансовой и рыночной стоимости — для плашек в соответствующих разделах.
+  const dynamicsByMode = useMemo(() => {
+    if (!item || !costs) return { balance: null as ReturnType<typeof buildOne>, market: null as ReturnType<typeof buildOne>, primary: null as ReturnType<typeof buildOne> };
     const dateStart = item.open_date ?? todayKey;
     const dateEnd = todayKey;
     const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
@@ -371,79 +394,8 @@ export default function AssetDetailPage() {
       return null;
     };
 
-    let initialRubCents: number | null;
-    let initialCurCents: number;
-    let finalRubCents: number | null;
-    let finalCurCents: number;
-    let qtyStart: number | null = null;
-    let qtyEnd: number | null = null;
-
     const isMarketOrCrypto = isMoexItem(item) || isCryptoItem(item);
 
-    const primaryValueKind = item.primary_value_kind ?? "BALANCE";
-    const isBalanceMode = primaryValueKind !== "MARKET";
-    const isMarketMode = primaryValueKind === "MARKET";
-
-    // Для балансовой (и приобретение, вложенные) — balance_rub; для рыночной — market для рыночных/крипты, иначе market_rub ?? balance_rub
-    const valueFromPoint = (p: { market_rub: number | null; balance_rub: number }) =>
-      isBalanceMode ? (p.balance_rub ?? 0) : (isMarketOrCrypto ? (p.market_rub ?? p.balance_rub ?? 0) : (p.market_rub ?? p.balance_rub ?? 0));
-
-    if (startPoint) {
-      const valCur = valueFromPoint(startPoint);
-      initialCurCents = valCur;
-      const rate = currencyCode !== "RUB" ? getRate(dateStart) : null;
-      initialRubCents =
-        currencyCode === "RUB"
-          ? valCur
-          : rate != null
-            ? Math.round((valCur / 100) * rate * 100)
-            : null;
-      const pt = startPoint as { market_quantity_units?: number | null };
-      if (isMarketOrCrypto && pt.market_quantity_units != null) qtyStart = pt.market_quantity_units;
-    } else {
-      initialRubCents = 0;
-      initialCurCents = 0;
-    }
-
-    if (endPoint) {
-      const valCur = valueFromPoint(endPoint);
-      finalCurCents = valCur;
-      const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
-      finalRubCents =
-        currencyCode === "RUB"
-          ? valCur
-          : rate != null
-            ? Math.round((valCur / 100) * rate * 100)
-            : null;
-      const pt = endPoint as { market_quantity_units?: number | null };
-      if (isMarketOrCrypto && pt.market_quantity_units != null) qtyEnd = pt.market_quantity_units;
-      else if (isMarketOrCrypto) {
-        // Если в точке на конечную дату нет количества — берём текущее из актива
-        if (item.type_code === "crypto" && item.quantity_units != null) qtyEnd = item.quantity_units;
-        else if (item.position_lots != null) qtyEnd = item.position_lots;
-      }
-    } else {
-      if (isMarketOrCrypto) {
-        finalCurCents = costs.market_rub ?? 0;
-        const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
-        finalRubCents =
-          costs.market_value_rub ??
-          (currencyCode !== "RUB" && rate != null
-            ? Math.round((finalCurCents / 100) * rate * 100)
-            : (costs.market_rub ?? 0));
-        if (item.type_code === "crypto" && item.quantity_units != null) qtyEnd = item.quantity_units;
-        else if (item.position_lots != null) qtyEnd = item.position_lots;
-      } else {
-        finalCurCents = costs.balance_rub ?? 0;
-        const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
-        finalRubCents =
-          currencyCode === "RUB"
-            ? finalCurCents
-            : rate != null
-              ? Math.round((finalCurCents / 100) * rate * 100)
-              : null;
-      }
-    }
     const txsInRange = (() => {
       const included = dynamicsTxs.filter((tx) => {
         const d = toTxDateKey(tx.transaction_date);
@@ -458,16 +410,14 @@ export default function AssetDetailPage() {
           const res = getTxDeltaForItem(tx, item.id, item.kind, item.currency_code);
           if (res !== null) return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
           if (isMarketOrCrypto && tx.related_item_id === item.id) {
-            // Для крипты и MOEX в валюте: сумма покупки/продажи в API в валюте актива (центы)
             const inCurrency = currencyCode !== "RUB";
-            return { tx, deltaCents: tx.amount_rub ?? 0, inCurrency };
+            return { tx, deltaCents: tx.amount ?? 0, inCurrency };
           }
           return { tx, deltaCents: 0, inCurrency: false };
         })
         .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)));
     })();
 
-    let netFlowRub = 0;
     let totalIncomeRub = 0;
     let totalExpenseRub = 0;
     let totalIncomeCur = 0;
@@ -482,12 +432,10 @@ export default function AssetDetailPage() {
       if (currencyCode === "RUB") {
         rubCents = deltaCents;
       } else {
-        // Для валютного актива: суммы транзакций — в валюте; рублёвая строка = сумма (сумма в валюте × курс на дату транзакции).
         if (inCurrency) {
           curUnits = deltaCents / 100;
           rubCents = rate != null ? Math.round(curUnits * rate * 100) : 0;
         } else {
-          // amount_rub в API в рублях — переводим в валюту для строки с валютой, затем в рубли по курсу на дату
           curUnits = rate != null ? (deltaCents / 100) / rate : null;
           rubCents = curUnits != null && rate != null ? Math.round(curUnits * rate * 100) : 0;
         }
@@ -508,18 +456,10 @@ export default function AssetDetailPage() {
       }
     });
 
-    // Считаем netFlow из тех же слагаемых, что показываем в плашках, чтобы выполнялось равенство: На дату + Куплено + Продано + Переводы + Изменение цены = На текущую дату
-    // В плашках: Куплено = totalExpense, Продано = -totalIncome, поэтому поток = totalExpense - totalIncome + transfer
     const displayFlowRub = totalExpenseRub - totalIncomeRub + totalTransferRub;
     const displayFlowCur = totalExpenseCur - totalIncomeCur + totalTransferCur;
-    netFlowRub = displayFlowRub;
+    const netFlowRub = displayFlowRub;
     const netFlowCur = displayFlowCur;
-
-    const effectiveKind = getEffectiveItemKind(item, finalCurCents);
-    const signedInitialRub = effectiveKind === "LIABILITY" ? -(initialRubCents ?? 0) : (initialRubCents ?? 0);
-    const signedFinalRub = effectiveKind === "LIABILITY" ? -(finalRubCents ?? 0) : (finalRubCents ?? 0);
-    const courseDiffRub = currencyCode !== "RUB" ? (signedFinalRub - signedInitialRub) - netFlowRub : 0;
-    const profitLossFromPriceRub = signedFinalRub - signedInitialRub - netFlowRub;
 
     let totalBuyQty = 0;
     let totalSellQty = 0;
@@ -541,54 +481,140 @@ export default function AssetDetailPage() {
         if (getIsBuy(tx)) totalBuyQty += qty;
         else totalSellQty += qty;
       });
-      // Если количество на текущую дату так и не задано — считаем по равенству: На дату + Куплено − Продано
-      if (qtyEnd == null && qtyStart != null) {
-        qtyEnd = qtyStart + totalBuyQty - totalSellQty;
-      }
     }
 
-    const rowGrowthPercent =
-      initialRubCents != null && initialRubCents !== 0
-        ? (effectiveKind === "LIABILITY"
-          ? (Math.abs(signedFinalRub) - Math.abs(signedInitialRub)) / Math.abs(signedInitialRub) * 100
-          : (signedFinalRub - signedInitialRub) / Math.abs(signedInitialRub) * 100)
-        : null;
+    function buildOne(primaryValueKind: PrimaryValueKind) {
+      const isBalanceMode = primaryValueKind !== "MARKET";
+      const isMarketMode = primaryValueKind === "MARKET";
+      const valueFromPoint = (p: { market: number | null; balance: number }) =>
+        isBalanceMode ? (p.balance ?? 0) : (isMarketOrCrypto ? (p.market ?? p.balance ?? 0) : (p.market ?? p.balance ?? 0));
 
-    const rateEnd = currencyCode !== "RUB" ? getRate(dateEnd) : null;
-    const profitLossFromPriceCur =
-      currencyCode !== "RUB"
-        ? (finalCurCents - initialCurCents) / 100 - netFlowCur
-        : null;
+      let initialRubCents: number | null;
+      let initialCurCents: number;
+      let finalRubCents: number | null;
+      let finalCurCents: number;
+      let qtyStart: number | null = null;
+      let qtyEnd: number | null = null;
 
+      if (startPoint) {
+        const valCur = valueFromPoint(startPoint);
+        initialCurCents = valCur;
+        const rate = currencyCode !== "RUB" ? getRate(dateStart) : null;
+        initialRubCents =
+          currencyCode === "RUB"
+            ? valCur
+            : rate != null
+              ? Math.round((valCur / 100) * rate * 100)
+              : null;
+        const pt = startPoint as { market_quantity_units?: number | null };
+        if (isMarketOrCrypto && pt.market_quantity_units != null) qtyStart = pt.market_quantity_units;
+      } else {
+        initialRubCents = 0;
+        initialCurCents = 0;
+      }
+
+      if (endPoint) {
+        const valCur = valueFromPoint(endPoint);
+        finalCurCents = valCur;
+        const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
+        finalRubCents =
+          currencyCode === "RUB"
+            ? valCur
+            : rate != null
+              ? Math.round((valCur / 100) * rate * 100)
+              : null;
+        const pt = endPoint as { market_quantity_units?: number | null };
+        if (isMarketOrCrypto && pt.market_quantity_units != null) qtyEnd = pt.market_quantity_units;
+        else if (isMarketOrCrypto) {
+          if (item.type_code === "crypto" && item.quantity_units != null) qtyEnd = item.quantity_units;
+          else if (item.position_lots != null) qtyEnd = item.position_lots;
+        }
+      } else {
+        if (isMarketOrCrypto) {
+          finalCurCents = costs.market ?? 0;
+          const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
+          finalRubCents =
+            costs.market_value_rub ??
+            (currencyCode !== "RUB" && rate != null
+              ? Math.round((finalCurCents / 100) * rate * 100)
+              : (costs.market ?? 0));
+          if (item.type_code === "crypto" && item.quantity_units != null) qtyEnd = item.quantity_units;
+          else if (item.position_lots != null) qtyEnd = item.position_lots;
+        } else {
+          finalCurCents = costs.balance ?? 0;
+          const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
+          finalRubCents =
+            currencyCode === "RUB"
+              ? finalCurCents
+              : rate != null
+                ? Math.round((finalCurCents / 100) * rate * 100)
+                : null;
+        }
+      }
+
+      if (isMarketOrCrypto && qtyEnd == null && qtyStart != null) {
+        qtyEnd = qtyStart + totalBuyQty - totalSellQty;
+      }
+
+      const effectiveKind = getEffectiveItemKind(item, finalCurCents);
+      const signedInitialRub = effectiveKind === "LIABILITY" ? -(initialRubCents ?? 0) : (initialRubCents ?? 0);
+      const signedFinalRub = effectiveKind === "LIABILITY" ? -(finalRubCents ?? 0) : (finalRubCents ?? 0);
+      const courseDiffRub = currencyCode !== "RUB" ? (signedFinalRub - signedInitialRub) - netFlowRub : 0;
+      const profitLossFromPriceRub = signedFinalRub - signedInitialRub - netFlowRub;
+
+      const rowGrowthPercent =
+        initialRubCents != null && initialRubCents !== 0
+          ? (effectiveKind === "LIABILITY"
+            ? (Math.abs(signedFinalRub) - Math.abs(signedInitialRub)) / Math.abs(signedInitialRub) * 100
+            : (signedFinalRub - signedInitialRub) / Math.abs(signedInitialRub) * 100)
+          : null;
+
+      const profitLossFromPriceCur =
+        currencyCode !== "RUB"
+          ? (finalCurCents - initialCurCents) / 100 - netFlowCur
+          : null;
+
+      return {
+        dateStart,
+        dateEnd,
+        initialRubCents,
+        initialCurCents,
+        finalRubCents,
+        finalCurCents,
+        qtyStart,
+        qtyEnd,
+        netFlowRub,
+        courseDiffRub,
+        profitLossFromPriceRub,
+        profitLossFromPriceCur,
+        totalIncomeRub,
+        totalExpenseRub,
+        totalIncomeCur,
+        totalExpenseCur,
+        totalTransferRub,
+        totalTransferCur,
+        totalBuyQty,
+        totalSellQty,
+        rowGrowthPercent,
+        effectiveKind,
+        currencyCode,
+        isMarketOrCrypto,
+        isBalanceMode,
+        isMarketMode,
+      };
+    }
+
+    const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
     return {
-      dateStart,
-      dateEnd,
-      initialRubCents,
-      initialCurCents,
-      finalRubCents,
-      finalCurCents,
-      qtyStart,
-      qtyEnd,
-      netFlowRub,
-      courseDiffRub,
-      profitLossFromPriceRub,
-      profitLossFromPriceCur,
-      totalIncomeRub,
-      totalExpenseRub,
-      totalIncomeCur,
-      totalExpenseCur,
-      totalTransferRub,
-      totalTransferCur,
-      totalBuyQty,
-      totalSellQty,
-      rowGrowthPercent,
-      effectiveKind,
-      currencyCode,
-      isMarketOrCrypto,
-      isBalanceMode,
-      isMarketMode,
+      balance: buildOne("BALANCE"),
+      market: buildOne("MARKET"),
+      primary: buildOne(primaryKind),
     };
   }, [item, costs, costHistoryData, dynamicsTxs, fxRatesByDate, latestRatesByCurrency, sortedFxRateDateKeys, todayKey]);
+
+  const dynamics = dynamicsByMode.primary;
+  const dynamicsBalance = dynamicsByMode.balance;
+  const dynamicsMarket = dynamicsByMode.market;
 
   const handleEditClick = useCallback(() => {
     if (!item) return;
@@ -804,7 +830,7 @@ export default function AssetDetailPage() {
       const isBuy = getIsBuy(tx);
       const delta = isBuy ? qty : -qty;
       balance += delta;
-      const costCents = tx.amount_rub ?? 0;
+      const costCents = tx.amount ?? 0;
       const priceCents = qty > 0 ? Math.round(costCents / qty) : null;
       return { tx, type: isBuy ? "Покупка" as const : "Продажа" as const, delta, balanceAfter: balance, priceCents, costCents };
     });
@@ -850,12 +876,12 @@ export default function AssetDetailPage() {
 
   const costChartSeries = useMemo(() => {
     if (!costHistoryOpen || !costHistoryData?.points.length) return [];
-    const key = costHistoryOpen === "balance" ? "balance_rub" : costHistoryOpen === "acquisition" ? "acquisition_rub" : costHistoryOpen === "invested" ? "invested_rub" : "market_rub";
+    const key = costHistoryOpen === "balance" ? "balance" : costHistoryOpen === "acquisition" ? "acquisition" : costHistoryOpen === "invested" ? "invested" : "market";
     const raw = costHistoryData.points.map((p) => {
       const valueRub = ((p as Record<string, number | null>)[key] ?? 0) / 100;
       const hasValue = (p as Record<string, number | null>)[key] != null;
       const base = { date: p.date, valueRub, hasValue };
-      if (key === "market_rub" && "market_quantity_units" in p && "market_price_rub" in p) {
+      if (key === "market" && "market_quantity_units" in p && "market_price_rub" in p) {
         return {
           ...base,
           marketQuantityUnits: p.market_quantity_units ?? undefined,
@@ -864,16 +890,19 @@ export default function AssetDetailPage() {
       }
       return base;
     });
-    if (key === "market_rub") return raw.filter((p) => p.hasValue);
+    if (key === "market") return raw.filter((p) => p.hasValue);
     return raw;
   }, [costHistoryOpen, costHistoryData]);
 
+  // costChartSeries хранит стоимость в валюте актива (balance/acquisition/invested/market). При отображении в RUB — рублёвый эквивалент = стоимость в валюте актива × курс.
   const costChartDisplaySeries = useMemo(() => {
-    if (costChartCurrency !== "CURRENCY" || !item?.currency_code || item.currency_code === "RUB") return costChartSeries;
+    if (!item?.currency_code || item.currency_code === "RUB") return costChartSeries;
+    if (costChartCurrency === "CURRENCY") return costChartSeries; // в валюте актива — как есть
+    // RUB: рублёвый эквивалент = стоимость в валюте актива × курс
     return costChartSeries.map((p) => {
       const rate = getRateForDateKey(p.date);
-      const valueDisplay = rate != null && rate > 0 ? p.valueRub / rate : p.valueRub;
-      return { ...p, valueRub: valueDisplay };
+      const valueInRub = rate != null && rate > 0 ? p.valueRub * rate : p.valueRub;
+      return { ...p, valueRub: valueInRub };
     });
   }, [costChartSeries, costChartCurrency, item?.currency_code, getRateForDateKey]);
 
@@ -1011,15 +1040,15 @@ export default function AssetDetailPage() {
 
     const selectValueRub = (p: (typeof costHistoryData.points)[number]): number => {
       if (primaryKind === "MARKET") {
-        return p.market_rub ?? p.balance_rub ?? 0;
+        return p.market ?? p.balance ?? 0;
       }
       if (primaryKind === "ACQUISITION") {
-        return p.acquisition_rub ?? 0;
+        return p.acquisition ?? 0;
       }
       if (primaryKind === "INVESTED") {
-        return p.invested_rub ?? 0;
+        return p.invested ?? 0;
       }
-      return p.balance_rub ?? 0;
+      return p.balance ?? 0;
     };
 
     const values = pointsInRange.map((p) => selectValueRub(p));
@@ -1047,7 +1076,7 @@ export default function AssetDetailPage() {
     let investmentInAsset = 0;
 
     txs.forEach((tx) => {
-      const amt = tx.amount_rub ?? 0;
+      const amt = tx.amount ?? 0;
       switch (tx.asset_link_type) {
         case "ASSET_INCOME":
           incomeFromAsset += amt;
@@ -1075,15 +1104,15 @@ export default function AssetDetailPage() {
       yieldAssetAnnual = (incomeMinusExpense / avgDailyRub) * annualFactor;
     }
 
-    const acquisitionRub = costs?.acquisition_rub ?? 0;
-    const investedRub = costs?.invested_rub ?? 0;
+    const acquisitionRub = costs?.acquisition ?? 0;
+    const investedRub = costs?.invested ?? 0;
     const investedBase = acquisitionRub + investedRub;
 
     const hasMarketPrimary = primaryKind === "MARKET";
     let currentMarketValueRub: number | null = null;
     if (hasMarketPrimary) {
       currentMarketValueRub =
-        costs?.market_rub ?? costs?.market_value_rub ?? null;
+        costs?.market ?? costs?.market_value_rub ?? null;
     }
 
     let yieldInvestmentsAnnual: number | null = null;
@@ -1510,10 +1539,10 @@ export default function AssetDetailPage() {
             {costs && (
               <div className="flex flex-col gap-2">
                 {([
-                  { key: "balance" as const, kind: "BALANCE" as PrimaryValueKind, label: "Балансовая стоимость", valueCents: costs.balance_rub, extra: null },
-                  { key: "market" as const, kind: "MARKET" as PrimaryValueKind, label: "Рыночная стоимость", valueCents: costs.market_rub, extra: item.currency_code && item.currency_code !== "RUB" && costs.market_value_rub != null ? { rub: costs.market_value_rub } : null },
-                  { key: "acquisition" as const, kind: "ACQUISITION" as PrimaryValueKind, label: "Стоимость приобретения", valueCents: costs.acquisition_rub, extra: null },
-                  { key: "invested" as const, kind: "INVESTED" as PrimaryValueKind, label: "Стоимость вложенных средств", valueCents: costs.invested_rub, extra: null },
+                  { key: "balance" as const, kind: "BALANCE" as PrimaryValueKind, label: "Балансовая стоимость", valueCents: costs.balance, extra: null },
+                  { key: "market" as const, kind: "MARKET" as PrimaryValueKind, label: "Рыночная стоимость", valueCents: costs.market, extra: item.currency_code && item.currency_code !== "RUB" && costs.market_value_rub != null ? { rub: costs.market_value_rub } : null },
+                  { key: "acquisition" as const, kind: "ACQUISITION" as PrimaryValueKind, label: "Стоимость приобретения", valueCents: costs.acquisition, extra: null },
+                  { key: "invested" as const, kind: "INVESTED" as PrimaryValueKind, label: "Стоимость вложенных средств", valueCents: costs.invested, extra: null },
                 ] as const).map(({ key, kind, label, valueCents, extra }) => {
                   const isPrimary = (item.primary_value_kind ?? "BALANCE") === kind;
                   const isHovered = costRowHover === key;
@@ -1695,6 +1724,98 @@ export default function AssetDetailPage() {
                               </div>
                             </>
                           ) : null}
+                          {((key === "balance" && dynamicsBalance) || (key === "market" && dynamicsMarket)) && (() => {
+                            const d = (key === "balance" ? dynamicsBalance : dynamicsMarket)!;
+                            const formatCur = (v: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+                            const SummaryBlock = ({
+                              title,
+                              qtyVal,
+                              curVal,
+                              rubVal,
+                              amountColor,
+                              showCurRow = true,
+                              showQtyRow = true,
+                              showEmptyQtyRow = false,
+                            }: {
+                              title: string;
+                              qtyVal?: number | null;
+                              curVal: number | null;
+                              rubVal: number | null;
+                              amountColor?: string;
+                              showCurRow?: boolean;
+                              showQtyRow?: boolean;
+                              showEmptyQtyRow?: boolean;
+                            }) => (
+                              <div className="flex flex-1 min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+                                <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
+                                <div className="flex flex-col gap-2">
+                                  {showEmptyQtyRow && (
+                                    <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden>
+                                      <span className="invisible select-none">0</span>
+                                    </div>
+                                  )}
+                                  {showQtyRow && qtyVal != null && (
+                                    <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                                      <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>
+                                        {isCryptoItem(item) ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(qtyVal) : new Intl.NumberFormat("ru-RU").format(qtyVal) + (isMoexItem(item) ? " л." : "")}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {d.currencyCode !== "RUB" && (showCurRow ? (
+                                    <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                                      <CurrencyChip code={d.currencyCode} />
+                                      <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{curVal != null ? formatCur(curVal) : "–"}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="rounded-md px-2 py-1 flex items-center text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden>
+                                      <span className="invisible select-none">0</span>
+                                    </div>
+                                  ))}
+                                  <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                                    <CurrencyChip code="RUB" />
+                                    <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{rubVal != null ? formatRub(rubVal) : "–"}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                            const dateStartLabel = d.dateStart ? new Date(d.dateStart).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+                            const dateEndLabel = d.dateEnd ? new Date(d.dateEnd).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+                            const initialDisplayRub = d.initialRubCents != null ? (d.effectiveKind === "LIABILITY" ? Math.abs(d.initialRubCents) : d.initialRubCents) : null;
+                            const initialDisplayCur = d.effectiveKind === "LIABILITY" ? Math.abs(d.initialCurCents) / 100 : d.initialCurCents / 100;
+                            const finalDisplayRub = d.finalRubCents != null ? (d.effectiveKind === "LIABILITY" ? Math.abs(d.finalRubCents) : d.finalRubCents) : null;
+                            const finalDisplayCur = d.effectiveKind === "LIABILITY" ? Math.abs(d.finalCurCents) / 100 : d.finalCurCents / 100;
+                            const showCurRow = d.currencyCode !== "RUB";
+                            return (
+                              <div className="flex w-full gap-4 flex-wrap mt-4">
+                                {d.isBalanceMode ? (
+                                  <>
+                                    <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                                    <SummaryBlock title="Доходы" curVal={showCurRow ? d.totalIncomeCur : null} rubVal={d.totalIncomeRub} amountColor={GREEN} showQtyRow={false} showCurRow={showCurRow} />
+                                    <SummaryBlock title="Расходы" curVal={showCurRow ? -d.totalExpenseCur : null} rubVal={-d.totalExpenseRub} amountColor={RED} showQtyRow={false} showCurRow={showCurRow} />
+                                    <SummaryBlock title="Переводы" curVal={showCurRow ? d.totalTransferCur : null} rubVal={d.totalTransferRub} amountColor={d.totalTransferRub < 0 ? RED : d.totalTransferRub > 0 ? GREEN : undefined} showQtyRow={false} showCurRow={showCurRow} />
+                                    {showCurRow && (
+                                      <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />
+                                    )}
+                                    <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                                  </>
+                                ) : d.isMarketMode && d.isMarketOrCrypto ? (
+                                  <>
+                                    <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={d.qtyStart} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
+                                    <SummaryBlock title="Куплено" qtyVal={d.totalBuyQty} curVal={showCurRow ? d.totalExpenseCur : null} rubVal={d.totalExpenseRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
+                                    <SummaryBlock title="Продано" qtyVal={-d.totalSellQty} curVal={showCurRow ? -d.totalIncomeCur : null} rubVal={-d.totalIncomeRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
+                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.profitLossFromPriceCur != null ? d.profitLossFromPriceCur : null} rubVal={d.currencyCode !== "RUB" ? d.courseDiffRub : d.profitLossFromPriceRub} amountColor={d.profitLossFromPriceRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} showEmptyQtyRow={true} />
+                                    <SummaryBlock title={`На ${dateEndLabel}`} qtyVal={d.qtyEnd} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
+                                  </>
+                                ) : (
+                                  <>
+                                    <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.profitLossFromPriceCur != null ? d.profitLossFromPriceCur : null} rubVal={d.currencyCode !== "RUB" ? d.courseDiffRub : d.profitLossFromPriceRub} amountColor={d.profitLossFromPriceRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} />
+                                    <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
@@ -1709,8 +1830,8 @@ export default function AssetDetailPage() {
               const isCrypto = item.type_code === "crypto";
               const quantity = isCrypto ? (item.quantity_units ?? 0) : (item.position_lots ?? 0);
               const hasQuantity = quantity > 0;
-              const acquisitionCents = costs.acquisition_rub ?? 0;
-              const currentValueCents = costs.market_rub != null ? costs.market_rub : costs.balance_rub;
+              const acquisitionCents = costs.acquisition ?? 0;
+              const currentValueCents = costs.market != null ? costs.market : costs.balance;
               const avgPriceCents = hasQuantity ? acquisitionCents / quantity : null;
               const profitLossCents = currentValueCents - acquisitionCents;
               const currencyCode = item.currency_code ?? "RUB";
@@ -1764,142 +1885,6 @@ export default function AssetDetailPage() {
           </div>
         </div>
 
-        {item && costs && (
-          <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
-            <div className="p-6">
-              <h3 className="text-base font-semibold mb-4" style={{ color: ACTIVE_TEXT_DARK }}>
-                {loadingDynamics ? "Загрузка…" : dynamics ? `Динамика стоимости (от ${dynamics.dateStart} до ${dynamics.dateEnd})` : "Динамика стоимости"}
-              </h3>
-              {loadingDynamics ? (
-                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка данных…</p>
-              ) : dynamics ? (
-                <div className="flex w-full gap-4 flex-wrap">
-                  {(() => {
-                    const formatCur = (v: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
-                    const SummaryBlock = ({
-                      title,
-                      qtyVal,
-                      curVal,
-                      rubVal,
-                      amountColor,
-                      showCurRow = true,
-                      showQtyRow = true,
-                      showEmptyQtyRow = false,
-                    }: {
-                      title: string;
-                      qtyVal?: number | null;
-                      curVal: number | null;
-                      rubVal: number | null;
-                      amountColor?: string;
-                      showCurRow?: boolean;
-                      showQtyRow?: boolean;
-                      showEmptyQtyRow?: boolean;
-                    }) => (
-                      <div className="flex flex-1 min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
-                        <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
-                        <div className="flex flex-col gap-2">
-                          {showEmptyQtyRow && (
-                            <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden>
-                              <span className="invisible select-none">0</span>
-                            </div>
-                          )}
-                          {showQtyRow && qtyVal != null && (
-                            <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
-                              <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>
-                                {isCryptoItem(item) ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(qtyVal) : new Intl.NumberFormat("ru-RU").format(qtyVal) + (isMoexItem(item) ? " л." : "")}
-                              </span>
-                            </div>
-                          )}
-                          {dynamics.currencyCode !== "RUB" && (showCurRow ? (
-                            <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
-                              <CurrencyChip code={dynamics.currencyCode} />
-                              <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{curVal != null ? formatCur(curVal) : "–"}</span>
-                            </div>
-                          ) : (
-                            <div className="rounded-md px-2 py-1 flex items-center text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden>
-                              <span className="invisible select-none">0</span>
-                            </div>
-                          ))}
-                          <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
-                            <CurrencyChip code="RUB" />
-                            <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{rubVal != null ? formatRub(rubVal) : "–"}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                    const dateStartLabel = dynamics.dateStart ? new Date(dynamics.dateStart).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
-                    const dateEndLabel = dynamics.dateEnd ? new Date(dynamics.dateEnd).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
-                    const initialDisplayRub = dynamics.initialRubCents != null ? (dynamics.effectiveKind === "LIABILITY" ? Math.abs(dynamics.initialRubCents) : dynamics.initialRubCents) : null;
-                    const initialDisplayCur = dynamics.effectiveKind === "LIABILITY" ? Math.abs(dynamics.initialCurCents) / 100 : dynamics.initialCurCents / 100;
-                    const finalDisplayRub = dynamics.finalRubCents != null ? (dynamics.effectiveKind === "LIABILITY" ? Math.abs(dynamics.finalRubCents) : dynamics.finalRubCents) : null;
-                    const finalDisplayCur = dynamics.effectiveKind === "LIABILITY" ? Math.abs(dynamics.finalCurCents) / 100 : dynamics.finalCurCents / 100;
-                    const showCurRow = dynamics.currencyCode !== "RUB";
-
-                    if (dynamics.isBalanceMode) {
-                      return (
-                        <>
-                          <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                          <SummaryBlock title="Доходы" curVal={showCurRow ? dynamics.totalIncomeCur : null} rubVal={dynamics.totalIncomeRub} amountColor={GREEN} showQtyRow={false} showCurRow={showCurRow} />
-                          <SummaryBlock title="Расходы" curVal={showCurRow ? -dynamics.totalExpenseCur : null} rubVal={-dynamics.totalExpenseRub} amountColor={RED} showQtyRow={false} showCurRow={showCurRow} />
-                          <SummaryBlock title="Переводы" curVal={showCurRow ? dynamics.totalTransferCur : null} rubVal={dynamics.totalTransferRub} amountColor={dynamics.totalTransferRub < 0 ? RED : dynamics.totalTransferRub > 0 ? GREEN : undefined} showQtyRow={false} showCurRow={showCurRow} />
-                          {showCurRow && (
-                            <SummaryBlock
-                              title="Курсовые разницы"
-                              curVal={null}
-                              rubVal={dynamics.courseDiffRub}
-                              amountColor={dynamics.courseDiffRub >= 0 ? GREEN : RED}
-                              showQtyRow={false}
-                              showCurRow={false}
-                            />
-                          )}
-                          <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                        </>
-                      );
-                    }
-                    if (dynamics.isMarketMode && dynamics.isMarketOrCrypto) {
-                      return (
-                        <>
-                          <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={dynamics.qtyStart} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
-                          <SummaryBlock title="Куплено" qtyVal={dynamics.totalBuyQty} curVal={showCurRow ? dynamics.totalExpenseCur : null} rubVal={dynamics.totalExpenseRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
-                          <SummaryBlock title="Продано" qtyVal={-dynamics.totalSellQty} curVal={showCurRow ? -dynamics.totalIncomeCur : null} rubVal={-dynamics.totalIncomeRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
-                          <SummaryBlock
-                            title="Изменение цены"
-                            qtyVal={undefined}
-                            curVal={showCurRow && dynamics.profitLossFromPriceCur != null ? dynamics.profitLossFromPriceCur : null}
-                            rubVal={dynamics.currencyCode !== "RUB" ? dynamics.courseDiffRub : dynamics.profitLossFromPriceRub}
-                            amountColor={dynamics.profitLossFromPriceRub >= 0 ? GREEN : RED}
-                            showCurRow={showCurRow}
-                            showQtyRow={false}
-                            showEmptyQtyRow={true}
-                          />
-                          <SummaryBlock title={`На ${dateEndLabel}`} qtyVal={dynamics.qtyEnd} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
-                        </>
-                      );
-                    }
-                    return (
-                      <>
-                        <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                        <SummaryBlock
-                          title="Изменение цены"
-                          qtyVal={undefined}
-                          curVal={showCurRow && dynamics.profitLossFromPriceCur != null ? dynamics.profitLossFromPriceCur : null}
-                          rubVal={dynamics.currencyCode !== "RUB" ? dynamics.courseDiffRub : dynamics.profitLossFromPriceRub}
-                          amountColor={dynamics.profitLossFromPriceRub >= 0 ? GREEN : RED}
-                          showCurRow={showCurRow}
-                          showQtyRow={false}
-                        />
-                        <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                      </>
-                    );
-                  })()}
-                </div>
-              ) : (
-                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период (нужна дата открытия и стоимость).</p>
-              )}
-            </div>
-          </div>
-        )}
-
         {costs && (
           <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
@@ -1908,13 +1893,13 @@ export default function AssetDetailPage() {
                 <div className="rounded-lg p-4" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
                   <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Доход</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    <AmountWithCurrency valueCents={costs.income_rub} currencyCode={item.currency_code} />
+                    <AmountWithCurrency valueCents={costs.income} currencyCode={item.currency_code} />
                   </div>
                 </div>
                 <div className="rounded-lg p-4" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
                   <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Расход</div>
                   <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    <AmountWithCurrency valueCents={costs.expense_rub} currencyCode={item.currency_code} />
+                    <AmountWithCurrency valueCents={costs.expense} currencyCode={item.currency_code} />
                   </div>
                 </div>
               </div>

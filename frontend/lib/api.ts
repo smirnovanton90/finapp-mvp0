@@ -97,23 +97,35 @@ export type ItemMarketValueCreate = {
   value_currency_cents?: number;
 };
 
+/** Стоимости актива. Все суммы в копейках/центах в валюте актива (RUB или валюта счёта). */
 export type ItemCostsOut = {
-  balance_rub: number;
-  acquisition_rub: number;
-  invested_rub: number;
-  market_rub: number | null;
+  /** Балансовая стоимость в валюте актива (копейки/центы). */
+  balance: number;
+  /** Стоимость приобретения в валюте актива (копейки/центы). */
+  acquisition: number;
+  /** Стоимость вложенных средств в валюте актива (копейки/центы). */
+  invested: number;
+  /** Рыночная стоимость в валюте актива (копейки/центы). */
+  market: number | null;
   /** Эквивалент рыночной стоимости в рублях (копейки). */
   market_value_rub?: number | null;
-  income_rub: number;
-  expense_rub: number;
+  /** Доход по активу за период в валюте актива (копейки/центы). */
+  income: number;
+  /** Расход по активу за период в валюте актива (копейки/центы). */
+  expense: number;
 };
 
+/** Точка истории стоимостей. Суммы в копейках/центах в валюте актива. */
 export type ItemCostHistoryPoint = {
   date: string;
-  balance_rub: number;
-  acquisition_rub: number;
-  invested_rub: number;
-  market_rub: number | null;
+  /** Балансовая стоимость в валюте актива (копейки/центы). */
+  balance: number;
+  /** Стоимость приобретения в валюте актива (копейки/центы). */
+  acquisition: number;
+  /** Стоимость вложенных средств в валюте актива (копейки/центы). */
+  invested: number;
+  /** Рыночная стоимость в валюте актива (копейки/центы). */
+  market: number | null;
   /** Количество единиц на дату (для графика рыночной стоимости, MOEX) */
   market_quantity_units?: number | null;
   /** Цена за единицу на дату, копейки (для графика рыночной стоимости, MOEX) */
@@ -341,7 +353,8 @@ export type TransactionOut = {
   chain_id: number | null;
   chain_name: string | null;
 
-  amount_rub: number; // в копейках
+  /** Сумма в копейках/центах в валюте primary-счёта (RUB или валюта счёта; для related_item — в валюте актива). */
+  amount: number;
   amount_counterparty: number | null;
   primary_quantity_lots: number | null;
   counterparty_quantity_lots: number | null;
@@ -424,7 +437,8 @@ export type TransactionChainCreate = {
   primary_item_id: number;
   counterparty_item_id?: number | null;
   counterparty_id?: number | null;
-  amount_rub: number;
+  /** Сумма в копейках/центах в валюте primary-счёта. */
+  amount: number;
   amount_counterparty?: number | null;
   primary_quantity_lots?: number | null;
   counterparty_quantity_lots?: number | null;
@@ -449,7 +463,7 @@ export type TransactionChainOut = {
   primary_card_item_id: number | null;
   counterparty_card_item_id: number | null;
   counterparty_id: number | null;
-  amount_rub: number;
+  amount: number;
   amount_counterparty: number | null;
   direction: TransactionDirection;
   category_id: number | null;
@@ -474,7 +488,8 @@ export type GoalOut = {
   custom_start_date: string | null;
   custom_end_date: string | null;
   category_id: number;
-  amount_rub: number;
+  /** Сумма в копейках/центах в валюте. */
+  amount: number;
   created_at: string;
   deleted_at: string | null;
 };
@@ -485,7 +500,8 @@ export type GoalCreate = {
   custom_start_date?: string | null;
   custom_end_date?: string | null;
   category_id: number;
-  amount_rub: number;
+  /** Сумма в копейках/центах в валюте. */
+  amount: number;
 };
 
 export type TransactionCreate = {
@@ -494,7 +510,8 @@ export type TransactionCreate = {
   counterparty_item_id?: number | null;
   counterparty_id?: number | null;
 
-  amount_rub: number; // в копейках
+  /** Сумма в копейках/центах в валюте primary-счёта. */
+  amount: number;
   amount_counterparty?: number | null;
   primary_quantity_lots?: number | null;
   counterparty_quantity_lots?: number | null;
@@ -523,7 +540,8 @@ export type TransactionDebtsCreate = {
   transaction_counterparty_id?: number | null;
   primary_item_id: number;
   transaction_date: string;
-  amount_rub: number;
+  /** Сумма в копейках/центах в валюте. */
+  amount: number;
   transaction_type?: TransactionType;
   comment?: string | null;
   status?: TransactionStatus | null;
@@ -532,7 +550,8 @@ export type TransactionDebtsCreate = {
 export type TransactionTheyPaidForMeCreate = {
   who_paid_counterparty_id: number;
   where_paid_counterparty_id: number;
-  amount_rub: number;
+  /** Сумма в копейках/центах в валюте. */
+  amount: number;
   transaction_date?: string | null;
   category_id?: number | null;
   comment?: string | null;
@@ -755,7 +774,8 @@ export async function fetchCounterpartyIndustries(): Promise<
 export type ReceiptRecognizeOut = {
   inn: string | null;
   transaction_date: string | null;
-  amount_rub: number | null;
+  /** Сумма в валюте чека (копейки/центы). */
+  amount: number | null;
   raw_text: string | null;
   counterparty: CounterpartyOut | null;
 };
@@ -768,7 +788,8 @@ export async function recognizeReceipt(file: File): Promise<ReceiptRecognizeOut>
     body: formData,
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapReceiptRecognizeFromApi(raw);
 }
 
 export async function createCounterparty(
@@ -1120,10 +1141,52 @@ export async function closeItem(
   return res.json();
 }
 
+function mapItemCostsFromApi(raw: unknown): ItemCostsOut {
+  const r = raw as Record<string, unknown>;
+  return {
+    balance: (r.balance ?? r.balance_rub) as number,
+    acquisition: (r.acquisition ?? r.acquisition_rub) as number,
+    invested: (r.invested ?? r.invested_rub) as number,
+    market: (r.market ?? r.market_rub) as number | null,
+    market_value_rub: r.market_value_rub as number | null | undefined,
+    income: (r.income ?? r.income_rub) as number,
+    expense: (r.expense ?? r.expense_rub) as number,
+  };
+}
+
+function mapItemCostHistoryPointFromApi(raw: unknown): ItemCostHistoryPoint {
+  const r = raw as Record<string, unknown>;
+  return {
+    date: r.date as string,
+    balance: (r.balance ?? r.balance_rub) as number,
+    acquisition: (r.acquisition ?? r.acquisition_rub) as number,
+    invested: (r.invested ?? r.invested_rub) as number,
+    market: (r.market ?? r.market_rub) as number | null,
+    market_quantity_units: r.market_quantity_units as number | null | undefined,
+    market_price_rub: r.market_price_rub as number | null | undefined,
+  };
+}
+
+function mapTransactionFromApi(raw: unknown): TransactionOut {
+  const r = raw as Record<string, unknown>;
+  return { ...r, amount: (r.amount ?? r.amount_rub) as number } as TransactionOut;
+}
+
+function mapReceiptRecognizeFromApi(raw: unknown): ReceiptRecognizeOut {
+  const r = raw as Record<string, unknown>;
+  return { ...r, amount: (r.amount ?? r.amount_rub) as number | null } as ReceiptRecognizeOut;
+}
+
+function mapGoalFromApi(raw: unknown): GoalOut {
+  const r = raw as Record<string, unknown>;
+  return { ...r, amount: (r.amount ?? r.amount_rub) as number } as GoalOut;
+}
+
 export async function fetchItemCosts(itemId: number): Promise<ItemCostsOut> {
   const res = await authFetch(`${API_BASE}/items/${itemId}/costs`);
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapItemCostsFromApi(raw);
 }
 
 export async function fetchItemCostHistory(
@@ -1135,7 +1198,8 @@ export async function fetchItemCostHistory(
   if (params?.date_to) q.set("date_to", params.date_to);
   const res = await authFetch(`${API_BASE}/items/${itemId}/cost-history${q.toString() ? `?${q}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json() as { points?: unknown[] };
+  return { points: (raw.points ?? []).map(mapItemCostHistoryPointFromApi) };
 }
 
 export async function fetchItemMarketValues(itemId: number): Promise<ItemMarketValueOut[]> {
@@ -1219,7 +1283,8 @@ async function readError(res: Response) {
 export async function fetchTransactions(): Promise<TransactionOut[]> {
   const res = await authFetch(`${API_BASE}/transactions`);
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json() as unknown[];
+  return raw.map(mapTransactionFromApi);
 }
 
 export async function fetchTransactionsPage(
@@ -1259,46 +1324,57 @@ export async function fetchTransactionsPage(
   const qs = params.toString();
   const res = await authFetch(`${API_BASE}/transactions/page${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json() as { items: unknown[]; next_cursor: string | null; has_more: boolean };
+  return { next_cursor: raw.next_cursor, has_more: raw.has_more, items: raw.items.map(mapTransactionFromApi) };
 }
 
 export async function fetchDeletedTransactions(): Promise<TransactionOut[]> {
   const res = await authFetch(`${API_BASE}/transactions/deleted`);
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json() as unknown[];
+  return raw.map(mapTransactionFromApi);
 }
 
 export async function createTransaction(
   payload: TransactionCreate
 ): Promise<TransactionOut> {
+  const { amount, ...rest } = payload;
+  const body = { ...rest, amount_rub: amount };
   const res = await authFetch(`${API_BASE}/transactions`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapTransactionFromApi(raw);
 }
 
 export async function createDebtsTransaction(
   payload: TransactionDebtsCreate
 ): Promise<TransactionOut> {
+  const { amount, ...rest } = payload;
+  const body = { ...rest, amount_rub: amount };
   const res = await authFetch(`${API_BASE}/transactions/debts`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapTransactionFromApi(raw);
 }
 
 export async function createTheyPaidForMeTransaction(
   payload: TransactionTheyPaidForMeCreate
 ): Promise<TransactionOut> {
+  const { amount, ...rest } = payload;
+  const body = { ...rest, amount_rub: amount };
   const res = await authFetch(`${API_BASE}/transactions/they-paid-for-me`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapTransactionFromApi(raw);
 }
 
 export async function deleteTransaction(id: number): Promise<void> {
@@ -1312,12 +1388,15 @@ export async function updateTransaction(
   id: number,
   payload: TransactionCreate
 ): Promise<TransactionOut> {
+  const { amount, ...rest } = payload;
+  const body = { ...rest, amount_rub: amount };
   const res = await authFetch(`${API_BASE}/transactions/${id}`, {
     method: "PATCH",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapTransactionFromApi(raw);
 }
 
 export async function updateTransactionStatus(
@@ -1329,7 +1408,8 @@ export async function updateTransactionStatus(
     body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapTransactionFromApi(raw);
 }
 
 export async function fetchTransactionChains(options?: {
@@ -1344,18 +1424,25 @@ export async function fetchTransactionChains(options?: {
     `${API_BASE}/transaction-chains${qs ? `?${qs}` : ""}`
   );
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json() as unknown[];
+  return raw.map((r: unknown) => {
+    const o = r as Record<string, unknown>;
+    return { ...o, amount: o.amount ?? o.amount_rub } as TransactionChainOut;
+  });
 }
 
 export async function createTransactionChain(
   payload: TransactionChainCreate
 ): Promise<TransactionChainOut> {
+  const { amount, ...rest } = payload;
+  const body = { ...rest, amount_rub: amount };
   const res = await authFetch(`${API_BASE}/transaction-chains`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json() as Record<string, unknown>;
+  return { ...raw, amount: raw.amount ?? raw.amount_rub } as TransactionChainOut;
 }
 
 export async function deleteTransactionChain(id: number): Promise<void> {
@@ -1375,28 +1462,35 @@ export async function fetchGoals(options?: {
   const qs = params.toString();
   const res = await authFetch(`${API_BASE}/goals${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json() as unknown[];
+  return raw.map(mapGoalFromApi);
 }
 
 export async function createGoal(payload: GoalCreate): Promise<GoalOut> {
+  const { amount, ...rest } = payload;
+  const body = { ...rest, amount_rub: amount };
   const res = await authFetch(`${API_BASE}/goals`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapGoalFromApi(raw);
 }
 
 export async function updateGoal(
   id: number,
   payload: GoalCreate
 ): Promise<GoalOut> {
+  const { amount, ...rest } = payload;
+  const body = { ...rest, amount_rub: amount };
   const res = await authFetch(`${API_BASE}/goals/${id}`, {
     method: "PATCH",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapGoalFromApi(raw);
 }
 
 export async function deleteGoal(id: number): Promise<void> {

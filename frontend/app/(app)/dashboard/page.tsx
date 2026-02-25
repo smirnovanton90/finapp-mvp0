@@ -427,8 +427,8 @@ function buildCategoryBreakdown(
     if (dateKey < startKey || dateKey > endKey) return;
     if (!isRealizedTransaction(tx)) return;
     const label = resolveLabel(tx.category_id);
-    totals.set(label, (totals.get(label) ?? 0) + tx.amount_rub);
-    total += tx.amount_rub;
+    totals.set(label, (totals.get(label) ?? 0) + tx.amount);
+    total += tx.amount;
   });
 
   if (total <= 0) return { total, rows: [] };
@@ -473,7 +473,7 @@ function buildCategoryTotalsByLabel(
     if (dateKey < startKey || dateKey > endKey) return;
     if (!isRealizedTransaction(tx)) return;
     const label = resolveLabel(tx.category_id);
-    totals.set(label, (totals.get(label) ?? 0) + tx.amount_rub);
+    totals.set(label, (totals.get(label) ?? 0) + tx.amount);
   });
 
   return totals;
@@ -499,7 +499,7 @@ function buildCategoryMonthlyTotals(
     if (!totals.has(label)) totals.set(label, new Map());
     const monthTotals = totals.get(label);
     if (!monthTotals) return;
-    monthTotals.set(monthKey, (monthTotals.get(monthKey) ?? 0) + tx.amount_rub);
+    monthTotals.set(monthKey, (monthTotals.get(monthKey) ?? 0) + tx.amount);
   });
 
   return totals;
@@ -630,18 +630,18 @@ function buildDeltasByDate(
 
     if (primarySelected) {
       let delta = 0;
-      if (tx.direction === "INCOME") delta = tx.amount_rub;
-      if (tx.direction === "EXPENSE") delta = -tx.amount_rub;
+      if (tx.direction === "INCOME") delta = tx.amount;
+      if (tx.direction === "EXPENSE") delta = -tx.amount;
       if (tx.direction === "TRANSFER") {
         const kind = itemKindById.get(tx.primary_item_id) ?? "ASSET";
-        delta = transferDelta(kind, true, tx.amount_rub);
+        delta = transferDelta(kind, true, tx.amount);
       }
       addDelta(dateKey, tx.primary_item_id, delta);
     }
 
     if (counterSelected && tx.direction === "TRANSFER" && tx.counterparty_item_id) {
       const kind = itemKindById.get(tx.counterparty_item_id) ?? "ASSET";
-      const counterAmount = tx.amount_counterparty ?? tx.amount_rub;
+      const counterAmount = tx.amount_counterparty ?? tx.amount;
       const delta = transferDelta(kind, false, counterAmount);
       addDelta(dateKey, tx.counterparty_item_id, delta);
     }
@@ -770,11 +770,11 @@ export default function DashboardPage() {
           const dateKey = toTxDateKey(tx.transaction_date);
           if (!dateKey) return;
           if (dateKey < range.startKey || dateKey > range.endKey) return;
-          amount += tx.amount_rub;
+          amount += tx.amount;
         });
       }
       const progress =
-        goal.amount_rub > 0 ? Math.min(amount / goal.amount_rub, 1) : 0;
+        goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;
       map.set(goal.id, {
         amount,
         progress,
@@ -1818,7 +1818,7 @@ export default function DashboardPage() {
                     rangeLabel: "",
                   };
                   const ratio =
-                    goal.amount_rub > 0 ? summary.amount / goal.amount_rub : 0;
+                    goal.amount > 0 ? summary.amount / goal.amount : 0;
                   const isIncomeGoal =
                     categoryLookup.idToScope?.get(goal.category_id) === "INCOME";
                   const progressColor = getGoalProgressColor(ratio, isIncomeGoal);
@@ -1853,7 +1853,7 @@ export default function DashboardPage() {
                           <span style={{ color: textColor }}>
                             {formatRub(summary.amount)}
                           </span>{" "}
-                          <span className="text-white/90">/ {formatRub(goal.amount_rub)}</span>
+                          <span className="text-white/90">/ {formatRub(goal.amount)}</span>
                         </div>
                       </div>
                       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/20">

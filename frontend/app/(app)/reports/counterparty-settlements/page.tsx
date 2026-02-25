@@ -104,7 +104,7 @@ function transactionDeltaForSide(
 ): number {
   const item = itemsById.get(itemId);
   if (!item) return 0;
-  const amount = tx.amount_rub ?? 0;
+  const amount = tx.amount ?? 0;
   // ASSET: приход = +; LIABILITY: приход = рост долга = − в «вашу пользу»
   const kindSign = item.kind === "LIABILITY" ? -1 : 1;
   let rawDelta: number;

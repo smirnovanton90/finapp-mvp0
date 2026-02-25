@@ -255,7 +255,7 @@ export function AddEditItemFormModal({
       const commissionTx = transactionsForEdit.find((tx) => tx.related_item_id === editingItem.id && tx.source === "AUTO_ITEM_COMMISSION");
       if (commissionTx) {
         setCommissionEnabled(true);
-        setCommissionAmount(commissionTx.amount_rub != null ? formatAmount(commissionTx.amount_rub) : "");
+        setCommissionAmount(commissionTx.amount != null ? formatAmount(commissionTx.amount) : "");
         setCommissionPaymentItemId(commissionTx.primary_item_id != null ? String(commissionTx.primary_item_id) : "");
       } else {
         setCommissionEnabled(false);

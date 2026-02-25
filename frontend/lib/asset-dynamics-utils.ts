@@ -21,16 +21,16 @@ export function getTxDeltaForItem(
   const isCounter = tx.counterparty_item_id === itemId || tx.counterparty_card_item_id === itemId;
   const primaryAmountInCurrency = Boolean(itemCurrencyCode && itemCurrencyCode.toUpperCase() !== "RUB");
   if (isPrimary) {
-    if (tx.direction === "INCOME") return { deltaCents: tx.amount_rub, inCurrency: primaryAmountInCurrency };
+    if (tx.direction === "INCOME") return { deltaCents: tx.amount, inCurrency: primaryAmountInCurrency };
     if (tx.direction === "EXPENSE") {
       const isOpening = tx.source === "AUTO_ITEM_OPENING";
-      const amount = isOpening && itemKind === "LIABILITY" ? tx.amount_rub : -tx.amount_rub;
+      const amount = isOpening && itemKind === "LIABILITY" ? tx.amount : -tx.amount;
       return { deltaCents: amount, inCurrency: primaryAmountInCurrency };
     }
-    if (tx.direction === "TRANSFER") return { deltaCents: transferDelta(itemKind, true, tx.amount_rub), inCurrency: primaryAmountInCurrency };
+    if (tx.direction === "TRANSFER") return { deltaCents: transferDelta(itemKind, true, tx.amount), inCurrency: primaryAmountInCurrency };
   }
   if (isCounter && tx.direction === "TRANSFER") {
-    const amount = tx.amount_counterparty ?? tx.amount_rub;
+    const amount = tx.amount_counterparty ?? tx.amount;
     const inCurrency = tx.amount_counterparty != null;
     return { deltaCents: transferDelta(itemKind, false, amount), inCurrency };
   }

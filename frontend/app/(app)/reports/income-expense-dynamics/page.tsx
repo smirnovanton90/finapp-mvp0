@@ -202,14 +202,14 @@ function getRubEquivalentCents(
   currencyCode: string,
   ratesByDate: Record<string, FxRateOut[]>
 ) {
-  if (!currencyCode || currencyCode === "RUB") return tx.amount_rub;
+  if (!currencyCode || currencyCode === "RUB") return tx.amount;
   const dateKey = toTxDateKey(tx.transaction_date);
   if (!dateKey) return null;
   const rates = ratesByDate[dateKey];
   if (!rates) return null;
   const rate = rates.find((rate) => rate.char_code === currencyCode)?.rate ?? null;
   if (!rate) return null;
-  return Math.round((tx.amount_rub / 100) * rate * 100);
+  return Math.round((tx.amount / 100) * rate * 100);
 }
 
 function buildCategoryMatrix(

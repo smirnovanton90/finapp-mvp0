@@ -238,8 +238,8 @@ export default function GoalsPage() {
 
     return goals.filter((goal) => {
       if (nameNorm && !goal.name.toLowerCase().includes(nameNorm)) return false;
-      if (Number.isFinite(amountFromCents) && goal.amount_rub < amountFromCents) return false;
-      if (Number.isFinite(amountToCents) && goal.amount_rub > amountToCents) return false;
+      if (Number.isFinite(amountFromCents) && goal.amount < amountFromCents) return false;
+      if (Number.isFinite(amountToCents) && goal.amount > amountToCents) return false;
       if (filterPeriod.size > 0 && !filterPeriod.has(goal.period)) return false;
       if (filterCategoryIds.length > 0 && !filterCategoryIds.includes(goal.category_id)) return false;
       const isDeleted = Boolean(goal.deleted_at);
@@ -300,11 +300,11 @@ export default function GoalsPage() {
           const dateKey = toTxDateKey(tx.transaction_date);
           if (!dateKey) return;
           if (dateKey < range.startKey || dateKey > range.endKey) return;
-          amount += tx.amount_rub;
+          amount += tx.amount;
         });
       }
       const progress =
-        goal.amount_rub > 0 ? Math.min(amount / goal.amount_rub, 1) : 0;
+        goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;
       map.set(goal.id, {
         amount,
         progress,
@@ -410,7 +410,7 @@ export default function GoalsPage() {
     setPeriod(editingGoal.period);
     setCustomStartDate(editingGoal.custom_start_date ?? "");
     setCustomEndDate(editingGoal.custom_end_date ?? "");
-    setAmountStr(formatCentsForInput(editingGoal.amount_rub));
+    setAmountStr(formatCentsForInput(editingGoal.amount));
     const path = categoryLookup.idToPath.get(editingGoal.category_id) ?? [];
     const nextL1 = path[0] ?? "";
     const nextL2 = path[1] ?? CATEGORY_PLACEHOLDER;
@@ -489,7 +489,7 @@ export default function GoalsPage() {
       name: trimmedName,
       period,
       category_id: categoryId,
-      amount_rub: amountCents,
+      amount: amountCents,
       custom_start_date: period === "CUSTOM" ? customStartDate : null,
       custom_end_date: period === "CUSTOM" ? customEndDate : null,
     };

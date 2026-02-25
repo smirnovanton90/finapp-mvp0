@@ -331,10 +331,10 @@ export default function AssetsProfitabilityPage() {
         const kind = item.primary_value_kind ?? "BALANCE";
         history.points.forEach((p) => {
           let v: number | null = null;
-          if (kind === "MARKET") v = p.market_rub ?? null;
-          else if (kind === "ACQUISITION") v = p.acquisition_rub;
-          else if (kind === "INVESTED") v = p.invested_rub;
-          else v = p.balance_rub;
+          if (kind === "MARKET") v = p.market ?? null;
+          else if (kind === "ACQUISITION") v = p.acquisition;
+          else if (kind === "INVESTED") v = p.invested;
+          else v = p.balance;
           map.set(p.date, v ?? 0);
         });
       }
@@ -399,7 +399,7 @@ export default function AssetsProfitabilityPage() {
           expense_acquisition: 0,
           investment_in_asset: 0,
         };
-      const amt = tx.amount_rub ?? 0;
+      const amt = tx.amount ?? 0;
       switch (tx.asset_link_type) {
         case "ASSET_INCOME":
           bucket.income_from_asset += amt;
@@ -481,16 +481,16 @@ export default function AssetsProfitabilityPage() {
 
       const totalChangeMinusFlows = endValueRub - startValueRub - netCashRub;
 
-      // Для рыночных активов считаем текущую рыночную стоимость как market_rub на конец периода
+      // Для рыночных активов считаем текущую рыночную стоимость как market (в валюте актива) на конец периода
       const history = costHistoryByItemId[item.id];
       if (history?.points?.length) {
         let lastMarket: number | null = null;
         let lastMarketDate: string | null = null;
         history.points.forEach((p) => {
-          if (p.date <= rangeEndKey && p.market_rub != null) {
+          if (p.date <= rangeEndKey && p.market != null) {
             if (!lastMarketDate || p.date > lastMarketDate) {
               lastMarketDate = p.date;
-              lastMarket = p.market_rub;
+              lastMarket = p.market;
             }
           }
         });
@@ -520,7 +520,7 @@ export default function AssetsProfitabilityPage() {
         const dKey = toDateKey(tx.transaction_date);
         const rate = getRateForDate(fxRatesByDate, dKey, currency) ?? rateStart;
         if (!rate || rate <= 0) return;
-        const amt = tx.amount_rub ?? 0;
+        const amt = tx.amount ?? 0;
         const sign =
           tx.asset_link_type === "ASSET_INCOME" ||
           tx.asset_link_type === "ASSET_SALE"

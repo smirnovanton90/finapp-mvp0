@@ -184,7 +184,7 @@ function amountInRange(
     if (!tx.category_id || !categoryIds.has(tx.category_id)) continue;
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey || dateKey < startKey || dateKey > endKey) continue;
-    sum += tx.amount_rub;
+    sum += tx.amount;
   }
   return sum;
 }
@@ -228,7 +228,7 @@ export function GoalCard({
 
   const categoryIds = categoryDescendants.get(goal.category_id) ?? new Set([goal.category_id]);
 
-  const currentRatio = goal.amount_rub > 0 ? currentAmount / goal.amount_rub : 0;
+  const currentRatio = goal.amount > 0 ? currentAmount / goal.amount : 0;
   const currentBarColor = getGoalProgressColor(currentRatio, isIncomeGoal);
 
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
@@ -326,7 +326,7 @@ export function GoalCard({
                     backgroundClip: "text",
                   }}
                 >
-                  {formatAmount(goal.amount_rub)}
+                  {formatAmount(goal.amount)}
                 </span>
               </span>
             </div>
@@ -381,7 +381,7 @@ export function GoalCard({
                     direction
                   );
                   const progress =
-                    goal.amount_rub > 0 ? Math.min(amount / goal.amount_rub, 1) : 0;
+                    goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;
                   const barColor = getGoalProgressColor(progress, isIncomeGoal);
                   return (
                     <div key={range.startKey} className="space-y-1">
@@ -390,7 +390,7 @@ export function GoalCard({
                           {range.label}
                         </span>
                         <span style={{ color: ACTIVE_TEXT_DARK }}>
-                          {formatAmount(amount)} / {formatAmount(goal.amount_rub)}
+                          {formatAmount(amount)} / {formatAmount(goal.amount)}
                         </span>
                       </div>
                       <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">

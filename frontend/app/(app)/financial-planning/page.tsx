@@ -188,7 +188,7 @@ function formatChainAmount(chain: TransactionChainOut) {
     }
     return `${formatAmount(chain.amount_min_rub)}–${formatAmount(chain.amount_max_rub)}`;
   }
-  return formatAmount(chain.amount_rub);
+  return formatAmount(chain.amount);
 }
 
 function formatDate(value: string) {
@@ -785,7 +785,7 @@ export default function FinancialPlanningPage() {
       primary_item_id: primaryItemId,
       counterparty_item_id: direction === "TRANSFER" ? counterpartyItemId : null,
       counterparty_id: counterpartyId ?? null,
-      amount_rub: amountCents,
+      amount: amountCents,
       amount_counterparty: direction === "TRANSFER" ? counterpartyCents : null,
       direction,
       category_id: resolvedCategoryId,
@@ -960,11 +960,11 @@ export default function FinancialPlanningPage() {
         const minChainAmount =
           chain.amount_is_variable && chain.amount_min_rub != null
             ? chain.amount_min_rub
-            : chain.amount_rub;
+            : chain.amount;
         const maxChainAmount =
           chain.amount_is_variable && chain.amount_max_rub != null
             ? chain.amount_max_rub
-            : chain.amount_rub;
+            : chain.amount;
         if (Number.isFinite(minAmountFilter) && minAmountFilter > 0 && maxChainAmount < minAmountFilter) {
           return false;
         }

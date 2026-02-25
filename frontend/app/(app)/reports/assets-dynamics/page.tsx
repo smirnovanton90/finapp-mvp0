@@ -298,16 +298,16 @@ function getTxDeltaForItem(
   const isCounter = tx.counterparty_item_id === itemId || tx.counterparty_card_item_id === itemId;
   const primaryAmountInCurrency = Boolean(itemCurrencyCode && itemCurrencyCode.toUpperCase() !== "RUB");
   if (isPrimary) {
-    if (tx.direction === "INCOME") return { deltaCents: tx.amount_rub, inCurrency: primaryAmountInCurrency };
+    if (tx.direction === "INCOME") return { deltaCents: tx.amount, inCurrency: primaryAmountInCurrency };
     if (tx.direction === "EXPENSE") {
       const isOpening = tx.source === "AUTO_ITEM_OPENING";
-      const amount = isOpening && itemKind === "LIABILITY" ? tx.amount_rub : -tx.amount_rub;
+      const amount = isOpening && itemKind === "LIABILITY" ? tx.amount : -tx.amount;
       return { deltaCents: amount, inCurrency: primaryAmountInCurrency };
     }
-    if (tx.direction === "TRANSFER") return { deltaCents: transferDelta(itemKind, true, tx.amount_rub), inCurrency: primaryAmountInCurrency };
+    if (tx.direction === "TRANSFER") return { deltaCents: transferDelta(itemKind, true, tx.amount), inCurrency: primaryAmountInCurrency };
   }
   if (isCounter && tx.direction === "TRANSFER") {
-    const amount = tx.amount_counterparty ?? tx.amount_rub;
+    const amount = tx.amount_counterparty ?? tx.amount;
     const inCurrency = tx.amount_counterparty != null;
     return { deltaCents: transferDelta(itemKind, false, amount), inCurrency };
   }
@@ -471,18 +471,18 @@ function buildDeltasByDate(
     primaryEffectiveIds.forEach((itemId) => {
       if (moexItemIds.has(itemId)) return;
       let delta = 0;
-      if (tx.direction === "INCOME") delta = tx.amount_rub;
+      if (tx.direction === "INCOME") delta = tx.amount;
       if (tx.direction === "EXPENSE") {
         // Opening-транзакции для обязательств создаются как EXPENSE,
         // но в backend они УВЕЛИЧИВАЮТ долг (см. item_opening_service._create_income_expense).
         // Поэтому для корректной истории учитываем этот частный случай.
         const kind = itemKindById.get(itemId) ?? "ASSET";
         const isOpening = tx.source === "AUTO_ITEM_OPENING";
-        delta = isOpening && kind === "LIABILITY" ? tx.amount_rub : -tx.amount_rub;
+        delta = isOpening && kind === "LIABILITY" ? tx.amount : -tx.amount;
       }
       if (tx.direction === "TRANSFER") {
         const kind = itemKindById.get(itemId) ?? "ASSET";
-        delta = transferDelta(kind, true, tx.amount_rub);
+        delta = transferDelta(kind, true, tx.amount);
       }
       addDelta(dateKey, itemId, delta);
     });
@@ -490,7 +490,7 @@ function buildDeltasByDate(
     // Обрабатываем counterparty items только для переводов
     // Для INCOME/EXPENSE counterparty_item_id обычно указывает на контрагента, а не на актив
     if (tx.direction === "TRANSFER") {
-      const counterAmount = tx.amount_counterparty ?? tx.amount_rub;
+      const counterAmount = tx.amount_counterparty ?? tx.amount;
       counterEffectiveIds.forEach((itemId) => {
         if (moexItemIds.has(itemId)) return;
         const kind = itemKindById.get(itemId) ?? "ASSET";
@@ -1278,12 +1278,12 @@ export default function AssetsDynamicsPage() {
       const rows: DailyRow[] = [];
       const pointByDateByItem = new Map<
         number,
-        Map<string, { market_rub: number | null; market_price_rub: number | null }>
+        Map<string, { market: number | null; market_price_rub: number | null }>
       >();
       effectiveSelectedItems.forEach((item) => {
-        const byDate = new Map<string, { market_rub: number | null; market_price_rub: number | null }>();
+        const byDate = new Map<string, { market: number | null; market_price_rub: number | null }>();
         (costHistoryByItemId[item.id]?.points ?? []).forEach((p) => {
-          byDate.set(p.date, { market_rub: p.market_rub ?? null, market_price_rub: p.market_price_rub ?? null });
+          byDate.set(p.date, { market: p.market ?? null, market_price_rub: p.market_price_rub ?? null });
         });
         pointByDateByItem.set(item.id, byDate);
       });
@@ -1308,11 +1308,11 @@ export default function AssetsDynamicsPage() {
           itemQuantitiesAtStart[item.id] = qtyRow?.[item.id] ?? null;
           const byDate = pointByDateByItem.get(item.id);
           const point = byDate?.get(dateKey);
-          const marketRub = point?.market_rub ?? null;
+          const marketRub = point?.market ?? null;
           const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
           const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, dateKey, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
           if (marketRub != null && qty != null && qty > 0) {
-            // Цена за единицу: для отображения (кол-во · цена). Для крипты — market_price_rub, для MOEX — market_rub/qty.
+            // Цена за единицу: для отображения (кол-во · цена). Для крипты — market_price_rub, для MOEX — market/qty.
             const unitPrice =
               isCryptoItem(item) && point?.market_price_rub != null
                 ? point.market_price_rub
@@ -1340,11 +1340,11 @@ export default function AssetsDynamicsPage() {
         effectiveSelectedItems.forEach((item) => {
           const byDate = pointByDateByItem.get(item.id);
           const point = byDate?.get(dateKey);
-          const marketRub = point?.market_rub ?? null;
+          const marketRub = point?.market ?? null;
           const qty = itemQuantities[item.id] ?? null;
           const unitPrice = itemUnitPriceCents[item.id] ?? null;
           const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
-          // Как на странице актива: valueFromPoint(point) = market_rub. Рубли: при RUB — как есть, иначе (valCur/100)*rate*100.
+          // Как на странице актива: valueFromPoint(point) = market. Рубли: при RUB — как есть, иначе (valCur/100)*rate*100.
           const valueCents = marketRub ?? (qty != null && unitPrice != null ? unitPrice * qty : null);
           const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, dateKey, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
           itemValues[item.id] = valueCents;
@@ -1402,12 +1402,12 @@ export default function AssetsDynamicsPage() {
 
     const pointByDateByItemNonMarket = new Map<
       number,
-      Map<string, { market_rub: number | null }>
+      Map<string, { market: number | null }>
     >();
     effectiveSelectedItems.forEach((item) => {
-      const byDate = new Map<string, { market_rub: number | null }>();
+      const byDate = new Map<string, { market: number | null }>();
       (costHistoryByItemId[item.id]?.points ?? []).forEach((p) => {
-        byDate.set(p.date, { market_rub: p.market_rub ?? null });
+        byDate.set(p.date, { market: p.market ?? null });
       });
       pointByDateByItemNonMarket.set(item.id, byDate);
     });
@@ -1418,13 +1418,13 @@ export default function AssetsDynamicsPage() {
     ): number | null => {
       const byDate = pointByDateByItemNonMarket.get(itemId);
       if (!byDate) return null;
-      const exact = byDate.get(dateKey)?.market_rub;
+      const exact = byDate.get(dateKey)?.market;
       if (exact != null) return exact;
       const sortedDates = Array.from(byDate.keys()).sort();
       for (let i = sortedDates.length - 1; i >= 0; i--) {
         const d = sortedDates[i]!;
         if (d <= dateKey) {
-          const v = byDate.get(d)?.market_rub;
+          const v = byDate.get(d)?.market;
           if (v != null) return v;
         }
       }
@@ -2745,7 +2745,7 @@ export default function AssetsDynamicsPage() {
                                             if (res !== null) return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
                                             if ((isMoexItem(item) || isCryptoItem(item)) && tx.related_item_id === item.id) {
                                               const inCurrency = (item.currency_code ?? "RUB").toUpperCase() !== "RUB";
-                                              return { tx, deltaCents: tx.amount_rub ?? 0, inCurrency };
+                                              return { tx, deltaCents: tx.amount ?? 0, inCurrency };
                                             }
                                             return { tx, deltaCents: 0, inCurrency: false };
                                           })
@@ -2855,7 +2855,7 @@ export default function AssetsDynamicsPage() {
                                               const isBuy = getIsBuy(tx);
                                               const delta = isBuy ? qty : -qty;
                                               balance += delta;
-                                              const costCents = tx.amount_rub ?? 0;
+                                              const costCents = tx.amount ?? 0;
                                               const priceCents = qty > 0 ? Math.round(costCents / qty) : null;
                                               return { tx, type: isBuy ? "Покупка" as const : "Продажа" as const, delta, balanceAfter: balance, priceCents, costCents };
                                             });

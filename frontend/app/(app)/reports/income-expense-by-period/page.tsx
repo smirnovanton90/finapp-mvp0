@@ -426,14 +426,14 @@ function getRubEquivalentCents(
   currencyCode: string,
   ratesByDate: Record<string, FxRateOut[]>
 ) {
-  if (!currencyCode || currencyCode === "RUB") return tx.amount_rub;
+  if (!currencyCode || currencyCode === "RUB") return tx.amount;
   const dateKey = toTxDateKey(tx.transaction_date);
   if (!dateKey) return null;
   const rates = ratesByDate[dateKey];
   if (!rates) return null;
   const rate = rates.find((rate) => rate.char_code === currencyCode)?.rate ?? null;
   if (!rate) return null;
-  return Math.round((tx.amount_rub / 100) * rate * 100);
+  return Math.round((tx.amount / 100) * rate * 100);
 }
 
 function buildCategoryMatrix(
@@ -870,12 +870,12 @@ function CategoryBreakdownTable({
       const dateKey = toTxDateKey(tx.transaction_date);
       if (!dateKey) return 0;
       const code = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
-      let rubCents = tx.amount_rub;
+      let rubCents = tx.amount;
       if (code !== "RUB") {
         const rates = chartRatesByDate[dateKey];
         const rate = rates?.find((r) => r.char_code === code)?.rate;
         if (rate == null) return 0;
-        rubCents = Math.round((tx.amount_rub / 100) * rate * 100);
+        rubCents = Math.round((tx.amount / 100) * rate * 100);
       }
       return Math.abs(rubCents);
     },
@@ -1643,12 +1643,12 @@ export default function IncomeExpenseDynamicsPage() {
       const dateKey = toTxDateKey(tx.transaction_date);
       if (!dateKey) return 0;
       const code = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
-      let rubCents = tx.amount_rub;
+      let rubCents = tx.amount;
       if (code !== "RUB") {
         const rates = chartRatesByDate[dateKey];
         const rate = rates?.find((r) => r.char_code === code)?.rate;
         if (rate == null) return 0;
-        rubCents = Math.round((tx.amount_rub / 100) * rate * 100);
+        rubCents = Math.round((tx.amount / 100) * rate * 100);
       }
       return Math.abs(rubCents);
     },

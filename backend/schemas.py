@@ -253,6 +253,8 @@ class ItemCreate(BaseModel):
     plan_settings: ItemPlanSettingsBase | None = None
     synonyms: list[str] | None = None
     primary_value_kind: PrimaryValueKind | None = None
+    acquisition_value_rub: int | None = None
+    """Стоимость приобретения для исторического актива с primary_value_kind=MARKET (копейки)."""
 
     @field_validator("account_last7", "contract_number", "card_last4", mode="before")
     @classmethod

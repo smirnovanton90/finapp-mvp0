@@ -2964,6 +2964,22 @@ export default function Page() {
       setFormError("Укажите стоимость приобретения.");
       return;
     }
+    if (
+      resolvedHistoryStatus === "HISTORICAL" &&
+      isMarketNonMoex &&
+      (!marketValueStr.trim() || !Number.isFinite(parseRubToCents(marketValueStr)) || parseRubToCents(marketValueStr) < 0)
+    ) {
+      setFormError("Укажите рыночную стоимость.");
+      return;
+    }
+    if (
+      resolvedHistoryStatus === "HISTORICAL" &&
+      isMarketNonMoex &&
+      (!amountStr.trim() || !Number.isFinite(parseRubToCents(amountStr)) || parseRubToCents(amountStr) < 0)
+    ) {
+      setFormError("Укажите стоимость приобретения.");
+      return;
+    }
 
     const trimmedAccountLast7 = accountLast7.trim();
     const trimmedContractNumber = contractNumber.trim();
@@ -3048,21 +3064,31 @@ export default function Page() {
     const amountValue = hideInitialAmountField
       ? amountStr.trim() || "0"
       : amountStr;
-    // У рыночных (MOEX) и крипто активов нет начальной балансовой стоимости — отправляем 0
+    // У рыночных (MOEX) и крипто активов нет начальной балансовой стоимости — отправляем 0. Для исторического актива с рыночной стоимостью в initial_value_rub — рыночная стоимость, стоимость приобретения — в acquisition_value_rub.
+    const isHistoricalMarketNonMoex =
+      resolvedHistoryStatus === "HISTORICAL" &&
+      primaryValueKind === "MARKET" &&
+      !isMoexType &&
+      !isCryptoType;
     const cents = isMoexType || isCryptoType ? 0 : parseRubToCents(amountValue);
+    const initialValueRubForPayload = isMoexType || isCryptoType
+      ? 0
+      : isHistoricalMarketNonMoex
+        ? parseRubToCents(marketValueStr)
+        : cents;
     if (
-      !Number.isFinite(cents) ||
-      (cents < 0 && !(showBankCardFields && cardKind === "CREDIT"))
+      !Number.isFinite(initialValueRubForPayload) ||
+      (initialValueRubForPayload < 0 && !(showBankCardFields && cardKind === "CREDIT"))
     ) {
       setFormError("Сумма должна быть числом (например 1234,56)");
       return;
     }
-  
+
     if (
       showBankCardFields &&
       cardKind === "CREDIT" &&
       creditLimitCents !== null &&
-      cents < -creditLimitCents
+      initialValueRubForPayload < -creditLimitCents
     ) {
       setFormError("Сумма не может быть ниже кредитного лимита.");
       return;
@@ -3210,9 +3236,12 @@ export default function Page() {
         counterparty_id: showCounterpartyField ? counterpartyId : null,
         open_date: openDate,
         opening_counterparty_item_id: openingCounterpartyValue,
-        initial_value_rub: cents,
+        initial_value_rub: initialValueRubForPayload,
         primary_value_kind: primaryValueKind,
       };
+      if (isHistoricalMarketNonMoex && Number.isFinite(parseRubToCents(amountStr))) {
+        payload.acquisition_value_rub = parseRubToCents(amountStr);
+      }
       if (editingItem) {
         payload.synonyms = synonymsList;
       } else if (synonymsList.length > 0) {

@@ -167,6 +167,8 @@ export type ItemCreate = {
   plan_settings?: ItemPlanSettings | null;
   synonyms?: string[];
   primary_value_kind?: PrimaryValueKind | null;
+  /** Стоимость приобретения для исторического актива с primary_value_kind=MARKET (копейки). */
+  acquisition_value_rub?: number | null;
 };
 
 export type BankOut = {

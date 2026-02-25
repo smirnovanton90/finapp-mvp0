@@ -402,6 +402,7 @@ class Item(Base):
 
     initial_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    initial_acquisition_rub: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     start_date: Mapped[date] = mapped_column(
         Date, server_default=func.current_date(), nullable=False

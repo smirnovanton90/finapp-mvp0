@@ -1349,8 +1349,13 @@ def create_item(
         else payload.initial_value_rub > 0
     )
     opening_price_cents = payload.opening_price_cents if (is_moex or is_crypto) else None
-    # У рыночных (MOEX/crypto) активов нет начальной балансовой стоимости — учитывается только рыночная
-    initial_value_rub_for_item = 0 if (is_moex or is_crypto) else payload.initial_value_rub
+    # У рыночных активов (MOEX, crypto, MARKET не-биржевые) баланс всегда 0 — отображается рыночная стоимость
+    primary_value_kind_pre = getattr(payload, "primary_value_kind", None)
+    initial_value_rub_for_item = (
+        0
+        if (is_moex or is_crypto or primary_value_kind_pre == "MARKET")
+        else payload.initial_value_rub
+    )
     opening_amount_rub = payload.initial_value_rub
     if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
@@ -1424,7 +1429,9 @@ def create_item(
         and payload.open_date > accounting_start_date
     )
     initial_current_value_rub = (
-        0 if (will_create_opening_tx or is_moex) else initial_value_rub_for_item
+        0
+        if (will_create_opening_tx or is_moex or primary_value_kind_pre == "MARKET")
+        else initial_value_rub_for_item
     )
 
     synonyms_list = getattr(payload, "synonyms", None) or []
@@ -1471,6 +1478,16 @@ def create_item(
         if opening_counterparty
         else None,
         primary_value_kind=primary_value_kind,
+        initial_acquisition_rub=(
+            getattr(payload, "acquisition_value_rub", None)
+            if (
+                history_status == "HISTORICAL"
+                and primary_value_kind == "MARKET"
+                and not is_moex
+                and not is_crypto
+            )
+            else None
+        ),
     )
     db.add(item)
     db.flush()
@@ -1787,7 +1804,8 @@ def update_item(
 
     # Для элементов, созданных в день начала учета, базовое значение - это initial_value_rub,
     # так как транзакции открытия не создаются. Для элементов, созданных после дня начала учета,
-    # базовое значение - это 0, так как транзакция открытия обновит current_value_rub.
+    # базовое значение - это 0, так как транзакция открытия обновит current_value_rub. У MARKET — всегда 0.
+    patch_primary_value_kind = getattr(payload, "primary_value_kind", None)
     old_will_have_opening_tx = (
         item.history_status == "NEW"
         and item.open_date > accounting_start_date
@@ -1798,7 +1816,11 @@ def update_item(
         new_history_status == "NEW"
         and payload.open_date > accounting_start_date
     )
-    new_base = 0 if new_will_have_opening_tx else payload.initial_value_rub
+    new_base = (
+        0
+        if (new_will_have_opening_tx or patch_primary_value_kind == "MARKET")
+        else payload.initial_value_rub
+    )
     next_current_value = new_base + delta
     if is_moex:
         next_current_value = item.current_value_rub
@@ -1839,7 +1861,11 @@ def update_item(
         item.quantity_units = quantity_units
     item.lot_size = lot_size
     item.face_value_cents = face_value_cents
-    item.initial_value_rub = 0 if (is_moex or is_crypto) else payload.initial_value_rub
+    item.initial_value_rub = (
+        0
+        if (is_moex or is_crypto or patch_primary_value_kind == "MARKET")
+        else payload.initial_value_rub
+    )
     item.current_value_rub = next_current_value
     item.start_date = accounting_start_date
     item.history_status = new_history_status
@@ -2155,7 +2181,7 @@ def _compute_acquisition_cost_basis(
     Если up_to_date задана, учитываются только транзакции с датой <= up_to_date (для истории по датам).
     """
     if not (is_moex_item(item) or is_crypto_item(item)):
-        # Для прочих активов — простая сумма покупок (без replay продаж)
+        # Для прочих активов — простая сумма покупок (без replay продаж) + начальная стоимость приобретения (исторические MARKET)
         q = (
             db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
             .filter(
@@ -2168,7 +2194,9 @@ def _compute_acquisition_cost_basis(
         )
         if up_to_date is not None:
             q = q.filter(Transaction.transaction_date <= up_to_date)
-        return int(q.scalar() or 0)
+        from_txs = int(q.scalar() or 0)
+        initial_acq = getattr(item, "initial_acquisition_rub", None) or 0
+        return from_txs + initial_acq
 
     txs = (
         db.query(Transaction)
@@ -2536,6 +2564,7 @@ def _build_item_cost_history(
             _compute_acquisition_cost_basis(db, user_id, item_id, item, up_to_date=d)
             if (is_moex_item(item) or is_crypto_item(item))
             else sum(amount for (td, amount) in acq_txs if (td.date() if hasattr(td, "date") else td) <= d)
+            + (getattr(item, "initial_acquisition_rub", None) or 0)
         )
         inv_extra = sum(amount for (td, amount) in inv_txs if (td.date() if hasattr(td, "date") else td) <= d)
         invested_rub = acq_rub + inv_extra

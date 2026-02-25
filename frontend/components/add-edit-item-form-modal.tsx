@@ -1026,6 +1026,22 @@ export function AddEditItemFormModal({
       setFormError("Укажите стоимость приобретения.");
       return;
     }
+    if (
+      resolvedHistoryStatus === "HISTORICAL" &&
+      isMarketNonMoex &&
+      (!marketValueStr.trim() || !Number.isFinite(parseRubToCents(marketValueStr)) || parseRubToCents(marketValueStr) < 0)
+    ) {
+      setFormError("Укажите рыночную стоимость.");
+      return;
+    }
+    if (
+      resolvedHistoryStatus === "HISTORICAL" &&
+      isMarketNonMoex &&
+      (!amountStr.trim() || !Number.isFinite(parseRubToCents(amountStr)) || parseRubToCents(amountStr) < 0)
+    ) {
+      setFormError("Укажите стоимость приобретения.");
+      return;
+    }
 
     const trimmedAccountLast7 = accountLast7.trim();
     const trimmedContractNumber = contractNumber.trim();
@@ -1101,8 +1117,18 @@ export function AddEditItemFormModal({
     }
 
     const cents = amountCentsForSubmit;
-    // У рыночных (MOEX) и крипто активов нет начальной балансовой стоимости — в payload передаём 0
-    const initialValueRubForPayload = isMoexType || isCryptoType ? 0 : cents;
+    // У рыночных (MOEX) и крипто активов нет начальной балансовой стоимости — в payload передаём 0.
+    // Для исторического актива с рыночной стоимостью в initial_value_rub передаём рыночную стоимость, стоимость приобретения — в acquisition_value_rub.
+    const isHistoricalMarketNonMoex =
+      resolvedHistoryStatus === "HISTORICAL" &&
+      primaryValueKind === "MARKET" &&
+      !isMoexType &&
+      !isCryptoType;
+    const initialValueRubForPayload = isMoexType || isCryptoType
+      ? 0
+      : isHistoricalMarketNonMoex
+        ? parseRubToCents(marketValueStr)
+        : cents;
     if (
       !Number.isFinite(initialValueRubForPayload) ||
       (initialValueRubForPayload < 0 && !(showBankCardFields && cardKind === "CREDIT"))
@@ -1261,6 +1287,9 @@ export function AddEditItemFormModal({
         initial_value_rub: initialValueRubForPayload,
         primary_value_kind: primaryValueKind,
       };
+      if (isHistoricalMarketNonMoex && Number.isFinite(parseRubToCents(amountStr))) {
+        payload.acquisition_value_rub = parseRubToCents(amountStr);
+      }
       if (synonymsList.length > 0) payload.synonyms = synonymsList;
 
       if (isMoexType && selectedInstrument) {

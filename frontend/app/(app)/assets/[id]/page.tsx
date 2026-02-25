@@ -63,7 +63,7 @@ import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, 
 import { PINK_GRADIENT } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
-import { CurrencyChip } from "@/components/currency-chip";
+import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
@@ -1652,9 +1652,9 @@ export default function AssetDetailPage() {
                         </div>
                         {isExpanded && costHistoryOpen === key && (
                           <div className="p-4 pt-0" style={{ backgroundColor: "transparent" }}>
-                          {(key === "market" && (!item.instrument_id || (item.currency_code && item.currency_code !== "RUB"))) ? (
+                          {(key === "market" && (!item.instrument_id || (item.currency_code && item.currency_code !== "RUB"))) || (key === "balance" && item.currency_code && item.currency_code !== "RUB") ? (
                             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                              {!item.instrument_id ? (
+                              {key === "market" && !item.instrument_id ? (
                                 <Button
                                   type="button"
                                   className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
@@ -1683,7 +1683,9 @@ export default function AssetDetailPage() {
                             <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
                           ) : costChartSeries.length === 0 ? (
                             <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период.</p>
-                          ) : costChartGeometry ? (
+                          ) : costChartGeometry ? (() => {
+                            const costChartColor = costChartCurrency === "CURRENCY" && item?.currency_code ? (getCurrencyChartColor(item.currency_code) ?? ACCENT) : ACCENT;
+                            return (
                             <>
                               <div
                                 ref={(el) => { costChartContainerRef.current = el; setCostChartContainerReady(!!el); }}
@@ -1725,12 +1727,12 @@ export default function AssetDetailPage() {
                               <svg ref={costChartSvgRef} viewBox={`0 0 ${costChartGeometry.width} ${costChartGeometry.height}`} className="h-full w-full cursor-pointer" style={{ overflow: "visible" }} onMouseMove={handleCostChartPointerMove} onMouseLeave={() => setCostChartHoverIndex(null)}>
                                 <defs>
                                   <linearGradient id="asset-detail-chart-area" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={ACCENT} stopOpacity={0.35} />
-                                    <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
+                                    <stop offset="0%" stopColor={costChartColor} stopOpacity={0.35} />
+                                    <stop offset="100%" stopColor={costChartColor} stopOpacity={0} />
                                   </linearGradient>
                                 </defs>
                                 <path d={costChartGeometry.areaPath} fill="url(#asset-detail-chart-area)" />
-                                <path d={costChartGeometry.linePath} fill="none" stroke={ACCENT} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                                <path d={costChartGeometry.linePath} fill="none" stroke={costChartColor} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
                                 {costChartDividers.map((div, idx) => (
                                   <line
                                     key={`div-${idx}-${div.x}`}
@@ -1747,7 +1749,7 @@ export default function AssetDetailPage() {
                                 {costChartHoverPoint && (
                                   <>
                                     <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
-                                    <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={6} fill={ACCENT} stroke="#fff" strokeWidth={2} />
+                                    <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={6} fill={costChartColor} stroke="#fff" strokeWidth={2} />
                                   </>
                                 )}
                                 {costChartGeometry.dayMarks.map((mark, idx) => (
@@ -1756,7 +1758,8 @@ export default function AssetDetailPage() {
                               </svg>
                               </div>
                             </>
-                          ) : null}
+                            );
+                          })() : null}
                           {((key === "balance" && dynamicsBalance) || (key === "market" && dynamicsMarket)) && (() => {
                             const d = (key === "balance" ? dynamicsBalance : dynamicsMarket)!;
                             const formatCur = (v: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);

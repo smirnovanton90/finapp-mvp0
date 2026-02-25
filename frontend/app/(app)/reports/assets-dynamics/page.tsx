@@ -2902,9 +2902,21 @@ export default function AssetsDynamicsPage() {
                                             {txsInRange.map(({ tx, deltaCents }) => {
                                               const d = toTxDateKey(tx.transaction_date);
                                               const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
-                                              // Для валютных счетов: в "В валюте" — сумма в валюте, в "Руб" — эта сумма × курс
-                                              const currencyUnits = currencyCode !== "RUB" ? deltaCents / 100 : null;
-                                              const rubCents = currencyCode !== "RUB" && rate != null ? Math.round(deltaCents * rate) : deltaCents;
+                                              // Для валютных счетов: если deltaCents в валюте счёта (inCurrency=true), считаем рубли через курс;
+                                              // если deltaCents уже в рублях (inCurrency=false), сначала берём рубли, а валюту счёта — через деление на курс.
+                                              let currencyUnits: number | null = null;
+                                              let rubCents: number;
+                                              if (currencyCode === "RUB") {
+                                                rubCents = deltaCents;
+                                              } else if (inCurrency && rate != null) {
+                                                currencyUnits = deltaCents / 100;
+                                                rubCents = Math.round(currencyUnits * rate * 100);
+                                              } else if (!inCurrency && rate != null) {
+                                                rubCents = deltaCents;
+                                                currencyUnits = (deltaCents / 100) / rate;
+                                              } else {
+                                                rubCents = deltaCents;
+                                              }
                                               const categoryPath = tx.category_id != null ? (categoryLookup.idToPath.get(tx.category_id) ?? []) : [];
                                               const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : null;
                                               const isTransfer = tx.direction === "TRANSFER";

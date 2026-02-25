@@ -390,6 +390,32 @@ def _get_fx_rate_for_date(
     return row
 
 
+def _convert_amount_between_currencies(
+    amount_minor: int,
+    from_currency: str | None,
+    to_currency: str | None,
+    rate_date: date_type,
+    db: Session,
+) -> int:
+    """Convert amount between currencies via FX rates (both in minor units).
+
+    from_currency/to_currency are ISO codes like 'RUB', 'USD'. If rates are missing,
+    falls back to the original amount.
+    """
+    from_code = (from_currency or "RUB").upper()
+    to_code = (to_currency or "RUB").upper()
+    if amount_minor == 0 or from_code == to_code:
+        return amount_minor
+
+    rate_from = _get_fx_rate_for_date(rate_date, from_code, db)
+    rate_to = _get_fx_rate_for_date(rate_date, to_code, db)
+    if not rate_from or not rate_to or rate_from <= 0 or rate_to <= 0:
+        return amount_minor
+
+    # amount is in minor units of from_currency; convert via RUB pivot into to_currency
+    return int(round(amount_minor * rate_from / rate_to))
+
+
 def _get_latest_market_price(
     db: Session,
     instrument_id: str,
@@ -1028,40 +1054,45 @@ def list_items(
             latest = _get_latest_item_market_value_rub(db, item.id, user.id, item)
             if latest is not None:
                 setattr(item, "latest_market_value_rub", latest)
-    # Стоимость приобретения и вложенных — для отображения основной стоимости (ACQUISITION / INVESTED)
-    item_ids = [it.id for it in items]
-    if item_ids:
-        acquisition_rows = (
-            db.query(Transaction.related_item_id, func.coalesce(func.sum(Transaction.amount_rub), 0).label("s"))
+    # Стоимость приобретения и вложенных — для отображения основной стоимости (ACQUISITION / INVESTED),
+    # в валюте самого актива с учётом FX.
+    for item in items:
+        acq = _compute_acquisition_cost_basis(db, user.id, item.id, item)
+        inv_q = (
+            db.query(Transaction)
             .filter(
                 Transaction.user_id == user.id,
-                Transaction.related_item_id.in_(item_ids),
-                Transaction.asset_link_type == "ASSET_PURCHASE",
-                Transaction.transaction_type == "ACTUAL",
-                Transaction.deleted_at.is_(None),
-            )
-            .group_by(Transaction.related_item_id)
-            .all()
-        )
-        investment_rows = (
-            db.query(Transaction.related_item_id, func.coalesce(func.sum(Transaction.amount_rub), 0).label("s"))
-            .filter(
-                Transaction.user_id == user.id,
-                Transaction.related_item_id.in_(item_ids),
+                Transaction.related_item_id == item.id,
                 Transaction.asset_link_type == "ASSET_INVESTMENT",
                 Transaction.transaction_type == "ACTUAL",
                 Transaction.deleted_at.is_(None),
             )
-            .group_by(Transaction.related_item_id)
-            .all()
         )
-        acquisition_by_id = {r.related_item_id: int(r.s) for r in acquisition_rows}
-        investment_by_id = {r.related_item_id: int(r.s) for r in investment_rows}
-        for item in items:
-            acq = acquisition_by_id.get(item.id, 0)
-            inv_sum = investment_by_id.get(item.id, 0)
-            setattr(item, "acquisition_rub", acq)
-            setattr(item, "invested_rub", acq + inv_sum)
+        inv_txs = inv_q.all()
+        inv_sum = 0
+        if inv_txs:
+            primary_ids = {t.primary_item_id for t in inv_txs}
+            primary_by_id: dict[int, str | None] = {}
+            if primary_ids:
+                rows = db.query(Item.id, Item.currency_code).filter(Item.id.in_(primary_ids)).all()
+                primary_by_id = {row.id: row.currency_code for row in rows}
+            item_currency = (item.currency_code or "RUB").upper()
+            for tx in inv_txs:
+                rate_date = (
+                    tx.transaction_date.date()
+                    if hasattr(tx.transaction_date, "date")
+                    else tx.transaction_date
+                )
+                from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
+                inv_sum += _convert_amount_between_currencies(
+                    tx.amount_rub or 0,
+                    from_currency,
+                    item_currency,
+                    rate_date,
+                    db,
+                )
+        setattr(item, "acquisition_rub", acq)
+        setattr(item, "invested_rub", acq + inv_sum)
     for item in items:
         _apply_item_photo_url(item)
     return items
@@ -2181,9 +2212,9 @@ def _compute_acquisition_cost_basis(
     Если up_to_date задана, учитываются только транзакции с датой <= up_to_date (для истории по датам).
     """
     if not (is_moex_item(item) or is_crypto_item(item)):
-        # Для прочих активов — простая сумма покупок (без replay продаж) + начальная стоимость приобретения (исторические MARKET)
-        q = (
-            db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        # Для прочих активов — сумма покупок, приведённая к валюте актива через FX + начальная стоимость приобретения (исторические MARKET).
+        tx_q = (
+            db.query(Transaction)
             .filter(
                 Transaction.user_id == user_id,
                 Transaction.related_item_id == item_id,
@@ -2193,10 +2224,35 @@ def _compute_acquisition_cost_basis(
             )
         )
         if up_to_date is not None:
-            q = q.filter(Transaction.transaction_date <= up_to_date)
-        from_txs = int(q.scalar() or 0)
+            tx_q = tx_q.filter(Transaction.transaction_date <= up_to_date)
+        txs = tx_q.all()
+
+        total = 0
+        if txs:
+            primary_ids = {t.primary_item_id for t in txs}
+            primary_by_id: dict[int, str | None] = {}
+            if primary_ids:
+                rows = db.query(Item.id, Item.currency_code).filter(Item.id.in_(primary_ids)).all()
+                primary_by_id = {row.id: row.currency_code for row in rows}
+
+            item_currency = (item.currency_code or "RUB").upper()
+            for tx in txs:
+                rate_date = (
+                    tx.transaction_date.date()
+                    if hasattr(tx.transaction_date, "date")
+                    else tx.transaction_date
+                )
+                from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
+                total += _convert_amount_between_currencies(
+                    tx.amount_rub or 0,
+                    from_currency,
+                    item_currency,
+                    rate_date,
+                    db,
+                )
+
         initial_acq = getattr(item, "initial_acquisition_rub", None) or 0
-        return from_txs + initial_acq
+        return total + initial_acq
 
     txs = (
         db.query(Transaction)
@@ -2254,8 +2310,9 @@ def get_item_costs(
         raise HTTPException(status_code=404, detail="Item not found")
     balance_rub = item.current_value_rub
     acquisition_rub = _compute_acquisition_cost_basis(db, user.id, item_id, item)
-    investment_sum = (
-        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+    # Investment: ASSET_INVESTMENT, приведённые к валюте актива
+    inv_q = (
+        db.query(Transaction)
         .filter(
             Transaction.user_id == user.id,
             Transaction.related_item_id == item_id,
@@ -2263,9 +2320,30 @@ def get_item_costs(
             Transaction.transaction_type == "ACTUAL",
             Transaction.deleted_at.is_(None),
         )
-        .scalar()
-        or 0
     )
+    inv_txs = inv_q.all()
+    investment_sum = 0
+    if inv_txs:
+        primary_ids = {t.primary_item_id for t in inv_txs}
+        primary_by_id: dict[int, str | None] = {}
+        if primary_ids:
+            rows = db.query(Item.id, Item.currency_code).filter(Item.id.in_(primary_ids)).all()
+            primary_by_id = {row.id: row.currency_code for row in rows}
+        item_currency = (item.currency_code or "RUB").upper()
+        for tx in inv_txs:
+            rate_date = (
+                tx.transaction_date.date()
+                if hasattr(tx.transaction_date, "date")
+                else tx.transaction_date
+            )
+            from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
+            investment_sum += _convert_amount_between_currencies(
+                tx.amount_rub or 0,
+                from_currency,
+                item_currency,
+                rate_date,
+                db,
+            )
     invested_rub = acquisition_rub + investment_sum
     market_rub = None
     if (is_moex_item(item) or is_crypto_item(item)) and item.instrument_id and item.instrument_board_id:
@@ -2325,30 +2403,45 @@ def get_item_costs(
                 market_value_rub = int(round((market_rub / 100) * rate * 100))
             else:
                 market_value_rub = market_rub  # fallback: показываем как есть
-    income_rub = (
-        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
-        .filter(
-            Transaction.user_id == user.id,
-            Transaction.related_item_id == item_id,
-            Transaction.asset_link_type == "ASSET_INCOME",
-            Transaction.transaction_type == "ACTUAL",
-            Transaction.deleted_at.is_(None),
+    # Доходы/расходы по активу в рублях (эквивалент суммы транзакций)
+    def _sum_asset_link(asset_link_type: str) -> int:
+        q = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user.id,
+                Transaction.related_item_id == item_id,
+                Transaction.asset_link_type == asset_link_type,
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+            )
         )
-        .scalar()
-        or 0
-    )
-    expense_rub = (
-        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
-        .filter(
-            Transaction.user_id == user.id,
-            Transaction.related_item_id == item_id,
-            Transaction.asset_link_type == "ASSET_EXPENSE",
-            Transaction.transaction_type == "ACTUAL",
-            Transaction.deleted_at.is_(None),
-        )
-        .scalar()
-        or 0
-    )
+        txs = q.all()
+        if not txs:
+            return 0
+        primary_ids = {t.primary_item_id for t in txs}
+        primary_by_id: dict[int, str | None] = {}
+        if primary_ids:
+            rows = db.query(Item.id, Item.currency_code).filter(Item.id.in_(primary_ids)).all()
+            primary_by_id = {row.id: row.currency_code for row in rows}
+        total = 0
+        for tx in txs:
+            rate_date = (
+                tx.transaction_date.date()
+                if hasattr(tx.transaction_date, "date")
+                else tx.transaction_date
+            )
+            from_currency = primary_by_id.get(tx.primary_item_id, "RUB")
+            total += _convert_amount_between_currencies(
+                tx.amount_rub or 0,
+                from_currency,
+                "RUB",
+                rate_date,
+                db,
+            )
+        return total
+
+    income_rub = _sum_asset_link("ASSET_INCOME")
+    expense_rub = _sum_asset_link("ASSET_EXPENSE")
     return ItemCostsOut(
         balance_rub=balance_rub,
         acquisition_rub=acquisition_rub,
@@ -2378,31 +2471,6 @@ def _build_item_cost_history(
     while current <= date_to:
         dates.append(current.isoformat())
         current += timedelta(days=1)
-
-    # Acquisition: all ASSET_PURCHASE for this item
-    acq_txs = (
-        db.query(Transaction.transaction_date, Transaction.amount_rub)
-        .filter(
-            Transaction.user_id == user_id,
-            Transaction.related_item_id == item_id,
-            Transaction.asset_link_type == "ASSET_PURCHASE",
-            Transaction.transaction_type == "ACTUAL",
-            Transaction.deleted_at.is_(None),
-        )
-        .all()
-    )
-    # Investment: all ASSET_INVESTMENT for this item
-    inv_txs = (
-        db.query(Transaction.transaction_date, Transaction.amount_rub)
-        .filter(
-            Transaction.user_id == user_id,
-            Transaction.related_item_id == item_id,
-            Transaction.asset_link_type == "ASSET_INVESTMENT",
-            Transaction.transaction_type == "ACTUAL",
-            Transaction.deleted_at.is_(None),
-        )
-        .all()
-    )
 
     # Balance: replay all transactions where item is primary or counterparty
     balance_txs = (
@@ -2560,13 +2628,43 @@ def _build_item_cost_history(
             units_balance += delta
             units_tx_index += 1
 
-        acq_rub = (
-            _compute_acquisition_cost_basis(db, user_id, item_id, item, up_to_date=d)
-            if (is_moex_item(item) or is_crypto_item(item))
-            else sum(amount for (td, amount) in acq_txs if (td.date() if hasattr(td, "date") else td) <= d)
-            + (getattr(item, "initial_acquisition_rub", None) or 0)
+        # Acquisition/Investment на дату d — через cost basis и ASSET_INVESTMENT, приведённые к валюте актива.
+        acq_rub = _compute_acquisition_cost_basis(
+            db, user_id, item_id, item, up_to_date=d
         )
-        inv_extra = sum(amount for (td, amount) in inv_txs if (td.date() if hasattr(td, "date") else td) <= d)
+        inv_txs = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.related_item_id == item_id,
+                Transaction.asset_link_type == "ASSET_INVESTMENT",
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+            )
+        )
+        inv_txs = inv_txs.filter(Transaction.transaction_date <= d).all()
+        inv_extra = 0
+        if inv_txs:
+            primary_ids = {t.primary_item_id for t in inv_txs}
+            primary_by_id: dict[int, str | None] = {}
+            if primary_ids:
+                rows = db.query(Item.id, Item.currency_code).filter(Item.id.in_(primary_ids)).all()
+                primary_by_id = {row.id: row.currency_code for row in rows}
+            item_currency = (item.currency_code or "RUB").upper()
+            for tx in inv_txs:
+                rate_date = (
+                    tx.transaction_date.date()
+                    if hasattr(tx.transaction_date, "date")
+                    else tx.transaction_date
+                )
+                from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
+                inv_extra += _convert_amount_between_currencies(
+                    tx.amount_rub or 0,
+                    from_currency,
+                    item_currency,
+                    rate_date,
+                    db,
+                )
         invested_rub = acq_rub + inv_extra
 
         market_rub = None

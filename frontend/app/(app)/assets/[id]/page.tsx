@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronUp,
   Plus,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -36,6 +37,7 @@ import {
   fetchTransactions,
   fetchTransactionsPage,
   fetchCounterparties,
+  fetchCategories,
   fetchFxRatesBatch,
   uploadItemPhoto,
   archiveItem,
@@ -64,6 +66,8 @@ import { PINK_GRADIENT } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
 import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip";
+import { CategoryIconImage } from "@/components/category-icon-image";
+import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
@@ -203,6 +207,8 @@ export default function AssetDetailPage() {
   const [costChartTooltipLeft, setCostChartTooltipLeft] = useState<number | null>(null);
   const [costChartContainerReady, setCostChartContainerReady] = useState(false);
   const [costChartCurrency, setCostChartCurrency] = useState<"RUB" | "CURRENCY">("RUB");
+  const [rentabilityOpen, setRentabilityOpen] = useState<"income" | "expense" | null>(null);
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(id)) return;
@@ -339,10 +345,12 @@ export default function AssetDetailPage() {
     setLoadingDynamics(true);
     const dateEnd = new Date().toISOString().slice(0, 10);
     const dateStart = item.open_date ?? dateEnd;
-    fetchTransactions()
-      .then((txs) => {
+    Promise.all([fetchTransactions(), fetchCategories(), fetchItems()])
+      .then(([txs, cats, itemsRes]) => {
         if (cancelled) return;
         setDynamicsTxs(txs);
+        setCategories(cats ?? []);
+        setAllItems(itemsRes ?? []);
         const dateSet = new Set<string>([dateStart, dateEnd]);
         txs.forEach((tx) => {
           const d = toTxDateKey(tx.transaction_date);
@@ -392,6 +400,31 @@ export default function AssetDetailPage() {
 
   const todayKey = new Date().toISOString().slice(0, 10);
   const sortedFxRateDateKeys = useMemo(() => Object.keys(fxRatesByDate).sort(), [fxRatesByDate]);
+  const categoryLookup = useMemo(() => buildCategoryLookup(categories), [categories]);
+  const itemsById = useMemo(() => {
+    const map = new Map<number, ItemOut>();
+    allItems.forEach((it) => map.set(it.id, it));
+    if (item) map.set(item.id, item);
+    return map;
+  }, [allItems, item]);
+  const incomeTxsForAsset = useMemo(() => {
+    if (!item?.id) return [];
+    return dynamicsTxs
+      .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_INCOME")
+      .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
+  }, [item?.id, dynamicsTxs]);
+  const expenseTxsForAsset = useMemo(() => {
+    if (!item?.id) return [];
+    return dynamicsTxs
+      .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_EXPENSE")
+      .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
+  }, [item?.id, dynamicsTxs]);
+
+  function formatTxDateCell(transactionDate: string) {
+    const dateKey = toTxDateKey(transactionDate);
+    if (!dateKey) return "—";
+    return new Date(dateKey).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+  }
   const latestRatesByCurrency = useMemo(() => {
     const map = new Map<string, { dateKey: string; rate: number }>();
     Object.entries(fxRatesByDate).forEach(([dateKey, rates]) => {
@@ -1930,20 +1963,141 @@ export default function AssetDetailPage() {
         {costs && (
           <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
-              <h3 className="text-base font-semibold mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Доход и расход по активу</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="rounded-lg p-4" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
-                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Доход</div>
-                  <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    <AmountWithCurrency valueCents={costs.income} currencyCode={item.currency_code} />
-                  </div>
-                </div>
-                <div className="rounded-lg p-4" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
-                  <div className="text-xs mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>Расход</div>
-                  <div className="text-lg font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    <AmountWithCurrency valueCents={costs.expense} currencyCode={item.currency_code} />
-                  </div>
-                </div>
+              <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Рентабельность</h3>
+              <div className="flex flex-col gap-2">
+                {(["income", "expense"] as const).map((key) => {
+                  const label = key === "income" ? "Доход" : "Расход";
+                  // costs.income / costs.expense — в рублях (копейки), эквивалент суммы транзакций по активу
+                  const rubTotalCents = key === "income" ? costs.income : costs.expense;
+                  const isExpanded = rentabilityOpen === key;
+                  const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
+                  const isCurrencyAsset = currencyCode !== "RUB";
+                  const rate = isCurrencyAsset ? getRateForDateKey(todayKey) : null;
+                  // Для валютных активов считаем сумму в валюте актива так, чтобы при умножении на курс получались те же рубли.
+                  const assetTotalCents =
+                    isCurrencyAsset && rate != null && rate > 0 ? Math.round(rubTotalCents / rate) : null;
+                  const txs = key === "income" ? incomeTxsForAsset : expenseTxsForAsset;
+                  const amountColor = key === "income" ? GREEN : RED;
+                  return (
+                    <div key={key} className="w-full">
+                      <div
+                        className="rounded-[9px] overflow-hidden"
+                        style={{ backgroundColor: BACKGROUND_DT }}
+                      >
+                        <div
+                          className="flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90"
+                          onClick={() => setRentabilityOpen((v) => (v === key ? null : key))}
+                        >
+                          <IconButton
+                            aria-label={isExpanded ? "Свернуть" : "Развернуть"}
+                            onClick={(e) => { e.stopPropagation(); setRentabilityOpen((v) => (v === key ? null : key)); }}
+                          >
+                            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                          </IconButton>
+                          <span className="text-sm shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>{label}</span>
+                          <div className="flex-1 min-w-0" />
+                          <div className="text-2xl font-medium shrink-0 text-right" style={{ color: amountColor }}>
+                            {isCurrencyAsset && assetTotalCents != null ? (
+                              <div className="flex flex-col items-end gap-0.5">
+                                <AmountWithCurrency valueCents={rubTotalCents} currencyCode="RUB" amountStyle={{ color: amountColor }} />
+                                <AmountWithCurrency valueCents={assetTotalCents} currencyCode={item.currency_code} amountStyle={{ color: amountColor }} />
+                              </div>
+                            ) : (
+                              <AmountWithCurrency valueCents={rubTotalCents} currencyCode="RUB" amountStyle={{ color: amountColor }} />
+                            )}
+                          </div>
+                        </div>
+                        {isExpanded && (
+                          <div className="p-4 pt-0" style={{ backgroundColor: "transparent" }}>
+                            {loadingDynamics ? (
+                              <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+                            ) : txs.length === 0 ? (
+                              <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                {key === "income" ? "Нет доходов по активу." : "Нет расходов по активу."}
+                              </p>
+                            ) : (
+                              <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                                <tbody>
+                                  {txs.map((tx) => {
+                                    const d = toTxDateKey(tx.transaction_date);
+                                    const primaryItem = itemsById.get(tx.primary_item_id) ?? null;
+                                    const txCurrency = (primaryItem?.currency_code ?? "RUB").toUpperCase();
+                                    const rateTxCur =
+                                      txCurrency === "RUB"
+                                        ? 1
+                                        : getRateForDate(fxRatesByDate, d, txCurrency, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
+                                    const rateAsset =
+                                      isCurrencyAsset
+                                        ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
+                                        : null;
+                                    // Рублёвый эквивалент операции: из валюты транзакции в RUB одним шагом
+                                    const rubCentsTx =
+                                      rateTxCur != null && rateTxCur > 0
+                                        ? Math.round((tx.amount ?? 0) * rateTxCur)
+                                        : (tx.amount ?? 0);
+                                    // Сумма в валюте актива: из рублёвой суммы через курс актива
+                                    const assetCentsTx =
+                                      isCurrencyAsset && rateAsset != null && rateAsset > 0
+                                        ? Math.round(rubCentsTx / rateAsset)
+                                        : null;
+                                    const currencyUnits = isCurrencyAsset && assetCentsTx != null ? assetCentsTx / 100 : null;
+                                    const categoryPath = tx.category_id != null ? (categoryLookup.idToPath.get(tx.category_id) ?? []) : [];
+                                    const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : "–";
+                                    return (
+                                      <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                        <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
+                                        <td className="py-1.5 pr-4 align-middle">
+                                          {tx.category_id != null ? (
+                                            <div className="flex items-center gap-2">
+                                              <CategoryIconImage
+                                                categoryId={tx.category_id}
+                                                categoryLookup={categoryLookup}
+                                                apiBase={API_BASE}
+                                                size={18}
+                                                className="h-4 w-4 rounded-sm object-contain shrink-0"
+                                                fallbackIconColor={ACTIVE_TEXT_DARK}
+                                              />
+                                              <span style={{ color: ACTIVE_TEXT_DARK }}>{categoryLabel}</span>
+                                            </div>
+                                          ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                        </td>
+                                        <td className="py-1.5 pr-4 align-middle">
+                                          {tx.comment?.trim() ? (
+                                            <div className="flex items-center gap-1.5" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                              <MessageSquare className="h-3.5 w-3.5 shrink-0" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                                              <span className="text-xs">{tx.comment.trim()}</span>
+                                            </div>
+                                          ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                        </td>
+                                        {isCurrencyAsset && (
+                                          <>
+                                            <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                              <div className="flex items-center gap-2 tabular-nums w-full">
+                                                <CurrencyChip code={currencyCode} />
+                                                <span className="ml-auto" style={{ color: amountColor }}>{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"}</span>
+                                              </div>
+                                            </td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>{rateAsset != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rateAsset) : "–"}</td>
+                                          </>
+                                        )}
+                                        <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                          <div className="flex items-center gap-2 tabular-nums w-full">
+                                            <CurrencyChip code="RUB" />
+                                            <span className="ml-auto" style={{ color: amountColor }}>{formatRub(rubCentsTx)}</span>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

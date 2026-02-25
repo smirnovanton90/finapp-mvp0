@@ -16,9 +16,9 @@ export function IconButton({
   ...rest
 }: IconButtonProps & { appearance?: "default" | "inactive" }) {
   const mergedStyle = {
-    // Базовые цвета подложки по дизайн-токенам
-    "--icon-button-bg": ACCENT_FILL_LIGHT,
-    "--icon-button-bg-hover": ACCENT_FILL_MEDIUM,
+    // Базовый цвет подложки; при ховере — светлее
+    "--icon-button-bg": ACCENT_FILL_MEDIUM,
+    "--icon-button-bg-hover": ACCENT_FILL_LIGHT,
     ...(style as React.CSSProperties),
   } as React.CSSProperties;
 

@@ -2230,187 +2230,45 @@ export default function AssetDetailPage() {
           </div>
         )}
 
-        {profitability && (
+        {profitability && profitability.hasMarketPrimary && (
           <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
-            <div className="p-6 space-y-4">
-              {/* Прибыльность актива */}
-              <div className="space-y-2">
-                <h3 className="text-base font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                  Прибыльность актива
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Среднедневная стоимость за период
+            <div className="p-6">
+              <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Доходность вложений в актив</h3>
+              <div className="flex w-full items-center justify-center py-4">
+                {profitability.yieldInvestmentsAnnual != null ? (
+                  <Tooltip
+                    content={
+                      <div className="space-y-1.5 text-left">
+                        <div className="font-medium">Рентабельность вложений в актив</div>
+                        <div>Формула: (Доходы − Расходы + Текущая рыночная стоимость или Доход от продажи − Вложения) / Вложения × (365 / дней в периоде)</div>
+                        <div>Расходы по приобретению: {formatAmount(-profitability.acquisitionCents)}</div>
+                        <div>Вложения в актив: {formatAmount(profitability.investedCents)}</div>
+                        <div>Текущая рыночная стоимость: {profitability.currentMarketValueCents != null ? formatAmount(profitability.currentMarketValueCents) : "—"}</div>
+                        <div>Доходы от продажи: {formatAmount(profitability.incomeFromSale)}</div>
+                        <div>Прибыль от переоценки: {profitability.revaluationProfitRub != null ? formatAmount(profitability.revaluationProfitRub) : "—"}</div>
+                        <div>Прибыль от курса: {profitability.fxProfitRub != null ? formatAmount(profitability.fxProfitRub) : "—"}</div>
+                        <div className="pt-0.5 border-t border-white/10">
+                          Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)
+                        </div>
+                      </div>
+                    }
+                    side="top"
+                  >
+                    <span
+                      className="tabular-nums italic text-5xl font-semibold cursor-help"
+                      style={
+                        profitability.yieldInvestmentsAnnual >= 0
+                          ? { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } as React.CSSProperties
+                          : { color: RED }
+                      }
+                    >
+                      {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldInvestmentsAnnual * 100)}%
                     </span>
-                    <span className="font-medium">
-                      {profitability.avgDailyRub > 0
-                        ? formatAmount(Math.round(profitability.avgDailyRub * 100))
-                        : "—"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">Доходы от актива</span>
-                    <span className="font-medium">
-                      {formatAmount(profitability.incomeFromAsset)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">Расходы по активу</span>
-                    <span className="font-medium">
-                      {formatAmount(-profitability.expenseForAsset)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Прибыльность актива в годовом выражении
-                    </span>
-                    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 tabular-nums font-medium">
-                      {profitability.yieldAssetAnnualRub != null && (
-                        <span
-                          style={{
-                            color:
-                              profitability.yieldAssetAnnualRub > 0
-                                ? GREEN
-                                : profitability.yieldAssetAnnualRub < 0
-                                  ? RED
-                                  : undefined,
-                          }}
-                        >
-                          RUB {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(profitability.yieldAssetAnnualRub * 100)}%
-                        </span>
-                      )}
-                      {profitability.yieldAssetAnnualCurrency != null && (
-                        <span
-                          style={{
-                            color:
-                              profitability.yieldAssetAnnualCurrency > 0
-                                ? GREEN
-                                : profitability.yieldAssetAnnualCurrency < 0
-                                  ? RED
-                                  : undefined,
-                          }}
-                        >
-                          {(item?.currency_code ?? "RUB").toUpperCase()} {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(profitability.yieldAssetAnnualCurrency * 100)}%
-                        </span>
-                      )}
-                      {profitability.yieldAssetAnnualRub == null && profitability.yieldAssetAnnualCurrency == null && "—"}
-                    </div>
-                  </div>
-                </div>
+                  </Tooltip>
+                ) : (
+                  <span className="text-lg italic" style={{ color: PLACEHOLDER_COLOR_DARK }}>—</span>
+                )}
               </div>
-
-              {/* Доходность вложений в актив */}
-              {profitability.hasMarketPrimary && (
-                <div className="space-y-2">
-                  <h3 className="text-base font-semibold" style={{ color: ACTIVE_TEXT_DARK }}>
-                    Доходность вложений в актив
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        Расходы по приобретению актива
-                      </span>
-                      <span className="font-medium">
-                        {formatAmount(-profitability.acquisitionCents)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Вложения в актив</span>
-                      <span className="font-medium">
-                        {formatAmount(profitability.investedCents)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        Текущая рыночная стоимость
-                      </span>
-                      <span className="font-medium">
-                        {profitability.currentMarketValueCents != null
-                          ? formatAmount(profitability.currentMarketValueCents)
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        Доходы от продажи актива
-                      </span>
-                      <span className="font-medium">
-                        {formatAmount(profitability.incomeFromSale)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        Прибыль от изменения стоимости актива
-                      </span>
-                      <span
-                        className="font-medium"
-                        style={{
-                          color:
-                            profitability.revaluationProfitRub != null &&
-                            profitability.revaluationProfitRub > 0
-                              ? GREEN
-                              : profitability.revaluationProfitRub != null &&
-                                  profitability.revaluationProfitRub < 0
-                                ? RED
-                                : undefined,
-                        }}
-                      >
-                        {profitability.revaluationProfitRub != null
-                          ? formatAmount(profitability.revaluationProfitRub)
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        Прибыль от изменения курса валюты
-                      </span>
-                      <span
-                        className="font-medium"
-                        style={{
-                          color:
-                            profitability.fxProfitRub != null &&
-                            profitability.fxProfitRub > 0
-                              ? GREEN
-                              : profitability.fxProfitRub != null &&
-                                  profitability.fxProfitRub < 0
-                                ? RED
-                                : undefined,
-                        }}
-                      >
-                        {profitability.fxProfitRub != null
-                          ? formatAmount(profitability.fxProfitRub)
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        Рентабельность вложений в актив в годовом выражении
-                      </span>
-                      <span
-                        className="font-medium"
-                        style={{
-                          color:
-                            profitability.yieldInvestmentsAnnual != null &&
-                            profitability.yieldInvestmentsAnnual > 0
-                              ? GREEN
-                              : profitability.yieldInvestmentsAnnual != null &&
-                                  profitability.yieldInvestmentsAnnual < 0
-                                ? RED
-                                : undefined,
-                        }}
-                      >
-                        {profitability.yieldInvestmentsAnnual != null
-                          ? `${new Intl.NumberFormat("ru-RU", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            }).format(profitability.yieldInvestmentsAnnual * 100)}%`
-                          : "—"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )}

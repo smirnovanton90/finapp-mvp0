@@ -16,6 +16,7 @@ import {
   Building2,
   ChevronDown,
   ChevronUp,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -165,6 +166,17 @@ export default function AssetDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingPrimary, setSavingPrimary] = useState(false);
   const [costHistoryOpen, setCostHistoryOpen] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
+  const costHistoryInitializedForItemIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!item) return;
+    if (costHistoryInitializedForItemIdRef.current !== item.id) {
+      costHistoryInitializedForItemIdRef.current = item.id;
+      const kind = item.primary_value_kind ?? "BALANCE";
+      setCostHistoryOpen(
+        kind === "MARKET" ? "market" : kind === "ACQUISITION" ? "acquisition" : kind === "INVESTED" ? "invested" : "balance"
+      );
+    }
+  }, [item]);
   const [costRowHover, setCostRowHover] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
   const [buySellModalOpen, setBuySellModalOpen] = useState(false);
   const [editMarketValueModalOpen, setEditMarketValueModalOpen] = useState(false);
@@ -277,6 +289,21 @@ export default function AssetDetailPage() {
     if (counterparties.length > 0) return;
     loadItemsAndCounterparties();
   }, [item?.counterparty_id, counterparties.length, loadItemsAndCounterparties]);
+
+  const refetchCostHistory = useCallback(async () => {
+    if (!item?.id || !item?.open_date) return;
+    setLoadingCostHistory(true);
+    try {
+      const dateFrom = item.open_date ?? undefined;
+      const dateTo = new Date().toISOString().slice(0, 10);
+      const data = await fetchItemCostHistory(item.id, { date_from: dateFrom, date_to: dateTo });
+      setCostHistoryData(data);
+    } catch {
+      setCostHistoryData(null);
+    } finally {
+      setLoadingCostHistory(false);
+    }
+  }, [item?.id, item?.open_date]);
 
   useEffect(() => {
     if (!item?.id || !item?.open_date) {
@@ -460,6 +487,8 @@ export default function AssetDetailPage() {
     const displayFlowCur = totalExpenseCur - totalIncomeCur + totalTransferCur;
     const netFlowRub = displayFlowRub;
     const netFlowCur = displayFlowCur;
+    // Поток в рублях в том же знаке, что в плашках: Доходы (+), Расходы (−), Переводы (±). Тогда На начало + chipFlowRub + courseDiffRub = На конец.
+    const chipFlowRub = totalIncomeRub - totalExpenseRub + totalTransferRub;
 
     let totalBuyQty = 0;
     let totalSellQty = 0;
@@ -559,19 +588,32 @@ export default function AssetDetailPage() {
       const effectiveKind = getEffectiveItemKind(item, finalCurCents);
       const signedInitialRub = effectiveKind === "LIABILITY" ? -(initialRubCents ?? 0) : (initialRubCents ?? 0);
       const signedFinalRub = effectiveKind === "LIABILITY" ? -(finalRubCents ?? 0) : (finalRubCents ?? 0);
-      const courseDiffRub = currencyCode !== "RUB" ? (signedFinalRub - signedInitialRub) - netFlowRub : 0;
-      const profitLossFromPriceRub = signedFinalRub - signedInitialRub - netFlowRub;
+      const totalNonFlowRub = signedFinalRub - signedInitialRub - chipFlowRub;
+      const profitLossFromPriceCur =
+        currencyCode !== "RUB"
+          ? (finalCurCents - initialCurCents) / 100 - netFlowCur
+          : null;
+      const rateEnd = currencyCode !== "RUB" ? getRate(dateEnd) : null;
+      let courseDiffRub: number;
+      let profitLossFromPriceRub: number;
+      if (currencyCode !== "RUB") {
+        if (isMarketMode && profitLossFromPriceCur != null && rateEnd != null) {
+          profitLossFromPriceRub = Math.round(profitLossFromPriceCur * 100 * rateEnd);
+          courseDiffRub = totalNonFlowRub - profitLossFromPriceRub;
+        } else {
+          courseDiffRub = totalNonFlowRub;
+          profitLossFromPriceRub = totalNonFlowRub;
+        }
+      } else {
+        courseDiffRub = 0;
+        profitLossFromPriceRub = totalNonFlowRub;
+      }
 
       const rowGrowthPercent =
         initialRubCents != null && initialRubCents !== 0
           ? (effectiveKind === "LIABILITY"
             ? (Math.abs(signedFinalRub) - Math.abs(signedInitialRub)) / Math.abs(signedInitialRub) * 100
             : (signedFinalRub - signedInitialRub) / Math.abs(signedInitialRub) * 100)
-          : null;
-
-      const profitLossFromPriceCur =
-        currencyCode !== "RUB"
-          ? (finalCurCents - initialCurCents) / 100 - netFlowCur
           : null;
 
       return {
@@ -1327,16 +1369,6 @@ export default function AssetDetailPage() {
               Купить/продать актив
             </Button>
           )}
-          {!item.instrument_id && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditMarketValueModalOpen(true)}
-              className="flex items-center gap-2"
-            >
-              Изменить рыночную стоимость
-            </Button>
-          )}
         </div>
 
         <div className="flex flex-col gap-4">
@@ -1575,11 +1607,11 @@ export default function AssetDetailPage() {
                           </IconButton>
                           <span className="text-sm shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>{label}</span>
                           {isPrimary && (
-                            <span className="rounded-md px-2 py-0.5 text-sm font-normal shrink-0" style={{ backgroundColor: ACCENT2, color: "#fff" }}>Основная</span>
+                            <span className="h-8 flex items-center rounded-[9px] px-2 text-sm font-normal shrink-0" style={{ backgroundColor: ACCENT2, color: "#fff" }}>Основная</span>
                           )}
                           {!isPrimary && isHovered && (
                             <span
-                              className="rounded-md px-2 py-0.5 text-sm font-normal shrink-0 cursor-pointer hover:opacity-90"
+                              className="h-8 flex items-center rounded-[9px] px-2 text-sm font-normal shrink-0 cursor-pointer hover:opacity-90"
                               style={{ backgroundColor: ACCENT2, color: "#fff" }}
                               onClick={(e) => { e.stopPropagation(); handlePrimaryValueKindChange(kind); }}
                             >
@@ -1618,40 +1650,41 @@ export default function AssetDetailPage() {
                             )}
                           </div>
                         </div>
-                        {extra && key === "market" && (
-                          <div className="text-sm pl-10 pr-3 py-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                            В рублях: <AmountWithCurrency valueCents={extra.rub} currencyCode="RUB" />
-                          </div>
-                        )}
                         {isExpanded && costHistoryOpen === key && (
                           <div className="p-4 pt-0" style={{ backgroundColor: "transparent" }}>
-                          {key !== "balance" && (
-                            <div className="text-sm font-medium mb-2" style={{ color: ACTIVE_TEXT_DARK }}>
-                              {key === "acquisition" && "История стоимости приобретения"}
-                              {key === "invested" && "История стоимости вложенных средств"}
-                              {key === "market" && "История рыночной стоимости"}
+                          {(key === "market" && (!item.instrument_id || (item.currency_code && item.currency_code !== "RUB"))) ? (
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                              {!item.instrument_id ? (
+                                <Button
+                                  type="button"
+                                  className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
+                                  style={{ backgroundColor: ACCENT }}
+                                  onClick={() => setEditMarketValueModalOpen(true)}
+                                >
+                                  <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                                  <span style={{ color: "white", opacity: 0.85 }}>Добавить/изменить рыночную стоимость</span>
+                                </Button>
+                              ) : <div />}
+                              {item.currency_code && item.currency_code !== "RUB" && (
+                                <SegmentedSelector
+                                  options={[
+                                    { value: "RUB", label: "RUB" },
+                                    { value: "CURRENCY", label: item.currency_code },
+                                  ]}
+                                  value={costChartCurrency}
+                                  onChange={(v) => setCostChartCurrency(v === "RUB" || v === "CURRENCY" ? v : "RUB")}
+                                  segmentWidth="auto"
+                                  className="w-fit shrink-0"
+                                />
+                              )}
                             </div>
-                          )}
+                          ) : null}
                           {loadingCostHistory ? (
                             <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
                           ) : costChartSeries.length === 0 ? (
                             <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период.</p>
                           ) : costChartGeometry ? (
                             <>
-                              {item.currency_code && item.currency_code !== "RUB" && (
-                                <div className="mb-3 flex justify-end">
-                                  <SegmentedSelector
-                                    options={[
-                                      { value: "RUB", label: "RUB" },
-                                      { value: "CURRENCY", label: item.currency_code },
-                                    ]}
-                                    value={costChartCurrency}
-                                    onChange={(v) => setCostChartCurrency(v === "RUB" || v === "CURRENCY" ? v : "RUB")}
-                                    segmentWidth="auto"
-                                    className="w-fit"
-                                  />
-                                </div>
-                              )}
                               <div
                                 ref={(el) => { costChartContainerRef.current = el; setCostChartContainerReady(!!el); }}
                                 className="relative w-full min-w-0"
@@ -1803,13 +1836,19 @@ export default function AssetDetailPage() {
                                     <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={d.qtyStart} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
                                     <SummaryBlock title="Куплено" qtyVal={d.totalBuyQty} curVal={showCurRow ? d.totalExpenseCur : null} rubVal={d.totalExpenseRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
                                     <SummaryBlock title="Продано" qtyVal={-d.totalSellQty} curVal={showCurRow ? -d.totalIncomeCur : null} rubVal={-d.totalIncomeRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.profitLossFromPriceCur != null ? d.profitLossFromPriceCur : null} rubVal={d.currencyCode !== "RUB" ? d.courseDiffRub : d.profitLossFromPriceRub} amountColor={d.profitLossFromPriceRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} showEmptyQtyRow={true} />
+                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.profitLossFromPriceCur != null ? d.profitLossFromPriceCur : null} rubVal={d.profitLossFromPriceRub} amountColor={d.profitLossFromPriceRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} showEmptyQtyRow={true} />
+                                    {showCurRow && (
+                                      <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />
+                                    )}
                                     <SummaryBlock title={`На ${dateEndLabel}`} qtyVal={d.qtyEnd} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
                                   </>
                                 ) : (
                                   <>
                                     <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.profitLossFromPriceCur != null ? d.profitLossFromPriceCur : null} rubVal={d.currencyCode !== "RUB" ? d.courseDiffRub : d.profitLossFromPriceRub} amountColor={d.profitLossFromPriceRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} />
+                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.profitLossFromPriceCur != null ? d.profitLossFromPriceCur : null} rubVal={d.profitLossFromPriceRub} amountColor={d.profitLossFromPriceRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} />
+                                    {showCurRow && (
+                                      <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />
+                                    )}
                                     <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
                                   </>
                                 )}
@@ -2191,7 +2230,10 @@ export default function AssetDetailPage() {
             item={item}
             marketValues={marketValues}
             getRateForDate={getRateForDateKey}
-            onSuccess={load}
+            onSuccess={async () => {
+              await load();
+              await refetchCostHistory();
+            }}
           />
         )}
       </div>

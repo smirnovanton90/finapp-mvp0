@@ -3042,6 +3042,7 @@ export default function AssetsDynamicsPage() {
                                           });
                                           const displayFlowRub = totalExpenseRub - totalIncomeRub + totalTransferRub;
                                           const netFlowRub = displayFlowRub;
+                                          const chipFlowRub = totalIncomeRub - totalExpenseRub + totalTransferRub;
                                           const signedInitialRub = initialRubCents != null && effectiveKind === "LIABILITY" ? -initialRubCents : initialRubCents ?? 0;
                                           const signedFinalRub = finalRubCents != null && effectiveKind === "LIABILITY" ? -finalRubCents : finalRubCents ?? 0;
                                           const primaryValueKind = item.primary_value_kind ?? "BALANCE";
@@ -3125,9 +3126,22 @@ export default function AssetsDynamicsPage() {
                                             currencyCode !== "RUB"
                                               ? finalCurForPrice - initialCurForPrice - netFlowCur
                                               : null;
-                                          const profitLossFromPriceRub = signedFinalRubForPrice - signedInitialRubForPrice - displayFlowRub;
-                                          const courseDiffRub = currencyCode !== "RUB" ? profitLossFromPriceRub : 0;
-                                          const priceChangeRubVal = currencyCode !== "RUB" ? courseDiffRub : profitLossFromPriceRub;
+                                          const totalNonFlowRub = signedFinalRubForPrice - signedInitialRubForPrice - chipFlowRub;
+                                          let courseDiffRub: number;
+                                          let profitLossFromPriceRub: number;
+                                          if (currencyCode !== "RUB") {
+                                            if (isMarketMode && profitLossFromPriceCur != null && rateEnd != null) {
+                                              profitLossFromPriceRub = Math.round(profitLossFromPriceCur * 100 * rateEnd);
+                                              courseDiffRub = totalNonFlowRub - profitLossFromPriceRub;
+                                            } else {
+                                              courseDiffRub = totalNonFlowRub;
+                                              profitLossFromPriceRub = totalNonFlowRub;
+                                            }
+                                          } else {
+                                            courseDiffRub = 0;
+                                            profitLossFromPriceRub = totalNonFlowRub;
+                                          }
+                                          const priceChangeRubVal = profitLossFromPriceRub;
                                           const priceChangeCurVal = showCurRow && profitLossFromPriceCur != null ? profitLossFromPriceCur : null;
                                           if (isBalanceMode) {
                                             return (
@@ -3166,6 +3180,16 @@ export default function AssetsDynamicsPage() {
                                                   showQtyRow={false}
                                                   showEmptyQtyRow={true}
                                                 />
+                                                {showCurRow && (
+                                                  <SummaryBlock
+                                                    title="Курсовые разницы"
+                                                    curVal={null}
+                                                    rubVal={courseDiffRub}
+                                                    amountColor={courseDiffRub >= 0 ? GREEN : RED}
+                                                    showQtyRow={false}
+                                                    showCurRow={false}
+                                                  />
+                                                )}
                                                 <SummaryBlock title={`На ${dateEndLabel}`} qtyVal={qtyEnd} curVal={showCurRow ? (finalDisplayCurResolved ?? null) : null} rubVal={finalDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
                                               </div>
                                             );
@@ -3182,6 +3206,16 @@ export default function AssetsDynamicsPage() {
                                                 showCurRow={showCurRow}
                                                 showQtyRow={false}
                                               />
+                                              {showCurRow && (
+                                                <SummaryBlock
+                                                  title="Курсовые разницы"
+                                                  curVal={null}
+                                                  rubVal={courseDiffRub}
+                                                  amountColor={courseDiffRub >= 0 ? GREEN : RED}
+                                                  showQtyRow={false}
+                                                  showCurRow={false}
+                                                />
+                                              )}
                                               <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? (finalDisplayCurResolved ?? null) : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
                                             </div>
                                           );

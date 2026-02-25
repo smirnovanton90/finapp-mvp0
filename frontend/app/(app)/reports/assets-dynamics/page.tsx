@@ -1309,15 +1309,16 @@ export default function AssetsDynamicsPage() {
           itemQuantitiesAtStart[item.id] = qtyRow?.[item.id] ?? null;
           const byDate = pointByDateByItem.get(item.id);
           const point = byDate?.get(dateKey);
-          const marketRub = point?.market ?? null;
+          // p.market — в валюте актива (копейки/центы)
+          const marketCents = point?.market ?? null;
           const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
           const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, dateKey, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
-          if (marketRub != null && qty != null && qty > 0) {
+          if (marketCents != null && qty != null && qty > 0) {
             // Цена за единицу: для отображения (кол-во · цена). Для крипты — market_price_rub, для MOEX — market/qty.
             const unitPrice =
               isCryptoItem(item) && point?.market_price_rub != null
                 ? point.market_price_rub
-                : Math.round(marketRub / qty);
+                : Math.round(marketCents / qty);
             itemUnitPriceCents[item.id] = unitPrice;
             const qtyAtStart = qtyRow?.[item.id] ?? 0;
             // Стоимость на начало дня = количество на начало × цена на дату (для строки таблицы).
@@ -1341,12 +1342,13 @@ export default function AssetsDynamicsPage() {
         effectiveSelectedItems.forEach((item) => {
           const byDate = pointByDateByItem.get(item.id);
           const point = byDate?.get(dateKey);
-          const marketRub = point?.market ?? null;
+          // point.market — в валюте актива (копейки/центы)
+          const marketCents = point?.market ?? null;
           const qty = itemQuantities[item.id] ?? null;
           const unitPrice = itemUnitPriceCents[item.id] ?? null;
           const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
           // Как на странице актива: valueFromPoint(point) = market. Рубли: при RUB — как есть, иначе (valCur/100)*rate*100.
-          const valueCents = marketRub ?? (qty != null && unitPrice != null ? unitPrice * qty : null);
+          const valueCents = marketCents ?? (qty != null && unitPrice != null ? unitPrice * qty : null);
           const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, dateKey, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
           itemValues[item.id] = valueCents;
           if (valueCents == null) {

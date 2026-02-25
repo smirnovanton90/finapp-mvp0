@@ -31,12 +31,14 @@ import { getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
 type ReportMetrics = {
   hasData: boolean;
   singleItemName: string | null;
-  primaryValueEndRub: number | null;
+  /** Основная стоимость на конец периода — в валюте актива (копейки/центы) */
+  primaryValueEndCents: number | null;
   /** Лейбл типа основной стоимости (как в карточке актива / дропдауне) или агрегированное «Разные типы основной стоимости» */
   primaryValueKindLabel: string | null;
   /** Признак того, что среди выбранных активов несколько разных типов основной стоимости */
   hasMixedPrimaryKinds: boolean;
-  avgDailyRub: number | null;
+  /** Среднедневная стоимость за период — в валюте актива (копейки/центы) */
+  avgDailyCents: number | null;
   incomeFromAsset: number;
   incomeFromSale: number;
   expenseForAsset: number;
@@ -49,9 +51,11 @@ type ReportMetrics = {
   yieldInvestmentsAnnual: number | null;
   /** Есть ли среди выбранных активов хотя бы один с primary_value_kind=MARKET */
   hasMarketPrimary: boolean;
-  /** Текущая рыночная стоимость на конец периода (агрегированно по рыночным активам) */
-  currentMarketValueRub: number | null;
+  /** Текущая рыночная стоимость на конец периода (агрегированно по рыночным активам) — в валюте актива (копейки/центы) */
+  currentMarketValueCents: number | null;
+  /** Прибыль от переоценки, в рублях */
   revaluationProfitRub: number | null;
+  /** Прибыль от изменения курса, в рублях */
   fxProfitRub: number | null;
 };
 
@@ -372,7 +376,8 @@ export default function AssetsProfitabilityPage() {
       return Boolean(tx.asset_link_type);
     });
 
-    const perItemCashflowsRub = new Map<
+    /** Денежные потоки по активу — суммы в валюте актива (копейки/центы) */
+    const perItemCashflows = new Map<
       number,
       {
         income_from_asset: number;
@@ -392,7 +397,7 @@ export default function AssetsProfitabilityPage() {
     relevantTxs.forEach((tx) => {
       const relatedId = tx.related_item_id!;
       const bucket =
-        perItemCashflowsRub.get(relatedId) ??
+        perItemCashflows.get(relatedId) ??
         {
           income_from_asset: 0,
           income_from_sale: 0,
@@ -426,7 +431,7 @@ export default function AssetsProfitabilityPage() {
         default:
           break;
       }
-      perItemCashflowsRub.set(relatedId, bucket);
+      perItemCashflows.set(relatedId, bucket);
     });
 
     const netProfit =
@@ -460,20 +465,20 @@ export default function AssetsProfitabilityPage() {
     let fxSum = 0;
     let hasMissingFx = false;
 
-    let currentMarketValueRub: number | null = null;
+    let currentMarketValueCents: number | null = null;
 
     effectiveItems.forEach((item) => {
       const startKeyForItem = itemStartKeyById.get(item.id) ?? rangeStartKey;
-      const startValueRub =
+      const startValueCents =
         startKeyForItem > rangeStartKey
           ? 0
           : valueByDate.get(item.id)?.get(rangeStartKey) ?? 0;
-      const endValueRub =
+      const endValueCents =
         valueByDate.get(item.id)?.get(rangeEndKey) ??
         (rangeEndKey < startKeyForItem ? 0 : 0);
 
-      const cash = perItemCashflowsRub.get(item.id);
-      const netCashRub = cash
+      const cash = perItemCashflows.get(item.id);
+      const netCash = cash
         ? cash.income_from_asset +
           cash.income_from_sale -
           cash.expense_for_asset -
@@ -481,7 +486,7 @@ export default function AssetsProfitabilityPage() {
           cash.investment_in_asset
         : 0;
 
-      const totalChangeMinusFlows = endValueRub - startValueRub - netCashRub;
+      const totalChangeMinusFlows = endValueCents - startValueCents - netCash;
 
       // Для рыночных активов считаем текущую рыночную стоимость как market (в валюте актива) на конец периода
       const history = costHistoryByItemId[item.id];
@@ -497,7 +502,7 @@ export default function AssetsProfitabilityPage() {
           }
         });
         if (lastMarket != null) {
-          currentMarketValueRub = (currentMarketValueRub ?? 0) + lastMarket;
+          currentMarketValueCents = (currentMarketValueCents ?? 0) + lastMarket;
         }
       }
 
@@ -531,8 +536,8 @@ export default function AssetsProfitabilityPage() {
         netCashCur += (sign * amt) / rate;
       });
 
-      const valueStartCur = startValueRub / rateStart;
-      const valueEndCur = endValueRub / rateEnd;
+      const valueStartCur = startValueCents / rateStart;
+      const valueEndCur = endValueCents / rateEnd;
       const deltaCur = valueEndCur - valueStartCur - netCashCur;
       const revaluationRub = deltaCur * rateStart;
       const fxRub = totalChangeMinusFlows - revaluationRub;
@@ -549,11 +554,11 @@ export default function AssetsProfitabilityPage() {
     // Теперь, когда известна текущая рыночная стоимость и денежные потоки, считаем рентабельность вложений
     if (hasMarketPrimary && investedBase > 0 && annualFactor > 0) {
       let returnInvestments: number | null = null;
-      if (incomeFromSale === 0 && currentMarketValueRub != null) {
+      if (incomeFromSale === 0 && currentMarketValueCents != null) {
         // Случай без продажи: доход от владения + текущая рыночная стоимость - вложения
         returnInvestments =
           incomeMinusExpense +
-          currentMarketValueRub -
+          currentMarketValueCents -
           expenseAcquisition -
           investmentInAsset;
       } else {
@@ -571,7 +576,7 @@ export default function AssetsProfitabilityPage() {
 
     const singleItemName =
       effectiveItems.length === 1 ? effectiveItems[0]?.name ?? null : null;
-    const primaryValueEndRub =
+    const primaryValueEndCents =
       effectiveItems.length === 1
         ? valueByDate.get(effectiveItems[0].id)?.get(rangeEndKey) ?? null
         : null;
@@ -599,10 +604,10 @@ export default function AssetsProfitabilityPage() {
     return {
       hasData: true,
       singleItemName,
-      primaryValueEndRub,
+      primaryValueEndCents,
       primaryValueKindLabel,
       hasMixedPrimaryKinds,
-      avgDailyRub: avgDaily,
+      avgDailyCents: avgDaily,
       incomeFromAsset,
       incomeFromSale,
       expenseForAsset,
@@ -612,7 +617,7 @@ export default function AssetsProfitabilityPage() {
       yieldAssetAnnual,
       yieldInvestmentsAnnual,
       hasMarketPrimary,
-      currentMarketValueRub,
+      currentMarketValueCents,
       revaluationProfitRub,
       fxProfitRub,
     };
@@ -762,13 +767,13 @@ export default function AssetsProfitabilityPage() {
                     {metrics.primaryValueKindLabel ?? "—"}
                   </span>
                 </div>
-                {metrics.singleItemName && metrics.primaryValueEndRub != null && (
+                {metrics.singleItemName && metrics.primaryValueEndCents != null && (
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-muted-foreground">
                       Основная стоимость на {rangeEndKey.split("-").reverse().join(".")}
                     </span>
                     <span className="font-medium">
-                      {formatRub(metrics.primaryValueEndRub)}
+                      {formatRub(metrics.primaryValueEndCents)}
                     </span>
                   </div>
                 )}
@@ -790,8 +795,8 @@ export default function AssetsProfitabilityPage() {
                   </span>
                   <span className="font-medium">
                     {formatRub(
-                      metrics.avgDailyRub != null
-                        ? Math.round(metrics.avgDailyRub)
+                      metrics.avgDailyCents != null
+                        ? Math.round(metrics.avgDailyCents)
                         : null
                     )}
                   </span>
@@ -860,7 +865,7 @@ export default function AssetsProfitabilityPage() {
                       Текущая рыночная стоимость
                     </span>
                     <span className="font-medium">
-                      {formatRub(metrics.currentMarketValueRub)}
+                      {formatRub(metrics.currentMarketValueCents)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2">

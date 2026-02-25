@@ -1223,34 +1223,36 @@ export default function AssetDetailPage() {
       yieldAssetAnnualCurrency = (incomeMinusExpenseCurrency / avgDailyCurrency) * annualFactor;
     }
 
-    const acquisitionRub = costs?.acquisition ?? 0;
-    const investedRub = costs?.invested ?? 0;
-    const investedBase = acquisitionRub + investedRub;
+    // costs.acquisition, costs.invested — в валюте актива (копейки/центы)
+    const acquisitionCents = costs?.acquisition ?? 0;
+    const investedCents = costs?.invested ?? 0;
+    const investedBase = acquisitionCents + investedCents;
 
     const hasMarketPrimary = primaryKind === "MARKET";
-    let currentMarketValueRub: number | null = null;
+    /** Рыночная стоимость: costs.market (валюта актива) или costs.market_value_rub (рубли) */
+    let currentMarketValueCents: number | null = null;
     if (hasMarketPrimary) {
-      currentMarketValueRub =
+      currentMarketValueCents =
         costs?.market ?? costs?.market_value_rub ?? null;
     }
 
     let yieldInvestmentsAnnual: number | null = null;
     if (hasMarketPrimary && investedBase > 0 && annualFactor > 0) {
       let returnInvestments: number | null = null;
-      if (incomeFromSale === 0 && currentMarketValueRub != null) {
+      if (incomeFromSale === 0 && currentMarketValueCents != null) {
         // Без продажи: доходы - расходы + текущая рыночная стоимость - вложения
         returnInvestments =
           incomeMinusExpense +
-          currentMarketValueRub -
-          acquisitionRub -
-          investedRub;
+          currentMarketValueCents -
+          acquisitionCents -
+          investedCents;
       } else if (incomeFromSale !== 0) {
         // С продажей: доходы - расходы + доходы от продажи - вложения
         returnInvestments =
           incomeMinusExpense +
           incomeFromSale -
-          acquisitionRub -
-          investedRub;
+          acquisitionCents -
+          investedCents;
       }
       if (returnInvestments != null) {
         yieldInvestmentsAnnual = (returnInvestments / investedBase) * annualFactor;
@@ -1277,10 +1279,10 @@ export default function AssetDetailPage() {
       investmentInAsset,
       yieldAssetAnnualRub,
       yieldAssetAnnualCurrency,
-      acquisitionRub,
-      investedRub,
+      acquisitionCents,
+      investedCents,
       hasMarketPrimary,
-      currentMarketValueRub,
+      currentMarketValueCents,
       yieldInvestmentsAnnual,
       revaluationProfitRub,
       fxProfitRub,
@@ -2310,13 +2312,13 @@ export default function AssetDetailPage() {
                         Расходы по приобретению актива
                       </span>
                       <span className="font-medium">
-                        {formatAmount(-profitability.acquisitionRub)}
+                        {formatAmount(-profitability.acquisitionCents)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-muted-foreground">Вложения в актив</span>
                       <span className="font-medium">
-                        {formatAmount(profitability.investedRub)}
+                        {formatAmount(profitability.investedCents)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
@@ -2324,8 +2326,8 @@ export default function AssetDetailPage() {
                         Текущая рыночная стоимость
                       </span>
                       <span className="font-medium">
-                        {profitability.currentMarketValueRub != null
-                          ? formatAmount(profitability.currentMarketValueRub)
+                        {profitability.currentMarketValueCents != null
+                          ? formatAmount(profitability.currentMarketValueCents)
                           : "—"}
                       </span>
                     </div>

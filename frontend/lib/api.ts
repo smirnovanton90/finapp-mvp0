@@ -73,10 +73,10 @@ export type ItemOut = {
   latest_market_value_rub?: number | null;
   /** Рыночная стоимость в валюте актива (центы), когда валюта не RUB. Слева на карточке. */
   latest_market_value_currency_cents?: number | null;
-  /** Стоимость приобретения в валюте актива (копейки для RUB, центы для иностранной валюты). Заполняется API в list/get. */
-  acquisition_rub?: number | null;
-  /** Стоимость вложенных средств в валюте актива (копейки для RUB, центы для иностранной валюты). Заполняется API в list/get. */
-  invested_rub?: number | null;
+  /** Стоимость приобретения в валюте актива (копейки для RUB, центы для иностранной валюты). Заполняется при маппинге из API (acquisition_rub). */
+  acquisitionCents?: number | null;
+  /** Стоимость вложенных средств в валюте актива (копейки для RUB, центы для иностранной валюты). Заполняется при маппинге из API (invested_rub). */
+  investedCents?: number | null;
 };
 
 export type ItemMarketValueOut = {
@@ -699,13 +699,15 @@ export async function fetchItems(options?: {
   const qs = params.toString();
   const res = await authFetch(`${API_BASE}/items${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json() as unknown[];
+  return raw.map(mapItemFromApi);
 }
 
 export async function fetchItem(itemId: number): Promise<ItemOut> {
   const res = await authFetch(`${API_BASE}/items/${itemId}`);
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  const raw = await res.json();
+  return mapItemFromApi(raw);
 }
 
 export async function fetchBanks(query?: string): Promise<BankOut[]> {
@@ -1071,7 +1073,7 @@ export async function createItem(payload: ItemCreate): Promise<ItemOut> {
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  return mapItemFromApi(await res.json());
 }
 
 export async function updateItem(
@@ -1089,7 +1091,7 @@ export async function updateItem(
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  return mapItemFromApi(await res.json());
 }
 
 export async function addItemSynonyms(
@@ -1101,7 +1103,7 @@ export async function addItemSynonyms(
     body: JSON.stringify({ add }),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  return mapItemFromApi(await res.json());
 }
 
 export async function uploadItemPhoto(itemId: number, file: File): Promise<ItemOut> {
@@ -1112,7 +1114,7 @@ export async function uploadItemPhoto(itemId: number, file: File): Promise<ItemO
     body: formData,
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  return mapItemFromApi(await res.json());
 }
 
 export async function archiveItem(id: number): Promise<ItemOut> {
@@ -1120,7 +1122,7 @@ export async function archiveItem(id: number): Promise<ItemOut> {
       method: "PATCH",
     });
     if (!res.ok) throw new Error(await readError(res));
-    return res.json();
+    return mapItemFromApi(await res.json());
   }
 
 export async function closeItem(
@@ -1148,7 +1150,17 @@ export async function closeItem(
     ...(body ? { body } : {}),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return res.json();
+  return mapItemFromApi(await res.json());
+}
+
+/** Маппинг ответа API item: acquisition_rub → acquisitionCents, invested_rub → investedCents (значения в валюте актива). */
+function mapItemFromApi(raw: unknown): ItemOut {
+  const r = raw as Record<string, unknown>;
+  return {
+    ...r,
+    acquisitionCents: (r.acquisitionCents ?? r.acquisition_rub) as number | null | undefined,
+    investedCents: (r.investedCents ?? r.invested_rub) as number | null | undefined,
+  } as ItemOut;
 }
 
 /** Маппинг ответа API: *_rub → поля в валюте актива (balance, acquisition, invested, market, income, expense). */

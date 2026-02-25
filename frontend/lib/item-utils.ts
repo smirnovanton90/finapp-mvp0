@@ -13,9 +13,9 @@ export function getItemPrimaryValueCents(item: ItemOut): number {
     }
     if (item.latest_market_value_rub != null) return item.latest_market_value_rub;
   }
-  // acquisition_rub / invested_rub на ItemOut — в валюте актива (копейки/центы)
-  if (kind === "ACQUISITION" && item.acquisition_rub != null) return item.acquisition_rub;
-  if (kind === "INVESTED" && item.invested_rub != null) return item.invested_rub;
+  // acquisitionCents / investedCents на ItemOut — в валюте актива (копейки/центы)
+  if (kind === "ACQUISITION" && item.acquisitionCents != null) return item.acquisitionCents;
+  if (kind === "INVESTED" && item.investedCents != null) return item.investedCents;
   return item.current_value_rub;
 }
 

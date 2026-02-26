@@ -143,6 +143,7 @@ export function AddEditItemFormModal({
   const [quantityUnitsStr, setQuantityUnitsStr] = useState("");
   const [moexPurchasePrice, setMoexPurchasePrice] = useState("");
   const [cryptoPurchasePrice, setCryptoPurchasePrice] = useState("");
+  const [historicalAcquisitionCost, setHistoricalAcquisitionCost] = useState("");
   const [commissionEnabled, setCommissionEnabled] = useState(false);
   const [commissionAmount, setCommissionAmount] = useState("");
   const [commissionPaymentItemId, setCommissionPaymentItemId] = useState("");
@@ -252,6 +253,7 @@ export function AddEditItemFormModal({
       setDepositTermDays(editingItem.deposit_term_days != null ? String(editingItem.deposit_term_days) : "");
       setPositionLots(editingItem.position_lots != null ? String(editingItem.position_lots) : "");
       setMoexPurchasePrice("");
+      setHistoricalAcquisitionCost(editingItem.acquisitionCents != null && editingItem.acquisitionCents !== 0 ? formatAmount(editingItem.acquisitionCents) : "");
       const commissionTx = transactionsForEdit.find((tx) => tx.related_item_id === editingItem.id && tx.source === "AUTO_ITEM_COMMISSION");
       if (commissionTx) {
         setCommissionEnabled(true);
@@ -547,6 +549,7 @@ export function AddEditItemFormModal({
     setQuantityUnitsStr("");
     setMoexPurchasePrice("");
     setCryptoPurchasePrice("");
+    setHistoricalAcquisitionCost("");
     setCommissionEnabled(false);
     setCommissionAmount("");
     setCommissionPaymentItemId("");
@@ -1295,13 +1298,20 @@ export function AddEditItemFormModal({
       if (isMoexType && selectedInstrument) {
         payload.instrument_id = selectedInstrument.secid;
         payload.instrument_board_id = instrumentBoardId || null;
-        payload.position_lots = Number(positionLots.replace(/\s/g, ""));
-        if (
-          resolvedHistoryStatus === "NEW" &&
-          moexPurchasePrice.trim() &&
-          moexPurchasePriceCents != null
-        ) {
+        const lots = Number(positionLots.replace(/\s/g, ""));
+        payload.position_lots = lots;
+        if (resolvedHistoryStatus === "NEW" && moexPurchasePrice.trim() && moexPurchasePriceCents != null) {
           payload.opening_price_cents = moexPurchasePriceCents;
+        }
+        if (resolvedHistoryStatus === "HISTORICAL" && historicalAcquisitionCost.trim()) {
+          const priceCents = parseRubToCents(historicalAcquisitionCost);
+          if (Number.isFinite(priceCents) && priceCents >= 0) {
+            payload.opening_price_cents = priceCents;
+            const lotSize = selectedInstrument?.lot_size ?? 1;
+            if (lots > 0) {
+              payload.acquisition_value_rub = Math.round(priceCents * lots * lotSize);
+            }
+          }
         }
         payload.commission_enabled = commissionEnabled;
         if (commissionEnabled) {
@@ -1317,7 +1327,15 @@ export function AddEditItemFormModal({
         if (resolvedHistoryStatus === "NEW" && cryptoPurchasePriceCents != null) {
           payload.opening_price_cents = cryptoPurchasePriceCents;
         }
-        // instrument_board_id не передаём — бэкенд подставит CRYPTO_BOARD_ID
+        if (resolvedHistoryStatus === "HISTORICAL" && historicalAcquisitionCost.trim()) {
+          const priceCents = parseRubToCents(historicalAcquisitionCost);
+          if (Number.isFinite(priceCents) && priceCents >= 0) {
+            payload.opening_price_cents = priceCents;
+            if (cryptoQuantityUnits > 0) {
+              payload.acquisition_value_rub = Math.round(priceCents * cryptoQuantityUnits);
+            }
+          }
+        }
       }
 
       if (showBankAccountFields) {
@@ -1741,6 +1759,18 @@ export function AddEditItemFormModal({
                           : "Например: 83,32"
                       }
                     />
+                  )}
+                  {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
+                    <div className="grid gap-1">
+                      <TextField
+                        label="Цена приобретения"
+                        value={historicalAcquisitionCost}
+                        onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))}
+                        onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))}
+                        placeholder={isCryptoType ? "Например: 83,32" : "Например: 123,45"}
+                      />
+                      <p className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>Укажите среднюю цену приобретения позиции с момента её появления у вас</p>
+                    </div>
                   )}
                   {isMoexType && moexDatePricesLoading && <p className="text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка цен...</p>}
                   {isMoexType && marketPrice && moexInitialValueCents != null && (

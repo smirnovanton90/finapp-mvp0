@@ -2130,29 +2130,43 @@ export default function AssetDetailPage() {
                                   style={{ left: costChartTooltipLeft != null ? `${costChartTooltipLeft}px` : `${costChartHoverPoint.x}px`, top: 0, transform: "translate(-50%, 0)", backgroundColor: MODAL_BG }}
                                 >
                                   <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartDate(new Date(costChartDisplaySeries[costChartHoverIndex]!.date))}</div>
-                                  <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
-                                    <span>
-                                      {costHistoryOpen === "balance" && "Балансовая стоимость"}
-                                      {costHistoryOpen === "acquisition" && "Стоимость приобретения"}
-                                      {costHistoryOpen === "invested" && "Стоимость вложенных средств"}
-                                      {costHistoryOpen === "market" && "Рыночная стоимость"}
-                                    </span>
-                                    <div className="flex items-center justify-end gap-2">
-                                      <AmountWithCurrency valueCents={Math.round(costChartDisplaySeries[costChartHoverIndex]!.valueRub * 100)} currencyCode={costChartCurrency === "RUB" ? "RUB" : item.currency_code} className="justify-end" />
-                                    </div>
-                                  </div>
-                                  {costHistoryOpen === "market" && (() => {
-                                    const pt = costChartSeries[costChartHoverIndex!] as { marketQuantityUnits?: number; marketPriceRub?: number };
-                                    if (pt?.marketQuantityUnits != null || pt?.marketPriceRub != null) {
-                                      return (
-                                        <div className="mt-2 space-y-1 text-[13px]" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                          {pt.marketQuantityUnits != null && <div>Количество: {pt.marketQuantityUnits.toLocaleString("ru-RU")} шт.</div>}
-                                          {pt.marketPriceRub != null && <div className="flex items-center gap-2">Цена на дату: <AmountWithCurrency valueCents={pt.marketPriceRub} currencyCode={item.currency_code} /></div>}
+                                  {costHistoryOpen === "market" ? (() => {
+                                    const pt = costChartSeries[costChartHoverIndex!] as { marketQuantityUnits?: number; marketPriceRub?: number; valueRub: number; date: string };
+                                    const isCurrencyAsset = item.currency_code && item.currency_code !== "RUB";
+                                    const valueCurrencyCents = Math.round(pt.valueRub * 100);
+                                    const rate = isCurrencyAsset ? getRateForDateKey(pt.date) : null;
+                                    const valueRubCents = isCurrencyAsset && rate != null && rate > 0 ? Math.round(pt.valueRub * rate * 100) : valueCurrencyCents;
+                                    return (
+                                      <>
+                                        {pt.marketQuantityUnits != null && (
+                                          <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                                            <span>Количество</span>
+                                            <span className="tabular-nums">{pt.marketQuantityUnits.toLocaleString("ru-RU")}</span>
+                                          </div>
+                                        )}
+                                        <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                                          <span>Рыночная стоимость</span>
+                                          <div className="flex flex-col items-end gap-0.5">
+                                            <AmountWithCurrency valueCents={valueRubCents} currencyCode="RUB" className="justify-end" />
+                                            {isCurrencyAsset && (
+                                              <AmountWithCurrency valueCents={valueCurrencyCents} currencyCode={item.currency_code} className="justify-end" />
+                                            )}
+                                          </div>
                                         </div>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
+                                      </>
+                                    );
+                                  })() : (
+                                    <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                                      <span>
+                                        {costHistoryOpen === "balance" && "Балансовая стоимость"}
+                                        {costHistoryOpen === "acquisition" && "Стоимость приобретения"}
+                                        {costHistoryOpen === "invested" && "Стоимость вложенных средств"}
+                                      </span>
+                                      <div className="flex items-center justify-end gap-2">
+                                        <AmountWithCurrency valueCents={Math.round(costChartDisplaySeries[costChartHoverIndex]!.valueRub * 100)} currencyCode={costChartCurrency === "RUB" ? "RUB" : item.currency_code} className="justify-end" />
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               <svg ref={costChartSvgRef} viewBox={`0 0 ${costChartGeometry.width} ${costChartGeometry.height}`} className="h-full w-full cursor-pointer" style={{ overflow: "visible" }} onMouseMove={handleCostChartPointerMove} onMouseLeave={() => setCostChartHoverIndex(null)}>
@@ -2829,7 +2843,7 @@ export default function AssetDetailPage() {
             getBankLogoUrl={itemCounterpartyLogoUrl}
             getBankName={itemCounterpartyName}
             getItemBalance={getItemPrimaryValueCents}
-            onSuccess={load}
+            onSuccess={async () => { await load(); await refetchCostHistory(); }}
           />
         )}
         {!item.instrument_id && (

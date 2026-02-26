@@ -1,9 +1,12 @@
+import logging
 from datetime import datetime, timedelta, date
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import ProgrammingError
 
@@ -893,19 +896,32 @@ def get_instrument_prices(
                 break
     if not engine or not market:
         raise HTTPException(status_code=400, detail="Engine or market is not available")
-    try:
-        payload = _moex_get(
-            f"history/engines/{engine}/markets/{market}/boards/{selected_board_id}/securities/{secid}.json",
-            params={
-                "iss.meta": "off",
-                "from": from_date.isoformat(),
-                "till": to_date.isoformat(),
-            },
-        )
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    history_rows: list[dict[str, Any]] = []
+    start = 0
+    page_size = 100
+    while True:
+        try:
+            payload = _moex_get(
+                f"history/engines/{engine}/markets/{market}/boards/{selected_board_id}/securities/{secid}.json",
+                params={
+                    "iss.meta": "off",
+                    "from": from_date.isoformat(),
+                    "till": to_date.isoformat(),
+                    "start": start,
+                },
+            )
+        except requests.RequestException as exc:
+            if not history_rows:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            break
+        page_rows = _table_rows(payload, "history")
+        if not page_rows:
+            break
+        history_rows.extend(page_rows)
+        if len(page_rows) < page_size:
+            break
+        start += len(page_rows)
 
-    history_rows = _table_rows(payload, "history")
     results: list[MarketPriceOut] = []
     for row in history_rows:
         trade_date_raw = _normalize_text(row.get("TRADEDATE"))
@@ -960,3 +976,117 @@ def get_instrument_prices(
 
     db.commit()
     return results
+
+
+def ensure_moex_history_prices(
+    db: Session,
+    secid: str,
+    board_id: str,
+    date_from: date,
+    date_to: date,
+) -> None:
+    """Load MOEX history prices into market_prices if coverage is insufficient."""
+    existing_count = db.execute(
+        select(func.count()).select_from(MarketPrice).where(
+            MarketPrice.instrument_id == secid,
+            MarketPrice.board_id == board_id,
+            MarketPrice.price_date >= date_from,
+            MarketPrice.price_date <= date_to,
+        )
+    ).scalar() or 0
+    total_days = (date_to - date_from).days + 1
+    trading_days_est = int(total_days * 5 / 7)
+    logger.info("ensure_moex_history_prices %s: existing=%d, est=%d", secid, existing_count, trading_days_est)
+    if existing_count >= max(trading_days_est * 0.8, 1):
+        return
+
+    instrument = db.get(MarketInstrument, secid)
+    if not instrument:
+        try:
+            details, _ = _fetch_instrument_details(secid)
+            instrument = _upsert_instrument(db, details)
+        except Exception:
+            logger.exception("ensure_moex_history_prices: failed to fetch instrument %s", secid)
+            return
+    else:
+        try:
+            details, _ = _fetch_instrument_details(secid)
+        except Exception:
+            details = {}
+
+    engine = details.get("engine") or instrument.engine
+    market_field = details.get("market") or instrument.market
+    if not engine or not market_field:
+        logger.warning("ensure_moex_history_prices %s: no engine=%s or market=%s", secid, engine, market_field)
+        return
+
+    history_rows: list[dict[str, Any]] = []
+    start = 0
+    page_size = 100
+    while True:
+        try:
+            payload = _moex_get(
+                f"history/engines/{engine}/markets/{market_field}/boards/{board_id}/securities/{secid}.json",
+                params={
+                    "iss.meta": "off",
+                    "from": date_from.isoformat(),
+                    "till": date_to.isoformat(),
+                    "start": start,
+                },
+            )
+        except Exception:
+            break
+        page_rows = _table_rows(payload, "history")
+        if not page_rows:
+            break
+        history_rows.extend(page_rows)
+        if len(page_rows) < page_size:
+            break
+        start += len(page_rows)
+
+    for row in history_rows:
+        td_raw = _normalize_text(row.get("TRADEDATE"))
+        if not td_raw:
+            continue
+        try:
+            td = datetime.strptime(td_raw, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        pv = row.get("CLOSE") or row.get("MARKETPRICE") or row.get("LAST")
+        av = row.get("ACCINT")
+        yv = row.get("YIELD")
+        po = MarketPriceOut(
+            instrument_id=secid, board_id=board_id, price_date=td, price_time=None,
+            price_cents=_to_cents(pv), price_percent_bp=_to_bp(pv),
+            accint_cents=_to_cents(av), yield_bp=_to_bp(yv),
+            currency_code=_normalize_currency_code(_get_field(row, "CURRENCYID")) or instrument.currency_code,
+        )
+        if instrument.type_code == "bonds":
+            fvc = instrument.face_value_cents or details.get("face_value_cents")
+            _apply_bond_price(po, fvc)
+        else:
+            po.price_percent_bp = None
+
+        ex = db.execute(
+            select(MarketPrice).where(
+                MarketPrice.instrument_id == secid,
+                MarketPrice.board_id == board_id,
+                MarketPrice.price_date == td,
+            )
+        ).scalar_one_or_none()
+        if not ex:
+            ex = MarketPrice(instrument_id=secid, board_id=board_id, price_date=td)
+        ex.price_cents = po.price_cents
+        ex.price_percent_bp = po.price_percent_bp
+        ex.accint_cents = po.accint_cents
+        ex.yield_bp = po.yield_bp
+        ex.currency_code = po.currency_code
+        ex.source = "MOEX"
+        db.add(ex)
+
+    logger.info("ensure_moex_history_prices %s: loaded %d rows from MOEX ISS", secid, len(history_rows))
+    try:
+        db.commit()
+    except Exception:
+        logger.exception("ensure_moex_history_prices %s: commit failed", secid)
+        db.rollback()

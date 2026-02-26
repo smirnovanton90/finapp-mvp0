@@ -695,6 +695,7 @@ export default function Page() {
   const [quantityUnitsStr, setQuantityUnitsStr] = useState("");
   const [moexPurchasePrice, setMoexPurchasePrice] = useState("");
   const [cryptoPurchasePrice, setCryptoPurchasePrice] = useState("");
+  const [historicalAcquisitionCost, setHistoricalAcquisitionCost] = useState("");
   const [commissionEnabled, setCommissionEnabled] = useState(false);
   const [commissionAmount, setCommissionAmount] = useState("");
   const [commissionPaymentItemId, setCommissionPaymentItemId] = useState("");
@@ -825,6 +826,7 @@ export default function Page() {
     setPositionLots("");
     setQuantityUnitsStr("");
     setMoexPurchasePrice("");
+    setHistoricalAcquisitionCost("");
     setCommissionEnabled(false);
     setCommissionAmount("");
     setCommissionPaymentItemId("");
@@ -2348,6 +2350,7 @@ export default function Page() {
       setQuantityUnitsStr("");
       setMoexPurchasePrice("");
       setCryptoPurchasePrice("");
+      setHistoricalAcquisitionCost("");
       setMarketPrice(null);
       return;
     }
@@ -2607,6 +2610,7 @@ export default function Page() {
     setPositionLots("");
     setMoexPurchasePrice("");
     setCryptoPurchasePrice("");
+    setHistoricalAcquisitionCost("");
     setMarketPrice(null);
     setMoexDatePrices({});
     setMoexDatePricesLoading(false);
@@ -2732,6 +2736,7 @@ export default function Page() {
     setQuantityUnitsStr(item.quantity_units != null ? String(item.quantity_units) : "");
     setMoexPurchasePrice("");
     setCryptoPurchasePrice("");
+    setHistoricalAcquisitionCost(item.acquisitionCents != null && item.acquisitionCents !== 0 ? formatAmount(item.acquisitionCents) : "");
     if (item.instrument_id && item.history_status === "NEW") {
       const commissionTx = txs.find(
         (tx) => tx.related_item_id === item.id && tx.source === "AUTO_ITEM_COMMISSION"
@@ -3251,13 +3256,20 @@ export default function Page() {
       if (isMoexType && selectedInstrument) {
         payload.instrument_id = selectedInstrument.secid;
         payload.instrument_board_id = instrumentBoardId || null;
-        payload.position_lots = Number(positionLots.replace(/\s/g, ""));
-        if (
-          resolvedHistoryStatus === "NEW" &&
-          moexPurchasePrice.trim() &&
-          moexPurchasePriceCents != null
-        ) {
+        const lots = Number(positionLots.replace(/\s/g, ""));
+        payload.position_lots = lots;
+        if (resolvedHistoryStatus === "NEW" && moexPurchasePrice.trim() && moexPurchasePriceCents != null) {
           payload.opening_price_cents = moexPurchasePriceCents;
+        }
+        if (resolvedHistoryStatus === "HISTORICAL" && historicalAcquisitionCost.trim()) {
+          const priceCents = parseRubToCents(historicalAcquisitionCost);
+          if (Number.isFinite(priceCents) && priceCents >= 0) {
+            payload.opening_price_cents = priceCents;
+            const lotSize = selectedInstrument?.lot_size ?? 1;
+            if (lots > 0) {
+              payload.acquisition_value_rub = Math.round(priceCents * lots * lotSize);
+            }
+          }
         }
         payload.commission_enabled = commissionEnabled;
         if (commissionEnabled) {
@@ -3272,6 +3284,15 @@ export default function Page() {
         payload.quantity_units = cryptoQuantityUnits;
         if (resolvedHistoryStatus === "NEW" && cryptoPurchasePriceCents != null) {
           payload.opening_price_cents = cryptoPurchasePriceCents;
+        }
+        if (resolvedHistoryStatus === "HISTORICAL" && historicalAcquisitionCost.trim()) {
+          const priceCents = parseRubToCents(historicalAcquisitionCost);
+          if (Number.isFinite(priceCents) && priceCents >= 0) {
+            payload.opening_price_cents = priceCents;
+            if (cryptoQuantityUnits > 0) {
+              payload.acquisition_value_rub = Math.round(priceCents * cryptoQuantityUnits);
+            }
+          }
         }
       }
 
@@ -4401,6 +4422,19 @@ export default function Page() {
                         : "Например: 83,32"
                     }
                   />
+                )}
+                {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
+                  <div className="grid gap-1">
+                    <TextField
+                      label="Цена приобретения"
+                      value={historicalAcquisitionCost}
+                      onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))}
+                      onBlur={() => setHistoricalAcquisitionCost((prev) => normalizeRubOnBlur(prev))}
+                      inputMode="decimal"
+                      placeholder={isCryptoType ? "Например: 83,32" : "Например: 123,45"}
+                    />
+                    <p className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>Укажите среднюю цену приобретения позиции с момента её появления у вас</p>
+                  </div>
                 )}
                 {isCryptoType && marketPrice && (marketPrice.price_usd_cents != null || marketPrice.price_cents != null) && (
                   <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>

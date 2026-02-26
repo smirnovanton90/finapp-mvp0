@@ -18,6 +18,7 @@ import {
   ChevronUp,
   Plus,
   MessageSquare,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -418,6 +419,18 @@ export default function AssetDetailPage() {
     if (!item?.id) return [];
     return dynamicsTxs
       .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_EXPENSE")
+      .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
+  }, [item?.id, dynamicsTxs]);
+  const purchaseTxsForAsset = useMemo(() => {
+    if (!item?.id) return [];
+    return dynamicsTxs
+      .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_PURCHASE")
+      .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
+  }, [item?.id, dynamicsTxs]);
+  const investmentTxsForAsset = useMemo(() => {
+    if (!item?.id) return [];
+    return dynamicsTxs
+      .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_INVESTMENT")
       .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
   }, [item?.id, dynamicsTxs]);
 
@@ -1762,19 +1775,8 @@ export default function AssetDetailPage() {
                         </div>
                         {isExpanded && costHistoryOpen === key && (
                           <div className="p-4 pt-0" style={{ backgroundColor: "transparent" }}>
-                          {(key === "market" && (!item.instrument_id || (item.currency_code && item.currency_code !== "RUB"))) || (key === "balance" && item.currency_code && item.currency_code !== "RUB") ? (
-                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                              {key === "market" && !item.instrument_id ? (
-                                <Button
-                                  type="button"
-                                  className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
-                                  style={{ backgroundColor: ACCENT }}
-                                  onClick={() => setEditMarketValueModalOpen(true)}
-                                >
-                                  <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                                  <span style={{ color: "white", opacity: 0.85 }}>Добавить/изменить рыночную стоимость</span>
-                                </Button>
-                              ) : <div />}
+                          {item.currency_code && item.currency_code !== "RUB" ? (
+                            <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
                               {item.currency_code && item.currency_code !== "RUB" && (
                                 <SegmentedSelector
                                   options={[
@@ -1870,6 +1872,250 @@ export default function AssetDetailPage() {
                             </>
                             );
                           })() : null}
+                          {key === "balance" && (
+                            <div className="mt-3 flex justify-center">
+                              <Button
+                                type="button"
+                                className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                                style={{ backgroundColor: ACCENT }}
+                                onClick={() => router.push(`/transactions?item_id=${item.id}`)}
+                              >
+                                <ExternalLink className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                                <span style={{ color: "white", opacity: 0.85 }}>Просмотреть транзакции</span>
+                              </Button>
+                            </div>
+                          )}
+                          {(key === "acquisition" || key === "invested") && (() => {
+                            const txs = key === "acquisition" ? purchaseTxsForAsset : investmentTxsForAsset;
+                            const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
+                            const isCurrencyAsset = currencyCode !== "RUB";
+                            const costValueCents = key === "acquisition" ? (costs.acquisition ?? 0) : (costs.invested ?? 0);
+                            const rateOnOpen =
+                              isCurrencyAsset && item.open_date
+                                ? getRateForDate(fxRatesByDate, item.open_date, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
+                                : null;
+                            // tx.amount в валюте primary_item (обычно RUB копейки); конвертируем в валюту актива
+                            const txsSumAssetCents = txs.reduce((sum, tx) => {
+                              const amt = tx.amount ?? 0;
+                              if (!isCurrencyAsset) return sum + amt;
+                              const pi = itemsById.get(tx.primary_item_id) ?? null;
+                              const txCur = (pi?.currency_code ?? "RUB").toUpperCase();
+                              const d = toTxDateKey(tx.transaction_date);
+                              const rateTx = txCur === "RUB" ? 1 : getRateForDate(fxRatesByDate, d, txCur, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
+                              const rubCents = rateTx != null && rateTx > 0 ? Math.round(amt * rateTx) : amt;
+                              const rateA = getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
+                              return sum + (rateA != null && rateA > 0 ? Math.round(rubCents / rateA) : rubCents);
+                            }, 0);
+                            const initialRowAssetCents = costValueCents - txsSumAssetCents;
+                            const hasImplicitInitial = Math.abs(initialRowAssetCents) > 1;
+                            const hasTxs = txs.length > 0;
+                            if (!hasTxs && !hasImplicitInitial) {
+                              return (
+                                <p className="text-sm mt-3" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                  {key === "acquisition" ? "Нет операций приобретения." : "Нет операций вложений."}
+                                </p>
+                              );
+                            }
+                            return (
+                              <table className="w-full text-left border-collapse text-sm mt-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                                <tbody>
+                                  {hasImplicitInitial && (() => {
+                                    const histRubCents =
+                                      isCurrencyAsset && rateOnOpen != null && rateOnOpen > 0
+                                        ? Math.round((initialRowAssetCents / 100) * rateOnOpen * 100)
+                                        : initialRowAssetCents;
+                                    const histCurrencyUnits = isCurrencyAsset ? initialRowAssetCents / 100 : null;
+                                    const dateLabel = item.open_date
+                                      ? new Date(item.open_date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })
+                                      : "—";
+                                    return (
+                                      <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                        <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{dateLabel}</td>
+                                        <td className="py-1.5 pr-4 align-middle" colSpan={1}>
+                                          <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Начальная стоимость</span>
+                                        </td>
+                                        <td className="py-1.5 pr-4 align-middle">
+                                          <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>
+                                        </td>
+                                        {isCurrencyAsset && (
+                                          <>
+                                            <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                              <div className="flex items-center gap-2 tabular-nums w-full">
+                                                <CurrencyChip code={currencyCode} />
+                                                <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{histCurrencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(histCurrencyUnits) : "–"}</span>
+                                              </div>
+                                            </td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>{rateOnOpen != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rateOnOpen) : "–"}</td>
+                                          </>
+                                        )}
+                                        <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                          <div className="flex items-center gap-2 tabular-nums w-full">
+                                            <CurrencyChip code="RUB" />
+                                            <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{formatRub(histRubCents)}</span>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })()}
+                                  {txs.map((tx) => {
+                                    const d = toTxDateKey(tx.transaction_date);
+                                    const primaryItem = itemsById.get(tx.primary_item_id) ?? null;
+                                    const txCurrency = (primaryItem?.currency_code ?? "RUB").toUpperCase();
+                                    const rateTxCur =
+                                      txCurrency === "RUB"
+                                        ? 1
+                                        : getRateForDate(fxRatesByDate, d, txCurrency, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
+                                    const rateAsset =
+                                      isCurrencyAsset
+                                        ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
+                                        : null;
+                                    const rubCentsTx =
+                                      rateTxCur != null && rateTxCur > 0
+                                        ? Math.round((tx.amount ?? 0) * rateTxCur)
+                                        : (tx.amount ?? 0);
+                                    const assetCentsTx =
+                                      isCurrencyAsset && rateAsset != null && rateAsset > 0
+                                        ? Math.round(rubCentsTx / rateAsset)
+                                        : null;
+                                    const currencyUnits = isCurrencyAsset && assetCentsTx != null ? assetCentsTx / 100 : null;
+                                    const categoryPath = tx.category_id != null ? (categoryLookup.idToPath.get(tx.category_id) ?? []) : [];
+                                    const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : "–";
+                                    return (
+                                      <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                        <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
+                                        <td className="py-1.5 pr-4 align-middle">
+                                          {tx.category_id != null ? (
+                                            <div className="flex items-center gap-2">
+                                              <CategoryIconImage
+                                                categoryId={tx.category_id}
+                                                categoryLookup={categoryLookup}
+                                                apiBase={API_BASE}
+                                                size={18}
+                                                className="h-4 w-4 rounded-sm object-contain shrink-0"
+                                                fallbackIconColor={ACTIVE_TEXT_DARK}
+                                              />
+                                              <span style={{ color: ACTIVE_TEXT_DARK }}>{categoryLabel}</span>
+                                            </div>
+                                          ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                        </td>
+                                        <td className="py-1.5 pr-4 align-middle">
+                                          {tx.comment?.trim() ? (
+                                            <div className="flex items-center gap-1.5" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                              <MessageSquare className="h-3.5 w-3.5 shrink-0" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                                              <span className="text-xs">{tx.comment.trim()}</span>
+                                            </div>
+                                          ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
+                                        </td>
+                                        {isCurrencyAsset && (
+                                          <>
+                                            <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                              <div className="flex items-center gap-2 tabular-nums w-full">
+                                                <CurrencyChip code={currencyCode} />
+                                                <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"}</span>
+                                              </div>
+                                            </td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>{rateAsset != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rateAsset) : "–"}</td>
+                                          </>
+                                        )}
+                                        <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                          <div className="flex items-center gap-2 tabular-nums w-full">
+                                            <CurrencyChip code="RUB" />
+                                            <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{formatRub(rubCentsTx)}</span>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            );
+                          })()}
+                          {key === "market" && !item.instrument_id && !isCryptoItem(item) && (() => {
+                            const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
+                            const isCurrencyAsset = currencyCode !== "RUB";
+                            const mvsSorted = [...marketValues].sort(
+                              (a, b) => a.value_date.localeCompare(b.value_date)
+                            );
+                            return (
+                              <div className="flex gap-4 mt-3 items-start">
+                                <div className="w-1/2 min-w-0">
+                                  {mvsSorted.length === 0 ? (
+                                    <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                      Нет данных о рыночной стоимости.
+                                    </p>
+                                  ) : (
+                                    <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                                      <tbody>
+                                        {mvsSorted.map((mv) => {
+                                          const dateLabel = new Date(mv.value_date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+                                          const rubCents = mv.value_rub;
+                                          const assetCents = mv.value_currency_cents ?? null;
+                                          const rateOnDate =
+                                            isCurrencyAsset
+                                              ? getRateForDate(fxRatesByDate, mv.value_date, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
+                                              : null;
+                                          const displayAssetCents =
+                                            assetCents != null
+                                              ? assetCents
+                                              : (isCurrencyAsset && rateOnDate != null && rateOnDate > 0
+                                                  ? Math.round(rubCents / rateOnDate)
+                                                  : null);
+                                          const displayRubCents =
+                                            rubCents !== 0
+                                              ? rubCents
+                                              : (assetCents != null && rateOnDate != null && rateOnDate > 0
+                                                  ? Math.round((assetCents / 100) * rateOnDate * 100)
+                                                  : 0);
+                                          const currencyUnits = displayAssetCents != null ? displayAssetCents / 100 : null;
+                                          return (
+                                            <tr key={mv.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                              <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{dateLabel}</td>
+                                              {isCurrencyAsset && (
+                                                <>
+                                                  <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                                    <div className="flex items-center gap-2 tabular-nums w-full">
+                                                      <CurrencyChip code={currencyCode} />
+                                                      <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>
+                                                        {currencyUnits != null
+                                                          ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits)
+                                                          : "–"}
+                                                      </span>
+                                                    </div>
+                                                  </td>
+                                                  <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                                    {rateOnDate != null
+                                                      ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rateOnDate)
+                                                      : "–"}
+                                                  </td>
+                                                </>
+                                              )}
+                                              <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
+                                                <div className="flex items-center gap-2 tabular-nums w-full">
+                                                  <CurrencyChip code="RUB" />
+                                                  <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{formatRub(displayRubCents)}</span>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </div>
+                                <div className="w-1/2 flex justify-center items-start pt-1">
+                                  <Button
+                                    type="button"
+                                    className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
+                                    style={{ backgroundColor: ACCENT }}
+                                    onClick={() => setEditMarketValueModalOpen(true)}
+                                  >
+                                    <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                                    <span style={{ color: "white", opacity: 0.85 }}>Добавить/изменить рыночную стоимость</span>
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })()}
                           {((key === "balance" && dynamicsBalance) || (key === "market" && dynamicsMarket)) && (() => {
                             const d = (key === "balance" ? dynamicsBalance : dynamicsMarket)!;
                             const formatCur = (v: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
@@ -2041,17 +2287,15 @@ export default function AssetDetailPage() {
         {costs && (
           <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
-              <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Рентабельность</h3>
+              <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Доходы и расходы</h3>
               <div className="flex flex-col gap-2">
                 {(["income", "expense"] as const).map((key) => {
                   const label = key === "income" ? "Доход" : "Расход";
-                  // costs.income / costs.expense — в валюте актива (копейки/центы), сумма транзакций по активу
                   const rubTotalCents = key === "income" ? costs.income : costs.expense;
                   const isExpanded = rentabilityOpen === key;
                   const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
                   const isCurrencyAsset = currencyCode !== "RUB";
                   const rate = isCurrencyAsset ? getRateForDateKey(todayKey) : null;
-                  // Для валютных активов считаем сумму в валюте актива так, чтобы при умножении на курс получались те же рубли.
                   const assetTotalCents =
                     isCurrencyAsset && rate != null && rate > 0 ? Math.round(rubTotalCents / rate) : null;
                   const txs = key === "income" ? incomeTxsForAsset : expenseTxsForAsset;
@@ -2116,12 +2360,10 @@ export default function AssetDetailPage() {
                                       isCurrencyAsset
                                         ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
                                         : null;
-                                    // Рублёвый эквивалент операции: из валюты транзакции в RUB одним шагом
                                     const rubCentsTx =
                                       rateTxCur != null && rateTxCur > 0
                                         ? Math.round((tx.amount ?? 0) * rateTxCur)
                                         : (tx.amount ?? 0);
-                                    // Сумма в валюте актива: из рублёвой суммы через курс актива
                                     const assetCentsTx =
                                       isCurrencyAsset && rateAsset != null && rateAsset > 0
                                         ? Math.round(rubCentsTx / rateAsset)
@@ -2185,7 +2427,15 @@ export default function AssetDetailPage() {
                   );
                 })}
               </div>
-              {profitability && (() => {
+            </div>
+          </div>
+        )}
+
+        {costs && profitability && (
+          <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
+            <div className="p-6">
+              <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Рентабельность</h3>
+              {(() => {
                 const currencyCode = (item?.currency_code ?? "RUB").toUpperCase();
                 const isCurrencyAsset = currencyCode !== "RUB";
                 const hasRub = profitability.yieldAssetAnnualRub != null;

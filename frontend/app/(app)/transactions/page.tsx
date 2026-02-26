@@ -2056,8 +2056,15 @@ function TransactionsView({
   const [selectedCurrencyCodes, setSelectedCurrencyCodes] = useState<Set<string>>(
     () => new Set()
   );
+  const itemIdParam = searchParams.get("item_id");
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(
-    () => new Set()
+    () => {
+      if (itemIdParam) {
+        const id = Number(itemIdParam);
+        if (Number.isFinite(id) && id > 0) return new Set([id]);
+      }
+      return new Set();
+    }
   );
 
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));

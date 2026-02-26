@@ -1170,45 +1170,48 @@ export default function AssetDetailPage() {
       return Boolean(tx.asset_link_type);
     });
 
-    // Для расчёта рентабельности берём уже посчитанные доход/расход из costs (те же, что в блоке «Рентабельность»)
-    const rateForDisplay = isCurrencyAsset ? getRateForDateKey(todayKey) : null;
-    const incomeFromAsset = costs ? costs.income : 0;
-    const expenseForAsset = costs ? costs.expense : 0;
+    // costs.income / costs.expense — в рублях (копейки); для валюты актива пересчитываем по курсу на todayKey
+    const incomeRubCents = costs?.income ?? 0;
+    const expenseRubCents = costs?.expense ?? 0;
+    const rateToday = isCurrencyAsset ? getRateForDateKey(todayKey) : null;
+    let incomeAssetCents = incomeRubCents;
+    let expenseAssetCents = expenseRubCents;
+    if (isCurrencyAsset && rateToday && rateToday > 0) {
+      incomeAssetCents = Math.round(incomeRubCents / rateToday);
+      expenseAssetCents = Math.round(expenseRubCents / rateToday);
+    }
 
-    let incomeFromSale = 0;
-    let expenseAcquisition = 0;
-    let investmentInAsset = 0;
+    let incomeFromSaleCents = 0;
+    let expenseAcquisitionCents = 0;
+    let investmentInAssetCents = 0;
     txs.forEach((tx) => {
       const amt = tx.amount ?? 0;
       switch (tx.asset_link_type) {
         case "ASSET_SALE":
-          incomeFromSale += amt;
+          incomeFromSaleCents += amt;
           break;
         case "ASSET_PURCHASE":
-          expenseAcquisition += amt;
+          expenseAcquisitionCents += amt;
           break;
         case "ASSET_INVESTMENT":
-          investmentInAsset += amt;
+          investmentInAssetCents += amt;
           break;
         default:
           break;
       }
     });
 
-    const incomeMinusExpense = incomeFromAsset - expenseForAsset;
-    // В валюте актива — те же значения, что отображаются (rubTotalCents/rate в центах → в единицах)
+    // Рентабельность актива
     let incomeFromAssetInCurrency: number | null = null;
     let expenseForAssetInCurrency: number | null = null;
-    if (isCurrencyAsset && costs && rateForDisplay != null && rateForDisplay > 0) {
-      incomeFromAssetInCurrency = costs.income / 100 / rateForDisplay;
-      expenseForAssetInCurrency = costs.expense / 100 / rateForDisplay;
+    if (isCurrencyAsset && rateToday && rateToday > 0) {
+      incomeFromAssetInCurrency = incomeAssetCents / 100;
+      expenseForAssetInCurrency = expenseAssetCents / 100;
     }
 
-    // Рентабельность = (Доход − Расход) / среднедневная стоимость за период, в годовом выражении
     let yieldAssetAnnualRub: number | null = null;
     if (avgDailyRub > 0 && annualFactor > 0) {
-      const incomeMinusExpenseRub = incomeMinusExpense / 100;
-      yieldAssetAnnualRub = (incomeMinusExpenseRub / avgDailyRub) * annualFactor;
+      yieldAssetAnnualRub = ((incomeRubCents - expenseRubCents) / 100 / avgDailyRub) * annualFactor;
     }
     let yieldAssetAnnualCurrency: number | null = null;
     if (
@@ -1219,43 +1222,63 @@ export default function AssetDetailPage() {
       incomeFromAssetInCurrency != null &&
       expenseForAssetInCurrency != null
     ) {
-      const incomeMinusExpenseCurrency = incomeFromAssetInCurrency - expenseForAssetInCurrency;
-      yieldAssetAnnualCurrency = (incomeMinusExpenseCurrency / avgDailyCurrency) * annualFactor;
+      yieldAssetAnnualCurrency =
+        ((incomeFromAssetInCurrency - expenseForAssetInCurrency) / avgDailyCurrency) * annualFactor;
     }
 
-    // costs.acquisition, costs.invested — в валюте актива (копейки/центы)
+    // Стоимости в валюте актива (копейки/центы)
     const acquisitionCents = costs?.acquisition ?? 0;
     const investedCents = costs?.invested ?? 0;
-    const investedBase = acquisitionCents + investedCents;
 
     const hasMarketPrimary = primaryKind === "MARKET";
-    /** Рыночная стоимость: costs.market (валюта актива) или costs.market_value_rub (рубли) */
-    let currentMarketValueCents: number | null = null;
-    if (hasMarketPrimary) {
-      currentMarketValueCents =
-        costs?.market ?? costs?.market_value_rub ?? null;
+
+    // Стоимость продажи: текущая рыночная (market) → сумма продаж → балансовая
+    let sellValueCentsAsset: number | null = null;
+    if (costs) {
+      if (costs.market != null) {
+        sellValueCentsAsset = costs.market;
+      } else if (incomeFromSaleCents !== 0) {
+        sellValueCentsAsset = incomeFromSaleCents;
+      } else {
+        sellValueCentsAsset = costs.balance ?? null;
+      }
     }
 
-    let yieldInvestmentsAnnual: number | null = null;
-    if (hasMarketPrimary && investedBase > 0 && annualFactor > 0) {
-      let returnInvestments: number | null = null;
-      if (incomeFromSale === 0 && currentMarketValueCents != null) {
-        // Без продажи: доходы - расходы + текущая рыночная стоимость - вложения
-        returnInvestments =
-          incomeMinusExpense +
-          currentMarketValueCents -
-          acquisitionCents -
-          investedCents;
-      } else if (incomeFromSale !== 0) {
-        // С продажей: доходы - расходы + доходы от продажи - вложения
-        returnInvestments =
-          incomeMinusExpense +
-          incomeFromSale -
-          acquisitionCents -
-          investedCents;
-      }
-      if (returnInvestments != null) {
-        yieldInvestmentsAnnual = (returnInvestments / investedBase) * annualFactor;
+    // Доходность вложений в актив в валюте актива:
+    // ((Доход − Расход) + (Стоимость продажи − Вложения)) / Вложения × (365 / дней)
+    let yieldInvestmentsAnnualCurrency: number | null = null;
+    if (investedCents > 0 && annualFactor > 0 && sellValueCentsAsset != null) {
+      const profitCurrency =
+        (incomeAssetCents - expenseAssetCents) +
+        (sellValueCentsAsset - investedCents);
+      yieldInvestmentsAnnualCurrency =
+        (profitCurrency / investedCents) * annualFactor;
+    }
+
+    // Доходность вложений в актив в рублях
+    let yieldInvestmentsAnnualRub: number | null = null;
+    if (annualFactor > 0 && sellValueCentsAsset != null) {
+      if (!isCurrencyAsset) {
+        if (investedCents > 0) {
+          const profitRub =
+            (incomeRubCents - expenseRubCents) +
+            (sellValueCentsAsset - investedCents);
+          yieldInvestmentsAnnualRub =
+            (profitRub / investedCents) * annualFactor;
+        }
+      } else if (rateToday && rateToday > 0) {
+        const toRub = (cents: number) =>
+          Math.round((cents / 100) * rateToday * 100);
+        const investedRubCentsCalc = toRub(investedCents);
+        const sellRubCentsCalc =
+          costs?.market_value_rub ?? toRub(sellValueCentsAsset);
+        if (investedRubCentsCalc > 0 && sellRubCentsCalc != null) {
+          const profitRub =
+            (incomeRubCents - expenseRubCents) +
+            (sellRubCentsCalc - investedRubCentsCalc);
+          yieldInvestmentsAnnualRub =
+            (profitRub / investedRubCentsCalc) * annualFactor;
+        }
       }
     }
 
@@ -1270,20 +1293,21 @@ export default function AssetDetailPage() {
       primaryKind,
       avgDailyRub,
       avgDailyCurrency,
-      incomeFromAsset,
-      incomeFromSale,
-      expenseForAsset,
-      expenseAcquisition,
+      incomeFromAsset: incomeAssetCents,
+      incomeFromSale: incomeFromSaleCents,
+      expenseForAsset: expenseAssetCents,
+      expenseAcquisition: expenseAcquisitionCents,
       incomeFromAssetInCurrency: incomeFromAssetInCurrency ?? null,
       expenseForAssetInCurrency: expenseForAssetInCurrency ?? null,
-      investmentInAsset,
+      investmentInAsset: investmentInAssetCents,
       yieldAssetAnnualRub,
       yieldAssetAnnualCurrency,
       acquisitionCents,
       investedCents,
       hasMarketPrimary,
-      currentMarketValueCents,
-      yieldInvestmentsAnnual,
+      currentMarketValueCents: sellValueCentsAsset,
+      yieldInvestmentsAnnualRub,
+      yieldInvestmentsAnnualCurrency,
       revaluationProfitRub,
       fxProfitRub,
     };
@@ -2234,41 +2258,71 @@ export default function AssetDetailPage() {
           <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
               <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Доходность вложений в актив</h3>
-              <div className="flex w-full items-center justify-center py-4">
-                {profitability.yieldInvestmentsAnnual != null ? (
-                  <Tooltip
-                    content={
-                      <div className="space-y-1.5 text-left">
-                        <div className="font-medium">Рентабельность вложений в актив</div>
-                        <div>Формула: (Доходы − Расходы + Текущая рыночная стоимость или Доход от продажи − Вложения) / Вложения × (365 / дней в периоде)</div>
-                        <div>Расходы по приобретению: {formatAmount(-profitability.acquisitionCents)}</div>
-                        <div>Вложения в актив: {formatAmount(profitability.investedCents)}</div>
-                        <div>Текущая рыночная стоимость: {profitability.currentMarketValueCents != null ? formatAmount(profitability.currentMarketValueCents) : "—"}</div>
-                        <div>Доходы от продажи: {formatAmount(profitability.incomeFromSale)}</div>
-                        <div>Прибыль от переоценки: {profitability.revaluationProfitRub != null ? formatAmount(profitability.revaluationProfitRub) : "—"}</div>
-                        <div>Прибыль от курса: {profitability.fxProfitRub != null ? formatAmount(profitability.fxProfitRub) : "—"}</div>
-                        <div className="pt-0.5 border-t border-white/10">
-                          Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)
-                        </div>
+              {(() => {
+                const currencyCode = (item?.currency_code ?? "RUB").toUpperCase();
+                const isCurrencyAsset = currencyCode !== "RUB";
+                const hasRub = profitability.yieldInvestmentsAnnualRub != null;
+                const hasCur = isCurrencyAsset && profitability.yieldInvestmentsAnnualCurrency != null;
+                const gradientStyle = { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } as React.CSSProperties;
+                const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+                const pctFmt = (n: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n * 100);
+
+                const rubTooltipContent = (
+                  <div className="space-y-1.5 text-left">
+                    <div className="font-medium">Доходность вложений (RUB)</div>
+                    <div>Формула: ((Доход − Расход) + (Стоимость продажи − Вложения)) / Вложения × (365 / дней)</div>
+                    <div>Доход: {formatAmount(profitability.incomeFromAsset)} ₽</div>
+                    <div>Расход: {formatAmount(profitability.expenseForAsset)} ₽</div>
+                    <div>Стоимость продажи: {profitability.currentMarketValueCents != null ? formatAmount(profitability.currentMarketValueCents) : "—"}</div>
+                    <div>Вложения: {formatAmount(profitability.investedCents)}</div>
+                    <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
+                  </div>
+                );
+
+                const curTooltipContent = isCurrencyAsset && profitability.yieldInvestmentsAnnualCurrency != null ? (
+                  <div className="space-y-1.5 text-left">
+                    <div className="font-medium">Доходность вложений ({currencyCode})</div>
+                    <div>Формула: ((Доход − Расход) + (Стоимость продажи − Вложения)) / Вложения × (365 / дней)</div>
+                    <div>Доход: {profitability.incomeFromAssetInCurrency != null ? fmt(profitability.incomeFromAssetInCurrency) : "—"} {currencyCode}</div>
+                    <div>Расход: {profitability.expenseForAssetInCurrency != null ? fmt(profitability.expenseForAssetInCurrency) : "—"} {currencyCode}</div>
+                    <div>Стоимость продажи: {profitability.currentMarketValueCents != null ? fmt(profitability.currentMarketValueCents / 100) : "—"} {currencyCode}</div>
+                    <div>Вложения: {fmt(profitability.investedCents / 100)} {currencyCode}</div>
+                    <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
+                  </div>
+                ) : null;
+
+                return (
+                  <div className="flex w-full items-center justify-center gap-6 py-4 mt-2">
+                    {hasRub && (
+                      <div className="flex items-center gap-2">
+                        <CurrencyChip code="RUB" className="shrink-0" />
+                        <Tooltip content={rubTooltipContent} side="top">
+                          <span
+                            className="tabular-nums italic text-5xl font-semibold cursor-help"
+                            style={profitability.yieldInvestmentsAnnualRub! >= 0 ? gradientStyle : { color: RED }}
+                          >
+                            {pctFmt(profitability.yieldInvestmentsAnnualRub!)}%
+                          </span>
+                        </Tooltip>
                       </div>
-                    }
-                    side="top"
-                  >
-                    <span
-                      className="tabular-nums italic text-5xl font-semibold cursor-help"
-                      style={
-                        profitability.yieldInvestmentsAnnual >= 0
-                          ? { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } as React.CSSProperties
-                          : { color: RED }
-                      }
-                    >
-                      {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldInvestmentsAnnual * 100)}%
-                    </span>
-                  </Tooltip>
-                ) : (
-                  <span className="text-lg italic" style={{ color: PLACEHOLDER_COLOR_DARK }}>—</span>
-                )}
-              </div>
+                    )}
+                    {hasCur && (
+                      <div className="flex items-center gap-2">
+                        <CurrencyChip code={item?.currency_code ?? "RUB"} className="shrink-0" />
+                        <Tooltip content={curTooltipContent ?? ""} side="top">
+                          <span
+                            className="tabular-nums italic text-5xl font-semibold cursor-help"
+                            style={profitability.yieldInvestmentsAnnualCurrency! >= 0 ? gradientStyle : { color: RED }}
+                          >
+                            {pctFmt(profitability.yieldInvestmentsAnnualCurrency!)}%
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
+                    {!hasRub && !hasCur && <span className="text-lg italic" style={{ color: PLACEHOLDER_COLOR_DARK }}>—</span>}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

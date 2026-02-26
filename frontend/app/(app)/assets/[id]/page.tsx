@@ -209,6 +209,14 @@ export default function AssetDetailPage() {
   const [costChartTooltipLeft, setCostChartTooltipLeft] = useState<number | null>(null);
   const [costChartContainerReady, setCostChartContainerReady] = useState(false);
   const [costChartCurrency, setCostChartCurrency] = useState<"RUB" | "CURRENCY">("RUB");
+  const [quantityBlockOpen, setQuantityBlockOpen] = useState(false);
+  const qtyChartContainerRef = useRef<HTMLDivElement | null>(null);
+  const qtyChartSvgRef = useRef<SVGSVGElement | null>(null);
+  const qtyChartTooltipRef = useRef<HTMLDivElement | null>(null);
+  const [qtyChartSize, setQtyChartSize] = useState({ width: 720, height: 280 });
+  const [qtyChartHoverIndex, setQtyChartHoverIndex] = useState<number | null>(null);
+  const [qtyChartTooltipLeft, setQtyChartTooltipLeft] = useState<number | null>(null);
+  const [qtyChartContainerReady, setQtyChartContainerReady] = useState(false);
   const [rentabilityOpen, setRentabilityOpen] = useState<"income" | "expense" | null>(null);
   const [categories, setCategories] = useState<CategoryNode[]>([]);
 
@@ -965,14 +973,28 @@ export default function AssetDetailPage() {
     return { startQty, totalBuy, totalSell, current };
   }, [quantityHistoryTx, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code]);
 
+  const qtyChartSeries = useMemo(() => {
+    if (!costHistoryData?.points.length) return [];
+    return costHistoryData.points
+      .filter((p) => p.market_quantity_units != null)
+      .map((p) => ({ date: p.date, value: p.market_quantity_units! }));
+  }, [costHistoryData]);
+
   const costChartSeries = useMemo(() => {
     if (!costHistoryOpen || !costHistoryData?.points.length) return [];
     const key = costHistoryOpen === "balance" ? "balance" : costHistoryOpen === "acquisition" ? "acquisition" : costHistoryOpen === "invested" ? "invested" : "market";
     const raw = costHistoryData.points.map((p) => {
-      const valueRub = ((p as Record<string, number | null>)[key] ?? 0) / 100;
-      const hasValue = (p as Record<string, number | null>)[key] != null;
+      let valueRub: number;
+      if (key === "market" && p.market_price_rub != null && p.market_quantity_units != null) {
+        valueRub = (p.market_price_rub * p.market_quantity_units) / 100;
+      } else {
+        valueRub = ((p as Record<string, number | null>)[key] ?? 0) / 100;
+      }
+      const hasValue = key === "market"
+        ? (p.market_price_rub != null && p.market_quantity_units != null) || p.market != null
+        : (p as Record<string, number | null>)[key] != null;
       const base = { date: p.date, valueRub, hasValue };
-      if (key === "market" && "market_quantity_units" in p && "market_price_rub" in p) {
+      if (key === "market") {
         return {
           ...base,
           marketQuantityUnits: p.market_quantity_units ?? undefined,
@@ -1115,6 +1137,79 @@ export default function AssetDetailPage() {
       costChartGeometry.innerHeight * costChartGeometry.valueToRatio(value);
     return { x, y, value };
   }, [costChartHoverIndex, costChartDisplaySeries, costChartGeometry]);
+
+  const qtyChartPadding = costChartPadding;
+  const qtyChartGeometry = useMemo(() => {
+    if (qtyChartSeries.length === 0) return null;
+    const width = qtyChartSize.width;
+    const height = qtyChartSize.height;
+    const padding = qtyChartPadding;
+    const innerWidth = width - padding.left - padding.right;
+    const innerHeight = height - padding.top - padding.bottom;
+    const values = qtyChartSeries.map((p) => p.value);
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const rangePadding = Math.max(Math.max(maxVal, Math.abs(minVal)) * 0.12, 1);
+    const paddedMin = minVal < 0 ? minVal - rangePadding : 0;
+    const paddedMax = maxVal + rangePadding;
+    const ticks = buildTicks(paddedMin, paddedMax);
+    const chartMin = ticks[0] ?? 0;
+    const chartMax = ticks[ticks.length - 1] ?? 1;
+    const valueToRatio = (v: number) => (v - chartMin) / (chartMax - chartMin || 1);
+    const zeroRatio = Math.max(0, Math.min(1, valueToRatio(0)));
+    const baselineY = padding.top + innerHeight - innerHeight * zeroRatio;
+    const points: ChartPoint[] = qtyChartSeries.map((p, i) => {
+      const progress = qtyChartSeries.length <= 1 ? 0 : i / (qtyChartSeries.length - 1);
+      const x = padding.left + innerWidth * progress;
+      const y = padding.top + innerHeight - innerHeight * valueToRatio(p.value);
+      return { x, y, value: p.value };
+    });
+    const dayMarks: { label: string; x: number }[] = [];
+    const step = Math.max(1, Math.ceil(qtyChartSeries.length / 7));
+    for (let i = 0; i < qtyChartSeries.length; i += step) {
+      const p = qtyChartSeries[i];
+      if (!p) continue;
+      const progress = qtyChartSeries.length <= 1 ? 0 : i / (qtyChartSeries.length - 1);
+      dayMarks.push({ label: formatChartDate(new Date(p.date)), x: padding.left + innerWidth * progress });
+    }
+    if (qtyChartSeries.length > 0 && dayMarks.length > 0) {
+      const lastX = padding.left + innerWidth;
+      if (Math.abs((dayMarks[dayMarks.length - 1]?.x ?? 0) - lastX) > 2) {
+        const last = qtyChartSeries[qtyChartSeries.length - 1]!;
+        dayMarks.push({ label: formatChartDate(new Date(last.date)), x: lastX });
+      }
+    }
+    return { width, height, padding, innerWidth, innerHeight, points, linePath: buildLinePath(points), areaPath: buildAreaPath(points, baselineY), baselineY, ticks, dayMarks, valueToRatio, chartMin, chartMax };
+  }, [qtyChartSeries, qtyChartSize, qtyChartPadding]);
+
+  const qtyChartDividers = useMemo(() => {
+    if (!qtyChartGeometry || qtyChartSeries.length <= 1) return [];
+    const divs: { x: number; type: "month" | "year" }[] = [];
+    const n = qtyChartSeries.length;
+    const { padding, innerWidth } = qtyChartGeometry;
+    for (let i = 1; i < n; i++) {
+      const prevDate = qtyChartSeries[i - 1]!.date;
+      const currDate = qtyChartSeries[i]!.date;
+      const prevYear = parseInt(prevDate.slice(0, 4), 10);
+      const prevMonth = parseInt(prevDate.slice(5, 7), 10);
+      const currYear = parseInt(currDate.slice(0, 4), 10);
+      const currMonth = parseInt(currDate.slice(5, 7), 10);
+      const progress = (n - 1) > 0 ? i / (n - 1) : 0;
+      const x = padding.left + innerWidth * progress;
+      if (currYear !== prevYear) divs.push({ x, type: "year" });
+      else if (currMonth !== prevMonth) divs.push({ x, type: "month" });
+    }
+    return divs;
+  }, [qtyChartGeometry, qtyChartSeries]);
+
+  const qtyChartHoverPoint = useMemo(() => {
+    if (qtyChartHoverIndex == null || !qtyChartGeometry || qtyChartSeries.length === 0) return null;
+    const progress = qtyChartSeries.length <= 1 ? 0 : qtyChartHoverIndex / (qtyChartSeries.length - 1);
+    const x = qtyChartGeometry.padding.left + qtyChartGeometry.innerWidth * progress;
+    const value = qtyChartSeries[qtyChartHoverIndex]!.value;
+    const y = qtyChartGeometry.padding.top + qtyChartGeometry.innerHeight - qtyChartGeometry.innerHeight * qtyChartGeometry.valueToRatio(value);
+    return { x, y, value };
+  }, [qtyChartHoverIndex, qtyChartSeries, qtyChartGeometry]);
 
   const profitability = useMemo(() => {
     if (!item || !costHistoryData?.points?.length) return null;
@@ -1370,6 +1465,55 @@ export default function AssetDetailPage() {
       setCostChartHoverIndex(Math.min(Math.max(index, 0), costChartSeries.length - 1));
     },
     [costChartSeries.length, costChartSize, costChartPadding]
+  );
+
+  useEffect(() => {
+    if (!qtyChartContainerReady || !qtyChartContainerRef.current) return;
+    const element = qtyChartContainerRef.current;
+    const updateSize = () => {
+      const rect = element.getBoundingClientRect();
+      const nextWidth = Math.max(1, Math.round(rect.width));
+      const nextHeight = Math.max(1, Math.round(rect.height));
+      setQtyChartSize((prev) => {
+        if (prev.width === nextWidth && prev.height === nextHeight) return prev;
+        return { width: nextWidth, height: nextHeight };
+      });
+    };
+    updateSize();
+    const obs = new ResizeObserver(updateSize);
+    obs.observe(element);
+    return () => obs.disconnect();
+  }, [qtyChartContainerReady, quantityBlockOpen]);
+
+  useEffect(() => {
+    if (!qtyChartHoverPoint?.x || qtyChartHoverIndex == null) { setQtyChartTooltipLeft(null); return; }
+    const half = 100;
+    const clamped = Math.max(half, Math.min(qtyChartHoverPoint.x, qtyChartSize.width - half));
+    setQtyChartTooltipLeft(clamped);
+  }, [qtyChartHoverPoint?.x, qtyChartHoverIndex, qtyChartSize.width]);
+
+  const handleQtyChartPointerMove = useCallback(
+    (event: React.MouseEvent<SVGSVGElement>) => {
+      if (!qtyChartSvgRef.current || qtyChartSeries.length === 0) return;
+      if (qtyChartSeries.length === 1) { setQtyChartHoverIndex(0); return; }
+      const ctm = qtyChartSvgRef.current.getScreenCTM();
+      if (!ctm) return;
+      let svgX = 0;
+      if (typeof DOMPoint !== "undefined") {
+        svgX = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse()).x;
+      } else {
+        const point = qtyChartSvgRef.current.createSVGPoint();
+        point.x = event.clientX; point.y = event.clientY;
+        svgX = point.matrixTransform(ctm.inverse()).x;
+      }
+      const padding = qtyChartPadding;
+      const innerWidth = qtyChartSize.width - padding.left - padding.right;
+      const clampedX = Math.min(Math.max(svgX, padding.left), qtyChartSize.width - padding.right);
+      const progress = (clampedX - padding.left) / innerWidth;
+      const index = Math.round(progress * (qtyChartSeries.length - 1));
+      setQtyChartHoverIndex(Math.min(Math.max(index, 0), qtyChartSeries.length - 1));
+    },
+    [qtyChartSeries.length, qtyChartSize, qtyChartPadding]
   );
 
   const buildItemCreatePayload = useCallback(
@@ -1672,20 +1816,195 @@ export default function AssetDetailPage() {
                 <dd style={{ color: ACTIVE_TEXT_DARK }}>{item.interest_rate}%</dd>
               </>
             )}
-            {item.type_code === "crypto" && item.quantity_units != null && (
-              <>
-                <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество</dt>
-                <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(item.quantity_units)}</dd>
-              </>
-            )}
-            {item.type_code !== "crypto" && item.position_lots != null && (
-              <>
-                <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество лотов</dt>
-                <dd style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(item.position_lots)}</dd>
-              </>
-            )}
           </dl>
         </div>
+
+        {(isMoexItem(item) || isCryptoItem(item)) && (() => {
+          const isCrypto = item.type_code === "crypto";
+          const currentQty = isCrypto ? (item.quantity_units ?? 0) : (item.position_lots ?? 0);
+          const qtyLabel = isCrypto
+            ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(currentQty)
+            : new Intl.NumberFormat("ru-RU").format(currentQty) + " л.";
+          const qtyChartColor = ACCENT;
+          return (
+            <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
+              <div className="p-6">
+                <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Количество</h3>
+                <div className="w-full">
+                  <div className="rounded-[9px] overflow-hidden" style={{ backgroundColor: BACKGROUND_DT }}>
+                    <div
+                      className="flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90"
+                      onClick={() => setQuantityBlockOpen((v) => !v)}
+                    >
+                      <IconButton
+                        aria-label={quantityBlockOpen ? "Свернуть" : "Развернуть"}
+                        onClick={(e) => { e.stopPropagation(); setQuantityBlockOpen((v) => !v); }}
+                      >
+                        {quantityBlockOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </IconButton>
+                      <span className="text-sm shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>Количество</span>
+                      <div className="flex-1 min-w-0" />
+                      <div className="text-2xl font-medium shrink-0 text-right" style={{ color: ACTIVE_TEXT_DARK }}>
+                        {qtyLabel}
+                      </div>
+                    </div>
+                    {quantityBlockOpen && (
+                      <div className="p-4 pt-0" style={{ backgroundColor: "transparent" }}>
+                        {loadingCostHistory ? (
+                          <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+                        ) : qtyChartSeries.length === 0 ? (
+                          <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период.</p>
+                        ) : qtyChartGeometry ? (
+                          <>
+                            <div
+                              ref={(el) => { qtyChartContainerRef.current = el; setQtyChartContainerReady(!!el); }}
+                              className="relative w-full min-w-0"
+                              style={{ aspectRatio: `${qtyChartSize.width}/${qtyChartSize.height}` }}
+                            >
+                              {qtyChartHoverPoint != null && qtyChartHoverIndex != null && qtyChartSeries[qtyChartHoverIndex] && (
+                                <div
+                                  ref={qtyChartTooltipRef}
+                                  className="pointer-events-none absolute z-20 whitespace-nowrap rounded-[9px] px-4 py-3 text-[14px] font-normal text-right"
+                                  style={{ left: qtyChartTooltipLeft != null ? `${qtyChartTooltipLeft}px` : `${qtyChartHoverPoint.x}px`, top: 0, transform: "translate(-50%, 0)", backgroundColor: MODAL_BG }}
+                                >
+                                  <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartDate(new Date(qtyChartSeries[qtyChartHoverIndex]!.date))}</div>
+                                  <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                                    <span>Количество</span>
+                                    <span className="tabular-nums">
+                                      {isCrypto
+                                        ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(qtyChartSeries[qtyChartHoverIndex]!.value)
+                                        : new Intl.NumberFormat("ru-RU").format(qtyChartSeries[qtyChartHoverIndex]!.value) + " л."}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                              <svg ref={qtyChartSvgRef} viewBox={`0 0 ${qtyChartGeometry.width} ${qtyChartGeometry.height}`} className="h-full w-full cursor-pointer" style={{ overflow: "visible" }} onMouseMove={handleQtyChartPointerMove} onMouseLeave={() => setQtyChartHoverIndex(null)}>
+                                <defs>
+                                  <linearGradient id="qty-chart-area" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={qtyChartColor} stopOpacity={0.35} />
+                                    <stop offset="100%" stopColor={qtyChartColor} stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <path d={qtyChartGeometry.areaPath} fill="url(#qty-chart-area)" />
+                                <path d={qtyChartGeometry.linePath} fill="none" stroke={qtyChartColor} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                                {qtyChartDividers.map((div, idx) => (
+                                  <line key={`qdiv-${idx}-${div.x}`} x1={div.x} x2={div.x} y1={qtyChartGeometry.padding.top} y2={qtyChartGeometry.padding.top + qtyChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={div.type === "year" ? 1.5 : 1} strokeOpacity={div.type === "year" ? 0.9 : 0.5} />
+                                ))}
+                                <line x1={qtyChartGeometry.padding.left} x2={qtyChartGeometry.width - qtyChartGeometry.padding.right} y1={qtyChartGeometry.baselineY} y2={qtyChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1} strokeDasharray="4 4" strokeOpacity={0.7} />
+                                {qtyChartHoverPoint && (
+                                  <>
+                                    <line x1={qtyChartHoverPoint.x} x2={qtyChartHoverPoint.x} y1={qtyChartGeometry.padding.top} y2={qtyChartGeometry.padding.top + qtyChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
+                                    <circle cx={qtyChartHoverPoint.x} cy={qtyChartHoverPoint.y} r={6} fill={qtyChartColor} stroke="#fff" strokeWidth={2} />
+                                  </>
+                                )}
+                                {qtyChartGeometry.dayMarks.map((mark, idx) => (
+                                  <text key={idx} x={mark.x} y={qtyChartGeometry.height - 12} textAnchor={idx === 0 ? "start" : idx === qtyChartGeometry.dayMarks.length - 1 ? "end" : "middle"} fontSize={14} fill={ACTIVE_TEXT_DARK}>{mark.label}</text>
+                                ))}
+                              </svg>
+                            </div>
+                          </>
+                        ) : null}
+
+                        {quantityHistoryError ? (
+                          <p className="text-sm text-red-500 mt-4">{quantityHistoryError}</p>
+                        ) : loadingQuantityHistory ? (
+                          <p className="text-sm mt-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+                        ) : (
+                          <>
+                            <div className="flex gap-4 mt-3 items-start">
+                              <div className="w-1/2 min-w-0">
+                                {quantityHistoryRows.length === 0 && quantitySummary.startQty === 0 ? (
+                                  <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи</p>
+                                ) : (
+                                  <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                                    <tbody>
+                                      {quantitySummary.startQty !== 0 && (() => {
+                                        const openDateLabel = item.open_date
+                                          ? new Date(item.open_date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })
+                                          : "—";
+                                        return (
+                                          <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                            <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{openDateLabel}</td>
+                                            <td className="py-1.5 pr-4 align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>Начальное количество</td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: ACTIVE_TEXT_DARK }}>
+                                              {isCrypto
+                                                ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(quantitySummary.startQty)
+                                                : new Intl.NumberFormat("ru-RU").format(quantitySummary.startQty)}
+                                            </td>
+                                            <td className="py-1.5 text-right tabular-nums align-middle" style={{ color: ACTIVE_TEXT_DARK }}>
+                                              {isCrypto
+                                                ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(quantitySummary.startQty)
+                                                : new Intl.NumberFormat("ru-RU").format(quantitySummary.startQty)}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })()}
+                                      {quantityHistoryRows.map(({ tx, type, delta, balanceAfter, priceCents, costCents }) => {
+                                        const dateStr = tx.transaction_date ? new Date(tx.transaction_date.replace("T", " ")).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                                        const amountColor = type === "Покупка" ? GREEN : RED;
+                                        return (
+                                          <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                            <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{dateStr}</td>
+                                            <td className="py-1.5 pr-4 align-middle" style={{ color: amountColor }}>{type}</td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: amountColor }}>
+                                              {delta > 0 ? `+${isCrypto ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 10 }).format(delta) : new Intl.NumberFormat("ru-RU").format(delta)}` : (isCrypto ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 10 }).format(delta) : new Intl.NumberFormat("ru-RU").format(delta))}
+                                            </td>
+                                            <td className="py-1.5 text-right tabular-nums align-middle" style={{ color: ACTIVE_TEXT_DARK }}>
+                                              {isCrypto
+                                                ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(balanceAfter)
+                                                : new Intl.NumberFormat("ru-RU").format(balanceAfter)}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                              <div className="w-1/2 flex justify-center items-start pt-1">
+                                {item.instrument_id && !isArchived && !isClosed && (
+                                  <Button
+                                    type="button"
+                                    className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                                    style={{ backgroundColor: ACCENT }}
+                                    onClick={() => setBuySellModalOpen(true)}
+                                  >
+                                    <TrendingUp className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                                    <span style={{ color: "white", opacity: 0.85 }}>Купить/продать актив</span>
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-4 mt-4">
+                              {(() => {
+                                const SummaryBlock = ({ title, value }: { title: string; value: number }) => (
+                                  <div className="flex flex-1 min-w-[120px] flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+                                    <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
+                                    <div className="rounded-md px-2 py-1 flex justify-center text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}>
+                                      {new Intl.NumberFormat("ru-RU").format(value)}
+                                    </div>
+                                  </div>
+                                );
+                                return (
+                                  <>
+                                    <SummaryBlock title="Количество на начало" value={quantitySummary.startQty} />
+                                    <SummaryBlock title="Всего куплено" value={quantitySummary.totalBuy} />
+                                    <SummaryBlock title="Всего продано" value={quantitySummary.totalSell} />
+                                    <SummaryBlock title="Количество на текущую дату" value={quantitySummary.current} />
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
           <div className="p-6">
@@ -2224,62 +2543,6 @@ export default function AssetDetailPage() {
           </div>
         )}
 
-            {item.instrument_id && costs && (() => {
-              const isCrypto = item.type_code === "crypto";
-              const quantity = isCrypto ? (item.quantity_units ?? 0) : (item.position_lots ?? 0);
-              const hasQuantity = quantity > 0;
-              // costs.acquisition, costs.market, costs.balance — в валюте актива (копейки/центы)
-              const acquisitionCents = costs.acquisition ?? 0;
-              const currentValueCents = costs.market != null ? costs.market : costs.balance;
-              const avgPriceCents = hasQuantity ? acquisitionCents / quantity : null;
-              const profitLossCents = currentValueCents - acquisitionCents;
-              const currencyCode = item.currency_code ?? "RUB";
-              return hasQuantity ? (
-                <div className="mt-6 pt-6 border-t border-white/10">
-                  <h4 className="text-sm font-semibold mb-4" style={{ color: ACTIVE_TEXT_DARK }}>
-                    Прибыль/убыток от стоимости актива
-                  </h4>
-                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm">
-                    <div>
-                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Средняя цена приобретения ({currencyCode})</dt>
-                      <dd className="mt-0.5 font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
-                        {avgPriceCents != null ? (
-                          <AmountWithCurrency valueCents={Math.round(avgPriceCents)} currencyCode={currencyCode} />
-                        ) : (
-                          "—"
-                        )}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость приобретения текущего количества ({currencyCode})</dt>
-                      <dd className="mt-0.5 font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
-                        <AmountWithCurrency valueCents={acquisitionCents} currencyCode={currencyCode} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Текущая стоимость ({currencyCode})</dt>
-                      <dd className="mt-0.5 font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
-                        <AmountWithCurrency valueCents={currentValueCents} currencyCode={currencyCode} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Текущее количество</dt>
-                      <dd className="mt-0.5 font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
-                        {isCrypto
-                          ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(quantity)
-                          : new Intl.NumberFormat("ru-RU").format(quantity) + " л."}
-                      </dd>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <dt style={{ color: PLACEHOLDER_COLOR_DARK }}>Прибыль/убыток ({currencyCode})</dt>
-                      <dd className="mt-0.5 font-semibold tabular-nums" style={{ color: profitLossCents >= 0 ? GREEN : RED }}>
-                        <AmountWithCurrency valueCents={profitLossCents} currencyCode={currencyCode} />
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-              ) : null;
-            })()}
 
           </div>
         </div>
@@ -2431,223 +2694,112 @@ export default function AssetDetailPage() {
           </div>
         )}
 
-        {costs && profitability && (
-          <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
-            <div className="p-6">
-              <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Рентабельность</h3>
-              {(() => {
-                const currencyCode = (item?.currency_code ?? "RUB").toUpperCase();
-                const isCurrencyAsset = currencyCode !== "RUB";
-                const hasRub = profitability.yieldAssetAnnualRub != null;
-                const hasCur = isCurrencyAsset && profitability.yieldAssetAnnualCurrency != null;
-                const gradientStyle = { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } as React.CSSProperties;
-                const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
-                const rubTooltipContent = (
-                  <div className="space-y-1.5 text-left">
-                    <div className="font-medium">Рентабельность (RUB)</div>
-                    <div>Формула: (Доход − Расход) / Среднедневная стоимость × (365 / дней в периоде)</div>
-                    <div>Доход: {formatAmount(profitability.incomeFromAsset)} ₽</div>
-                    <div>Расход: {formatAmount(profitability.expenseForAsset)} ₽</div>
-                    <div>Среднедневная стоимость: {formatAmount(Math.round(profitability.avgDailyRub * 100))} ₽</div>
-                    <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
-                    <div className="pt-0.5 border-t border-white/10">
-                      Расчёт: ({fmt((profitability.incomeFromAsset - profitability.expenseForAsset) / 100)} / {fmt(profitability.avgDailyRub)}) × {fmt(profitability.annualFactor)} = {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldAssetAnnualRub! * 100)}%
+        {costs && profitability && (() => {
+          const currencyCode = (item?.currency_code ?? "RUB").toUpperCase();
+          const isCurrencyAsset = currencyCode !== "RUB";
+          const gradientStyle = { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } as React.CSSProperties;
+          const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+          const pctFmt = (n: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n * 100);
+
+          const rentHasRub = profitability.yieldAssetAnnualRub != null;
+          const rentHasCur = isCurrencyAsset && profitability.yieldAssetAnnualCurrency != null;
+          const invHasRub = profitability.yieldInvestmentsAnnualRub != null;
+          const invHasCur = isCurrencyAsset && profitability.yieldInvestmentsAnnualCurrency != null;
+          const showRent = rentHasRub || rentHasCur;
+          const showInv = profitability.hasMarketPrimary && (invHasRub || invHasCur);
+          if (!showRent && !showInv) return null;
+
+          const rentRubTooltip = (
+            <div className="space-y-1.5 text-left">
+              <div className="font-medium">Рентабельность (RUB)</div>
+              <div>Формула: (Доход − Расход) / Среднедневная стоимость × (365 / дней)</div>
+              <div>Доход: {formatAmount(profitability.incomeFromAsset)} ₽</div>
+              <div>Расход: {formatAmount(profitability.expenseForAsset)} ₽</div>
+              <div>Среднедневная стоимость: {formatAmount(Math.round(profitability.avgDailyRub * 100))} ₽</div>
+              <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
+              <div className="pt-0.5 border-t border-white/10">
+                Расчёт: ({fmt((profitability.incomeFromAsset - profitability.expenseForAsset) / 100)} / {fmt(profitability.avgDailyRub)}) × {fmt(profitability.annualFactor)} = {pctFmt(profitability.yieldAssetAnnualRub!)}%
+              </div>
+            </div>
+          );
+          const rentCurTooltip = profitability.incomeFromAssetInCurrency != null && profitability.expenseForAssetInCurrency != null && profitability.avgDailyCurrency != null ? (
+            <div className="space-y-1.5 text-left">
+              <div className="font-medium">Рентабельность ({currencyCode})</div>
+              <div>Формула: (Доход − Расход) / Среднедневная стоимость × (365 / дней)</div>
+              <div>Доход: {fmt(profitability.incomeFromAssetInCurrency)} {currencyCode}</div>
+              <div>Расход: {fmt(profitability.expenseForAssetInCurrency)} {currencyCode}</div>
+              <div>Среднедневная стоимость: {fmt(profitability.avgDailyCurrency)} {currencyCode}</div>
+              <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
+              <div className="pt-0.5 border-t border-white/10">
+                Расчёт: ({fmt(profitability.incomeFromAssetInCurrency - profitability.expenseForAssetInCurrency)} / {fmt(profitability.avgDailyCurrency)}) × {fmt(profitability.annualFactor)} = {pctFmt(profitability.yieldAssetAnnualCurrency!)}%
+              </div>
+            </div>
+          ) : null;
+
+          const invRubTooltip = (
+            <div className="space-y-1.5 text-left">
+              <div className="font-medium">Доходность вложений (RUB)</div>
+              <div>Формула: ((Доход − Расход) + (Стоимость продажи − Вложения)) / Вложения × (365 / дней)</div>
+              <div>Доход: {formatAmount(profitability.incomeFromAsset)} ₽</div>
+              <div>Расход: {formatAmount(profitability.expenseForAsset)} ₽</div>
+              <div>Стоимость продажи: {profitability.currentMarketValueCents != null ? formatAmount(profitability.currentMarketValueCents) : "—"}</div>
+              <div>Вложения: {formatAmount(profitability.investedCents)}</div>
+              <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
+            </div>
+          );
+          const invCurTooltip = isCurrencyAsset && profitability.yieldInvestmentsAnnualCurrency != null ? (
+            <div className="space-y-1.5 text-left">
+              <div className="font-medium">Доходность вложений ({currencyCode})</div>
+              <div>Формула: ((Доход − Расход) + (Стоимость продажи − Вложения)) / Вложения × (365 / дней)</div>
+              <div>Доход: {profitability.incomeFromAssetInCurrency != null ? fmt(profitability.incomeFromAssetInCurrency) : "—"} {currencyCode}</div>
+              <div>Расход: {profitability.expenseForAssetInCurrency != null ? fmt(profitability.expenseForAssetInCurrency) : "—"} {currencyCode}</div>
+              <div>Стоимость продажи: {profitability.currentMarketValueCents != null ? fmt(profitability.currentMarketValueCents / 100) : "—"} {currencyCode}</div>
+              <div>Вложения: {fmt(profitability.investedCents / 100)} {currencyCode}</div>
+              <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
+            </div>
+          ) : null;
+
+          const PctCard = ({ value, tooltip, code }: { value: number; tooltip: React.ReactNode; code: string }) => (
+            <div className="rounded-lg p-3 flex flex-col items-center gap-2" style={{ backgroundColor: BACKGROUND_DT }}>
+              <CurrencyChip code={code} />
+              <Tooltip content={tooltip} side="top">
+                <span
+                  className="tabular-nums italic text-4xl font-semibold cursor-help whitespace-nowrap"
+                  style={value >= 0 ? gradientStyle : { color: RED }}
+                >
+                  {pctFmt(value)}%
+                </span>
+              </Tooltip>
+            </div>
+          );
+
+          return (
+            <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
+              <div className="p-6">
+                <div className={`grid gap-6 ${showRent && showInv ? "grid-cols-2" : "grid-cols-1"}`}>
+                  {showRent && (
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm flex-1 text-center" style={{ color: ACTIVE_TEXT_DARK }}>Рентабельность</span>
+                      <div className="flex flex-col gap-3 max-w-[180px]">
+                        {rentHasCur && <PctCard value={profitability.yieldAssetAnnualCurrency!} tooltip={rentCurTooltip ?? ""} code={item?.currency_code ?? "RUB"} />}
+                        {rentHasRub && <PctCard value={profitability.yieldAssetAnnualRub!} tooltip={rentRubTooltip} code="RUB" />}
+                      </div>
                     </div>
-                  </div>
-                );
-                const curTooltipContent = profitability.incomeFromAssetInCurrency != null && profitability.expenseForAssetInCurrency != null && profitability.avgDailyCurrency != null ? (
-                  <div className="space-y-1.5 text-left">
-                    <div className="font-medium">Рентабельность ({currencyCode})</div>
-                    <div>Формула: (Доход − Расход) / Среднедневная стоимость × (365 / дней в периоде)</div>
-                    <div>Доход: {fmt(profitability.incomeFromAssetInCurrency)} {currencyCode}</div>
-                    <div>Расход: {fmt(profitability.expenseForAssetInCurrency)} {currencyCode}</div>
-                    <div>Среднедневная стоимость: {fmt(profitability.avgDailyCurrency)} {currencyCode}</div>
-                    <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
-                    <div className="pt-0.5 border-t border-white/10">
-                      Расчёт: ({fmt(profitability.incomeFromAssetInCurrency - profitability.expenseForAssetInCurrency)} / {fmt(profitability.avgDailyCurrency)}) × {fmt(profitability.annualFactor)} = {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldAssetAnnualCurrency! * 100)}%
+                  )}
+                  {showInv && (
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm flex-1 text-center" style={{ color: ACTIVE_TEXT_DARK }}>Доходность вложений</span>
+                      <div className="flex flex-col gap-3 max-w-[180px]">
+                        {invHasCur && <PctCard value={profitability.yieldInvestmentsAnnualCurrency!} tooltip={invCurTooltip ?? ""} code={item?.currency_code ?? "RUB"} />}
+                        {invHasRub && <PctCard value={profitability.yieldInvestmentsAnnualRub!} tooltip={invRubTooltip} code="RUB" />}
+                      </div>
                     </div>
-                  </div>
-                ) : null;
-                return (
-                  <div className="flex w-full items-center justify-center gap-6 py-4 mt-2">
-                    {hasRub && (
-                      <div className="flex items-center gap-2">
-                        <CurrencyChip code="RUB" className="shrink-0" />
-                        <Tooltip content={rubTooltipContent} side="top">
-                          <span
-                            className="tabular-nums italic text-5xl font-semibold cursor-help"
-                            style={profitability.yieldAssetAnnualRub! >= 0 ? gradientStyle : { color: RED }}
-                          >
-                            {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldAssetAnnualRub! * 100)}%
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {hasCur && (
-                      <div className="flex items-center gap-2">
-                        <CurrencyChip code={item?.currency_code ?? "RUB"} className="shrink-0" />
-                        <Tooltip content={curTooltipContent ?? ""} side="top">
-                          <span
-                            className="tabular-nums italic text-5xl font-semibold cursor-help"
-                            style={profitability.yieldAssetAnnualCurrency! >= 0 ? gradientStyle : { color: RED }}
-                          >
-                            {new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(profitability.yieldAssetAnnualCurrency! * 100)}%
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {!hasRub && !hasCur && <span className="text-lg italic" style={{ color: PLACEHOLDER_COLOR_DARK }}>—</span>}
-                  </div>
-                );
-              })()}
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        )}
-
-        {profitability && profitability.hasMarketPrimary && (
-          <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
-            <div className="p-6">
-              <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Доходность вложений в актив</h3>
-              {(() => {
-                const currencyCode = (item?.currency_code ?? "RUB").toUpperCase();
-                const isCurrencyAsset = currencyCode !== "RUB";
-                const hasRub = profitability.yieldInvestmentsAnnualRub != null;
-                const hasCur = isCurrencyAsset && profitability.yieldInvestmentsAnnualCurrency != null;
-                const gradientStyle = { background: PINK_GRADIENT, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" } as React.CSSProperties;
-                const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
-                const pctFmt = (n: number) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n * 100);
-
-                const rubTooltipContent = (
-                  <div className="space-y-1.5 text-left">
-                    <div className="font-medium">Доходность вложений (RUB)</div>
-                    <div>Формула: ((Доход − Расход) + (Стоимость продажи − Вложения)) / Вложения × (365 / дней)</div>
-                    <div>Доход: {formatAmount(profitability.incomeFromAsset)} ₽</div>
-                    <div>Расход: {formatAmount(profitability.expenseForAsset)} ₽</div>
-                    <div>Стоимость продажи: {profitability.currentMarketValueCents != null ? formatAmount(profitability.currentMarketValueCents) : "—"}</div>
-                    <div>Вложения: {formatAmount(profitability.investedCents)}</div>
-                    <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
-                  </div>
-                );
-
-                const curTooltipContent = isCurrencyAsset && profitability.yieldInvestmentsAnnualCurrency != null ? (
-                  <div className="space-y-1.5 text-left">
-                    <div className="font-medium">Доходность вложений ({currencyCode})</div>
-                    <div>Формула: ((Доход − Расход) + (Стоимость продажи − Вложения)) / Вложения × (365 / дней)</div>
-                    <div>Доход: {profitability.incomeFromAssetInCurrency != null ? fmt(profitability.incomeFromAssetInCurrency) : "—"} {currencyCode}</div>
-                    <div>Расход: {profitability.expenseForAssetInCurrency != null ? fmt(profitability.expenseForAssetInCurrency) : "—"} {currencyCode}</div>
-                    <div>Стоимость продажи: {profitability.currentMarketValueCents != null ? fmt(profitability.currentMarketValueCents / 100) : "—"} {currencyCode}</div>
-                    <div>Вложения: {fmt(profitability.investedCents / 100)} {currencyCode}</div>
-                    <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
-                  </div>
-                ) : null;
-
-                return (
-                  <div className="flex w-full items-center justify-center gap-6 py-4 mt-2">
-                    {hasRub && (
-                      <div className="flex items-center gap-2">
-                        <CurrencyChip code="RUB" className="shrink-0" />
-                        <Tooltip content={rubTooltipContent} side="top">
-                          <span
-                            className="tabular-nums italic text-5xl font-semibold cursor-help"
-                            style={profitability.yieldInvestmentsAnnualRub! >= 0 ? gradientStyle : { color: RED }}
-                          >
-                            {pctFmt(profitability.yieldInvestmentsAnnualRub!)}%
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {hasCur && (
-                      <div className="flex items-center gap-2">
-                        <CurrencyChip code={item?.currency_code ?? "RUB"} className="shrink-0" />
-                        <Tooltip content={curTooltipContent ?? ""} side="top">
-                          <span
-                            className="tabular-nums italic text-5xl font-semibold cursor-help"
-                            style={profitability.yieldInvestmentsAnnualCurrency! >= 0 ? gradientStyle : { color: RED }}
-                          >
-                            {pctFmt(profitability.yieldInvestmentsAnnualCurrency!)}%
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {!hasRub && !hasCur && <span className="text-lg italic" style={{ color: PLACEHOLDER_COLOR_DARK }}>—</span>}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-
-        {item.instrument_id && (
-          <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
-            <div className="p-6">
-              <h3 className="text-base font-semibold mb-4" style={{ color: ACTIVE_TEXT_DARK }}>История операций по количеству</h3>
-              {quantityHistoryError ? (
-                <p className="text-sm text-red-500">{quantityHistoryError}</p>
-              ) : loadingQuantityHistory ? (
-                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
-              ) : (
-                <>
-                  <div className="rounded-lg overflow-hidden">
-                    <table className="w-full text-left border-collapse text-sm">
-                      <thead>
-                        <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
-                          <th className="pl-6 pr-4 py-3 text-sm font-medium">Дата</th>
-                          <th className="px-4 py-3 text-sm font-medium">Тип операции</th>
-                          <th className="px-4 py-3 text-sm font-medium text-right">Количество</th>
-                          <th className="px-4 py-3 text-sm font-medium text-right">Цена</th>
-                          <th className="px-4 py-3 text-sm font-medium text-right">Стоимость</th>
-                          <th className="px-6 py-3 text-sm font-medium text-right">Количество после операции</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {quantityHistoryRows.length === 0 ? (
-                          <tr style={{ backgroundColor: MODAL_BG }}>
-                            <td colSpan={6} className="px-6 py-4 text-center text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи</td>
-                          </tr>
-                        ) : (
-                          quantityHistoryRows.map(({ tx, type, delta, balanceAfter, priceCents, costCents }) => {
-                            const dateStr = tx.transaction_date ? new Date(tx.transaction_date.replace("T", " ")).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
-                            const amountColor = type === "Покупка" ? GREEN : RED;
-                            return (
-                              <tr key={tx.id} className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
-                                <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{dateStr}</td>
-                                <td className="px-4 py-2 text-sm" style={{ color: amountColor }}>{type}</td>
-                                <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: amountColor }}>{delta > 0 ? `+${delta}` : delta}</td>
-                                <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{priceCents != null ? formatAmount(priceCents) : "—"}</td>
-                                <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(costCents)}</td>
-                                <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{new Intl.NumberFormat("ru-RU").format(balanceAfter)}</td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="flex flex-wrap gap-4 mt-4">
-                    {(() => {
-                      const SummaryBlock = ({ title, value }: { title: string; value: number }) => (
-                        <div className="flex flex-1 min-w-[120px] flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
-                          <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
-                          <div className="rounded-md px-2 py-1 flex justify-center text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}>
-                            {new Intl.NumberFormat("ru-RU").format(value)}
-                          </div>
-                        </div>
-                      );
-                      return (
-                        <>
-                          <SummaryBlock title="Количество на начало" value={quantitySummary.startQty} />
-                          <SummaryBlock title="Всего куплено" value={quantitySummary.totalBuy} />
-                          <SummaryBlock title="Всего продано" value={quantitySummary.totalSell} />
-                          <SummaryBlock title="Количество на текущую дату" value={quantitySummary.current} />
-                        </>
-                      );
-                    })()}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {item && editModalOpen && (
           <AddEditItemFormModal

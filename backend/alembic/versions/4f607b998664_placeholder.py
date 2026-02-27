@@ -20,10 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     # Missing migration placeholder. No-op.
-    op.execute("-- placeholder revision 4f607b998664")
+    pass
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # No-op.
-    op.execute("-- placeholder revision 4f607b998664")
+    pass

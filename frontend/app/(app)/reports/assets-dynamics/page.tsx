@@ -2902,7 +2902,7 @@ export default function AssetsDynamicsPage() {
                                                 ) : (
                                         <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                                           <tbody>
-                                            {txsInRange.map(({ tx, deltaCents }) => {
+                                            {txsInRange.map(({ tx, deltaCents, inCurrency }) => {
                                               const d = toTxDateKey(tx.transaction_date);
                                               const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
                                               // Для валютных счетов: если deltaCents в валюте счёта (inCurrency=true), считаем рубли через курс;
@@ -3130,8 +3130,8 @@ export default function AssetsDynamicsPage() {
                                           const rateStart = dateStart && showCurRow ? getRate(dateStart) : null;
                                           const rateEnd = dateEnd && showCurRow ? getRate(dateEnd) : null;
                                           // Сумма в валюте = количество на дату × цену на дату (itemValues). Только при отсутствии — пересчёт из RUB по курсу.
-                                          const initialDisplayCurResolved = showCurRow && (initialValueCents != null ? (effectiveKind === "LIABILITY" ? Math.abs(initialValueCents) / 100 : initialValueCents / 100) : (initialRubCents != null && rateStart != null ? (initialRubCents / 100) / rateStart : null));
-                                          const finalDisplayCurResolved = showCurRow && (finalValueCents != null ? (effectiveKind === "LIABILITY" ? Math.abs(finalValueCents) / 100 : finalValueCents / 100) : (finalRubCents != null && rateEnd != null ? (finalRubCents / 100) / rateEnd : null));
+                                          const initialDisplayCurResolved = showCurRow ? (initialValueCents != null ? (effectiveKind === "LIABILITY" ? Math.abs(initialValueCents) / 100 : initialValueCents / 100) : (initialRubCents != null && rateStart != null ? (initialRubCents / 100) / rateStart : null)) : null;
+                                          const finalDisplayCurResolved = showCurRow ? (finalValueCents != null ? (effectiveKind === "LIABILITY" ? Math.abs(finalValueCents) / 100 : finalValueCents / 100) : (finalRubCents != null && rateEnd != null ? (finalRubCents / 100) / rateEnd : null)) : null;
                                           const netFlowCur = totalExpenseCur - totalIncomeCur + totalTransferCur;
                                           const signedInitialRubForPrice = initialRubCents != null && effectiveKind === "LIABILITY" ? -initialRubCents : (initialRubCents ?? 0);
                                           const signedFinalRubForPrice = finalRubCents != null && effectiveKind === "LIABILITY" ? -finalRubCents : (finalRubCents ?? 0);

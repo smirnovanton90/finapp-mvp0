@@ -41,6 +41,7 @@ import {
   fetchCategories,
   fetchFxRatesBatch,
   uploadItemPhoto,
+  updateItem,
   archiveItem,
   closeItem,
   API_BASE,
@@ -461,10 +462,12 @@ export default function AssetDetailPage() {
 
   // Динамика по периоду (дата начала = дата появления актива, конец = сегодня). Отдельно для балансовой и рыночной стоимости — для плашек в соответствующих разделах.
   const dynamicsByMode = useMemo(() => {
-    if (!item || !costs) return { balance: null as ReturnType<typeof buildOne>, market: null as ReturnType<typeof buildOne>, primary: null as ReturnType<typeof buildOne> };
-    const dateStart = item.open_date ?? todayKey;
+    if (!item || !costs) return { balance: null as unknown as ReturnType<typeof buildOne>, market: null as unknown as ReturnType<typeof buildOne>, primary: null as unknown as ReturnType<typeof buildOne> };
+    const it = item;
+    const c = costs;
+    const dateStart = it.open_date ?? todayKey;
     const dateEnd = todayKey;
-    const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
+    const currencyCode = (it.currency_code ?? "RUB").toUpperCase();
     const points = costHistoryData?.points ?? [];
     const startPoint = points.find((p) => p.date === dateStart) ?? points.filter((p) => p.date <= dateStart).pop() ?? null;
     const endPoint = points.find((p) => p.date === dateEnd) ?? points.filter((p) => p.date <= dateEnd).pop() ?? null;
@@ -476,22 +479,22 @@ export default function AssetDetailPage() {
       return null;
     };
 
-    const isMarketOrCrypto = isMoexItem(item) || isCryptoItem(item);
+    const isMarketOrCrypto = isMoexItem(it) || isCryptoItem(it);
 
     const txsInRange = (() => {
       const included = dynamicsTxs.filter((tx) => {
         const d = toTxDateKey(tx.transaction_date);
         if (d <= dateStart || d > dateEnd) return false;
-        const delta = getTxDeltaForItem(tx, item.id, item.kind, item.currency_code);
+        const delta = getTxDeltaForItem(tx, it.id, it.kind, it.currency_code);
         if (delta !== null) return true;
-        if (isMarketOrCrypto && tx.related_item_id === item.id) return true;
+        if (isMarketOrCrypto && tx.related_item_id === it.id) return true;
         return false;
       });
       return included
         .map((tx) => {
-          const res = getTxDeltaForItem(tx, item.id, item.kind, item.currency_code);
+          const res = getTxDeltaForItem(tx, it.id, it.kind, it.currency_code);
           if (res !== null) return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
-          if (isMarketOrCrypto && tx.related_item_id === item.id) {
+          if (isMarketOrCrypto && tx.related_item_id === it.id) {
             const inCurrency = currencyCode !== "RUB";
             return { tx, deltaCents: tx.amount ?? 0, inCurrency };
           }
@@ -548,16 +551,16 @@ export default function AssetDetailPage() {
     let totalBuyQty = 0;
     let totalSellQty = 0;
     if (isMarketOrCrypto) {
-      const isCrypto = isCryptoItem(item);
+      const isCrypto = isCryptoItem(it);
       const getTxQty = (tx: TransactionOut) => {
-        if (tx.related_item_id === item.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
-        if (tx.counterparty_item_id === item.id || tx.counterparty_card_item_id === item.id) return isCrypto ? (tx.counterparty_quantity_units ?? 0) : (tx.counterparty_quantity_lots ?? 0);
-        if (tx.primary_item_id === item.id || tx.primary_card_item_id === item.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+        if (tx.related_item_id === it.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+        if (tx.counterparty_item_id === it.id || tx.counterparty_card_item_id === it.id) return isCrypto ? (tx.counterparty_quantity_units ?? 0) : (tx.counterparty_quantity_lots ?? 0);
+        if (tx.primary_item_id === it.id || tx.primary_card_item_id === it.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
         return 0;
       };
       const getIsBuy = (tx: TransactionOut) => {
-        if (tx.related_item_id === item.id) return tx.asset_link_type === "ASSET_PURCHASE";
-        if (tx.counterparty_item_id === item.id || tx.counterparty_card_item_id === item.id) return true;
+        if (tx.related_item_id === it.id) return tx.asset_link_type === "ASSET_PURCHASE";
+        if (tx.counterparty_item_id === it.id || tx.counterparty_card_item_id === it.id) return true;
         return false;
       };
       txsInRange.forEach(({ tx }) => {
@@ -610,24 +613,24 @@ export default function AssetDetailPage() {
         const pt = endPoint as { market_quantity_units?: number | null };
         if (isMarketOrCrypto && pt.market_quantity_units != null) qtyEnd = pt.market_quantity_units;
         else if (isMarketOrCrypto) {
-          if (item.type_code === "crypto" && item.quantity_units != null) qtyEnd = item.quantity_units;
-          else if (item.position_lots != null) qtyEnd = item.position_lots;
+          if (it.type_code === "crypto" && it.quantity_units != null) qtyEnd = it.quantity_units;
+          else if (it.position_lots != null) qtyEnd = it.position_lots;
         }
       } else {
         if (isMarketOrCrypto) {
-          // costs.market — в валюте актива (копейки/центы)
-          finalCurCents = costs.market ?? 0;
+          // c.market — в валюте актива (копейки/центы)
+          finalCurCents = c.market ?? 0;
           const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
           finalRubCents =
-            costs.market_value_rub ??
+            c.market_value_rub ??
             (currencyCode !== "RUB" && rate != null
               ? Math.round((finalCurCents / 100) * rate * 100)
-              : (costs.market ?? 0));
-          if (item.type_code === "crypto" && item.quantity_units != null) qtyEnd = item.quantity_units;
-          else if (item.position_lots != null) qtyEnd = item.position_lots;
+              : (c.market ?? 0));
+          if (it.type_code === "crypto" && it.quantity_units != null) qtyEnd = it.quantity_units;
+          else if (it.position_lots != null) qtyEnd = it.position_lots;
         } else {
-          // costs.balance — в валюте актива (копейки/центы)
-          finalCurCents = costs.balance ?? 0;
+          // c.balance — в валюте актива (копейки/центы)
+          finalCurCents = c.balance ?? 0;
           const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
           finalRubCents =
             currencyCode === "RUB"
@@ -642,7 +645,7 @@ export default function AssetDetailPage() {
         qtyEnd = qtyStart + totalBuyQty - totalSellQty;
       }
 
-      const effectiveKind = getEffectiveItemKind(item, finalCurCents);
+      const effectiveKind = getEffectiveItemKind(it, finalCurCents);
       const signedInitialRub = effectiveKind === "LIABILITY" ? -(initialRubCents ?? 0) : (initialRubCents ?? 0);
       const signedFinalRub = effectiveKind === "LIABILITY" ? -(finalRubCents ?? 0) : (finalRubCents ?? 0);
       const totalNonFlowRub = signedFinalRub - signedInitialRub - chipFlowRub;
@@ -703,7 +706,7 @@ export default function AssetDetailPage() {
       };
     }
 
-    const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
+    const primaryKind = (it.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
     return {
       balance: buildOne("BALANCE"),
       market: buildOne("MARKET"),
@@ -988,11 +991,11 @@ export default function AssetDetailPage() {
       if (key === "market" && p.market_price_rub != null && p.market_quantity_units != null) {
         valueRub = (p.market_price_rub * p.market_quantity_units) / 100;
       } else {
-        valueRub = ((p as Record<string, number | null>)[key] ?? 0) / 100;
+        valueRub = ((p as unknown as Record<string, number | null>)[key] ?? 0) / 100;
       }
       const hasValue = key === "market"
         ? (p.market_price_rub != null && p.market_quantity_units != null) || p.market != null
-        : (p as Record<string, number | null>)[key] != null;
+        : (p as unknown as Record<string, number | null>)[key] != null;
       const base = { date: p.date, valueRub, hasValue };
       if (key === "market") {
         return {

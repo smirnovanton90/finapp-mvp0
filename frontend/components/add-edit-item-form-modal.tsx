@@ -87,16 +87,12 @@ export type AddEditItemFormModalProps = {
   editingItem: ItemOut | null;
   onClearEditingItem: () => void;
   initialCreateOptions?: { kind: ItemKind; typeCodes: string[]; general?: boolean; sectionId?: string } | null;
+  /** Опциональные начальные значения полей при открытии в режиме создания (например из онбординга). */
+  initialCreateDefaults?: { name?: string; amountStr?: string; openDate?: string; typeCode?: string } | null;
   askConfirm: (title: string, message: string) => Promise<boolean>;
   transactionsForEdit?: TransactionOut[];
   /** Если передано, модалка не подгружает список сама (например со страницы «Активы»). */
   items?: ItemOut[];
-  /** @deprecated Не используется (модалка всегда открывается как FormModal без focus trap). Оставлено для обратной совместиости. */
-  modal?: boolean;
-  /** @deprecated Не используется. Оставлено для обратной совместиости. */
-  overlayClassName?: string;
-  /** @deprecated Не используется. Оставлено для обратной совместиости. */
-  containerClassName?: string;
 };
 
 export function AddEditItemFormModal({
@@ -106,6 +102,7 @@ export function AddEditItemFormModal({
   editingItem,
   onClearEditingItem,
   initialCreateOptions,
+  initialCreateDefaults,
   askConfirm,
   transactionsForEdit = [],
   items: itemsProp,
@@ -219,13 +216,13 @@ export function AddEditItemFormModal({
       setAllowedTypeCodes(initialCreateOptions.typeCodes);
       setSectionId(initialCreateOptions.sectionId ?? "");
       setIsGeneralCreate(true);
-      setTypeCode("");
+      setTypeCode(initialCreateDefaults?.typeCode ?? "");
       setCurrencyCode("RUB");
-      setName("");
-      setAmountStr("");
+      setName(initialCreateDefaults?.name ?? "");
+      setAmountStr(initialCreateDefaults?.amountStr ?? "");
       setCounterpartyId(null);
-      setOpenDate(getTodayDateKey());
-      setPrimaryValueKind(getDefaultPrimaryValueKind("", initialCreateOptions.kind));
+      setOpenDate(initialCreateDefaults?.openDate ?? getTodayDateKey());
+      setPrimaryValueKind(getDefaultPrimaryValueKind(initialCreateDefaults?.typeCode ?? "", initialCreateOptions.kind));
       setSynonyms([]);
       setMarketValueStr("");
     }
@@ -291,7 +288,7 @@ export function AddEditItemFormModal({
       setItemPhotoFile(null);
       fetchTransactionChains({ linked_item_id: editingItem.id }).then((chains) => setLinkedChains((chains ?? []).filter((c) => !c.deleted_at))).catch(() => setLinkedChains([]));
     }
-  }, [open, initialCreateOptions, editingItem?.id ?? null, accountingStartDate]);
+  }, [open, initialCreateOptions, initialCreateDefaults, editingItem?.id ?? null, accountingStartDate]);
 
   const sectionOptions = useMemo(
     () => ITEM_SECTIONS.filter((s) => s.kind === kind),

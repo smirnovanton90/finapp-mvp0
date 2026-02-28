@@ -27,8 +27,6 @@ import {
   Info,
   Upload,
   Camera,
-  ChevronRight,
-  ChevronLeft,
 } from "lucide-react";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -746,7 +744,6 @@ export default function Page() {
   const itemPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [icon3dFormat, setIcon3dFormat] = useState<"png" | null>("png");
   const [show2dIcon, setShow2dIcon] = useState(false);
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
 
   useEffect(() => {
     if (!isWizardOpen) {
@@ -1339,35 +1336,6 @@ export default function Page() {
     isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW" && hasNonZeroLots;
   const commissionAllowed = showMoexCommission;
   
-  // Check if there are any additional fields to show in the right panel
-  const hasAdditionalFields = useMemo(() => {
-    return (
-      showMoexPricing ||
-      showMoexCommission ||
-      showBankAccountFields ||
-      showBankCardFields ||
-      showContractNumberField ||
-      showDepositFields ||
-      showInterestFields ||
-      showPlanSection
-    );
-  }, [
-    showMoexPricing,
-    showMoexCommission,
-    showBankAccountFields,
-    showBankCardFields,
-    showContractNumberField,
-    showDepositFields,
-    showInterestFields,
-    showPlanSection,
-  ]);
-  
-  // Close right panel when there are no additional fields
-  useEffect(() => {
-    if (!hasAdditionalFields) {
-      setIsRightPanelOpen(false);
-    }
-  }, [hasAdditionalFields]);
   const showMoexStartDatePricing =
     showMoexPricing &&
     resolvedHistoryStatus === "HISTORICAL" &&
@@ -2150,6 +2118,12 @@ export default function Page() {
     if (!isCreateOpen || !showCounterpartyField || counterparties.length || counterpartyLoading) return;
     loadCounterparties();
   }, [isCreateOpen, showCounterpartyField, counterparties.length, counterpartyLoading]);
+
+  useEffect(() => {
+    if (isCreateOpen && currencies.length === 0) {
+      loadCurrencies();
+    }
+  }, [isCreateOpen, currencies.length]);
 
   useEffect(() => {
     if (showCounterpartyField) return;
@@ -4088,7 +4062,6 @@ export default function Page() {
             setFormError(null);
             resetCreateForm();
             setEditingItem(null);
-            setIsRightPanelOpen(false);
           }
         }}
         title={
@@ -4463,13 +4436,7 @@ export default function Page() {
               placeholder="Например: Кошелек / Ипотека"
             />
 
-            <div
-              className={`transition-all duration-300 ${
-                showCounterpartyField || showBankCardFields
-                  ? "max-h-[600px] opacity-100 overflow-visible"
-                  : "max-h-0 opacity-0 overflow-hidden"
-              }`}
-            >
+            {(showCounterpartyField || showBankCardFields) && (
               <div className="grid gap-4">
                 {showCounterpartyField && (
                   <div className="grid gap-2">
@@ -4529,7 +4496,7 @@ export default function Page() {
                   </div>
                 )}
               </div>
-            </div>
+            )}
 
             <div className="grid gap-2">
               <div className="flex items-center justify-between">
@@ -4689,40 +4656,6 @@ export default function Page() {
               maxLengthPerItem={300}
             />
 
-              </div>
-
-              {/* Toggle button for right panel - only show when there are additional fields */}
-              <div
-                className={`overflow-hidden transition-all duration-300 self-stretch flex items-center ${
-                  hasAdditionalFields ? "w-8 opacity-100" : "w-0 opacity-0"
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-                  className="w-8 h-full flex items-center justify-center transition-all cursor-pointer hover:bg-[rgba(93,95,215,0.22)] flex-shrink-0"
-                  style={{
-                    backgroundColor: MODAL_BG,
-                  }}
-                  aria-label={isRightPanelOpen ? "Скрыть дополнительные поля" : "Показать дополнительные поля"}
-                >
-                  {isRightPanelOpen ? (
-                    <ChevronLeft className="w-5 h-5" style={{ color: ACTIVE_TEXT_DARK }} />
-                  ) : (
-                    <ChevronRight className="w-5 h-5" style={{ color: ACTIVE_TEXT_DARK }} />
-                  )}
-                </button>
-              </div>
-
-              {/* Right panel - collapsible */}
-              <div
-                className={`transition-all duration-300 ${
-                  isRightPanelOpen
-                    ? "w-[340px] opacity-100 overflow-visible"
-                    : "w-0 opacity-0 overflow-hidden"
-                }`}
-              >
-                <div className="w-[340px] grid content-start gap-4 pl-4">
             {showMoexPricing && (
               <div className="rounded-lg border-2 border-border/70 p-3 text-sm" style={{ backgroundColor: BACKGROUND_DT }}>
                 <div className="font-medium">
@@ -5204,7 +5137,6 @@ export default function Page() {
                 )}
               </div>
             )}
-                </div>
               </div>
             </div>
       </FormModal>

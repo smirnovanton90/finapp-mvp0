@@ -183,8 +183,6 @@ export function AddEditItemFormModal({
   const [itemPhotoError, setItemPhotoError] = useState<string | null>(null);
   const [icon3dFormat, setIcon3dFormat] = useState<"png" | null>("png");
   const [show2dIcon, setShow2dIcon] = useState(false);
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
-
   useEffect(() => {
     if (!open) return;
     if (itemsProp !== undefined) {
@@ -593,7 +591,6 @@ export function AddEditItemFormModal({
     if (itemPhotoInputRef.current) itemPhotoInputRef.current.value = "";
     setIcon3dFormat("png");
     setShow2dIcon(false);
-    setIsRightPanelOpen(false);
   }, []);
 
   const handleItemPhotoChange = useCallback((file: File | null) => {

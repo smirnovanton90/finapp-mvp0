@@ -2599,8 +2599,11 @@ def _build_item_cost_history(
     if is_moex_item(item) and item.instrument_id and item.instrument_board_id:
         try:
             ensure_moex_history_prices(db, item.instrument_id, item.instrument_board_id, start, date_to)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(
+                "ensure_moex_history_prices failed for item %s instrument_id=%s board_id=%s: %s",
+                item.id, item.instrument_id, item.instrument_board_id, e,
+            )
         all_prices = (
             db.query(MarketPrice)
             .filter(
@@ -2760,6 +2763,8 @@ def _build_item_cost_history(
                 idx = bisect.bisect_right(moex_sorted_keys, d_str) - 1
                 if idx >= 0:
                     price = moex_prices_by_date[moex_sorted_keys[idx]]
+                elif moex_sorted_keys:
+                    price = moex_prices_by_date[moex_sorted_keys[0]]
             if price is not None and lot_balance is not None and lot_balance >= 0:
                 class _ItemLike:
                     pass
@@ -2790,6 +2795,8 @@ def _build_item_cost_history(
                     if m_date <= d_str:
                         price_in_currency = crypto_chart_prices[m_date]
                         break
+                if price_in_currency is None and sorted_dates:
+                    price_in_currency = crypto_chart_prices[sorted_dates[0]]
             if price_in_currency is not None and price_in_currency > 0:
                 market_rub = int(round(units_balance * price_in_currency * 100))
                 market_quantity_units = int(round(units_balance))

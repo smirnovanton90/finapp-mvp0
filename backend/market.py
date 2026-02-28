@@ -1005,8 +1005,13 @@ def ensure_moex_history_prices(
     ).scalar()
     total_days = (date_to - date_from).days + 1
     trading_days_est = int(total_days * 5 / 7)
-    logger.info("ensure_moex_history_prices %s: existing=%d, est=%d, min_date=%s", secid, existing_count, trading_days_est, min_date_in_range)
-    if existing_count >= max(trading_days_est * 0.8, 1) and (min_date_in_range is not None and min_date_in_range <= date_from):
+    logger.info("ensure_moex_history_prices %s: existing=%d, est=%d, min_date=%s, date_from=%s", secid, existing_count, trading_days_est, min_date_in_range, date_from)
+    # Допускаем расхождение до 60 дней: MOEX может не иметь данных точно с date_from
+    # (инструмент ещё не торговался, праздники и т.д.)
+    early_tolerance = timedelta(days=60)
+    if existing_count >= max(trading_days_est * 0.8, 1) and (
+        min_date_in_range is not None and min_date_in_range <= date_from + early_tolerance
+    ):
         return
 
     instrument = db.get(MarketInstrument, secid)
@@ -1029,30 +1034,50 @@ def ensure_moex_history_prices(
         logger.warning("ensure_moex_history_prices %s: no engine=%s or market=%s", secid, engine, market_field)
         return
 
+    # Запрашиваем по подпериодам (по ~4 месяца), чтобы гарантированно получить начало периода:
+    # MOEX ISS может отдавать строки с конца периода или ограничивать выборку.
     history_rows: list[dict[str, Any]] = []
-    start = 0
-    page_size = 100
-    while True:
-        try:
-            payload = _moex_get(
-                f"history/engines/{engine}/markets/{market_field}/boards/{board_id}/securities/{secid}.json",
-                params={
-                    "iss.meta": "off",
-                    "from": date_from.isoformat(),
-                    "till": date_to.isoformat(),
-                    "start": start,
-                },
-            )
-        except Exception:
+    chunk_days = 120
+    current_from = date_from
+    while current_from <= date_to:
+        chunk_to = min(
+            current_from + timedelta(days=chunk_days - 1),
+            date_to,
+        )
+        start = 0
+        page_size = 500
+        while True:
+            try:
+                payload = _moex_get(
+                    f"history/engines/{engine}/markets/{market_field}/boards/{board_id}/securities/{secid}.json",
+                    params={
+                        "iss.meta": "off",
+                        "from": current_from.isoformat(),
+                        "till": chunk_to.isoformat(),
+                        "start": start,
+                        "limit": page_size,
+                    },
+                )
+            except Exception as e:
+                logger.warning("ensure_moex_history_prices %s: MOEX request failed from=%s till=%s start=%s: %s", secid, current_from, chunk_to, start, e)
+                break
+            page_rows = _table_rows(payload, "history")
+            if not page_rows:
+                break
+            history_rows.extend(page_rows)
+            if len(page_rows) < page_size:
+                break
+            start += len(page_rows)
+        current_from = chunk_to + timedelta(days=1)
+        if current_from > date_to:
             break
-        page_rows = _table_rows(payload, "history")
-        if not page_rows:
-            break
-        history_rows.extend(page_rows)
-        if len(page_rows) < page_size:
-            break
-        start += len(page_rows)
 
+    if history_rows:
+        dates_loaded = sorted({_normalize_text(r.get("TRADEDATE")) for r in history_rows if _normalize_text(r.get("TRADEDATE"))})
+        logger.info(
+            "ensure_moex_history_prices %s: fetched %d rows, date range %s .. %s",
+            secid, len(history_rows), dates_loaded[0] if dates_loaded else "?", dates_loaded[-1] if dates_loaded else "?",
+        )
     for row in history_rows:
         td_raw = _normalize_text(row.get("TRADEDATE"))
         if not td_raw:

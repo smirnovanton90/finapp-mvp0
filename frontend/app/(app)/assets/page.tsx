@@ -1321,6 +1321,7 @@ export default function Page() {
   const hasNonZeroAmount = Number.isFinite(amountCents) && amountCents !== 0;
   const hasNonZeroLots = moexLots != null && moexLots > 0;
   const showOpeningCounterparty =
+    resolvedHistoryStatus !== "HISTORICAL" &&
     (primaryValueKind === "BALANCE" ||
       primaryValueKind === "ACQUISITION" ||
       primaryValueKind === "INVESTED" ||
@@ -1391,12 +1392,14 @@ export default function Page() {
     kind === "LIABILITY"
       ? "Актив для зачисления"
       : "Источник средств";
-  const openingHint =
-    showOpeningCounterparty
-      ? kind === "LIABILITY"
-        ? "Если не выбрать актив, будет создана фактическая транзакция с категорией «Прочие расходы»."
-        : "Если не выбрать актив, будет создана фактическая транзакция с категорией «Прочие доходы»."
-      : null;
+  const openingHint = useMemo(() => {
+    if (!showOpeningCounterparty) return null;
+    const dateLabel = accountingStartDate ? formatShortDate(accountingStartDate) : null;
+    const datePhrase = dateLabel ? ` после даты начала учета ${dateLabel}, поэтому` : ", поэтому";
+    return kind === "LIABILITY"
+      ? `Обязательство появилось${datePhrase} нужно указать источник средств, откуда были переведены средства или погашено обязательство. Если источник не указать, то будет создана транзакция в размере начальной суммы с категорией «Прочие расходы».`
+      : `Актив появился${datePhrase} нужно указать источник средств, откуда были переведены средства или оплачен актив. Если источник не указать, то будет создана транзакция в размере начальной суммы с категорией «Прочие доходы».`;
+  }, [showOpeningCounterparty, accountingStartDate, kind]);
   const amountLabel = useMemo(() => {
     if (primaryValueKind === "MARKET" && !isMoexType) {
       if (resolvedHistoryStatus === "HISTORICAL") {
@@ -4226,10 +4229,11 @@ export default function Page() {
             {/* ══════ 1. Основное ══════ */}
             <CollapsibleFormSection title="Основное" defaultOpen>
 
-            {showInstrumentBlock && (
-              <>
+            <div className={`grid grid-cols-1 gap-4 ${showInstrumentBlock || showCounterpartyField ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+              {/* Рыночные активы: Ценная бумага | Название актива | Дата появления */}
+              {showInstrumentBlock && (
                 <div className="grid gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-h-6 items-center gap-2">
                     <Label style={{ color: ACTIVE_TEXT_DARK }}>{isCryptoType ? "Криптовалюта" : "Ценная бумага"}</Label>
                     <Tooltip content="Поиск возможен по ISIN-коду, коду ценной бумаги, названию">
                       <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
@@ -4260,9 +4264,7 @@ export default function Page() {
                           zIndex: 100,
                         }}
                       >
-                        {/* Gradient border wrapper */}
                         <div className="relative rounded-lg">
-                          {/* Stroke layer */}
                           <div
                             className="absolute inset-0 rounded-lg pointer-events-none z-0"
                             style={{
@@ -4274,7 +4276,6 @@ export default function Page() {
                               opacity: 1,
                             }}
                           />
-                          {/* Inner container */}
                           <div className="relative rounded-lg p-1 z-10" style={{ backgroundColor: DROPDOWN_BG }}>
                             {instrumentLoading && (
                               <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
@@ -4330,33 +4331,23 @@ export default function Page() {
                     )}
                   </div>
                 </div>
+              )}
 
-                {isMoexType && (
-                  <SelectField
-                    label="Торговый режим"
-                    value={instrumentBoardId}
-                    onValueChange={setInstrumentBoardId}
-                    disabled={instrumentBoards.length === 0}
-                    options={instrumentBoards.map((board) => ({ value: board.board_id, label: board.title ? `${board.board_id} - ${board.title}` : board.board_id }))}
-                    placeholder="Выберите режим"
-                  />
-                )}
-              </>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Название актива (колонка 1 для остальных, колонка 2 для рыночных) */}
               <div className="grid gap-2">
                 <div className="flex h-6 items-center justify-between">
                   <Label style={{ color: ACTIVE_TEXT_DARK }}>Название актива</Label>
-                  <button
-                    type="button"
-                    className="text-sm font-medium hover:underline invisible"
-                    style={{ color: ACCENT }}
-                    tabIndex={-1}
-                    aria-hidden="true"
-                  >
-                    В дату начала учета
-                  </button>
+                  {!showInstrumentBlock && (
+                    <button
+                      type="button"
+                      className="text-sm font-medium hover:underline invisible"
+                      style={{ color: ACCENT }}
+                      tabIndex={-1}
+                      aria-hidden="true"
+                    >
+                      В дату начала учета
+                    </button>
+                  )}
                 </div>
                 <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
                   <AuthInput
@@ -4367,34 +4358,8 @@ export default function Page() {
                   />
                 </div>
               </div>
-              <div className="grid gap-2">
-                <div className="flex h-6 items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Label style={{ color: ACTIVE_TEXT_DARK }}>{openDateLabel}</Label>
-                    <Tooltip content={openDateHelpText} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
-                      <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
-                    </Tooltip>
-                  </div>
-                  {accountingStartDate && (
-                    <button type="button" className="text-sm font-medium hover:underline" style={{ color: ACCENT }} onClick={() => setOpenDate(accountingStartDate)}>В дату начала учета</button>
-                  )}
-                </div>
-                <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
-                  <AuthInput
-                    type="date"
-                    value={openDate}
-                    onChange={(e) => setOpenDate(e.target.value)}
-                    max={getTodayDateKey()}
-                  />
-                </div>
-                {resolvedHistoryStatus && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${resolvedHistoryStatus === "NEW" ? "bg-emerald-50 text-emerald-700" : "bg-muted text-foreground"}`}>
-                      {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
-                    </span>
-                  </div>
-                )}
-              </div>
+
+              {/* Банк/Контрагент — только для не-рыночных активов */}
               {showCounterpartyField && (
                 <div className="grid gap-2">
                   <Label>{isBankCounterparty ? "Банк" : "Контрагент"}</Label>
@@ -4414,6 +4379,43 @@ export default function Page() {
                   {counterpartyError && <p className="text-xs text-red-600">{counterpartyError}</p>}
                 </div>
               )}
+
+              {/* Дата появления — всегда третья колонка (справа) */}
+              <div className="grid gap-2">
+                <div className="flex h-6 items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>{openDateLabel}</Label>
+                    <Tooltip content={openDateHelpText} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
+                      <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
+                    </Tooltip>
+                  </div>
+                  {accountingStartDate && (
+                    <button type="button" className="text-sm font-medium hover:underline" style={{ color: ACCENT }} onClick={() => setOpenDate(accountingStartDate)}>В дату начала учета</button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1 min-w-0 [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
+                    <AuthInput
+                      type="date"
+                      value={openDate}
+                      onChange={(e) => setOpenDate(e.target.value)}
+                      max={getTodayDateKey()}
+                    />
+                  </div>
+                  {resolvedHistoryStatus && (
+                    <span
+                      className="inline-flex items-center shrink-0 rounded-md border px-2 py-1 text-sm font-normal"
+                      style={{
+                        borderColor: ACCENT2,
+                        backgroundColor: "rgba(85, 68, 209, 0.15)",
+                        color: ACTIVE_TEXT_DARK,
+                      }}
+                    >
+                      {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
 
             {showBankCardFields && (
@@ -4432,11 +4434,14 @@ export default function Page() {
             {/* ══════ 2. Стоимость ══════ */}
             <CollapsibleFormSection
               title="Стоимость"
-              titleRight={typeCode ? `По умолчанию используется ${getPrimaryValueLabel(primaryValueKind)}` : undefined}
+              titleColor={ACTIVE_TEXT_DARK}
+              titleCenter={showInstrumentBlock ? <>Валюта <CurrencyChip code={currencyCode} className="min-w-10 justify-center" /></> : undefined}
+              titleRight={typeCode ? <>По умолчанию используется <span style={{ color: ACCENT }}>{getPrimaryValueLabel(primaryValueKind)}</span></> : undefined}
               defaultOpen
             >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {!isCryptoType && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Колонка 1: Валюта (только для не-рыночных активов) */}
+              {!showInstrumentBlock && (
                 <SelectField
                   label="Валюта"
                   value={currencyCode}
@@ -4454,6 +4459,7 @@ export default function Page() {
                   placeholder="Выберите валюту"
                 />
               )}
+              {/* Колонка 2: Баланс / сумма на дату появления */}
               {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
                 <div className="grid gap-2">
                   <TextField
@@ -4497,28 +4503,54 @@ export default function Page() {
                   )}
                 </div>
               )}
+              {/* Колонка 3: Источник средств (подсказка в тултипе, как у «Дата появления») */}
+              {showOpeningCounterparty && (
+                <div className="grid gap-2">
+                  <div className="flex min-h-6 items-center gap-2">
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>{openingCounterpartyLabel}</Label>
+                    <Tooltip content={openingHint ?? ""} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
+                      <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
+                    </Tooltip>
+                  </div>
+                  <ItemSelector
+                    items={openingCounterpartyItems}
+                    selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
+                    onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")}
+                    selectionMode="single"
+                    placeholder="Не выбирать"
+                    getItemTypeLabel={(it) => (it.name ?? "") + " " + (it.currency_code ?? "")}
+                    apiBase={API_BASE}
+                    getBankLogoUrl={itemCounterpartyLogoUrl}
+                    getBankName={itemCounterpartyName}
+                    itemCounts={itemTxCounts}
+                    ariaLabel={openingCounterpartyLabel}
+                  />
+                </div>
+              )}
             </div>
 
             {showInstrumentBlock && (
               <>
-                <TextField
-                  label={isCryptoType ? "Количество" : "Количество лотов"}
-                  value={isCryptoType ? quantityUnitsStr : positionLots}
-                  onChange={(e) => (isCryptoType ? setQuantityUnitsStr(e.target.value) : setPositionLots(e.target.value))}
-                  inputMode={isCryptoType ? "decimal" : "numeric"}
-                  placeholder={isCryptoType ? "Например: 0.5" : "Например: 10"}
-                />
-                {isMoexType && resolvedHistoryStatus === "NEW" && (
-                  <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => setMoexPurchasePrice(formatRubInput(e.target.value))} onBlur={() => setMoexPurchasePrice((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder="Например: 123,45" />
-                )}
-                {isCryptoType && resolvedHistoryStatus === "NEW" && (
-                  <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))} onBlur={() => setCryptoPurchasePrice((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder={marketPrice?.price_usd_cents != null ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",") : "Например: 83,32"} />
-                )}
-                {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
-                  <div className="grid gap-1">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <TextField
+                    label={isCryptoType ? "Количество" : "Количество лотов"}
+                    value={isCryptoType ? quantityUnitsStr : positionLots}
+                    onChange={(e) => (isCryptoType ? setQuantityUnitsStr(e.target.value) : setPositionLots(e.target.value))}
+                    inputMode={isCryptoType ? "decimal" : "numeric"}
+                    placeholder={isCryptoType ? "Например: 0.5" : "Например: 10"}
+                  />
+                  {isMoexType && resolvedHistoryStatus === "NEW" && (
+                    <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => setMoexPurchasePrice(formatRubInput(e.target.value))} onBlur={() => setMoexPurchasePrice((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder="Например: 123,45" />
+                  )}
+                  {isCryptoType && resolvedHistoryStatus === "NEW" && (
+                    <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))} onBlur={() => setCryptoPurchasePrice((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder={marketPrice?.price_usd_cents != null ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",") : "Например: 83,32"} />
+                  )}
+                  {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
                     <TextField label="Цена приобретения" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={() => setHistoricalAcquisitionCost((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder={isCryptoType ? "Например: 83,32" : "Например: 123,45"} />
-                    <p className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>Укажите среднюю цену приобретения позиции с момента её появления у вас</p>
-                  </div>
+                  )}
+                </div>
+                {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
+                  <p className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>Укажите среднюю цену приобретения позиции с момента её появления у вас</p>
                 )}
                 {isCryptoType && marketPrice && (marketPrice.price_usd_cents != null || marketPrice.price_cents != null) && (
                   <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
@@ -4531,28 +4563,6 @@ export default function Page() {
                   </p>
                 )}
               </>
-            )}
-
-            {showOpeningCounterparty && (
-              <div className="grid gap-2">
-                <Label>{openingCounterpartyLabel}</Label>
-                <ItemSelector
-                  items={openingCounterpartyItems}
-                  selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
-                  onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")}
-                  selectionMode="single"
-                  placeholder="Не выбирать"
-                  getItemTypeLabel={(it) => (it.name ?? "") + " " + (it.currency_code ?? "")}
-                  apiBase={API_BASE}
-                  getBankLogoUrl={itemCounterpartyLogoUrl}
-                  getBankName={itemCounterpartyName}
-                  itemCounts={itemTxCounts}
-                  ariaLabel={openingCounterpartyLabel}
-                />
-                {openingHint && (
-                  <p className="text-xs text-muted-foreground">{openingHint}</p>
-                )}
-              </div>
             )}
 
             {showMoexCommission && (

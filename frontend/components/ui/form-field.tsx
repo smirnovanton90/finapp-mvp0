@@ -35,7 +35,7 @@ export function FormField({ label, labelHint, required, error, className, childr
   return (
     <div className={cn("grid min-w-0", label ? "gap-2" : "gap-0", className)}>
       {label ? (
-        <Label style={{ color: ACTIVE_TEXT_DARK }} className="flex flex-wrap items-center gap-x-1.5 gap-y-0">
+        <Label style={{ color: ACTIVE_TEXT_DARK }} className="flex min-h-6 flex-wrap items-center gap-x-1.5 gap-y-0">
           <span>{label}{required && <span style={{ color: "#FB4C4F" }}> *</span>}</span>
           {labelHint ? (
             <Tooltip content={labelHint} side="top" className="inline-flex items-center">

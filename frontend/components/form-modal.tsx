@@ -42,7 +42,7 @@ export interface FormModalProps {
 }
 
 const sizeStyles: Record<FormModalSize, string> = {
-  wide: "w-full max-w-[calc(100%-2rem)] md:max-w-none md:w-auto",
+  wide: "w-full sm:max-w-6xl",
   medium: "sm:max-w-[600px]",
 };
 
@@ -75,11 +75,7 @@ export function FormModal({
         overlayClassName={overlayClassName}
         containerClassName={containerClassName}
         className={cn(sizeStyles[size], "gap-4")}
-        style={
-          size === "wide"
-            ? { backgroundColor: MODAL_BG, maxWidth: "none", width: "auto" }
-            : { backgroundColor: MODAL_BG }
-        }
+        style={{ backgroundColor: MODAL_BG }}
       >
         <div className={cn("grid gap-4", className)}>
           <DialogHeader>

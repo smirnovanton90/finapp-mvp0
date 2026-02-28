@@ -49,6 +49,7 @@ import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
+import { CollapsibleFormSection } from "@/components/ui/collapsible-form-section";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
@@ -127,7 +128,7 @@ import {
   PaymentAmountKind,
   PrimaryValueKind,
 } from "@/lib/api";
-import { getDefaultPrimaryValueKind, PRIMARY_VALUE_KIND_OPTIONS, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
+import { getDefaultPrimaryValueKind, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, getItemPrimaryValueCents, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
@@ -2120,12 +2121,6 @@ export default function Page() {
   }, [isCreateOpen, showCounterpartyField, counterparties.length, counterpartyLoading]);
 
   useEffect(() => {
-    if (isCreateOpen && currencies.length === 0) {
-      loadCurrencies();
-    }
-  }, [isCreateOpen, currencies.length]);
-
-  useEffect(() => {
     if (showCounterpartyField) return;
     if (counterpartyId) {
       setCounterpartyId(null);
@@ -4084,10 +4079,7 @@ export default function Page() {
         size="wide"
         contentRef={dialogContentRef}
       >
-        <div className="flex flex-col md:flex-row items-start gap-0 transition-all duration-300 min-w-0 w-full max-w-[600px] md:max-w-none">
-              {/* Left part - full width on mobile, 600px on desktop */}
-              <div className="w-full md:w-[600px] grid content-start gap-4 flex-shrink-0 min-w-0">
-            {/* Item Photo Upload and Type Selection in one row */}
+        <div className="grid gap-4 w-full">
             <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
               {/* Item Photo Upload */}
               <div className="relative">
@@ -4181,70 +4173,67 @@ export default function Page() {
                   </div>
                 )}
 
-                {isGeneralCreate && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {isGeneralCreate && (
+                    <SelectField
+                      label="Раздел"
+                      value={sectionId}
+                      onValueChange={(value) => {
+                        setSectionId(value);
+                        const section = sectionOptions.find((s) => s.id === value);
+                        const firstType = section?.typeCodes?.[0] ?? "";
+                        setTypeCode(firstType);
+                        setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
+                        setIcon3dFormat("png");
+                        setShow2dIcon(false);
+                      }}
+                      options={sectionOptions.map((section) => ({
+                        value: section.id,
+                        label: section.label,
+                      }))}
+                      placeholder={
+                        kind === "ASSET"
+                          ? "Выберите раздел актива"
+                          : "Выберите раздел обязательства"
+                      }
+                    />
+                  )}
                   <SelectField
-                    label="Раздел"
-                    value={sectionId}
+                    label="Вид"
+                    value={typeCode}
                     onValueChange={(value) => {
-                      setSectionId(value);
-                      const section = sectionOptions.find((s) => s.id === value);
-                      const firstType = section?.typeCodes?.[0] ?? "";
-                      setTypeCode(firstType);
-                      setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
+                      setTypeCode(value);
+                      if (value === "crypto") setCurrencyCode("USD");
+                      if (!editingItem) setPrimaryValueKind(getDefaultPrimaryValueKind(value, kind));
                       setIcon3dFormat("png");
                       setShow2dIcon(false);
                     }}
-                    options={sectionOptions.map((section) => ({
-                      value: section.id,
-                      label: section.label,
+                    disabled={isGeneralCreate && !sectionId}
+                    options={typeOptions.map((t) => ({
+                      value: t.code,
+                      label: t.label,
                     }))}
                     placeholder={
-                      kind === "ASSET"
-                        ? "Выберите раздел актива"
-                        : "Выберите раздел обязательства"
+                      isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"
                     }
                   />
-                )}
-
-                <SelectField
-                  label="Вид"
-                  value={typeCode}
-                  onValueChange={(value) => {
-                    setTypeCode(value);
-                    if (value === "crypto") setCurrencyCode("USD");
-                    if (!editingItem) setPrimaryValueKind(getDefaultPrimaryValueKind(value, kind));
-                    setIcon3dFormat("png");
-                    setShow2dIcon(false);
-                  }}
-                  disabled={isGeneralCreate && !sectionId}
-                  options={typeOptions.map((t) => ({
-                    value: t.code,
-                    label: t.label,
-                  }))}
-                  placeholder={
-                    isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"
-                  }
-                />
+                </div>
               </div>
             </div>
 
 
-            <div
-              className={`transition-all duration-300 ${
-                showInstrumentBlock ? "max-h-[2000px] opacity-100 overflow-visible" : "max-h-0 opacity-0 overflow-hidden"
-              }`}
-            >
-              {showInstrumentBlock && (
-                <div className="grid gap-3">
+            {typeCode && (<>
+            {/* ══════ 1. Основное ══════ */}
+            <CollapsibleFormSection title="Основное" defaultOpen>
+
+            {showInstrumentBlock && (
+              <>
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
                     <Label style={{ color: ACTIVE_TEXT_DARK }}>{isCryptoType ? "Криптовалюта" : "Ценная бумага"}</Label>
-                    <div className="group relative">
-                      <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                      <div className="absolute left-0 top-6 z-50 hidden w-64 rounded-md border border-border/60 bg-white p-2 text-xs text-muted-foreground shadow-lg group-hover:block">
-                        Поиск возможен по ISIN-коду, коду ценной бумаги, названию
-                      </div>
-                    </div>
+                    <Tooltip content="Поиск возможен по ISIN-коду, коду ценной бумаги, названию">
+                      <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
+                    </Tooltip>
                   </div>
                   <div className="relative" ref={instrumentAnchorRef}>
                     <TextField
@@ -4348,19 +4337,170 @@ export default function Page() {
                     value={instrumentBoardId}
                     onValueChange={setInstrumentBoardId}
                     disabled={instrumentBoards.length === 0}
-                    options={instrumentBoards.map((board) => {
-                      const boardLabel = board.title
-                        ? `${board.board_id} - ${board.title}`
-                        : board.board_id;
-                      return {
-                        value: board.board_id,
-                        label: boardLabel,
-                      };
-                    })}
+                    options={instrumentBoards.map((board) => ({ value: board.board_id, label: board.title ? `${board.board_id} - ${board.title}` : board.board_id }))}
                     placeholder="Выберите режим"
                   />
                 )}
+              </>
+            )}
 
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid gap-2">
+                <div className="flex h-6 items-center justify-between">
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Название актива</Label>
+                  <button
+                    type="button"
+                    className="text-sm font-medium hover:underline invisible"
+                    style={{ color: ACCENT }}
+                    tabIndex={-1}
+                    aria-hidden="true"
+                  >
+                    В дату начала учета
+                  </button>
+                </div>
+                <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
+                  <AuthInput
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Например: Кошелек / Ипотека"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <div className="flex h-6 items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>{openDateLabel}</Label>
+                    <Tooltip content={openDateHelpText} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
+                      <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
+                    </Tooltip>
+                  </div>
+                  {accountingStartDate && (
+                    <button type="button" className="text-sm font-medium hover:underline" style={{ color: ACCENT }} onClick={() => setOpenDate(accountingStartDate)}>В дату начала учета</button>
+                  )}
+                </div>
+                <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
+                  <AuthInput
+                    type="date"
+                    value={openDate}
+                    onChange={(e) => setOpenDate(e.target.value)}
+                    max={getTodayDateKey()}
+                  />
+                </div>
+                {resolvedHistoryStatus && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${resolvedHistoryStatus === "NEW" ? "bg-emerald-50 text-emerald-700" : "bg-muted text-foreground"}`}>
+                      {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {showCounterpartyField && (
+                <div className="grid gap-2">
+                  <Label>{isBankCounterparty ? "Банк" : "Контрагент"}</Label>
+                  <CounterpartySelector
+                    counterparties={counterparties}
+                    selectedIds={counterpartyId ? [counterpartyId] : []}
+                    onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                    selectionMode="single"
+                    placeholder="Начните вводить название"
+                    industries={industries}
+                    disabled={counterpartyLoading}
+                    counterpartyCounts={counterpartyTxCounts}
+                    apiBase={API_BASE}
+                    filterByIndustryId={isBankCounterparty ? industries.find((ind) => ind.name === "Банки")?.id ?? null : null}
+                    onAddCounterparty={() => setCreateCounterpartyOpen(true)}
+                  />
+                  {counterpartyError && <p className="text-xs text-red-600">{counterpartyError}</p>}
+                </div>
+              )}
+            </div>
+
+            {showBankCardFields && (
+              <SelectField
+                label="Вид карты"
+                value={cardKind}
+                onValueChange={(value) => setCardKind(value as CardKind)}
+                disabled={isEditing}
+                options={[{ value: "DEBIT", label: "Дебетовая" }, { value: "CREDIT", label: "Кредитная" }]}
+                placeholder="Выберите вид карты"
+              />
+            )}
+
+            </CollapsibleFormSection>
+
+            {/* ══════ 2. Стоимость ══════ */}
+            <CollapsibleFormSection
+              title="Стоимость"
+              titleRight={typeCode ? `По умолчанию используется ${getPrimaryValueLabel(primaryValueKind)}` : undefined}
+              defaultOpen
+            >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {!isCryptoType && (
+                <SelectField
+                  label="Валюта"
+                  value={currencyCode}
+                  onValueChange={setCurrencyCode}
+                  disabled={currencies.length === 0}
+                  options={currencies.map((c) => ({
+                    value: c.iso_char_code,
+                    label: (
+                      <div className="flex items-center gap-2">
+                        <CurrencyChip code={c.iso_char_code} className="min-w-10 justify-center" />
+                        <span>{c.name}</span>
+                      </div>
+                    ),
+                  }))}
+                  placeholder="Выберите валюту"
+                />
+              )}
+              {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
+                <div className="grid gap-2">
+                  <TextField
+                    label="Рыночная стоимость (в валюте актива)"
+                    value={marketValueStr}
+                    onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))}
+                    onBlur={() => setMarketValueStr((prev) => normalizeRubOnBlur(prev))}
+                    inputMode="decimal"
+                    placeholder="Укажите сумму"
+                  />
+                  <TextField
+                    label="Стоимость приобретения"
+                    value={amountStr}
+                    onChange={(e) => {
+                      const formatted = formatRubInput(e.target.value);
+                      setAmountStr(formatted);
+                    }}
+                    onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                    inputMode="decimal"
+                    placeholder="Укажите сумму"
+                  />
+                </div>
+              )}
+              {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType) && (
+                <div className="grid gap-2">
+                  <TextField
+                    label={amountLabel}
+                    value={amountStr}
+                    onChange={(e) => {
+                      const formatted = formatRubInput(e.target.value);
+                      setAmountStr(formatted);
+                    }}
+                    onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
+                    inputMode="decimal"
+                    placeholder="Укажите сумму"
+                  />
+                  {showLoanPlanSettings && (
+                    <div className="text-xs text-muted-foreground">
+                      Указывайте задолженность по основному долгу без процентов.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {showInstrumentBlock && (
+              <>
                 <TextField
                   label={isCryptoType ? "Количество" : "Количество лотов"}
                   value={isCryptoType ? quantityUnitsStr : positionLots}
@@ -4368,260 +4508,29 @@ export default function Page() {
                   inputMode={isCryptoType ? "decimal" : "numeric"}
                   placeholder={isCryptoType ? "Например: 0.5" : "Например: 10"}
                 />
-
                 {isMoexType && resolvedHistoryStatus === "NEW" && (
-                  <TextField
-                    label="Цена покупки (за 1 шт.)"
-                    value={moexPurchasePrice}
-                    onChange={(e) => {
-                      const formatted = formatRubInput(e.target.value);
-                      setMoexPurchasePrice(formatted);
-                    }}
-                    onBlur={() =>
-                      setMoexPurchasePrice((prev) => normalizeRubOnBlur(prev))
-                    }
-                    inputMode="decimal"
-                    placeholder="Например: 123,45"
-                  />
+                  <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => setMoexPurchasePrice(formatRubInput(e.target.value))} onBlur={() => setMoexPurchasePrice((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder="Например: 123,45" />
                 )}
                 {isCryptoType && resolvedHistoryStatus === "NEW" && (
-                  <TextField
-                    label="Цена (за 1 ед., USD)"
-                    value={cryptoPurchasePrice}
-                    onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))}
-                    onBlur={() => setCryptoPurchasePrice((prev) => normalizeRubOnBlur(prev))}
-                    inputMode="decimal"
-                    placeholder={
-                      marketPrice?.price_usd_cents != null
-                        ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",")
-                        : "Например: 83,32"
-                    }
-                  />
+                  <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))} onBlur={() => setCryptoPurchasePrice((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder={marketPrice?.price_usd_cents != null ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",") : "Например: 83,32"} />
                 )}
                 {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
                   <div className="grid gap-1">
-                    <TextField
-                      label="Цена приобретения"
-                      value={historicalAcquisitionCost}
-                      onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))}
-                      onBlur={() => setHistoricalAcquisitionCost((prev) => normalizeRubOnBlur(prev))}
-                      inputMode="decimal"
-                      placeholder={isCryptoType ? "Например: 83,32" : "Например: 123,45"}
-                    />
+                    <TextField label="Цена приобретения" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={() => setHistoricalAcquisitionCost((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder={isCryptoType ? "Например: 83,32" : "Например: 123,45"} />
                     <p className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>Укажите среднюю цену приобретения позиции с момента её появления у вас</p>
                   </div>
                 )}
                 {isCryptoType && marketPrice && (marketPrice.price_usd_cents != null || marketPrice.price_cents != null) && (
                   <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                     Текущая цена:{" "}
-                    {marketPrice.price_usd_cents != null && (
-                      <>{formatAmount(marketPrice.price_usd_cents)} USD</>
-                    )}
+                    {marketPrice.price_usd_cents != null && <>{formatAmount(marketPrice.price_usd_cents)} USD</>}
                     {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && " ("}
-                    {marketPrice.price_cents != null && (
-                      <>{formatAmount(marketPrice.price_cents)} ₽</>
-                    )}
+                    {marketPrice.price_cents != null && <>{formatAmount(marketPrice.price_cents)} ₽</>}
                     {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && ")"}
                     {" за 1 ед."}
                   </p>
                 )}
-                </div>
-              )}
-            </div>
-
-            <TextField
-              label="Название актива"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Например: Кошелек / Ипотека"
-            />
-
-            {(showCounterpartyField || showBankCardFields) && (
-              <div className="grid gap-4">
-                {showCounterpartyField && (
-                  <div className="grid gap-2">
-                    <Label>{isBankCounterparty ? "Банк" : "Контрагент"}</Label>
-                    <CounterpartySelector
-                      counterparties={counterparties}
-                      selectedIds={counterpartyId ? [counterpartyId] : []}
-                      onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
-                      selectionMode="single"
-                      placeholder="Начните вводить название"
-                      industries={industries}
-                      disabled={counterpartyLoading}
-                      counterpartyCounts={counterpartyTxCounts}
-                      apiBase={API_BASE}
-                      filterByIndustryId={
-                        isBankCounterparty
-                          ? industries.find((ind) => ind.name === "Банки")?.id ?? null
-                          : null
-                      }
-                      onAddCounterparty={() => setCreateCounterpartyOpen(true)}
-                    />
-                    {counterpartyError && (
-                      <p className="text-xs text-red-600">{counterpartyError}</p>
-                    )}
-                  </div>
-                )}
-                {showBankCardFields && (
-                  <div className="grid gap-2">
-                    <SelectField
-                      label="Вид карты"
-                      value={cardKind}
-                      onValueChange={(value) => setCardKind(value as CardKind)}
-                      disabled={isEditing}
-                      options={[
-                        { value: "DEBIT", label: "Дебетовая" },
-                        { value: "CREDIT", label: "Кредитная" },
-                      ]}
-                      placeholder="Выберите вид карты"
-                    />
-                    {isCreditCard && (
-                      <TextField
-                        label="Кредитный лимит"
-                        value={creditLimit}
-                        onChange={(e) => {
-                          const formatted = formatRubInput(e.target.value).replace(/^-/, "");
-                          setCreditLimit(formatted);
-                        }}
-                        onBlur={() =>
-                          setCreditLimit((prev) =>
-                            normalizeRubOnBlur(prev.replace(/^-/, ""))
-                          )
-                        }
-                        inputMode="decimal"
-                        placeholder="Например: 120 000"
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Label style={{ color: ACTIVE_TEXT_DARK }}>{openDateLabel}</Label>
-                  <Tooltip
-                    content={openDateHelpText}
-                    contentClassName="w-80 max-w-[calc(100vw-2rem)]"
-                  >
-                    <span
-                      className="text-muted-foreground"
-                      aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u0434\u0430\u0442\u0435 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f"
-                    >
-                      <Info className="h-4 w-4" />
-                    </span>
-                  </Tooltip>
-                </div>
-                {accountingStartDate && (
-                  <button
-                    type="button"
-                    className="text-sm font-medium hover:underline"
-                    style={{ color: ACCENT }}
-                    onClick={() => setOpenDate(accountingStartDate)}
-                  >
-                    В дату начала учета
-                  </button>
-                )}
-              </div>
-              <DateField
-                label=""
-                value={openDate}
-                onChange={(e) => setOpenDate(e.target.value)}
-                max={getTodayDateKey()}
-              />
-              {resolvedHistoryStatus && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                      resolvedHistoryStatus === "NEW"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-muted text-foreground"
-                    }`}
-                  >
-                    {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
-                  </span>
-                </div>
-              )}
-            </div>
-
-
-
-            {!isCryptoType && (
-            <SelectField
-              label="Валюта"
-              value={currencyCode}
-              onValueChange={setCurrencyCode}
-              disabled={currencies.length === 0}
-              options={currencies.map((c) => ({
-                value: c.iso_char_code,
-                label: (
-                  <div className="flex items-center gap-2">
-                    <CurrencyChip code={c.iso_char_code} className="min-w-10 justify-center" />
-                    <span>{c.name}</span>
-                  </div>
-                ),
-              }))}
-              placeholder="Выберите валюту"
-            />
-            )}
-
-            {typeCode && (
-              <SelectField
-                label="Основная стоимость"
-                value={primaryValueKind}
-                onValueChange={(value) => setPrimaryValueKind(value as PrimaryValueKind)}
-                options={PRIMARY_VALUE_KIND_OPTIONS.map((opt) => ({
-                  value: opt.value,
-                  label: opt.label,
-                }))}
-                placeholder="Выберите вид стоимости"
-              />
-            )}
-
-            {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
-              <div className="grid gap-2">
-                <TextField
-                  label="Рыночная стоимость (в валюте актива)"
-                  value={marketValueStr}
-                  onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))}
-                  onBlur={() => setMarketValueStr((prev) => normalizeRubOnBlur(prev))}
-                  inputMode="decimal"
-                  placeholder="Укажите сумму"
-                />
-                <TextField
-                  label="Стоимость приобретения"
-                  value={amountStr}
-                  onChange={(e) => {
-                    const formatted = formatRubInput(e.target.value);
-                    setAmountStr(formatted);
-                  }}
-                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                  inputMode="decimal"
-                  placeholder="Укажите сумму"
-                />
-              </div>
-            )}
-            {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType) && (
-              <div className="grid gap-2">
-                <TextField
-                  label={amountLabel}
-                  value={amountStr}
-                  onChange={(e) => {
-                    const formatted = formatRubInput(e.target.value);
-                    setAmountStr(formatted);
-                  }}
-                  onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                  inputMode="decimal"
-                  placeholder="Укажите сумму"
-                />
-                {showLoanPlanSettings && (
-                  <div className="text-xs text-muted-foreground">
-                    Указывайте задолженность по основному долгу без процентов.
-                  </div>
-                )}
-              </div>
+              </>
             )}
 
             {showOpeningCounterparty && (
@@ -4646,499 +4555,127 @@ export default function Page() {
               </div>
             )}
 
-            <ChipsInput
-              label="Синонимы"
-              labelHint={'Добавьте альтернативные названия актива/обязательства. При импорте транзакций из банков актив/обязательство будет подбираться не только по основному названию, но и по указанным в этом поле синонимам. Например, зачастую в выписках встречается обозначение номеров карт с помощью последних четырех цифр - "*1234"'}
-              value={synonyms}
-              onChange={setSynonyms}
-              placeholder="Введите синоним и нажмите Enter"
-              maxItems={50}
-              maxLengthPerItem={300}
-            />
-
-            {showMoexPricing && (
-              <div className="rounded-lg border-2 border-border/70 p-3 text-sm" style={{ backgroundColor: BACKGROUND_DT }}>
-                <div className="font-medium">
-                  {"MOEX: \u0446\u0435\u043d\u044b \u0438 \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c"}
-                </div>
-                {moexDatePricesLoading && (
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {"\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043a\u043e\u0442\u0438\u0440\u043e\u0432\u043e\u043a..."}
-                  </div>
-                )}
-                <table className="mt-2 w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-muted-foreground">
-                      <th className="py-1 font-medium">{"\u0414\u0430\u0442\u0430"}</th>
-                      <th className="py-1 text-right font-medium">{"\u0426\u0435\u043d\u0430"}</th>
-                      <th className="py-1 text-right font-medium">{"\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c"}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {showMoexStartDatePricing && accountingStartDate && (
-                      <tr>
-                        <td className="py-1 pr-2">
-                          {"\u041d\u0430\u0447\u0430\u043b\u043e \u0443\u0447\u0435\u0442\u0430 ("}
-                          {formatShortDate(accountingStartDate)}
-                          {")"}
-                        </td>
-                        <td className="py-1 text-right">
-                          {formatMoexPrice(moexStartDatePrice)}
-                        </td>
-                        <td className="py-1 text-right">
-                          {formatMoexValue(moexStartDatePrice)}
-                        </td>
-                      </tr>
-                    )}
-                    {openDate && (
-                      <tr>
-                        <td className="py-1 pr-2">
-                          {"\u0414\u0430\u0442\u0430 \u043f\u043e\u044f\u0432\u043b\u0435\u043d\u0438\u044f ("}
-                          {formatShortDate(openDate)}
-                          {")"}
-                        </td>
-                        <td className="py-1 text-right">
-                          {formatMoexPrice(moexOpenDatePrice)}
-                        </td>
-                        <td className="py-1 text-right">
-                          {formatMoexValue(moexOpenDatePrice)}
-                        </td>
-                      </tr>
-                    )}
-                    <tr>
-                      <td className="py-1 pr-2">
-                        {"\u0422\u0435\u043a\u0443\u0449\u0430\u044f ("}
-                        {formatShortDate(getTodayDateKey())}
-                        {")"}
-                      </td>
-                      <td className="py-1 text-right">
-                        {formatMoexPrice(marketPrice)}
-                      </td>
-                      <td className="py-1 text-right">
-                        {formatMoexValue(marketPrice)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
             {showMoexCommission && (
               <div className="rounded-lg border-2 border-border/70 p-3 text-sm" style={{ backgroundColor: BACKGROUND_DT }}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 font-medium">
-                    {"\u041a\u043e\u043c\u0438\u0441\u0441\u0438\u044f \u043f\u0440\u0438 \u043f\u043e\u043a\u0443\u043f\u043a\u0435"}
+                    Комиссия при покупке
                     <Tooltip content="Создать фактическую транзакцию по оплате комиссии за покупку ценной бумаги">
-                      <span
-                        className="text-muted-foreground"
-                        aria-label="\u041f\u043e\u0434\u0441\u043a\u0430\u0437\u043a\u0430 \u043f\u043e \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"
-                      >
-                        <Info className="h-4 w-4" />
-                      </span>
+                      <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
                     </Tooltip>
                   </div>
-                  <Switch
-                    checked={commissionEnabled}
-                    onCheckedChange={setCommissionEnabled}
-                  />
+                  <Switch checked={commissionEnabled} onCheckedChange={setCommissionEnabled} />
                 </div>
-                    {commissionEnabled && (
-                      <div className="mt-3 grid gap-2">
-                        <TextField
-                          label="Сумма комиссии"
-                          value={commissionAmount}
-                          onChange={(e) => {
-                            const formatted = formatRubInput(e.target.value);
-                            setCommissionAmount(formatted);
-                          }}
-                          onBlur={() =>
-                            setCommissionAmount((prev) => normalizeRubOnBlur(prev))
-                          }
-                          inputMode="decimal"
-                          placeholder="Например: 1 234,56"
-                        />
+                {commissionEnabled && (
+                  <div className="mt-3 grid gap-2">
+                    <TextField label="Сумма комиссии" value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={() => setCommissionAmount((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder="Например: 1 234,56" />
                     <div className="grid gap-2">
-                      <Label>
-                        {"\u0421\u0447\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"}
-                      </Label>
-                      <ItemSelector
-                        items={commissionPaymentItems}
-                        selectedIds={
-                          commissionPaymentItemId
-                            ? [Number(commissionPaymentItemId)]
-                            : []
-                        }
-                        onChange={(ids) => {
-                          const nextId = ids[0] ?? null;
-                          setCommissionPaymentItemId(nextId ? String(nextId) : "");
-                        }}
-                        selectionMode="single"
-                        placeholder={"\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0430\u043a\u0442\u0438\u0432/\u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u043e"}
-                        clearLabel={"\u041d\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u043e"}
-                        getItemTypeLabel={getItemTypeLabel}
-                        getItemKind={resolveItemEffectiveKind}
-                        getItemBalance={getItemDisplayBalanceCents}
-                        getCounterpartyForItemId={getCounterpartyForItemId}
-                        apiBase={API_BASE}
-                        getBankLogoUrl={itemCounterpartyLogoUrl}
-                        getBankName={itemCounterpartyName}
-                        itemCounts={itemTxCounts}
-                        ariaLabel={"\u0421\u0447\u0435\u0442 \u043e\u043f\u043b\u0430\u0442\u044b \u043a\u043e\u043c\u0438\u0441\u0441\u0438\u0438"}
-                      />
+                      <Label>Счет оплаты комиссии</Label>
+                      <ItemSelector items={commissionPaymentItems} selectedIds={commissionPaymentItemId ? [Number(commissionPaymentItemId)] : []} onChange={(ids) => { const nextId = ids[0] ?? null; setCommissionPaymentItemId(nextId ? String(nextId) : ""); }} selectionMode="single" placeholder="Выберите актив/обязательство" clearLabel="Не выбрано" getItemTypeLabel={getItemTypeLabel} getItemKind={resolveItemEffectiveKind} getItemBalance={getItemDisplayBalanceCents} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} getBankLogoUrl={itemCounterpartyLogoUrl} getBankName={itemCounterpartyName} itemCounts={itemTxCounts} ariaLabel="Счет оплаты комиссии" />
                     </div>
                   </div>
                 )}
               </div>
             )}
-            {showBankAccountFields && (
-              <TextField
-                label="Последние 7 цифр номера счета"
-                value={accountLast7}
-                onChange={(e) => {
-                  const digits = e.target.value.replace(/\D/g, "").slice(0, 7);
-                  setAccountLast7(digits);
-                }}
-                inputMode="numeric"
-                maxLength={7}
-                placeholder="Например: 1234567"
-              />
-            )}
-
-            {showBankCardFields && (
-              <>
-                <TextField
-                  label="Последние 4 цифры номера карты"
-                  value={cardLast4}
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
-                    setCardLast4(digits);
-                  }}
-                  inputMode="numeric"
-                  maxLength={4}
-                  placeholder="Например: 1234"
-                />
-
-                {!isCreditCard && (
-                  <div className="grid gap-2">
-                    <Label>Привязка карты к банковскому счету</Label>
-                    <ItemSelector
-                      items={bankAccountItems}
-                      selectedIds={cardAccountId ? [Number(cardAccountId)] : []}
-                      onChange={(ids) => {
-                        const nextId = ids[0] ?? null;
-                        if (!nextId) {
-                          setCardAccountId("");
-                          return;
-                        }
-                        setCardAccountId(String(nextId));
-                        const account = itemsById.get(nextId);
-                        if (account) {
-                          setCurrencyCode(account.currency_code ?? "RUB");
-                          setCounterpartyId(account.counterparty_id ?? null);
-                        }
-                      }}
-                      selectionMode="single"
-                      placeholder="Выберите счет"
-                      clearLabel="Не выбрано"
-                      getItemTypeLabel={getItemTypeLabel}
-                      getItemKind={resolveItemEffectiveKind}
-                      getItemBalance={getItemDisplayBalanceCents}
-                      getCounterpartyForItemId={getCounterpartyForItemId}
-                      apiBase={API_BASE}
-                      getBankLogoUrl={itemCounterpartyLogoUrl}
-                      getBankName={itemCounterpartyName}
-                      itemCounts={itemTxCounts}
-                      ariaLabel="Привязка карты к банковскому счету"
-                    />
-                  </div>
-                )}
-              </>
-            )}
-
-            {showContractNumberField && (
-              <TextField
-                label="Номер договора"
-                value={contractNumber}
-                onChange={(e) => setContractNumber(e.target.value)}
-                placeholder="Например: 01-2025/123"
-              />
-            )}
-
-            {showDepositFields && (
-              <div className="grid gap-2">
-                <TextField
-                  label="Срок вклада в днях"
-                  value={depositTermDays}
-                  onChange={(e) => setDepositTermDays(e.target.value.replace(/\D/g, ""))}
-                  inputMode="numeric"
-                  placeholder="Например: 365"
-                />
-                <div className="text-sm text-muted-foreground">
-                  {depositEndDateText
-                    ? `Дата окончания: ${depositEndDateText}`
-                    : "Дата окончания: —"}
-                </div>
-              </div>
-            )}
-
-            {showInterestFields && (
-              <>
-                <TextField
-                  label="Процентная ставка"
-                  value={interestRate}
-                  onChange={(e) => setInterestRate(e.target.value.replace(/[^\d.,]/g, ""))}
-                  inputMode="decimal"
-                  placeholder="Например: 8,5"
-                />
-
-                <SelectField
-                  label="Порядок выплаты процентов"
-                  value={interestPayoutOrder || "__none"}
-                  onValueChange={(value) =>
-                    setInterestPayoutOrder(value === "__none" ? "" : value)
-                  }
-                  options={[
-                    { value: "__none", label: "Не выбрано" },
-                    { value: "END_OF_TERM", label: "В конце срока" },
-                    { value: "MONTHLY", label: "Ежемесячно" },
-                  ]}
-                  placeholder="Выберите вариант"
-                />
-
-                <SelectField
-                  label="Капитализация процентов"
-                  value={interestCapitalization || "__none"}
-                  onValueChange={(value) =>
-                    setInterestCapitalization(value === "__none" ? "" : value)
-                  }
-                  options={[
-                    { value: "__none", label: "Не выбрано" },
-                    { value: "true", label: "Да" },
-                    { value: "false", label: "Нет" },
-                  ]}
-                  placeholder="Выберите вариант"
-                />
-
-                {interestCapitalization !== "true" && (
-                  <div className="grid gap-2">
-                    <Label>Счет выплаты процентов</Label>
-                    <ItemSelector
-                      items={interestPayoutItems}
-                      selectedIds={
-                        interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []
-                      }
-                      onChange={(ids) => {
-                        const nextId = ids[0] ?? null;
-                        setInterestPayoutAccountId(nextId ? String(nextId) : "");
-                      }}
-                      selectionMode="single"
-                      placeholder="Выберите актив"
-                      clearLabel="Не выбрано"
-                      getItemTypeLabel={getItemTypeLabel}
-                      getItemKind={resolveItemEffectiveKind}
-                      getItemBalance={getItemDisplayBalanceCents}
-                      getCounterpartyForItemId={getCounterpartyForItemId}
-                      apiBase={API_BASE}
-                      getBankLogoUrl={itemCounterpartyLogoUrl}
-                      getBankName={itemCounterpartyName}
-                      itemCounts={itemTxCounts}
-                      ariaLabel="Счет выплаты процентов"
-                    />
-                  </div>
-                )}
-              </>
-            )}
+            </CollapsibleFormSection>
 
             {showPlanSection && (
-              <div
-                className={`rounded-lg border-2 border-border/70 ${planEnabled ? "p-4 grid gap-4" : "p-4 self-start"}`}
-                style={{ backgroundColor: BACKGROUND_DT }}
-              >
+              <CollapsibleFormSection title="Планирование" defaultOpen={false}>
                 <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium">Плановые транзакции</div>
-                  </div>
-                  <Switch
-                    checked={planEnabled}
-                    onCheckedChange={setPlanEnabled}
-                  />
+                  <div className="text-sm font-medium">Плановые транзакции</div>
+                  <Switch checked={planEnabled} onCheckedChange={setPlanEnabled} />
                 </div>
-                {planEnabled && (
+                {planEnabled && showInterestPlanSettings && (
                   <>
-                    {showInterestPlanSettings && (
-                      <>
-                        {interestPayoutOrder === "MONTHLY" && (
-                          <SelectField
-                            label="Правило первой выплаты"
-                            value={firstPayoutRule || "__none"}
-                            onValueChange={(value) =>
-                              setFirstPayoutRule(
-                                value === "__none" ? "" : (value as FirstPayoutRule)
-                              )
-                            }
-                            options={[
-                              { value: "__none", label: "Не выбрано" },
-                              { value: "OPEN_DATE", label: "В дату открытия" },
-                              { value: "MONTH_END", label: "В конце месяца" },
-                              { value: "SHIFT_ONE_MONTH", label: "В конце следующего месяца" },
-                            ]}
-                            placeholder="Выберите правило"
-                          />
-                        )}
-                        {typeCode === "savings_account" && (
-                          <DateField
-                            label="Дата окончания планирования"
-                            value={planEndDate}
-                            min={minPlanDate || undefined}
-                            onChange={(e) => setPlanEndDate(e.target.value)}
-                          />
-                        )}
-                      </>
+                    {interestPayoutOrder === "MONTHLY" && (
+                      <SelectField label="Правило первой выплаты" value={firstPayoutRule || "__none"} onValueChange={(value) => setFirstPayoutRule(value === "__none" ? "" : (value as FirstPayoutRule))} options={[{ value: "__none", label: "Не выбрано" }, { value: "OPEN_DATE", label: "В дату открытия" }, { value: "MONTH_END", label: "В конце месяца" }, { value: "SHIFT_ONE_MONTH", label: "В конце следующего месяца" }]} placeholder="Выберите правило" />
                     )}
-                    {showLoanPlanSettings && (
+                    {typeCode === "savings_account" && (
+                      <DateField label="Дата окончания планирования" value={planEndDate} min={minPlanDate || undefined} onChange={(e) => setPlanEndDate(e.target.value)} />
+                    )}
+                  </>
+                )}
+                {planEnabled && showLoanPlanSettings && (
+                  <>
+                    <div className="grid gap-2">
+                      <Label>Счет погашения</Label>
+                      <ItemSelector items={repaymentAccountItems} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => { const nextId = ids[0] ?? null; setRepaymentAccountId(nextId ? String(nextId) : ""); }} selectionMode="single" placeholder="Выберите актив" clearLabel="Не выбрано" getItemTypeLabel={getItemTypeLabel} getItemKind={resolveItemEffectiveKind} getItemBalance={getItemDisplayBalanceCents} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} getBankLogoUrl={itemCounterpartyLogoUrl} getBankName={itemCounterpartyName} itemCounts={itemTxCounts} ariaLabel="Счет погашения" />
+                    </div>
+                    <SelectField label="Частота выплат" value={repaymentFrequency} onValueChange={(value) => setRepaymentFrequency(value as TransactionChainFrequency)} options={[{ value: "DAILY", label: "Ежедневно" }, { value: "WEEKLY", label: "Еженедельно" }, { value: "MONTHLY", label: "Ежемесячно" }, { value: "REGULAR", label: "Регулярно" }]} placeholder="Выберите вариант" />
+                    {repaymentFrequency === "WEEKLY" && <SelectField label="День недели" value={String(repaymentWeeklyDay)} onValueChange={(value) => setRepaymentWeeklyDay(Number(value))} options={WEEKDAY_LABELS.map((label, index) => ({ value: String(index), label }))} placeholder="Выберите день" />}
+                    {repaymentFrequency === "REGULAR" && <TextField label="Интервал, дней" value={repaymentIntervalDays} onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="Например: 30" />}
+                    {repaymentFrequency === "MONTHLY" && <SelectField label="Правило первого платежа" value={firstPayoutRule || "__none"} onValueChange={(value) => setFirstPayoutRule(value === "__none" ? "" : (value as FirstPayoutRule))} options={[{ value: "__none", label: "Не выбрано" }, { value: "OPEN_DATE", label: "В дату открытия" }, { value: "MONTH_END", label: "В конце месяца" }, { value: "SHIFT_ONE_MONTH", label: "В конце следующего месяца" }]} placeholder="Выберите правило" />}
+                    <SelectField label="Тип выплат" value={repaymentType || "__none"} onValueChange={(value) => setRepaymentType(value === "__none" ? "" : (value as RepaymentType))} options={[{ value: "__none", label: "Не выбрано" }, { value: "ANNUITY", label: "Аннуитетный" }, { value: "DIFFERENTIATED", label: "Дифференцированный" }]} placeholder="Выберите тип" />
+                    <DateField label="Дата окончания планирования" value={planEndDate} min={minPlanDate || undefined} onChange={(e) => setPlanEndDate(e.target.value)} />
+                    <DateField label="Дата окончания кредита" value={loanEndDate} min={minPlanDate || undefined} onChange={(e) => setLoanEndDate(e.target.value)} />
+                    {requiresLoanPaymentInput && (
                       <>
-                        <div className="grid gap-2">
-                          <Label>Счет погашения</Label>
-                          <ItemSelector
-                            items={repaymentAccountItems}
-                            selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []}
-                            onChange={(ids) => {
-                              const nextId = ids[0] ?? null;
-                              setRepaymentAccountId(nextId ? String(nextId) : "");
-                            }}
-                            selectionMode="single"
-                            placeholder="Выберите актив"
-                            clearLabel="Не выбрано"
-                            getItemTypeLabel={getItemTypeLabel}
-                            getItemKind={resolveItemEffectiveKind}
-                            getItemBalance={getItemDisplayBalanceCents}
-                            getCounterpartyForItemId={getCounterpartyForItemId}
-                            apiBase={API_BASE}
-                            getBankLogoUrl={itemCounterpartyLogoUrl}
-                            getBankName={itemCounterpartyName}
-                            itemCounts={itemTxCounts}
-                            ariaLabel="Счет погашения"
-                          />
-                        </div>
-                        <SelectField
-                          label="Частота выплат"
-                          value={repaymentFrequency}
-                          onValueChange={(value) =>
-                            setRepaymentFrequency(value as TransactionChainFrequency)
-                          }
-                          options={[
-                            { value: "DAILY", label: "Ежедневно" },
-                            { value: "WEEKLY", label: "Еженедельно" },
-                            { value: "MONTHLY", label: "Ежемесячно" },
-                            { value: "REGULAR", label: "Регулярно" },
-                          ]}
-                          placeholder="Выберите вариант"
-                        />
-                        {repaymentFrequency === "WEEKLY" && (
-                          <SelectField
-                            label="День недели"
-                            value={String(repaymentWeeklyDay)}
-                            onValueChange={(value) => setRepaymentWeeklyDay(Number(value))}
-                            options={WEEKDAY_LABELS.map((label, index) => ({
-                              value: String(index),
-                              label,
-                            }))}
-                            placeholder="Выберите день"
-                          />
-                        )}
-                        {repaymentFrequency === "REGULAR" && (
-                          <TextField
-                            label="Интервал, дней"
-                            value={repaymentIntervalDays}
-                            onChange={(e) =>
-                              setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))
-                            }
-                            inputMode="numeric"
-                            placeholder="Например: 30"
-                          />
-                        )}
-                        {repaymentFrequency === "MONTHLY" && (
-                          <SelectField
-                            label="Правило первого платежа"
-                            value={firstPayoutRule || "__none"}
-                            onValueChange={(value) =>
-                              setFirstPayoutRule(
-                                value === "__none" ? "" : (value as FirstPayoutRule)
-                              )
-                            }
-                            options={[
-                              { value: "__none", label: "Не выбрано" },
-                              { value: "OPEN_DATE", label: "В дату открытия" },
-                              { value: "MONTH_END", label: "В конце месяца" },
-                              { value: "SHIFT_ONE_MONTH", label: "В конце следующего месяца" },
-                            ]}
-                            placeholder="Выберите правило"
-                          />
-                        )}
-                        <SelectField
-                          label="Тип выплат"
-                          value={repaymentType || "__none"}
-                          onValueChange={(value) =>
-                            setRepaymentType(value === "__none" ? "" : (value as RepaymentType))
-                          }
-                          options={[
-                            { value: "__none", label: "Не выбрано" },
-                            { value: "ANNUITY", label: "Аннуитетный" },
-                            { value: "DIFFERENTIATED", label: "Дифференцированный" },
-                          ]}
-                          placeholder="Выберите тип"
-                        />
-                        <DateField
-                          label="Дата окончания планирования"
-                          value={planEndDate}
-                          min={minPlanDate || undefined}
-                          onChange={(e) => setPlanEndDate(e.target.value)}
-                        />
-                        <DateField
-                          label="Дата окончания кредита"
-                          value={loanEndDate}
-                          min={minPlanDate || undefined}
-                          onChange={(e) => setLoanEndDate(e.target.value)}
-                        />
-                        {requiresLoanPaymentInput && (
-                          <>
-                            <SelectField
-                              label="Тип платежей"
-                              value={paymentAmountKind || "__none"}
-                              onValueChange={(value) =>
-                                setPaymentAmountKind(
-                                  value === "__none" ? "" : (value as PaymentAmountKind)
-                                )
-                              }
-                              options={[
-                                { value: "__none", label: "Не выбрано" },
-                                { value: "TOTAL", label: "Полный платеж" },
-                                { value: "PRINCIPAL", label: "Только тело" },
-                              ]}
-                              placeholder="Выберите вариант"
-                            />
-                            <TextField
-                              label="Сумма платежа"
-                              value={paymentAmountStr}
-                              onChange={(e) => {
-                                const formatted = formatRubInput(e.target.value);
-                                setPaymentAmountStr(formatted);
-                              }}
-                              onBlur={() =>
-                                setPaymentAmountStr((prev) => normalizeRubOnBlur(prev))
-                              }
-                              inputMode="decimal"
-                              placeholder="Например: 10 000,00"
-                            />
-                          </>
-                        )}
+                        <SelectField label="Тип платежей" value={paymentAmountKind || "__none"} onValueChange={(value) => setPaymentAmountKind(value === "__none" ? "" : (value as PaymentAmountKind))} options={[{ value: "__none", label: "Не выбрано" }, { value: "TOTAL", label: "Полный платеж" }, { value: "PRINCIPAL", label: "Только тело" }]} placeholder="Выберите вариант" />
+                        <TextField label="Сумма платежа" value={paymentAmountStr} onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))} onBlur={() => setPaymentAmountStr((prev) => normalizeRubOnBlur(prev))} inputMode="decimal" placeholder="Например: 10 000,00" />
                       </>
                     )}
                   </>
                 )}
-              </div>
+              </CollapsibleFormSection>
             )}
-              </div>
-            </div>
+
+            {/* ══════ 4. Дополнительно ══════ */}
+            <CollapsibleFormSection title="Дополнительно" defaultOpen={false}>
+              <ChipsInput
+                label="Синонимы"
+                labelHint={'Добавьте альтернативные названия актива/обязательства. При импорте транзакций из банков актив/обязательство будет подбираться не только по основному названию, но и по указанным в этом поле синонимам. Например, зачастую в выписках встречается обозначение номеров карт с помощью последних четырех цифр - "*1234"'}
+                value={synonyms}
+                onChange={setSynonyms}
+                placeholder="Введите синоним и нажмите Enter"
+                maxItems={50}
+                maxLengthPerItem={300}
+              />
+
+              {showBankCardFields && isCreditCard && (
+                <TextField label="Кредитный лимит" value={creditLimit} onChange={(e) => setCreditLimit(formatRubInput(e.target.value).replace(/^-/, ""))} onBlur={() => setCreditLimit((prev) => normalizeRubOnBlur(prev.replace(/^-/, "")))} inputMode="decimal" placeholder="Например: 120 000" />
+              )}
+
+              {showBankAccountFields && (
+                <TextField label="Последние 7 цифр номера счета" value={accountLast7} onChange={(e) => setAccountLast7(e.target.value.replace(/\D/g, "").slice(0, 7))} inputMode="numeric" maxLength={7} placeholder="Например: 1234567" />
+              )}
+
+              {showBankCardFields && (
+                <>
+                  <TextField label="Последние 4 цифры номера карты" value={cardLast4} onChange={(e) => setCardLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} inputMode="numeric" maxLength={4} placeholder="Например: 1234" />
+                  {!isCreditCard && (
+                    <div className="grid gap-2">
+                      <Label>Привязка карты к банковскому счету</Label>
+                      <ItemSelector items={bankAccountItems} selectedIds={cardAccountId ? [Number(cardAccountId)] : []} onChange={(ids) => { const nextId = ids[0] ?? null; if (!nextId) { setCardAccountId(""); return; } setCardAccountId(String(nextId)); const account = itemsById.get(nextId); if (account) { setCurrencyCode(account.currency_code ?? "RUB"); setCounterpartyId(account.counterparty_id ?? null); } }} selectionMode="single" placeholder="Выберите счет" clearLabel="Не выбрано" getItemTypeLabel={getItemTypeLabel} getItemKind={resolveItemEffectiveKind} getItemBalance={getItemDisplayBalanceCents} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} getBankLogoUrl={itemCounterpartyLogoUrl} getBankName={itemCounterpartyName} itemCounts={itemTxCounts} ariaLabel="Привязка карты к банковскому счету" />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {showContractNumberField && <TextField label="Номер договора" value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} placeholder="Например: 01-2025/123" />}
+
+              {showDepositFields && (
+                <div className="grid gap-2">
+                  <TextField label="Срок вклада в днях" value={depositTermDays} onChange={(e) => setDepositTermDays(e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="Например: 365" />
+                  <div className="text-sm text-muted-foreground">{depositEndDateText ? `Дата окончания: ${depositEndDateText}` : "Дата окончания: —"}</div>
+                </div>
+              )}
+
+              {showInterestFields && (
+                <>
+                  <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value.replace(/[^\d.,]/g, ""))} inputMode="decimal" placeholder="Например: 8,5" />
+                  <SelectField label="Порядок выплаты процентов" value={interestPayoutOrder || "__none"} onValueChange={(value) => setInterestPayoutOrder(value === "__none" ? "" : value)} options={[{ value: "__none", label: "Не выбрано" }, { value: "END_OF_TERM", label: "В конце срока" }, { value: "MONTHLY", label: "Ежемесячно" }]} placeholder="Выберите вариант" />
+                  <SelectField label="Капитализация процентов" value={interestCapitalization || "__none"} onValueChange={(value) => setInterestCapitalization(value === "__none" ? "" : value)} options={[{ value: "__none", label: "Не выбрано" }, { value: "true", label: "Да" }, { value: "false", label: "Нет" }]} placeholder="Выберите вариант" />
+                  {interestCapitalization !== "true" && (
+                    <div className="grid gap-2">
+                      <Label>Счет выплаты процентов</Label>
+                      <ItemSelector items={interestPayoutItems} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => { const nextId = ids[0] ?? null; setInterestPayoutAccountId(nextId ? String(nextId) : ""); }} selectionMode="single" placeholder="Выберите актив" clearLabel="Не выбрано" getItemTypeLabel={getItemTypeLabel} getItemKind={resolveItemEffectiveKind} getItemBalance={getItemDisplayBalanceCents} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} getBankLogoUrl={itemCounterpartyLogoUrl} getBankName={itemCounterpartyName} itemCounts={itemTxCounts} ariaLabel="Счет выплаты процентов" />
+                    </div>
+                  )}
+                </>
+              )}
+            </CollapsibleFormSection>
+            </>)}
+        </div>
       </FormModal>
 
       <Dialog open={closeItemDialogOpen} onOpenChange={setCloseItemDialogOpen}>

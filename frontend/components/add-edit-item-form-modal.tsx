@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Camera, Upload, Wallet } from "lucide-react";
 import { FormModal } from "@/components/form-modal";
+import { CollapsibleFormSection } from "@/components/ui/collapsible-form-section";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import { TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
@@ -72,8 +73,8 @@ import {
   addDays,
   toDateKey,
   findPriceOnOrBefore,
-  PRIMARY_VALUE_KIND_OPTIONS,
   getDefaultPrimaryValueKind,
+  getPrimaryValueLabel,
 } from "@/lib/asset-item-form-constants";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-type-icons";
 
@@ -1580,9 +1581,7 @@ export function AddEditItemFormModal({
         loading={loading}
         size="wide"
       >
-        <div className="flex flex-col md:flex-row items-start gap-0 transition-all duration-300 min-w-0 w-full max-w-[600px] md:max-w-none">
-          <div className="w-full md:w-[600px] grid content-start gap-4 flex-shrink-0 min-w-0">
-            {/* Photo + type row */}
+        <div className="grid gap-4 w-full">
             <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
               <div className="relative">
                 <div
@@ -1636,85 +1635,75 @@ export function AddEditItemFormModal({
                     />
                   </div>
                 )}
-                {isGeneralCreate && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {isGeneralCreate && (
+                    <SelectField
+                      label="Раздел"
+                      value={sectionId}
+                      onValueChange={(value) => {
+                        setSectionId(value);
+                        const section = sectionOptions.find((s) => s.id === value);
+                        const firstType = section?.typeCodes?.[0] ?? "";
+                        setTypeCode(firstType);
+                        setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
+                      }}
+                      options={sectionOptions.map((s) => ({ value: s.id, label: s.label }))}
+                      placeholder={kind === "ASSET" ? "Выберите раздел актива" : "Выберите раздел обязательства"}
+                    />
+                  )}
                   <SelectField
-                    label="Раздел"
-                    value={sectionId}
+                    label="Вид"
+                    value={typeCode}
                     onValueChange={(value) => {
-                      setSectionId(value);
-                      const section = sectionOptions.find((s) => s.id === value);
-                      const firstType = section?.typeCodes?.[0] ?? "";
-                      setTypeCode(firstType);
-                      setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
+                      setTypeCode(value);
+                      if (value === "crypto") setCurrencyCode("USD");
+                      if (!editingItem) setPrimaryValueKind(getDefaultPrimaryValueKind(value, kind));
                     }}
-                    options={sectionOptions.map((s) => ({ value: s.id, label: s.label }))}
-                    placeholder={kind === "ASSET" ? "Выберите раздел актива" : "Выберите раздел обязательства"}
+                    disabled={isGeneralCreate && !sectionId}
+                    options={typeOptions.map((t) => ({ value: t.code, label: t.label }))}
+                    placeholder={isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"}
                   />
-                )}
-                <SelectField
-                  label="Вид"
-                  value={typeCode}
-                  onValueChange={(value) => {
-                    setTypeCode(value);
-                    if (value === "crypto") setCurrencyCode("USD");
-                    if (!editingItem) setPrimaryValueKind(getDefaultPrimaryValueKind(value, kind));
-                  }}
-                  disabled={isGeneralCreate && !sectionId}
-                  options={typeOptions.map((t) => ({ value: t.code, label: t.label }))}
-                  placeholder={isGeneralCreate && !sectionId ? "Сначала выберите раздел" : "Выберите вид"}
-                />
+                </div>
               </div>
             </div>
 
-            {/* Instrument block (MOEX / Crypto) */}
-            <div className={cn("transition-all duration-300", showInstrumentBlock ? "max-h-[2000px] opacity-100 overflow-visible" : "max-h-0 opacity-0 overflow-hidden")}>
-              {showInstrumentBlock && (
-                <div className="grid gap-3">
+            {typeCode && (<>
+            {/* ══════ 1. Основное ══════ */}
+            <CollapsibleFormSection title="Основное" defaultOpen>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <TextField label="Название" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, Кошелёк" required />
+                <DateField label={primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Дата приобретения" : "Дата появления"} value={openDate} onChange={(e) => setOpenDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                {showCounterpartyField && (
                   <div className="grid gap-2">
-                    <div className="flex items-center gap-2">
-                      <Label style={{ color: ACTIVE_TEXT_DARK }}>{isCryptoType ? "Криптовалюта" : "Ценная бумага"}</Label>
-                    </div>
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Контрагент{isCounterpartyMandatory ? " *" : ""}</Label>
+                    <CounterpartySelector counterparties={counterparties} selectedIds={counterpartyId != null ? [counterpartyId] : []} onChange={(ids) => setCounterpartyId(ids[0] ?? null)} selectionMode="single" placeholder="Начните вводить название" industries={industries} disabled={counterpartyLoading} apiBase={API_BASE} onAddCounterparty={() => setCreateCounterpartyOpen(true)} />
+                    {counterpartyError && <p className="text-xs text-red-600">{counterpartyError}</p>}
+                  </div>
+                )}
+              </div>
+
+              {showBankCardFields && (
+                <SelectField label="Тип карты" value={cardKind} onValueChange={(v) => setCardKind(v as CardKind)} options={[{ value: "DEBIT", label: "Дебетовая" }, { value: "CREDIT", label: "Кредитная" }]} />
+              )}
+
+              {showInstrumentBlock && (
+                <>
+                  <div className="grid gap-2">
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>{isCryptoType ? "Криптовалюта" : "Ценная бумага"}</Label>
                     <div className="relative" ref={instrumentAnchorRef}>
-                      <TextField
-                        label=""
-                        value={instrumentQuery}
-                        onChange={(e) => {
-                          setInstrumentQuery(e.target.value);
-                          setSelectedInstrument(null);
-                          setInstrumentDropdownOpen(true);
-                        }}
-                        onFocus={() => setInstrumentDropdownOpen(true)}
-                        onBlur={() => setTimeout(() => setInstrumentDropdownOpen(false), 150)}
-                        placeholder={isCryptoType ? "Введите название или тикер" : "Введите тикер или название"}
-                      />
+                      <TextField label="" value={instrumentQuery} onChange={(e) => { setInstrumentQuery(e.target.value); setSelectedInstrument(null); setInstrumentDropdownOpen(true); }} onFocus={() => setInstrumentDropdownOpen(true)} onBlur={() => setTimeout(() => setInstrumentDropdownOpen(false), 150)} placeholder={isCryptoType ? "Введите название или тикер" : "Введите тикер или название"} />
                       {instrumentDropdownOpen && (
-                        <div
-                          className="selector-dropdown absolute z-[100] w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
-                          style={instrumentDropdownStyle ?? { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: 256, zIndex: 100 }}
-                        >
+                        <div className="selector-dropdown absolute z-[100] w-full overflow-auto overscroll-contain rounded-lg shadow-lg" style={instrumentDropdownStyle ?? { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: 256, zIndex: 100 }}>
                           <div className="relative rounded-lg p-1" style={{ backgroundColor: DROPDOWN_BG }}>
                             {instrumentLoading && <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загружаем инструменты...</div>}
                             {!instrumentLoading && instrumentError && <div className="px-2 py-1 text-sm text-red-600">{instrumentError}</div>}
                             {!instrumentLoading && !instrumentError && instrumentOptions.length === 0 && <div className="px-2 py-1 text-sm" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Ничего не найдено</div>}
                             {!instrumentLoading && !instrumentError && instrumentOptions.map((option) => {
                               const isCrypto = option.type_code === "crypto";
-                              const label = isCrypto
-                                ? `${option.short_name ?? option.secid} - ${option.name ?? option.secid}`
-                                : `${option.secid} - ${option.short_name || option.name || option.secid}`;
+                              const optLabel = isCrypto ? `${option.short_name ?? option.secid} - ${option.name ?? option.secid}` : `${option.secid} - ${option.short_name || option.name || option.secid}`;
                               return (
-                                <button
-                                  key={option.secid}
-                                  type="button"
-                                  className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-sm"
-                                  style={{ backgroundColor: "transparent", color: SIDEBAR_TEXT_ACTIVE }}
-                                  onMouseDown={(event) => event.preventDefault()}
-                                  onClick={() => {
-                                    setSelectedInstrument(option);
-                                    setInstrumentQuery(label);
-                                    setInstrumentDropdownOpen(false);
-                                  }}
-                                >
-                                  <span className="text-sm font-normal" style={{ color: SIDEBAR_TEXT_ACTIVE }}>{label}</span>
+                                <button key={option.secid} type="button" className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-sm" style={{ backgroundColor: "transparent", color: SIDEBAR_TEXT_ACTIVE }} onMouseDown={(ev) => ev.preventDefault()} onClick={() => { setSelectedInstrument(option); setInstrumentQuery(optLabel); setInstrumentDropdownOpen(false); }}>
+                                  <span className="text-sm font-normal" style={{ color: SIDEBAR_TEXT_ACTIVE }}>{optLabel}</span>
                                 </button>
                               );
                             })}
@@ -1724,432 +1713,171 @@ export function AddEditItemFormModal({
                     </div>
                   </div>
                   {isMoexType && (
-                    <SelectField
-                      label="Торговый режим"
-                      value={instrumentBoardId}
-                      onValueChange={setInstrumentBoardId}
-                      disabled={instrumentBoards.length === 0}
-                      options={instrumentBoards.map((board: MarketBoardOut) => ({ value: board.board_id, label: board.title ? `${board.board_id} - ${board.title}` : board.board_id }))}
-                      placeholder="Выберите режим"
-                    />
+                    <SelectField label="Торговый режим" value={instrumentBoardId} onValueChange={setInstrumentBoardId} disabled={instrumentBoards.length === 0} options={instrumentBoards.map((board: MarketBoardOut) => ({ value: board.board_id, label: board.title ? `${board.board_id} - ${board.title}` : board.board_id }))} placeholder="Выберите режим" />
                   )}
-                  <TextField
-                    label={isCryptoType ? "Количество" : "Количество лотов"}
-                    value={isCryptoType ? quantityUnitsStr : positionLots}
-                    onChange={(e) => (isCryptoType ? setQuantityUnitsStr(e.target.value) : setPositionLots(e.target.value))}
-                    inputMode="decimal"
-                    placeholder={isCryptoType ? "Например: 0.5" : "Например: 10"}
-                  />
+                </>
+              )}
+            </CollapsibleFormSection>
+
+            {/* ══════ 2. Стоимость ══════ */}
+            <CollapsibleFormSection
+              title="Стоимость"
+              titleRight={typeCode ? `По умолчанию используется ${getPrimaryValueLabel(primaryValueKind)}` : undefined}
+              defaultOpen
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {!isCryptoType && (
+                  <TextField label="Валюта" value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value.toUpperCase().slice(0, 3))} placeholder="RUB" />
+                )}
+                {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
+                  <div className="grid gap-2">
+                    <TextField label="Рыночная стоимость (в валюте актива)" value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                    <TextField label="Стоимость приобретения" value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                  </div>
+                )}
+                {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType) && (
+                  <TextField label={primaryValueKind === "BALANCE" ? "Баланс на дату появления" : primaryValueKind === "MARKET" ? "Рыночная стоимость на дату появления" : primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Стоимость приобретения" : "Сумма на дату появления"} value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                )}
+              </div>
+
+              {showInstrumentBlock && (
+                <>
+                  <TextField label={isCryptoType ? "Количество" : "Количество лотов"} value={isCryptoType ? quantityUnitsStr : positionLots} onChange={(e) => (isCryptoType ? setQuantityUnitsStr(e.target.value) : setPositionLots(e.target.value))} inputMode="decimal" placeholder={isCryptoType ? "Например: 0.5" : "Например: 10"} />
                   {isMoexType && resolvedHistoryStatus === "NEW" && (
-                    <TextField
-                      label="Цена покупки (за 1 шт.)"
-                      value={moexPurchasePrice}
-                      onChange={(e) => setMoexPurchasePrice(e.target.value)}
-                      placeholder="По умолчанию — рыночная цена на дату"
-                    />
+                    <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => setMoexPurchasePrice(e.target.value)} placeholder="По умолчанию — рыночная цена на дату" />
                   )}
                   {isCryptoType && resolvedHistoryStatus === "NEW" && (
-                    <TextField
-                      label="Цена (за 1 ед., USD)"
-                      value={cryptoPurchasePrice}
-                      onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))}
-                      onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))}
-                      placeholder={
-                        marketPrice?.price_usd_cents != null
-                          ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",")
-                          : "Например: 83,32"
-                      }
-                    />
+                    <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))} onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={marketPrice?.price_usd_cents != null ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",") : "Например: 83,32"} />
                   )}
                   {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
                     <div className="grid gap-1">
-                      <TextField
-                        label="Цена приобретения"
-                        value={historicalAcquisitionCost}
-                        onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))}
-                        onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))}
-                        placeholder={isCryptoType ? "Например: 83,32" : "Например: 123,45"}
-                      />
+                      <TextField label="Цена приобретения" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder={isCryptoType ? "Например: 83,32" : "Например: 123,45"} />
                       <p className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>Укажите среднюю цену приобретения позиции с момента её появления у вас</p>
                     </div>
                   )}
                   {isMoexType && moexDatePricesLoading && <p className="text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка цен...</p>}
                   {isMoexType && marketPrice && moexInitialValueCents != null && (
-                    <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
-                      Сумма по текущей цене: {formatAmount(moexInitialValueCents)}
-                    </p>
+                    <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>Сумма по текущей цене: {formatAmount(moexInitialValueCents)}</p>
                   )}
                   {isCryptoType && marketPrice && (marketPrice.price_usd_cents != null || marketPrice.price_cents != null) && (
                     <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                       Текущая цена:{" "}
-                      {marketPrice.price_usd_cents != null && (
-                        <>{formatAmount(marketPrice.price_usd_cents)} USD</>
-                      )}
+                      {marketPrice.price_usd_cents != null && <>{formatAmount(marketPrice.price_usd_cents)} USD</>}
                       {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && " ("}
-                      {marketPrice.price_cents != null && (
-                        <>{formatAmount(marketPrice.price_cents)} ₽</>
-                      )}
+                      {marketPrice.price_cents != null && <>{formatAmount(marketPrice.price_cents)} ₽</>}
                       {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && ")"}
                       {" за 1 ед."}
                     </p>
                   )}
-                  {isMoexType && commissionAllowed && (
-                    <div className="grid gap-2 rounded border border-border/50 p-2">
-                      <div className="flex items-center gap-2">
-                        <Switch checked={commissionEnabled} onCheckedChange={setCommissionEnabled} />
-                        <Label style={{ color: ACTIVE_TEXT_DARK }}>Указать комиссию</Label>
-                      </div>
-                      {commissionEnabled && (
-                        <>
-                          <TextField
-                            label="Сумма комиссии"
-                            value={commissionAmount}
-                            onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))}
-                            onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))}
-                            placeholder="0"
-                          />
-                          <div className="grid gap-2">
-                            <Label style={{ color: ACTIVE_TEXT_DARK }}>Счет оплаты комиссии</Label>
-                            <ItemSelector
-                              items={items.filter((it) => !it.instrument_id && !it.archived_at && !it.closed_at)}
-                              selectedIds={commissionPaymentItemId ? [Number(commissionPaymentItemId)] : []}
-                              onChange={(ids) => setCommissionPaymentItemId(ids[0] != null ? String(ids[0]) : "")}
-                              selectionMode="single"
-                              placeholder="Выберите счет"
-                              getItemTypeLabel={(it) => getItemTypeLabel(it) + " — " + (it.name || "")}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <TextField
-              label="Название"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Например, Кошелёк"
-              required
-            />
-            <SelectField
-              label="Основная стоимость"
-              value={primaryValueKind}
-              onValueChange={(v) => setPrimaryValueKind(v as PrimaryValueKind)}
-              options={PRIMARY_VALUE_KIND_OPTIONS}
-            />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {!isCryptoType && (
-                <TextField
-                  label="Валюта"
-                  value={currencyCode}
-                  onChange={(e) => setCurrencyCode(e.target.value.toUpperCase().slice(0, 3))}
-                  placeholder="RUB"
-                />
-              )}
-              {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
-                <>
-                  <TextField
-                    label="Рыночная стоимость (в валюте актива)"
-                    value={marketValueStr}
-                    onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))}
-                    onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))}
-                    placeholder="0"
-                  />
-                  <TextField
-                    label="Стоимость приобретения"
-                    value={amountStr}
-                    onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                    onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))}
-                    placeholder="0"
-                  />
                 </>
               )}
-              {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType) && (
-                <TextField
-                  label={
-                    primaryValueKind === "BALANCE"
-                      ? "Баланс на дату появления"
-                      : primaryValueKind === "MARKET"
-                        ? "Рыночная стоимость на дату появления"
-                        : primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED"
-                          ? "Стоимость приобретения"
-                          : "Сумма на дату появления"
-                  }
-                  value={amountStr}
-                  onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                  onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))}
-                  placeholder="0"
-                />
-              )}
+
               {hideInitialAmountField && isMoexType && moexInitialValueCents != null && (
                 <div className="flex flex-col gap-1">
                   <Label style={{ color: ACTIVE_TEXT_DARK }}>Начальный баланс</Label>
                   <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(moexInitialValueCents)}</p>
                 </div>
               )}
-            </div>
-            <DateField
-              label={primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Дата приобретения" : "Дата появления"}
-              value={openDate}
-              onChange={(e) => setOpenDate(e.target.value)}
-              placeholder="ГГГГ-ММ-ДД"
-            />
-            {showOpeningCounterparty && (
-              <div className="grid gap-2">
-                <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
-                <ItemSelector
-                  items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)}
-                  selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []}
-                  onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")}
-                  selectionMode="single"
-                  placeholder="Не выбирать"
-                  getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")}
-                />
-              </div>
-            )}
-            <ChipsInput
-              label="Синонимы"
-              labelHint="Добавьте альтернативные названия. При импорте транзакций актив/обязательство будет подбираться и по синонимам (например, *1234 для карты)."
-              value={synonyms}
-              onChange={setSynonyms}
-              placeholder="Введите синоним и нажмите Enter"
-              maxItems={50}
-              maxLengthPerItem={300}
-            />
-            {showBankAccountFields && (
-              <TextField
-                label="Последние 7 цифр номера счета"
-                value={accountLast7}
-                onChange={(e) => setAccountLast7(e.target.value.replace(/\D/g, "").slice(0, 7))}
-                placeholder="Необязательно"
-              />
-            )}
-            {showContractNumberField && (
-              <TextField
-                label="Номер договора"
-                value={contractNumber}
-                onChange={(e) => setContractNumber(e.target.value)}
-                placeholder="Необязательно"
-              />
-            )}
-            {showBankCardFields && (
-              <div className="grid gap-4">
-                <TextField
-                  label="Последние 4 цифры карты"
-                  value={cardLast4}
-                  onChange={(e) => setCardLast4(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                  placeholder="Необязательно"
-                />
-                <SelectField
-                  label="Тип карты"
-                  value={cardKind}
-                  onValueChange={(v) => setCardKind(v as CardKind)}
-                  options={[
-                    { value: "DEBIT", label: "Дебетовая" },
-                    { value: "CREDIT", label: "Кредитная" },
-                  ]}
-                />
-                {!isCreditCard && (
-                  <div className="grid gap-2">
-                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Привязать к счету</Label>
-                    <ItemSelector
-                      items={items.filter((it) => (it.type_code === "bank_account" || it.type_code === "savings_account") && !it.archived_at && !it.closed_at)}
-                      selectedIds={cardAccountId ? [Number(cardAccountId)] : []}
-                      onChange={(ids) => setCardAccountId(ids[0] != null ? String(ids[0]) : "")}
-                      selectionMode="single"
-                      placeholder="Не привязывать"
-                      getItemTypeLabel={(it) => (it.name || "") + (it.account_last7 ? ` ***${it.account_last7}` : "")}
-                    />
+
+              {showOpeningCounterparty && (
+                <div className="grid gap-2">
+                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
+                  <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                </div>
+              )}
+
+              {isMoexType && commissionAllowed && (
+                <div className="grid gap-2 rounded border border-border/50 p-2">
+                  <div className="flex items-center gap-2">
+                    <Switch checked={commissionEnabled} onCheckedChange={setCommissionEnabled} />
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Указать комиссию</Label>
                   </div>
-                )}
-                {isCreditCard && (
-                  <TextField
-                    label="Кредитный лимит"
-                    value={creditLimit}
-                    onChange={(e) => setCreditLimit(formatRubInput(e.target.value))}
-                    onBlur={(e) => setCreditLimit(normalizeRubOnBlur(e.target.value))}
-                    placeholder="0"
-                  />
-                )}
-              </div>
-            )}
-            {showDepositFields && (
-              <TextField
-                label="Срок вклада (дней)"
-                value={depositTermDays}
-                onChange={(e) => setDepositTermDays(e.target.value.replace(/\D/g, ""))}
-                placeholder="Необязательно"
-              />
-            )}
-            {(showInterestFields || showLoanPlanSettings) && (
-              <div className="grid gap-4">
-                <TextField
-                  label="Процентная ставка"
-                  value={interestRate}
-                  onChange={(e) => setInterestRate(e.target.value)}
-                  placeholder="Например: 8,5"
-                />
-                {showInterestFields && (
-                  <>
-                    <SelectField
-                      label="Порядок выплаты процентов"
-                      value={interestPayoutOrder}
-                      onValueChange={setInterestPayoutOrder}
-                      options={[
-                        { value: "END_OF_TERM", label: "В конце срока" },
-                        { value: "MONTHLY", label: "Ежемесячно" },
-                      ]}
-                    />
-                    {interestPayoutOrder === "MONTHLY" && (
-                      <SelectField
-                        label="Капитализация"
-                        value={interestCapitalization}
-                        onValueChange={setInterestCapitalization}
-                        options={[
-                          { value: "true", label: "Да" },
-                          { value: "false", label: "Нет" },
-                        ]}
-                      />
-                    )}
-                    {interestCapitalization !== "true" && (
+                  {commissionEnabled && (
+                    <>
+                      <TextField label="Сумма комиссии" value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                       <div className="grid gap-2">
-                        <Label style={{ color: ACTIVE_TEXT_DARK }}>Счет выплаты процентов</Label>
-                        <ItemSelector
-                          items={items.filter((it) => it.kind === "ASSET" && !it.archived_at && !it.closed_at)}
-                          selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []}
-                          onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")}
-                          selectionMode="single"
-                          placeholder="Выберите счет"
-                          getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")}
-                        />
+                        <Label style={{ color: ACTIVE_TEXT_DARK }}>Счет оплаты комиссии</Label>
+                        <ItemSelector items={items.filter((it) => !it.instrument_id && !it.archived_at && !it.closed_at)} selectedIds={commissionPaymentItemId ? [Number(commissionPaymentItemId)] : []} onChange={(ids) => setCommissionPaymentItemId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => getItemTypeLabel(it) + " — " + (it.name || "")} />
                       </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
+                    </>
+                  )}
+                </div>
+              )}
+            </CollapsibleFormSection>
+
+            {/* ══════ 3. Планирование ══════ */}
             {showPlanSection && (
-              <div className="grid gap-4 rounded-lg border-2 border-border/70 p-3" style={{ backgroundColor: BACKGROUND_DT }}>
+              <CollapsibleFormSection title="Планирование" defaultOpen={false}>
                 <div className="flex items-center gap-2">
                   <Switch checked={planEnabled} onCheckedChange={setPlanEnabled} />
                   <Label style={{ color: ACTIVE_TEXT_DARK }}>Плановые транзакции</Label>
                 </div>
-                {planEnabled && (
+                {planEnabled && showInterestPlanSettings && (
+                  <TextField label="Дата окончания планирования (вклад/накопительный)" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                )}
+                {planEnabled && showLoanPlanSettings && (
                   <>
-                    {showInterestPlanSettings && (
-                      <TextField
-                        label="Дата окончания планирования (вклад/накопительный)"
-                        value={planEndDate}
-                        onChange={(e) => setPlanEndDate(e.target.value)}
-                        placeholder="ГГГГ-ММ-ДД"
-                      />
-                    )}
-                    {showLoanPlanSettings && (
+                    <TextField label="Плановая дата погашения" value={loanEndDate} onChange={(e) => setLoanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                    <SelectField label="Счет погашения" value={repaymentAccountId} onValueChange={setRepaymentAccountId} options={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at).map((it) => ({ value: String(it.id), label: (it.name || "") + " " + (it.currency_code || "") }))} placeholder="Выберите счет" />
+                    <SelectField label="Периодичность погашения" value={repaymentFrequency} onValueChange={(v) => setRepaymentFrequency(v as TransactionChainFrequency)} options={[{ value: "WEEKLY", label: "Еженедельно" }, { value: "MONTHLY", label: "Ежемесячно" }, { value: "REGULAR", label: "С заданным интервалом (дни)" }]} />
+                    {repaymentFrequency === "MONTHLY" && <SelectField label="Первая дата погашения" value={firstPayoutRule} onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)} options={[{ value: "MONTH_END", label: "Последний день месяца" }, { value: "SAME_DAY", label: "Тот же день, что и дата появления" }]} />}
+                    {repaymentFrequency === "REGULAR" && <TextField label="Интервал (дней)" value={repaymentIntervalDays} onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))} placeholder="1" />}
+                    <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" />
+                    {requiresLoanPaymentInput && (
                       <>
-                        <TextField
-                          label="Плановая дата погашения"
-                          value={loanEndDate}
-                          onChange={(e) => setLoanEndDate(e.target.value)}
-                          placeholder="ГГГГ-ММ-ДД"
-                        />
-                        <SelectField
-                          label="Счет погашения"
-                          value={repaymentAccountId}
-                          onValueChange={setRepaymentAccountId}
-                          options={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at).map((it) => ({ value: String(it.id), label: (it.name || "") + " " + (it.currency_code || "") }))}
-                          placeholder="Выберите счет"
-                        />
-                        <SelectField
-                          label="Периодичность погашения"
-                          value={repaymentFrequency}
-                          onValueChange={(v) => setRepaymentFrequency(v as TransactionChainFrequency)}
-                          options={[
-                            { value: "WEEKLY", label: "Еженедельно" },
-                            { value: "MONTHLY", label: "Ежемесячно" },
-                            { value: "REGULAR", label: "С заданным интервалом (дни)" },
-                          ]}
-                        />
-                        {repaymentFrequency === "MONTHLY" && (
-                          <SelectField
-                            label="Первая дата погашения"
-                            value={firstPayoutRule}
-                            onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)}
-                            options={[
-                              { value: "MONTH_END", label: "Последний день месяца" },
-                              { value: "SAME_DAY", label: "Тот же день, что и дата появления" },
-                            ]}
-                          />
-                        )}
-                        {repaymentFrequency === "REGULAR" && (
-                          <TextField
-                            label="Интервал (дней)"
-                            value={repaymentIntervalDays}
-                            onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))}
-                            placeholder="1"
-                          />
-                        )}
-                        <SelectField
-                          label="Тип погашения"
-                          value={repaymentType}
-                          onValueChange={(v) => setRepaymentType(v as RepaymentType)}
-                          options={[
-                            { value: "ANNUITY", label: "Аннуитет" },
-                            { value: "DIFFERENTIAL", label: "Дифференцированный" },
-                          ]}
-                          placeholder="Не выбрано"
-                        />
-                        {requiresLoanPaymentInput && (
-                          <>
-                            <SelectField
-                              label="Тип суммы погашения"
-                              value={paymentAmountKind}
-                              onValueChange={(v) => setPaymentAmountKind(v as PaymentAmountKind)}
-                              options={[
-                                { value: "FIXED", label: "Фиксированная сумма" },
-                                { value: "PERCENT", label: "Процент от остатка" },
-                              ]}
-                              placeholder="Выберите"
-                            />
-                            <TextField
-                              label="Сумма погашения"
-                              value={paymentAmountStr}
-                              onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))}
-                              onBlur={(e) => setPaymentAmountStr(normalizeRubOnBlur(e.target.value))}
-                              placeholder="0"
-                            />
-                          </>
-                        )}
+                        <SelectField label="Тип суммы погашения" value={paymentAmountKind} onValueChange={(v) => setPaymentAmountKind(v as PaymentAmountKind)} options={[{ value: "FIXED", label: "Фиксированная сумма" }, { value: "PERCENT", label: "Процент от остатка" }]} placeholder="Выберите" />
+                        <TextField label="Сумма погашения" value={paymentAmountStr} onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setPaymentAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                       </>
                     )}
                   </>
                 )}
-              </div>
+              </CollapsibleFormSection>
             )}
-            {showCounterpartyField && (
-              <div className="grid gap-2">
-                <Label style={{ color: ACTIVE_TEXT_DARK }}>
-                  Контрагент{isCounterpartyMandatory ? " *" : ""}
-                </Label>
-                <CounterpartySelector
-                  counterparties={counterparties}
-                  selectedIds={counterpartyId != null ? [counterpartyId] : []}
-                  onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
-                  selectionMode="single"
-                  placeholder="Начните вводить название"
-                  industries={industries}
-                  disabled={counterpartyLoading}
-                  apiBase={API_BASE}
-                  onAddCounterparty={() => setCreateCounterpartyOpen(true)}
-                />
-                {counterpartyError && (
-                  <p className="text-xs text-red-600">{counterpartyError}</p>
-                )}
-              </div>
-            )}
-          </div>
+
+            {/* ══════ 4. Дополнительно ══════ */}
+            <CollapsibleFormSection title="Дополнительно" defaultOpen={false}>
+              <ChipsInput label="Синонимы" labelHint="Добавьте альтернативные названия. При импорте транзакций актив/обязательство будет подбираться и по синонимам (например, *1234 для карты)." value={synonyms} onChange={setSynonyms} placeholder="Введите синоним и нажмите Enter" maxItems={50} maxLengthPerItem={300} />
+
+              {showBankCardFields && isCreditCard && (
+                <TextField label="Кредитный лимит" value={creditLimit} onChange={(e) => setCreditLimit(formatRubInput(e.target.value))} onBlur={(e) => setCreditLimit(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+              )}
+
+              {showBankAccountFields && <TextField label="Последние 7 цифр номера счета" value={accountLast7} onChange={(e) => setAccountLast7(e.target.value.replace(/\D/g, "").slice(0, 7))} placeholder="Необязательно" />}
+              {showContractNumberField && <TextField label="Номер договора" value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} placeholder="Необязательно" />}
+
+              {showBankCardFields && (
+                <>
+                  <TextField label="Последние 4 цифры карты" value={cardLast4} onChange={(e) => setCardLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="Необязательно" />
+                  {!isCreditCard && (
+                    <div className="grid gap-2">
+                      <Label style={{ color: ACTIVE_TEXT_DARK }}>Привязать к счету</Label>
+                      <ItemSelector items={items.filter((it) => (it.type_code === "bank_account" || it.type_code === "savings_account") && !it.archived_at && !it.closed_at)} selectedIds={cardAccountId ? [Number(cardAccountId)] : []} onChange={(ids) => setCardAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не привязывать" getItemTypeLabel={(it) => (it.name || "") + (it.account_last7 ? ` ***${it.account_last7}` : "")} />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {showDepositFields && <TextField label="Срок вклада (дней)" value={depositTermDays} onChange={(e) => setDepositTermDays(e.target.value.replace(/\D/g, ""))} placeholder="Необязательно" />}
+
+              {(showInterestFields || showLoanPlanSettings) && (
+                <>
+                  <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" />
+                  {showInterestFields && (
+                    <>
+                      <SelectField label="Порядок выплаты процентов" value={interestPayoutOrder} onValueChange={setInterestPayoutOrder} options={[{ value: "END_OF_TERM", label: "В конце срока" }, { value: "MONTHLY", label: "Ежемесячно" }]} />
+                      {interestPayoutOrder === "MONTHLY" && <SelectField label="Капитализация" value={interestCapitalization} onValueChange={setInterestCapitalization} options={[{ value: "true", label: "Да" }, { value: "false", label: "Нет" }]} />}
+                      {interestCapitalization !== "true" && (
+                        <div className="grid gap-2">
+                          <Label style={{ color: ACTIVE_TEXT_DARK }}>Счет выплаты процентов</Label>
+                          <ItemSelector items={items.filter((it) => it.kind === "ASSET" && !it.archived_at && !it.closed_at)} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </CollapsibleFormSection>
+            </>)}
         </div>
       </FormModal>
     </>

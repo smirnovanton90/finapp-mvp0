@@ -994,10 +994,19 @@ def ensure_moex_history_prices(
             MarketPrice.price_date <= date_to,
         )
     ).scalar() or 0
+    # Не пропускать загрузку, если нет котировок с даты начала периода (иначе начало графика пустое)
+    min_date_in_range = db.execute(
+        select(func.min(MarketPrice.price_date)).where(
+            MarketPrice.instrument_id == secid,
+            MarketPrice.board_id == board_id,
+            MarketPrice.price_date >= date_from,
+            MarketPrice.price_date <= date_to,
+        )
+    ).scalar()
     total_days = (date_to - date_from).days + 1
     trading_days_est = int(total_days * 5 / 7)
-    logger.info("ensure_moex_history_prices %s: existing=%d, est=%d", secid, existing_count, trading_days_est)
-    if existing_count >= max(trading_days_est * 0.8, 1):
+    logger.info("ensure_moex_history_prices %s: existing=%d, est=%d, min_date=%s", secid, existing_count, trading_days_est, min_date_in_range)
+    if existing_count >= max(trading_days_est * 0.8, 1) and (min_date_in_range is not None and min_date_in_range <= date_from):
         return
 
     instrument = db.get(MarketInstrument, secid)

@@ -1003,7 +1003,14 @@ export default function AssetDetailPage() {
       }
       return base;
     });
-    if (key === "market") return raw.filter((p) => p.hasValue);
+    // Для рыночной стоимости: начальные даты без цены заполняем первой известной ценой (forward-fill), чтобы график не показывал нули
+    if (key === "market") {
+      const firstWithValue = raw.find((p) => p.hasValue && p.valueRub > 0);
+      const fillValue = firstWithValue?.valueRub ?? 0;
+      return raw.map((p) =>
+        !p.hasValue && fillValue > 0 ? { ...p, valueRub: fillValue } : p
+      );
+    }
     return raw;
   }, [costHistoryOpen, costHistoryData]);
 

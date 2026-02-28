@@ -2775,6 +2775,12 @@ def _build_item_cost_history(
                 if units > 0 and market_rub is not None:
                     market_quantity_units = units
                     market_price_rub = market_rub // units
+            elif lot_balance is not None and lot_balance >= 0:
+                # Количество на дату — даже без цены MOEX, чтобы «На начальную дату» отображалось верно
+                lot_size = item.lot_size or 1
+                units = int(lot_balance * lot_size)
+                if units >= 0:
+                    market_quantity_units = units
         elif is_crypto_item(item) and item.instrument_id and units_balance >= 0:
             # Для крипты crypto_chart_prices в USD (см. vs_currency выше); считаем в центах USD
             price_in_currency = crypto_chart_prices.get(d_str)
@@ -2786,8 +2792,11 @@ def _build_item_cost_history(
                         break
             if price_in_currency is not None and price_in_currency > 0:
                 market_rub = int(round(units_balance * price_in_currency * 100))
-                market_quantity_units = units_balance
+                market_quantity_units = int(round(units_balance))
                 market_price_rub = int(round(price_in_currency * 100))
+            elif units_balance >= 0:
+                # Количество на дату — даже без цены, чтобы «На начальную дату» отображалось верно
+                market_quantity_units = int(round(units_balance))
         if market_rub is None:
             for m_date in reversed(market_sorted_dates):
                 if m_date <= d_str:

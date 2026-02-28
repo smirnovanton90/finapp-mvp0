@@ -52,6 +52,7 @@ import { getItemTypeLabel } from "@/lib/item-types";
 import {
   getTodayDateKey,
   CASH_TYPES,
+  REPAYMENT_ACCOUNT_TYPE_CODES,
   ASSET_TYPES,
   LIABILITY_TYPES,
   MOEX_TYPE_CODES,
@@ -304,7 +305,10 @@ export function AddEditItemFormModal({
     const base = kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES;
     if (!effectiveAllowedTypeCodes.length) return isGeneralCreate ? [] : base;
     const allowed = new Set(effectiveAllowedTypeCodes);
-    return base.filter((o) => allowed.has(o.code));
+    const filtered = base.filter((o) => allowed.has(o.code));
+    // Порядок в выпадающем списке — как в разделе (effectiveAllowedTypeCodes)
+    const orderBySection = new Map(effectiveAllowedTypeCodes.map((code, i) => [code, i]));
+    return filtered.slice().sort((a, b) => (orderBySection.get(a.code) ?? 999) - (orderBySection.get(b.code) ?? 999));
   }, [kind, effectiveAllowedTypeCodes, isGeneralCreate]);
   const showCounterpartyField = useMemo(
     () => COUNTERPARTY_TYPE_CODES.includes(typeCode),
@@ -1262,8 +1266,8 @@ export function AddEditItemFormModal({
         setFormError("Счет погашения не найден.");
         return;
       }
-      if (!CASH_TYPES.includes(repaymentAccount.type_code)) {
-        setFormError("Счет погашения должен быть денежным активом.");
+      if (!REPAYMENT_ACCOUNT_TYPE_CODES.includes(repaymentAccount.type_code)) {
+        setFormError("Счет погашения должен быть денежным или брокерским/накопительным счётом.");
         return;
       }
       if (repaymentAccount.currency_code !== currencyCode) {
@@ -2058,7 +2062,7 @@ export function AddEditItemFormModal({
                           label="Счет погашения"
                           value={repaymentAccountId}
                           onValueChange={setRepaymentAccountId}
-                          options={items.filter((it) => CASH_TYPES.includes(it.type_code) && !it.archived_at && !it.closed_at).map((it) => ({ value: String(it.id), label: (it.name || "") + " " + (it.currency_code || "") }))}
+                          options={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at).map((it) => ({ value: String(it.id), label: (it.name || "") + " " + (it.currency_code || "") }))}
                           placeholder="Выберите счет"
                         />
                         <SelectField

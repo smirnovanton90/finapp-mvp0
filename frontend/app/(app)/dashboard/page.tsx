@@ -62,17 +62,15 @@ type DailyRow = {
 
 type CategoryIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 
-const CASH_TYPES = ["cash", "bank_account", "bank_card", "savings_account", "e_wallet", "brokerage"];
+const CASH_TYPES = ["cash", "bank_account", "bank_card", "e_wallet"];
 const FINANCIAL_INSTRUMENTS_TYPES = [
   "deposit",
+  "savings_account",
+  "brokerage",
   "securities",
   "bonds",
-  "etf",
-  "bpif",
-  "pif",
-  "iis",
-  "precious_metals",
   "crypto",
+  "precious_metals",
 ];
 const PROPERTY_TYPES = [
   "real_estate",

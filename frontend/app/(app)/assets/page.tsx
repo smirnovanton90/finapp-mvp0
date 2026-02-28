@@ -209,19 +209,18 @@ const LIABILITY_TYPES = [
 const LIABILITY_TYPE_CODES = LIABILITY_TYPES.map((type) => type.code);
 const ALL_TYPE_CODES = [...ASSET_TYPE_CODES, ...LIABILITY_TYPE_CODES];
 
-// Категории активов
-const CASH_TYPES = ["cash", "bank_account", "bank_card", "savings_account", "e_wallet", "brokerage"];
+// Категории активов (синхронно с asset-item-form-constants)
+const CASH_TYPES = ["cash", "bank_account", "bank_card", "e_wallet"];
 const INVESTMENT_TYPES = [
   "deposit",
+  "savings_account",
+  "brokerage",
   "securities",
   "bonds",
-  "etf",
-  "bpif",
-  "pif",
-  "iis",
-  "precious_metals",
   "crypto",
+  "precious_metals",
 ];
+const REPAYMENT_ACCOUNT_TYPE_CODES = ["cash", "bank_account", "bank_card", "e_wallet", "savings_account", "brokerage"];
 const MOEX_TYPE_CODES = [
   "securities",
   "bonds",
@@ -1066,7 +1065,10 @@ export default function Page() {
       return isGeneralCreate ? [] : base;
     }
     const allowed = new Set(effectiveAllowedTypeCodes);
-    return base.filter((option) => allowed.has(option.code));
+    const filtered = base.filter((option) => allowed.has(option.code));
+    // Порядок в выпадающем списке «Вид» — как в разделе
+    const orderBySection = new Map(effectiveAllowedTypeCodes.map((code, i) => [code, i]));
+    return filtered.slice().sort((a, b) => (orderBySection.get(a.code) ?? 999) - (orderBySection.get(b.code) ?? 999));
   }, [kind, effectiveAllowedTypeCodes, isGeneralCreate]);
 
   const showCounterpartyField = useMemo(
@@ -1611,7 +1613,7 @@ export default function Page() {
   const repaymentAccountItems = useMemo(() => {
     const filtered = activeAssetItems.filter((item) => {
       if (editingItem && item.id === editingItem.id) return false;
-      if (!CASH_TYPES.includes(item.type_code)) return false;
+      if (!REPAYMENT_ACCOUNT_TYPE_CODES.includes(item.type_code)) return false;
       if (currencyCode && item.currency_code !== currencyCode) return false;
       return true;
     });
@@ -3216,8 +3218,8 @@ export default function Page() {
         setFormError("Счет погашения не найден.");
         return;
       }
-      if (!CASH_TYPES.includes(repaymentAccount.type_code)) {
-        setFormError("Счет погашения должен быть денежным активом.");
+      if (!REPAYMENT_ACCOUNT_TYPE_CODES.includes(repaymentAccount.type_code)) {
+        setFormError("Счет погашения должен быть денежным или брокерским/накопительным счётом.");
         return;
       }
       if (repaymentAccount.currency_code !== currencyCode) {

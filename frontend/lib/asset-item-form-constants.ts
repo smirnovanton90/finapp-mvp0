@@ -20,6 +20,7 @@ export function getPrimaryValueLabel(primaryValueKind: PrimaryValueKind | null |
 export function getDefaultPrimaryValueKind(typeCode: string, kind: ItemKind): PrimaryValueKind {
   if (kind === "LIABILITY") return "BALANCE";
   if (typeCode === "deposit") return "BALANCE";
+  if (typeCode === "savings_account" || typeCode === "brokerage") return "BALANCE";
   if (CASH_TYPES.includes(typeCode) || THIRD_PARTY_DEBT_TYPES.includes(typeCode) || PENSION_TYPES.includes(typeCode) || OTHER_ASSET_TYPES.includes(typeCode))
     return "BALANCE";
   if (INVESTMENT_TYPES.includes(typeCode) || REAL_ESTATE_TYPES.includes(typeCode) || TRANSPORT_TYPES.includes(typeCode) || VALUABLES_TYPES.includes(typeCode))
@@ -100,8 +101,12 @@ export const LIABILITY_TYPES = [
   { code: "other_liability", label: "Прочие обязательства" },
 ];
 
-export const CASH_TYPES = ["cash", "bank_account", "bank_card", "savings_account", "e_wallet", "brokerage"];
-const INVESTMENT_TYPES = ["deposit", "securities", "bonds", "etf", "bpif", "pif", "iis", "precious_metals", "crypto"];
+/** Денежные активы (раздел без накопительного и брокерского счёта) */
+export const CASH_TYPES = ["cash", "bank_account", "bank_card", "e_wallet"];
+/** Инвестиционные активы: порядок типов в разделе (ETF, БПИФ, ПИФ, ИИС скрыты в v1) */
+export const INVESTMENT_TYPES = ["deposit", "savings_account", "brokerage", "securities", "bonds", "crypto", "precious_metals"];
+/** Типы счетов, с которых допускается погашение кредитов/займов */
+export const REPAYMENT_ACCOUNT_TYPE_CODES = ["cash", "bank_account", "bank_card", "e_wallet", "savings_account", "brokerage"];
 const THIRD_PARTY_DEBT_TYPES = ["loan_to_third_party", "counterparty_settlements"];
 const REAL_ESTATE_TYPES = ["real_estate", "townhouse", "land_plot", "garage", "commercial_real_estate", "real_estate_share"];
 const TRANSPORT_TYPES = ["car", "motorcycle", "boat", "trailer", "special_vehicle"];

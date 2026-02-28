@@ -1,5 +1,5 @@
 /**
- * Constants for the asset/liability form (shared with Assets page and AddEditItemModal).
+ * Constants for the asset/liability form (shared with Assets page and AddEditItemFormModal).
  */
 
 import type { ItemKind, MarketPriceOut, PrimaryValueKind } from "./api";

@@ -1624,17 +1624,6 @@ export default function AssetDetailPage() {
               К активам и обязательствам
             </Link>
           </Button>
-          {item.instrument_id && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setBuySellModalOpen(true)}
-              className="flex items-center gap-2"
-            >
-              <TrendingUp className="h-4 w-4" />
-              Купить/продать актив
-            </Button>
-          )}
         </div>
 
         <div className="flex flex-col gap-4">
@@ -1844,6 +1833,18 @@ export default function AssetDetailPage() {
                       </IconButton>
                       <span className="text-sm shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>Количество</span>
                       <div className="flex-1 min-w-0" />
+                      {item.instrument_id && !isArchived && !isClosed && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
+                          style={{ backgroundColor: ACCENT }}
+                          onClick={(e) => { e.stopPropagation(); setBuySellModalOpen(true); }}
+                        >
+                          <TrendingUp className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                          <span style={{ color: "white", opacity: 0.85 }}>Купить/продать актив</span>
+                        </Button>
+                      )}
                       <div className="text-2xl font-medium shrink-0 text-right" style={{ color: ACTIVE_TEXT_DARK }}>
                         {qtyLabel}
                       </div>
@@ -1911,8 +1912,8 @@ export default function AssetDetailPage() {
                           <p className="text-sm mt-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
                         ) : (
                           <>
-                            <div className="flex gap-4 mt-3 items-start">
-                              <div className="w-1/2 min-w-0">
+                            <div className="mt-3">
+                              <div className="min-w-0">
                                 {quantityHistoryRows.length === 0 && quantitySummary.startQty === 0 ? (
                                   <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи</p>
                                 ) : (
@@ -1959,19 +1960,6 @@ export default function AssetDetailPage() {
                                       })}
                                     </tbody>
                                   </table>
-                                )}
-                              </div>
-                              <div className="w-1/2 flex justify-center items-start pt-1">
-                                {item.instrument_id && !isArchived && !isClosed && (
-                                  <Button
-                                    type="button"
-                                    className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-                                    style={{ backgroundColor: ACCENT }}
-                                    onClick={() => setBuySellModalOpen(true)}
-                                  >
-                                    <TrendingUp className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                                    <span style={{ color: "white", opacity: 0.85 }}>Купить/продать актив</span>
-                                  </Button>
                                 )}
                               </div>
                             </div>

@@ -291,7 +291,7 @@ export function AddEditItemFormModal({
       setItemPhotoFile(null);
       fetchTransactionChains({ linked_item_id: editingItem.id }).then((chains) => setLinkedChains((chains ?? []).filter((c) => !c.deleted_at))).catch(() => setLinkedChains([]));
     }
-  }, [open, initialCreateOptions, editingItem, accountingStartDate, transactionsForEdit]);
+  }, [open, initialCreateOptions, editingItem?.id ?? null, accountingStartDate]);
 
   const sectionOptions = useMemo(
     () => ITEM_SECTIONS.filter((s) => s.kind === kind),

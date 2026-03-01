@@ -15,7 +15,7 @@ import { ChipsInput } from "@/components/ui/chips-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { CurrencyChip } from "@/components/currency-chip";
 import { useAccountingStart } from "@/components/accounting-start-context";
-import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, BACKGROUND_DT, DROPDOWN_BG, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, BACKGROUND_DT, DROPDOWN_BG, GREEN, PLACEHOLDER_COLOR_DARK, RED, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 import {
   fetchItems,
@@ -72,6 +72,7 @@ import {
   MAX_PHOTO_DIM,
   ALLOWED_PHOTO_TYPES,
   formatSize,
+  formatShortDate,
   parseDateKey,
   addDays,
   toDateKey,
@@ -422,6 +423,7 @@ export function AddEditItemFormModal({
     const accint = typeCode === "bonds" ? marketPrice.accint_cents ?? 0 : 0;
     return Math.round((unitPrice + accint) * moexLots * lotSize);
   }, [isMoexType, marketPrice, moexLots, selectedInstrument?.lot_size, typeCode]);
+
   const showLoanPlanSettings = useMemo(
     () => AUTO_PLAN_LOAN_TYPES.includes(typeCode),
     [typeCode]
@@ -476,6 +478,62 @@ export function AddEditItemFormModal({
     }
     return editingItem?.history_status ?? null;
   }, [openDate, accountingStartDate, editingItem]);
+
+  /** Для MOEX: данные для таблицы Цена/Стоимость и прибыль (дата появления, текущая дата). Таблица показывается всегда, значения могут быть null. */
+  const moexPriceTable = useMemo(() => {
+    if (!isMoexType) return null;
+    const lotSize = selectedInstrument?.lot_size ?? 1;
+    const accintOnDate = (p: MarketPriceOut | null) => (typeCode === "bonds" && p?.accint_cents != null ? p.accint_cents : 0);
+    const priceOnOpen = moexDatePrices[openDate];
+    const userOpenCents =
+      resolvedHistoryStatus === "HISTORICAL" && historicalAcquisitionCost.trim()
+        ? parseRubToCents(historicalAcquisitionCost)
+        : resolvedHistoryStatus === "NEW"
+          ? moexPurchasePriceCents
+          : null;
+    const openPriceCents =
+      priceOnOpen?.price_cents != null
+        ? priceOnOpen.price_cents
+        : userOpenCents != null && Number.isFinite(userOpenCents)
+          ? userOpenCents
+          : null;
+    const hasLots = moexLots != null && moexLots > 0;
+    const openValueCents =
+      openPriceCents != null && Number.isFinite(openPriceCents) && hasLots
+        ? Math.round((openPriceCents + accintOnDate(priceOnOpen)) * moexLots * lotSize)
+        : null;
+    const currentPrice = marketPrice?.price_cents ?? null;
+    const currentValueCents =
+      currentPrice != null && hasLots
+        ? Math.round((currentPrice + accintOnDate(marketPrice)) * moexLots * lotSize)
+        : null;
+    const profitCents =
+      currentValueCents != null && openValueCents != null ? currentValueCents - openValueCents : null;
+    const profitPercent =
+      profitCents != null && openValueCents != null && openValueCents !== 0
+        ? (profitCents / openValueCents) * 100
+        : null;
+    return {
+      openPriceCents: openPriceCents != null && Number.isFinite(openPriceCents) ? openPriceCents : null,
+      openValueCents,
+      currentPriceCents: currentPrice,
+      currentValueCents,
+      profitCents,
+      profitPercent,
+    };
+  }, [
+    isMoexType,
+    moexLots,
+    selectedInstrument?.lot_size,
+    typeCode,
+    moexDatePrices,
+    openDate,
+    resolvedHistoryStatus,
+    historicalAcquisitionCost,
+    moexPurchasePriceCents,
+    marketPrice,
+  ]);
+
   const normalizedAmountValue = hideInitialAmountField
     ? amountStr.trim() || "0"
     : amountStr;
@@ -1008,26 +1066,19 @@ export function AddEditItemFormModal({
           return;
         }
       }
-      if (commissionEnabled) {
-        if (!commissionAllowed) {
-          setFormError("Комиссию можно указать только при количестве лотов больше 0.");
+      const hasCommission = commissionAllowed && commissionAmount.trim() && commissionAmountCents != null && commissionAmountCents > 0;
+      if (hasCommission) {
+        if (!openingCounterpartyId) {
+          setFormError("Укажите источник средств (он же используется для оплаты комиссии).");
           return;
         }
-        if (!commissionPaymentItemId) {
-          setFormError("Укажите счет оплаты комиссии.");
-          return;
-        }
-        if (!commissionAmountCents || commissionAmountCents <= 0) {
-          setFormError("Сумма комиссии должна быть больше 0.");
-          return;
-        }
-        const paymentItem = itemsById.get(Number(commissionPaymentItemId));
+        const paymentItem = itemsById.get(Number(openingCounterpartyId));
         if (!paymentItem || paymentItem.archived_at || paymentItem.closed_at) {
-          setFormError("Счет оплаты комиссии не найден.");
+          setFormError("Источник средств не найден.");
           return;
         }
         if (paymentItem.instrument_id) {
-          setFormError("Оплата комиссии должна быть с не-MOEX счета.");
+          setFormError("Оплата комиссии должна быть с не-рыночного счета (укажите обычный счет в источнике средств).");
           return;
         }
       }
@@ -1390,12 +1441,11 @@ export function AddEditItemFormModal({
             }
           }
         }
-        payload.commission_enabled = commissionEnabled;
-        if (commissionEnabled) {
+        const hasCommission = commissionAmount.trim() && commissionAmountCents != null && commissionAmountCents > 0;
+        payload.commission_enabled = hasCommission;
+        if (hasCommission) {
           payload.commission_amount_rub = commissionAmountCents ?? null;
-          payload.commission_payment_item_id = commissionPaymentItemId
-            ? Number(commissionPaymentItemId)
-            : null;
+          payload.commission_payment_item_id = openingCounterpartyId ? Number(openingCounterpartyId) : null;
         }
       }
       if (isCryptoType && selectedInstrument && cryptoQuantityUnits != null) {
@@ -1478,7 +1528,11 @@ export function AddEditItemFormModal({
               (showLoanPlanSettings && repaymentFrequency === "MONTHLY"))
               ? (firstPayoutRule as FirstPayoutRule)
               : null,
-          plan_end_date: planEnabled ? (planEndDate || null) : null,
+          plan_end_date: planEnabled
+            ? (showDepositFields && depositTermDaysValue != null
+              ? toDateKey(addDays(parseDateKey(openDate || getTodayDateKey()), depositTermDaysValue))
+              : (planEndDate || null))
+            : null,
           loan_end_date: planEnabled ? (loanEndDate || null) : null,
           repayment_frequency:
             planEnabled && showLoanPlanSettings ? repaymentFrequency : null,
@@ -1829,7 +1883,7 @@ export function AddEditItemFormModal({
                     </div>
                     {resolvedHistoryStatus && (
                       <span
-                        className="inline-flex items-center shrink-0 self-end rounded-md border px-2 py-1 text-sm font-normal mb-0.5"
+                        className="inline-flex items-center shrink-0 self-center rounded-md border px-2 py-1 text-sm font-normal"
                         style={{
                           borderColor: ACCENT2,
                           backgroundColor: "rgba(85, 68, 209, 0.15)",
@@ -1852,98 +1906,197 @@ export function AddEditItemFormModal({
               titleRight={typeCode ? <>По умолчанию используется <span style={{ color: ACCENT }}>{getPrimaryValueLabel(primaryValueKind)}</span></> : undefined}
               defaultOpen
             >
-              <div className={cn("grid grid-cols-1 gap-4", showOpeningCounterparty ? "md:grid-cols-3" : "md:grid-cols-2")}>
-                {/* Колонка 1: Валюта */}
-                {!showInstrumentBlock && (
-                  <SelectField
-                    label="Валюта"
-                    value={currencyCode}
-                    onValueChange={setCurrencyCode}
-                    options={currencySelectOptions}
-                    placeholder="Выберите валюту"
-                  />
-                )}
-                {/* Колонка 2: Баланс / сумма на дату появления */}
-                {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
-                  <div className="grid gap-2">
-                    <TextField label="Рыночная стоимость (в валюте актива)" value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
-                    <TextField label="Стоимость приобретения" value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
-                  </div>
-                )}
-                {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType) && (
-                  <TextField label={primaryValueKind === "BALANCE" ? "Баланс на дату появления" : primaryValueKind === "MARKET" ? "Рыночная стоимость на дату появления" : primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Стоимость приобретения" : "Сумма на дату появления"} value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
-                )}
-                {/* Колонка 3: Источник средств (подсказка в тултипе) */}
-                {showOpeningCounterparty && (
-                  <div className="grid gap-2">
-                    <div className="flex min-h-6 items-center gap-2">
-                      <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
-                      <Tooltip content={openingHintModal ?? ""} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
-                        <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
-                      </Tooltip>
+              {((!showInstrumentBlock) || showOpeningCounterparty || (!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType))) && (
+                <div className={cn("grid grid-cols-1 gap-4", showOpeningCounterparty ? "md:grid-cols-3" : "md:grid-cols-2")}>
+                  {/* Колонка 1: Валюта */}
+                  {!showInstrumentBlock && (
+                    <SelectField
+                      label="Валюта"
+                      value={currencyCode}
+                      onValueChange={setCurrencyCode}
+                      options={currencySelectOptions}
+                      placeholder="Выберите валюту"
+                    />
+                  )}
+                  {/* Колонка 2: Баланс / сумма на дату появления */}
+                  {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
+                    <div className="grid gap-2">
+                      <TextField label="Рыночная стоимость (в валюте актива)" value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                      <TextField label="Стоимость приобретения" value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                     </div>
-                    <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
-                  </div>
-                )}
-              </div>
+                  )}
+                  {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType) && (
+                    <TextField label={primaryValueKind === "BALANCE" ? "Баланс на дату появления" : primaryValueKind === "MARKET" ? "Рыночная стоимость на дату появления" : primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Стоимость приобретения" : "Сумма на дату появления"} value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                  )}
+                  {/* Колонка 3: Источник средств — не показываем здесь для MOEX, он в левой колонке блока рыночных активов */}
+                  {showOpeningCounterparty && !(showInstrumentBlock && isMoexType) && (
+                    <div className="grid gap-2">
+                      <div className="flex min-h-6 items-center gap-2">
+                        <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
+                        <Tooltip content={openingHintModal ?? ""} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
+                          <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
+                        </Tooltip>
+                      </div>
+                      <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                    </div>
+                  )}
+                </div>
+              )}
 
               {showInstrumentBlock && (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <TextField label={isCryptoType ? "Количество" : "Количество лотов"} value={isCryptoType ? quantityUnitsStr : positionLots} onChange={(e) => (isCryptoType ? setQuantityUnitsStr(e.target.value) : setPositionLots(e.target.value))} inputMode="decimal" placeholder={isCryptoType ? "Например: 0.5" : "Например: 10"} />
-                    {isMoexType && resolvedHistoryStatus === "NEW" && (
-                      <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => setMoexPurchasePrice(e.target.value)} placeholder="По умолчанию — рыночная цена на дату" />
-                    )}
-                    {isCryptoType && resolvedHistoryStatus === "NEW" && (
-                      <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))} onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={marketPrice?.price_usd_cents != null ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",") : "Например: 83,32"} />
-                    )}
-                    {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
-                      <TextField label="Цена приобретения" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder={isCryptoType ? "Например: 83,32" : "Например: 123,45"} />
-                    )}
-                  </div>
-                  {(isMoexType || isCryptoType) && resolvedHistoryStatus === "HISTORICAL" && (
-                    <p className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>Укажите среднюю цену приобретения позиции с момента её появления у вас</p>
-                  )}
-                  {isMoexType && moexDatePricesLoading && <p className="text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка цен...</p>}
-                  {isMoexType && marketPrice && moexInitialValueCents != null && (
-                    <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>Сумма по текущей цене: {formatAmount(moexInitialValueCents)}</p>
-                  )}
-                  {isCryptoType && marketPrice && (marketPrice.price_usd_cents != null || marketPrice.price_cents != null) && (
-                    <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
-                      Текущая цена:{" "}
-                      {marketPrice.price_usd_cents != null && <>{formatAmount(marketPrice.price_usd_cents)} USD</>}
-                      {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && " ("}
-                      {marketPrice.price_cents != null && <>{formatAmount(marketPrice.price_cents)} ₽</>}
-                      {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && ")"}
-                      {" за 1 ед."}
-                    </p>
-                  )}
-                </>
-              )}
-
-              {hideInitialAmountField && isMoexType && moexInitialValueCents != null && (
-                <div className="flex flex-col gap-1">
-                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Начальный баланс</Label>
-                  <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(moexInitialValueCents)}</p>
-                </div>
-              )}
-
-              {isMoexType && commissionAllowed && (
-                <div className="grid gap-2 rounded border border-border/50 p-2">
-                  <div className="flex items-center gap-2">
-                    <Switch checked={commissionEnabled} onCheckedChange={setCommissionEnabled} />
-                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Указать комиссию</Label>
-                  </div>
-                  {commissionEnabled && (
-                    <>
-                      <TextField label="Сумма комиссии" value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />
-                      <div className="grid gap-2">
-                        <Label style={{ color: ACTIVE_TEXT_DARK }}>Счет оплаты комиссии</Label>
-                        <ItemSelector items={items.filter((it) => !it.instrument_id && !it.archived_at && !it.closed_at)} selectedIds={commissionPaymentItemId ? [Number(commissionPaymentItemId)] : []} onChange={(ids) => setCommissionPaymentItemId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => getItemTypeLabel(it) + " — " + (it.name || "")} />
+                  {isMoexType ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex flex-col gap-4 min-w-0">
+                        <TextField label="Количество лотов" value={positionLots} onChange={(e) => setPositionLots(e.target.value)} inputMode="decimal" placeholder="Например: 10" />
+                        {resolvedHistoryStatus === "NEW" ? (
+                          <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => setMoexPurchasePrice(e.target.value)} placeholder="По умолчанию — рыночная цена на дату" />
+                        ) : (
+                          <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 123,45" />
+                        )}
+                        {commissionAllowed && (
+                          <TextField label="Сумма комиссии" value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                        )}
+                        {showOpeningCounterparty && (
+                          <div className="grid gap-2">
+                            <div className="flex min-h-6 items-center gap-2">
+                              <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
+                              <Tooltip content={openingHintModal ?? ""} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
+                                <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
+                              </Tooltip>
+                            </div>
+                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                          </div>
+                        )}
                       </div>
+                      <div className="min-w-0 flex flex-col justify-center">
+                        {moexDatePricesLoading && <p className="text-xs mb-2" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка цен...</p>}
+                        {moexPriceTable != null && (
+                          <>
+                            <table className="w-full text-sm border-collapse" style={{ color: ACTIVE_TEXT_DARK }}>
+                              <thead>
+                                <tr>
+                                  <th className="text-left font-medium py-1.5 pr-3 border-b border-white/10" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                                  <th className="text-right font-medium py-1.5 px-2 border-b border-white/10" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                    {openDate ? formatShortDate(openDate) : "Дата появления"}
+                                  </th>
+                                  <th className="text-right font-medium py-1.5 px-2 border-b border-white/10" />
+                                  <th className="text-right font-medium py-1.5 pl-2 border-b border-white/10" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                    {formatShortDate(getTodayDateKey())}
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td className="py-1.5 pr-3 border-b border-white/10" style={{ color: PLACEHOLDER_COLOR_DARK }}>Цена</td>
+                                  <td className="py-1.5 px-2 border-b border-white/10 text-right">
+                                    {moexPriceTable.openPriceCents != null ? (
+                                      <span className="flex items-center gap-2 justify-between w-full">
+                                        <CurrencyChip code={currencyCode} className="shrink-0" />
+                                        {formatAmount(moexPriceTable.openPriceCents)}
+                                      </span>
+                                    ) : "—"}
+                                  </td>
+                                  <td className="py-1.5 px-2 border-b border-white/10 text-right align-top">
+                                    {moexPriceTable.openPriceCents != null && moexPriceTable.currentPriceCents != null ? (() => {
+                                      const priceChangeCents = moexPriceTable.currentPriceCents - moexPriceTable.openPriceCents;
+                                      const priceChangePercent = moexPriceTable.openPriceCents !== 0 ? (priceChangeCents / moexPriceTable.openPriceCents) * 100 : null;
+                                      const color = priceChangeCents >= 0 ? GREEN : RED;
+                                      return (
+                                        <span className="flex flex-col gap-0.5 text-right">
+                                          <span style={{ color }}>{(priceChangeCents >= 0 ? "+" : "")}{formatAmount(priceChangeCents)}</span>
+                                          {priceChangePercent != null && (
+                                            <span style={{ color }}>{(priceChangePercent >= 0 ? "+" : "")}{priceChangePercent.toFixed(1)}%</span>
+                                          )}
+                                        </span>
+                                      );
+                                    })() : "—"}
+                                  </td>
+                                  <td className="py-1.5 pl-2 border-b border-white/10 text-right">
+                                    {moexPriceTable.currentPriceCents != null ? (
+                                      <span className="flex items-center gap-2 justify-between w-full">
+                                        <CurrencyChip code={currencyCode} className="shrink-0" />
+                                        {formatAmount(moexPriceTable.currentPriceCents)}
+                                      </span>
+                                    ) : "—"}
+                                  </td>
+                                </tr>
+                                {currencyCode !== "RUB" && (
+                                  <>
+                                    <tr>
+                                      <td className="py-1.5 pr-3 border-b border-white/10" style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость в валюте</td>
+                                      <td className="py-1.5 px-2 border-b border-white/10 text-right">—</td>
+                                      <td className="py-1.5 px-2 border-b border-white/10 text-right">—</td>
+                                      <td className="py-1.5 pl-2 border-b border-white/10 text-right">—</td>
+                                    </tr>
+                                    <tr>
+                                      <td className="py-1.5 pr-3 border-b border-white/10" style={{ color: PLACEHOLDER_COLOR_DARK }}>Курс</td>
+                                      <td className="py-1.5 px-2 border-b border-white/10 text-right">—</td>
+                                      <td className="py-1.5 px-2 border-b border-white/10 text-right">—</td>
+                                      <td className="py-1.5 pl-2 border-b border-white/10 text-right">—</td>
+                                    </tr>
+                                  </>
+                                )}
+                                <tr>
+                                  <td className="py-1.5 pr-3" style={{ color: PLACEHOLDER_COLOR_DARK }}>Стоимость в рублях</td>
+                                  <td className="py-1.5 px-2 text-right">
+                                    {moexPriceTable.openValueCents != null ? (
+                                      <span className="flex items-center gap-2 justify-between w-full">
+                                        <CurrencyChip code="RUB" className="shrink-0" />
+                                        {formatAmount(moexPriceTable.openValueCents)}
+                                      </span>
+                                    ) : "—"}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-right align-top">
+                                    {moexPriceTable.profitCents != null && moexPriceTable.profitPercent != null ? (() => {
+                                      const color = moexPriceTable.profitCents >= 0 ? GREEN : RED;
+                                      return (
+                                        <span className="flex flex-col gap-0.5 text-right">
+                                          <span style={{ color }}>{(moexPriceTable.profitCents >= 0 ? "+" : "")}{formatAmount(moexPriceTable.profitCents)}</span>
+                                          <span style={{ color }}>{(moexPriceTable.profitPercent >= 0 ? "+" : "")}{moexPriceTable.profitPercent.toFixed(1)}%</span>
+                                        </span>
+                                      );
+                                    })() : "—"}
+                                  </td>
+                                  <td className="py-1.5 pl-2 text-right">
+                                    {moexPriceTable.currentValueCents != null ? (
+                                      <span className="flex items-center gap-2 justify-between w-full">
+                                        <CurrencyChip code="RUB" className="shrink-0" />
+                                        {formatAmount(moexPriceTable.currentValueCents)}
+                                      </span>
+                                    ) : "—"}
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <TextField label="Количество" value={quantityUnitsStr} onChange={(e) => setQuantityUnitsStr(e.target.value)} inputMode="decimal" placeholder="Например: 0.5" />
+                        {resolvedHistoryStatus === "NEW" && (
+                          <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))} onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={marketPrice?.price_usd_cents != null ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",") : "Например: 83,32"} />
+                        )}
+                        {resolvedHistoryStatus === "HISTORICAL" && (
+                          <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 83,32" />
+                        )}
+                      </div>
+                      {marketPrice && (marketPrice.price_usd_cents != null || marketPrice.price_cents != null) && (
+                        <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                          Текущая цена:{" "}
+                          {marketPrice.price_usd_cents != null && <>{formatAmount(marketPrice.price_usd_cents)} USD</>}
+                          {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && " ("}
+                          {marketPrice.price_cents != null && <>{formatAmount(marketPrice.price_cents)} ₽</>}
+                          {marketPrice.price_usd_cents != null && marketPrice.price_cents != null && ")"}
+                          {" за 1 ед."}
+                        </p>
+                      )}
                     </>
                   )}
-                </div>
+                </>
               )}
             </CollapsibleFormSection>
 
@@ -2059,12 +2212,14 @@ export function AddEditItemFormModal({
                 )}
                 {planEnabled && showInterestPlanSettings && (
                   <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                      <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
-                      <div className="min-w-0">
-                        <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
+                    {!showDepositFields && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
+                        <div className="min-w-0">
+                          <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
+                        </div>
                       </div>
-                    </div>
+                    )}
                     {interestPayoutOrder === "MONTHLY" && (
                       <SelectField label="Первая дата выплаты процентов" value={firstPayoutRule} onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)} options={[{ value: "MONTH_END", label: "Последний день месяца" }, { value: "SAME_DAY", label: "Тот же день, что и дата появления" }]} placeholder="Выберите" required={planEnabled} />
                     )}

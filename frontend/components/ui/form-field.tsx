@@ -62,6 +62,7 @@ export function FormField({ label, labelHint, required, error, className, childr
 
 interface TextFieldProps extends Omit<React.ComponentProps<"input">, "prefix"> {
   label?: string;
+  labelHint?: string;
   required?: boolean;
   error?: string;
   prefix?: React.ReactNode;
@@ -69,6 +70,7 @@ interface TextFieldProps extends Omit<React.ComponentProps<"input">, "prefix"> {
 
 export function TextField({ 
   label, 
+  labelHint,
   required, 
   error, 
   prefix,
@@ -76,7 +78,7 @@ export function TextField({
   ...props 
 }: TextFieldProps) {
   return (
-    <FormField label={label ?? ""} required={required} error={error}>
+    <FormField label={label ?? ""} labelHint={labelHint} required={required} error={error}>
       <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
         <AuthInput
           {...props}

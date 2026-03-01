@@ -1657,7 +1657,7 @@ export function AddEditItemFormModal({
         size="wide"
       >
         <div className="grid gap-4 w-full">
-            <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
               <div className="relative">
                 <div
                   className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
@@ -1784,10 +1784,10 @@ export function AddEditItemFormModal({
                 {/* Название */}
                 <TextField label="Название" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, Кошелёк" required />
 
-                {/* Банк — только для не-рыночных активов (счёт, карта, вклад и т.д.) */}
+                {/* Банк / Где открыт — только для не-рыночных активов (счёт, карта, вклад, электронный кошелёк и т.д.) */}
                 {showCounterpartyField && (
                   <FormField
-                    label="Банк"
+                    label={typeCode === "e_wallet" ? "Где открыт" : "Банк"}
                     required={isCounterpartyMandatory}
                     error={counterpartyError ?? undefined}
                   >
@@ -1796,11 +1796,11 @@ export function AddEditItemFormModal({
                       selectedIds={counterpartyId != null ? [counterpartyId] : []}
                       onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
                       selectionMode="single"
-                      placeholder="Начните вводить название банка"
+                      placeholder={typeCode === "e_wallet" ? "Начните вводить название" : "Начните вводить название банка"}
                       industries={industries}
                       disabled={counterpartyLoading}
                       apiBase={API_BASE}
-                      filterByIndustryId={bankIndustryId}
+                      filterByIndustryId={typeCode === "e_wallet" ? null : bankIndustryId}
                       onAddCounterparty={() => setCreateCounterpartyOpen(true)}
                     />
                   </FormField>

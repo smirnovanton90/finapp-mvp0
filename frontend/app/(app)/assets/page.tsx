@@ -107,7 +107,6 @@ import {
   closeItem,
   uploadItemPhoto,
   API_BASE,
-  CardKind,
   ItemKind,
   ItemCreate,
   ItemOut,
@@ -141,7 +140,8 @@ import { assetIconPath } from "@/lib/image-paths";
 const ASSET_TYPES = [
   { code: "cash", label: "Наличные" },
   { code: "bank_account", label: "Банковский счёт" },
-  { code: "bank_card", label: "Банковская карта" },
+  { code: "bank_card_debit", label: "Банковская карта (дебетовая)" },
+  { code: "bank_card_credit", label: "Банковская карта (кредитная)" },
   { code: "savings_account", label: "Накопительный счет" },
   { code: "e_wallet", label: "Электронный кошелек" },
   { code: "brokerage", label: "Брокерский счёт" },
@@ -209,7 +209,7 @@ const LIABILITY_TYPE_CODES = LIABILITY_TYPES.map((type) => type.code);
 const ALL_TYPE_CODES = [...ASSET_TYPE_CODES, ...LIABILITY_TYPE_CODES];
 
 // Категории активов (синхронно с asset-item-form-constants)
-const CASH_TYPES = ["cash", "bank_account", "bank_card", "e_wallet"];
+const CASH_TYPES = ["cash", "bank_account", "bank_card_debit", "bank_card_credit", "e_wallet"];
 const INVESTMENT_TYPES = [
   "deposit",
   "savings_account",
@@ -219,7 +219,7 @@ const INVESTMENT_TYPES = [
   "crypto",
   "precious_metals",
 ];
-const REPAYMENT_ACCOUNT_TYPE_CODES = ["cash", "bank_account", "bank_card", "e_wallet", "savings_account", "brokerage"];
+const REPAYMENT_ACCOUNT_TYPE_CODES = ["cash", "bank_account", "bank_card_debit", "bank_card_credit", "e_wallet", "savings_account", "brokerage"];
 const MOEX_TYPE_CODES = [
   "securities",
   "bonds",
@@ -269,7 +269,8 @@ const LEGAL_LIABILITY_TYPES = [
 const OTHER_LIABILITY_TYPES = ["business_liability", "other_liability"];
 const MANDATORY_COUNTERPARTY_TYPE_CODES = [
   "bank_account",
-  "bank_card",
+  "bank_card_debit",
+  "bank_card_credit",
   "deposit",
   "savings_account",
   "consumer_loan",
@@ -304,7 +305,8 @@ const OPTIONAL_COUNTERPARTY_TYPE_CODES = [
 
 const BANK_COUNTERPARTY_TYPE_CODES = [
   "bank_account",
-  "bank_card",
+  "bank_card_debit",
+  "bank_card_credit",
   "deposit",
   "savings_account",
   "brokerage",
@@ -313,6 +315,7 @@ const BANK_COUNTERPARTY_TYPE_CODES = [
   "car_loan",
   "education_loan",
 ];
+const BANK_CARD_TYPE_CODES = ["bank_card_debit", "bank_card_credit"];
 
 // Все типы, где контрагент релевантен
 const COUNTERPARTY_TYPE_CODES = [
@@ -403,6 +406,8 @@ const TYPE_ICON_BY_CODE: Record<
   cash: Banknote,
   bank_account: Landmark,
   bank_card: CreditCard,
+  bank_card_debit: CreditCard,
+  bank_card_credit: CreditCard,
   deposit: PiggyBank,
   savings_account: Wallet,
   e_wallet: Wallet,
@@ -710,7 +715,6 @@ export default function Page() {
   const [openDate, setOpenDate] = useState(() => getTodayDateKey());
   const [cardLast4, setCardLast4] = useState("");
   const [cardAccountId, setCardAccountId] = useState("");
-  const [cardKind, setCardKind] = useState<CardKind>("DEBIT");
   const [creditLimit, setCreditLimit] = useState("");
   const [depositTermDays, setDepositTermDays] = useState("");
   const [interestRate, setInterestRate] = useState("");
@@ -1073,11 +1077,8 @@ export default function Page() {
     () => typeCode === "bank_account" || typeCode === "savings_account",
     [typeCode]
   );
-  const showBankCardFields = useMemo(() => typeCode === "bank_card", [typeCode]);
-  const isCreditCard = useMemo(
-    () => showBankCardFields && cardKind === "CREDIT",
-    [showBankCardFields, cardKind]
-  );
+  const showBankCardFields = useMemo(() => BANK_CARD_TYPE_CODES.includes(typeCode), [typeCode]);
+  const isCreditCard = useMemo(() => typeCode === "bank_card_credit", [typeCode]);
   const isLoanLiabilityType = useMemo(
     () => LOAN_LIABILITY_TYPES.includes(typeCode),
     [typeCode]
@@ -1125,10 +1126,10 @@ export default function Page() {
   const showContractNumberField = useMemo(
     () =>
       typeCode === "bank_account" ||
-      typeCode === "bank_card" ||
+      showBankCardFields ||
       typeCode === "deposit" ||
       typeCode === "savings_account",
-    [typeCode]
+    [typeCode, showBankCardFields]
   );
 
   useEffect(() => {
@@ -2076,9 +2077,8 @@ export default function Page() {
     if (showBankCardFields) return;
     if (cardLast4) setCardLast4("");
     if (cardAccountId) setCardAccountId("");
-    if (cardKind !== "DEBIT") setCardKind("DEBIT");
     if (creditLimit) setCreditLimit("");
-  }, [showBankCardFields, cardLast4, cardAccountId, cardKind, creditLimit]);
+  }, [showBankCardFields, cardLast4, cardAccountId, creditLimit]);
 
   useEffect(() => {
     if (!showOpeningCounterparty) {
@@ -2127,9 +2127,9 @@ export default function Page() {
   }, [commissionEnabled, commissionPaymentItemId, itemsById]);
   useEffect(() => {
     if (!showBankCardFields) return;
-    if (cardKind !== "DEBIT") return;
+    if (isCreditCard) return;
     if (creditLimit) setCreditLimit("");
-  }, [showBankCardFields, cardKind, creditLimit]);
+  }, [showBankCardFields, isCreditCard, creditLimit]);
   useEffect(() => {
     if (!showBankCardFields) return;
     if (!isCreditCard) return;

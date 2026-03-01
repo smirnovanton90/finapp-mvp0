@@ -32,6 +32,8 @@ export const TYPE_ICON_BY_CODE: Record<
   cash: Banknote,
   bank_account: Landmark,
   bank_card: CreditCard,
+  bank_card_debit: CreditCard,
+  bank_card_credit: CreditCard,
   deposit: PiggyBank,
   savings_account: Wallet,
   e_wallet: Wallet,

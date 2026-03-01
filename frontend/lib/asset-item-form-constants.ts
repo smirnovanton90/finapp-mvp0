@@ -39,7 +39,8 @@ export function getTodayDateKey(): string {
 export const ASSET_TYPES = [
   { code: "cash", label: "Наличные" },
   { code: "bank_account", label: "Банковский счёт" },
-  { code: "bank_card", label: "Банковская карта" },
+  { code: "bank_card_debit", label: "Банковская карта (дебетовая)" },
+  { code: "bank_card_credit", label: "Банковская карта (кредитная)" },
   { code: "savings_account", label: "Накопительный счет" },
   { code: "e_wallet", label: "Электронный кошелек" },
   { code: "brokerage", label: "Брокерский счёт" },
@@ -102,11 +103,11 @@ export const LIABILITY_TYPES = [
 ];
 
 /** Денежные активы (раздел без накопительного и брокерского счёта) */
-export const CASH_TYPES = ["cash", "bank_account", "bank_card", "e_wallet"];
+export const CASH_TYPES = ["cash", "bank_account", "bank_card_debit", "bank_card_credit", "e_wallet"];
 /** Инвестиционные активы: порядок типов в разделе (ETF, БПИФ, ПИФ, ИИС скрыты в v1) */
 export const INVESTMENT_TYPES = ["deposit", "savings_account", "brokerage", "securities", "bonds", "crypto", "precious_metals"];
 /** Типы счетов, с которых допускается погашение кредитов/займов */
-export const REPAYMENT_ACCOUNT_TYPE_CODES = ["cash", "bank_account", "bank_card", "e_wallet", "savings_account", "brokerage"];
+export const REPAYMENT_ACCOUNT_TYPE_CODES = ["cash", "bank_account", "bank_card_debit", "bank_card_credit", "e_wallet", "savings_account", "brokerage"];
 const THIRD_PARTY_DEBT_TYPES = ["loan_to_third_party", "counterparty_settlements"];
 const REAL_ESTATE_TYPES = ["real_estate", "townhouse", "land_plot", "garage", "commercial_real_estate", "real_estate_share"];
 const TRANSPORT_TYPES = ["car", "motorcycle", "boat", "trailer", "special_vehicle"];
@@ -123,14 +124,14 @@ const OTHER_LIABILITY_TYPES = ["business_liability", "other_liability"];
 export const MOEX_TYPE_CODES = ["securities", "bonds", "etf", "bpif", "pif", "precious_metals"];
 
 export const COUNTERPARTY_TYPE_CODES = [
-  "bank_account", "bank_card", "deposit", "savings_account", "consumer_loan", "mortgage", "car_loan", "education_loan",
+  "bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account", "consumer_loan", "mortgage", "car_loan", "education_loan",
   "loan_to_third_party", "private_loan", "brokerage", "installment", "microloan", "e_wallet", "npf", "investment_life_insurance",
   "utilities_debt", "telecom_debt", "tax_debt", "fns_debt", "traffic_fines_debt", "enforcement_debt", "alimony_debt",
   "court_debt", "court_fine_debt", "personal_income_tax_debt", "property_tax_debt", "land_tax_debt", "transport_tax_debt",
 ];
 
 export const MANDATORY_COUNTERPARTY_TYPE_CODES = [
-  "bank_account", "bank_card", "deposit", "savings_account", "consumer_loan", "mortgage", "car_loan", "education_loan",
+  "bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account", "consumer_loan", "mortgage", "car_loan", "education_loan",
   "loan_to_third_party", "private_loan",
 ];
 
@@ -152,9 +153,11 @@ export const ITEM_SECTIONS: { id: string; kind: ItemKind; label: string; typeCod
 ];
 
 export const BANK_COUNTERPARTY_TYPE_CODES = [
-  "bank_account", "bank_card", "deposit", "savings_account", "brokerage",
+  "bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account", "brokerage",
   "consumer_loan", "mortgage", "car_loan", "education_loan",
 ];
+/** Коды видов «банковская карта» (для проверки типа в форме). API по-прежнему возвращает type_code=bank_card. */
+export const BANK_CARD_TYPE_CODES = ["bank_card_debit", "bank_card_credit"];
 
 export const LOAN_LIABILITY_TYPES = [...CREDIT_LIABILITY_TYPES, ...THIRD_PARTY_LOAN_TYPES];
 

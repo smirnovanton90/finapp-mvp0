@@ -4,6 +4,8 @@ export const ITEM_TYPE_LABELS: Record<string, string> = {
   cash: "Наличные",
   bank_account: "Банковский счёт",
   bank_card: "Банковская карта",
+  bank_card_debit: "Банковская карта (дебетовая)",
+  bank_card_credit: "Банковская карта (кредитная)",
   savings_account: "Накопительный счет",
   e_wallet: "Электронный кошелек",
   brokerage: "Брокерский счёт",
@@ -69,8 +71,8 @@ export const ITEM_TYPE_LABELS: Record<string, string> = {
 export function getItemTypeLabel(item: ItemOut) {
   const base = ITEM_TYPE_LABELS[item.type_code] ?? item.type_code;
   if (item.type_code === "bank_card") {
-    if (item.card_kind === "CREDIT") return `${base} (кредитная)`;
-    if (item.card_kind === "DEBIT") return `${base} (дебетовая)`;
+    if (item.card_kind === "CREDIT") return "Банковская карта (кредитная)";
+    if (item.card_kind === "DEBIT") return "Банковская карта (дебетовая)";
   }
   return base;
 }

@@ -13,6 +13,8 @@ interface CollapsibleFormSectionProps {
   titleCenter?: React.ReactNode;
   /** Текст справа в заголовке (например, подсказка «По умолчанию используется ...») */
   titleRight?: React.ReactNode;
+  /** Если true, titleRight не обрезается (для подписи + туггла и т.п.) */
+  titleRightNoTruncate?: boolean;
   defaultOpen?: boolean;
   open?: boolean;
   onToggle?: () => void;
@@ -24,6 +26,7 @@ export function CollapsibleFormSection({
   titleColor,
   titleCenter,
   titleRight,
+  titleRightNoTruncate,
   defaultOpen,
   open: controlledOpen,
   onToggle,
@@ -62,7 +65,7 @@ export function CollapsibleFormSection({
         )}
         {titleRight != null ? (
           <span
-            className={`text-right min-w-0 truncate ${titleRightSameAsTitle ? "text-sm font-medium" : "text-xs font-normal opacity-80"}`}
+            className={`text-right ${titleRightNoTruncate ? "shrink-0" : "min-w-0 truncate"} ${titleRightSameAsTitle ? "text-sm font-medium" : "text-xs font-normal opacity-80"}`}
             style={{ color: titleRightSameAsTitle && typeof titleRight !== "string" ? ACTIVE_TEXT_DARK : headerColor }}
           >
             {titleRight}

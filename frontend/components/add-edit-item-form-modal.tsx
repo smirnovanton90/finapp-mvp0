@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Camera, Info, Upload, Wallet } from "lucide-react";
+import { Camera, Info, RefreshCcw, Upload, Wallet } from "lucide-react";
 import { FormModal } from "@/components/form-modal";
 import { CollapsibleFormSection } from "@/components/ui/collapsible-form-section";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
-import { TextField, DateField, SelectField } from "@/components/ui/form-field";
+import { FormField, TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
@@ -21,6 +21,7 @@ import {
   fetchItems,
   fetchCounterparties,
   fetchCounterpartyIndustries,
+  fetchCurrencies,
   fetchMarketInstruments,
   fetchMarketInstrumentDetails,
   fetchMarketInstrumentPrice,
@@ -31,7 +32,7 @@ import {
   uploadItemPhoto,
   createItemMarketValue,
   API_BASE,
-  CardKind,
+  CurrencyOut,
   ItemKind,
   ItemCreate,
   ItemOut,
@@ -75,10 +76,12 @@ import {
   addDays,
   toDateKey,
   findPriceOnOrBefore,
+  BANK_CARD_TYPE_CODES,
   getDefaultPrimaryValueKind,
   getPrimaryValueLabel,
 } from "@/lib/asset-item-form-constants";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-type-icons";
+import { assetIconPath } from "@/lib/image-paths";
 
 export type AddEditItemFormModalProps = {
   open: boolean;
@@ -125,6 +128,7 @@ export function AddEditItemFormModal({
   const [counterpartyLoading, setCounterpartyLoading] = useState(false);
   const [counterpartyError, setCounterpartyError] = useState<string | null>(null);
   const [industries, setIndustries] = useState<CounterpartyIndustryOut[]>([]);
+  const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
   const [openDate, setOpenDate] = useState(() => getTodayDateKey());
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
@@ -155,14 +159,21 @@ export function AddEditItemFormModal({
   const [contractNumber, setContractNumber] = useState("");
   const [cardLast4, setCardLast4] = useState("");
   const [cardAccountId, setCardAccountId] = useState("");
-  const [cardKind, setCardKind] = useState<CardKind>("DEBIT");
   const [creditLimit, setCreditLimit] = useState("");
   const [depositTermDays, setDepositTermDays] = useState("");
+  /** Режим ввода срока вклада: по дням или по дате окончания. Только для type_code === "deposit". */
+  const [depositTermMode, setDepositTermMode] = useState<"days" | "end_date">("days");
+  /** Дата окончания вклада (YYYY-MM-DD), используется при depositTermMode === "end_date". */
+  const [depositEndDate, setDepositEndDate] = useState("");
   const [interestRate, setInterestRate] = useState("");
   const [interestPayoutOrder, setInterestPayoutOrder] = useState("");
   const [interestCapitalization, setInterestCapitalization] = useState("");
   const [interestPayoutAccountId, setInterestPayoutAccountId] = useState("");
+  /** Для вклада/накопительного: true = проценты на тот же счёт (по умолчанию), false = выбор счёта «Куда зачисляются проценты». */
+  const [interestToSameAccount, setInterestToSameAccount] = useState(true);
   const [planEnabled, setPlanEnabled] = useState(false);
+  /** Раскрыт ли блок «Планирование»; при включении тоггла «Добавить плановые транзакции» блок раскрывается. */
+  const [planSectionOpen, setPlanSectionOpen] = useState(false);
   const [firstPayoutRule, setFirstPayoutRule] = useState<FirstPayoutRule | "">("");
   const [planEndDate, setPlanEndDate] = useState("");
   const [loanEndDate, setLoanEndDate] = useState("");
@@ -184,6 +195,9 @@ export function AddEditItemFormModal({
   const [icon3dFormat, setIcon3dFormat] = useState<"png" | null>("png");
   const [show2dIcon, setShow2dIcon] = useState(false);
   useEffect(() => {
+    setIcon3dFormat("png");
+  }, [typeCode]);
+  useEffect(() => {
     if (!open) return;
     if (itemsProp !== undefined) {
       setItems(itemsProp);
@@ -200,10 +214,11 @@ export function AddEditItemFormModal({
     if (!open) return;
     setCounterpartyLoading(true);
     setCounterpartyError(null);
-    Promise.all([fetchCounterparties(), fetchCounterpartyIndustries()])
-      .then(([cp, ind]) => {
+    Promise.all([fetchCounterparties(), fetchCounterpartyIndustries(), fetchCurrencies()])
+      .then(([cp, ind, curr]) => {
         setCounterparties(cp);
         setIndustries(ind);
+        setCurrencies(curr);
       })
       .catch((e: any) => setCounterpartyError(e?.message ?? null))
       .finally(() => setCounterpartyLoading(false));
@@ -231,7 +246,11 @@ export function AddEditItemFormModal({
       setAllowedTypeCodes(editingItem.kind === "ASSET" ? ASSET_TYPE_CODES : LIABILITY_TYPE_CODES);
       setSectionId("");
       setIsGeneralCreate(true);
-      setTypeCode(editingItem.type_code);
+      setTypeCode(
+        editingItem.type_code === "bank_card"
+          ? (editingItem.card_kind === "CREDIT" ? "bank_card_credit" : "bank_card_debit")
+          : editingItem.type_code
+      );
       setCurrencyCode(editingItem.type_code === "crypto" ? "USD" : editingItem.currency_code);
       setName(editingItem.name);
       setAmountStr(formatAmount(editingItem.initial_value_rub));
@@ -247,9 +266,18 @@ export function AddEditItemFormModal({
       setContractNumber(editingItem.contract_number ?? "");
       setCardLast4(editingItem.card_last4 ?? "");
       setCardAccountId(editingItem.card_account_id ? String(editingItem.card_account_id) : "");
-      setCardKind(editingItem.card_kind ?? "DEBIT");
       setCreditLimit(editingItem.credit_limit != null ? formatAmount(editingItem.credit_limit) : "");
-      setDepositTermDays(editingItem.deposit_term_days != null ? String(editingItem.deposit_term_days) : "");
+      const od = editingItem.open_date ?? getTodayDateKey();
+      if (editingItem.deposit_end_date) {
+        setDepositTermMode("end_date");
+        setDepositEndDate(editingItem.deposit_end_date);
+        const days = Math.round((parseDateKey(editingItem.deposit_end_date).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
+        setDepositTermDays(Number.isFinite(days) && days >= 0 ? String(days) : editingItem.deposit_term_days != null ? String(editingItem.deposit_term_days) : "");
+      } else {
+        setDepositTermMode("days");
+        setDepositEndDate("");
+        setDepositTermDays(editingItem.deposit_term_days != null ? String(editingItem.deposit_term_days) : "");
+      }
       setPositionLots(editingItem.position_lots != null ? String(editingItem.position_lots) : "");
       setMoexPurchasePrice("");
       setHistoricalAcquisitionCost(editingItem.acquisitionCents != null && editingItem.acquisitionCents !== 0 ? formatAmount(editingItem.acquisitionCents) : "");
@@ -267,8 +295,11 @@ export function AddEditItemFormModal({
       setInterestPayoutOrder(editingItem.interest_payout_order ?? "");
       setInterestCapitalization(editingItem.interest_capitalization == null ? "" : editingItem.interest_capitalization ? "true" : "false");
       setInterestPayoutAccountId(editingItem.interest_payout_account_id ? String(editingItem.interest_payout_account_id) : "");
+      setInterestToSameAccount(!editingItem.interest_payout_account_id);
       const ps = editingItem.plan_settings;
-      setPlanEnabled(ps?.enabled ?? false);
+      const planOn = ps?.enabled ?? false;
+      setPlanEnabled(planOn);
+      setPlanSectionOpen(planOn);
       setFirstPayoutRule(ps?.first_payout_rule ?? "");
       setPlanEndDate(ps?.plan_end_date ?? "");
       setLoanEndDate(ps?.loan_end_date ?? "");
@@ -299,6 +330,23 @@ export function AddEditItemFormModal({
     [sectionOptions, sectionId]
   );
   const effectiveAllowedTypeCodes = isGeneralCreate ? sectionTypeCodes : allowedTypeCodes;
+  const currencySelectOptions = useMemo(() => {
+    const list = [...currencies];
+    const hasCurrent = list.some((c) => c.iso_char_code === currencyCode);
+    if (currencyCode && !hasCurrent) {
+      list.unshift({ iso_char_code: currencyCode, iso_num_code: "", nominal: 1, name: currencyCode, eng_name: currencyCode });
+    }
+    return list.map((c) => ({
+      value: c.iso_char_code,
+      label: (
+        <span className="inline-flex items-center gap-2">
+          <CurrencyChip code={c.iso_char_code} className="shrink-0" />
+          <span>{c.name}</span>
+        </span>
+      ),
+    }));
+  }, [currencies, currencyCode]);
+
   const typeOptions = useMemo(() => {
     const base = kind === "ASSET" ? ASSET_TYPES : LIABILITY_TYPES;
     if (!effectiveAllowedTypeCodes.length) return isGeneralCreate ? [] : base;
@@ -315,6 +363,10 @@ export function AddEditItemFormModal({
   const isCounterpartyMandatory = useMemo(
     () => MANDATORY_COUNTERPARTY_TYPE_CODES.includes(typeCode),
     [typeCode]
+  );
+  const bankIndustryId = useMemo(
+    () => industries.find((ind) => ind.name === "Банки")?.id ?? null,
+    [industries]
   );
 
   const isMoexType = useMemo(() => MOEX_TYPE_CODES.includes(typeCode), [typeCode]);
@@ -387,11 +439,8 @@ export function AddEditItemFormModal({
     () => typeCode === "bank_account" || typeCode === "savings_account",
     [typeCode]
   );
-  const showBankCardFields = useMemo(() => typeCode === "bank_card", [typeCode]);
-  const isCreditCard = useMemo(
-    () => showBankCardFields && cardKind === "CREDIT",
-    [showBankCardFields, cardKind]
-  );
+  const showBankCardFields = useMemo(() => BANK_CARD_TYPE_CODES.includes(typeCode), [typeCode]);
+  const isCreditCard = useMemo(() => typeCode === "bank_card_credit", [typeCode]);
   const showDepositFields = useMemo(() => typeCode === "deposit", [typeCode]);
   const showInterestFields = useMemo(
     () => typeCode === "deposit" || typeCode === "savings_account",
@@ -410,10 +459,10 @@ export function AddEditItemFormModal({
   const showContractNumberField = useMemo(
     () =>
       typeCode === "bank_account" ||
-      typeCode === "bank_card" ||
+      showBankCardFields ||
       typeCode === "deposit" ||
       typeCode === "savings_account",
-    [typeCode]
+    [typeCode, showBankCardFields]
   );
   const hideInitialAmountField =
     (showBankCardFields && Boolean(cardAccountId)) || isMoexType;
@@ -572,14 +621,17 @@ export function AddEditItemFormModal({
     setContractNumber("");
     setCardLast4("");
     setCardAccountId("");
-    setCardKind("DEBIT");
     setCreditLimit("");
     setDepositTermDays("");
+    setDepositTermMode("days");
+    setDepositEndDate("");
     setInterestRate("");
     setInterestPayoutOrder("");
     setInterestCapitalization("");
     setInterestPayoutAccountId("");
+    setInterestToSameAccount(true);
     setPlanEnabled(false);
+    setPlanSectionOpen(false);
     setFirstPayoutRule("");
     setPlanEndDate("");
     setLoanEndDate("");
@@ -871,6 +923,7 @@ export function AddEditItemFormModal({
   useEffect(() => {
     if (!showPlanSection) {
       setPlanEnabled(false);
+      setPlanSectionOpen(false);
       setFirstPayoutRule("");
       setPlanEndDate("");
       setLoanEndDate("");
@@ -1096,13 +1149,23 @@ export function AddEditItemFormModal({
     }
 
     let depositTermDaysValue: number | null = null;
-    if (showDepositFields && depositTermDays.trim()) {
-      const parsed = Number(depositTermDays);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        setFormError("Срок вклада должен быть положительным числом.");
-        return;
+    if (showDepositFields) {
+      if (depositTermMode === "days" && depositTermDays.trim()) {
+        const parsed = Number(depositTermDays);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          setFormError("Срок вклада должен быть положительным числом.");
+          return;
+        }
+        depositTermDaysValue = Math.trunc(parsed);
+      } else if (depositTermMode === "end_date" && depositEndDate.trim()) {
+        const od = openDate || getTodayDateKey();
+        const days = Math.round((parseDateKey(depositEndDate).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
+        if (!Number.isFinite(days) || days <= 0) {
+          setFormError("Дата окончания вклада должна быть позже даты открытия.");
+          return;
+        }
+        depositTermDaysValue = days;
       }
-      depositTermDaysValue = Math.trunc(parsed);
     }
 
     let interestRateValue: number | null = null;
@@ -1117,7 +1180,7 @@ export function AddEditItemFormModal({
     }
 
     let creditLimitCents: number | null = null;
-    if (showBankCardFields && cardKind === "CREDIT") {
+    if (showBankCardFields && isCreditCard) {
       const trimmedCreditLimit = creditLimit.trim();
       if (!trimmedCreditLimit) {
         setFormError("Укажите кредитный лимит для кредитной карты.");
@@ -1146,14 +1209,14 @@ export function AddEditItemFormModal({
         : cents;
     if (
       !Number.isFinite(initialValueRubForPayload) ||
-      (initialValueRubForPayload < 0 && !(showBankCardFields && cardKind === "CREDIT"))
+      (initialValueRubForPayload < 0 && !(showBankCardFields && isCreditCard))
     ) {
       setFormError("Сумма должна быть числом (например 1234,56)");
       return;
     }
     if (
       showBankCardFields &&
-      cardKind === "CREDIT" &&
+      isCreditCard &&
       creditLimitCents !== null &&
       initialValueRubForPayload < -creditLimitCents
     ) {
@@ -1197,8 +1260,8 @@ export function AddEditItemFormModal({
         setFormError("Для накопительного счета нужен горизонт планирования.");
         return;
       }
-      if (interestCapitalization !== "true" && !interestPayoutAccountId) {
-        setFormError("Укажите счет выплаты процентов или включите капитализацию.");
+      if (!interestToSameAccount && !interestPayoutAccountId) {
+        setFormError("Укажите, куда зачисляются проценты.");
         return;
       }
     }
@@ -1249,7 +1312,7 @@ export function AddEditItemFormModal({
     if (
       planEnabled &&
       showInterestPlanSettings &&
-      interestCapitalization !== "true" &&
+      !interestToSameAccount &&
       interestPayoutAccountId
     ) {
       const payoutAccount = itemsById.get(Number(interestPayoutAccountId));
@@ -1291,9 +1354,11 @@ export function AddEditItemFormModal({
           ? Number(openingCounterpartyId)
           : null;
       const synonymsList = synonyms.map((s) => s.trim()).filter((s) => s.length > 0);
+      const effectiveTypeCode =
+        typeCode === "bank_card_debit" || typeCode === "bank_card_credit" ? "bank_card" : typeCode;
       const payload: ItemCreate = {
         kind,
-        type_code: typeCode,
+        type_code: effectiveTypeCode,
         name: name.trim(),
         currency_code: isCryptoType ? "USD" : currencyCode,
         counterparty_id: showCounterpartyField ? counterpartyId : null,
@@ -1363,8 +1428,8 @@ export function AddEditItemFormModal({
           : cardAccountId
           ? Number(cardAccountId)
           : null;
-        payload.card_kind = cardKind;
-        if (cardKind === "CREDIT" && creditLimitCents !== null) {
+        payload.card_kind = isCreditCard ? "CREDIT" : "DEBIT";
+        if (isCreditCard && creditLimitCents !== null) {
           payload.credit_limit = creditLimitCents;
         }
       }
@@ -1380,7 +1445,7 @@ export function AddEditItemFormModal({
         }
         if (interestCapitalization === "true") payload.interest_capitalization = true;
         if (interestCapitalization === "false") payload.interest_capitalization = false;
-        if (interestPayoutAccountId) {
+        if (!interestToSameAccount && interestPayoutAccountId) {
           payload.interest_payout_account_id = Number(interestPayoutAccountId);
         }
       }
@@ -1600,6 +1665,13 @@ export function AddEditItemFormModal({
                 >
                   {itemPhotoPreview ? (
                     <img src={itemPhotoPreview} alt="" className="w-full h-full object-cover" />
+                  ) : typeCode && assetIconPath((typeCode === "bank_card_debit" || typeCode === "bank_card_credit") ? "bank_card" : typeCode, icon3dFormat) ? (
+                    <img
+                      src={assetIconPath((typeCode === "bank_card_debit" || typeCode === "bank_card_credit") ? "bank_card" : typeCode, icon3dFormat)!}
+                      alt=""
+                      className="w-full h-full object-contain"
+                      onError={() => setIcon3dFormat(null)}
+                    />
                   ) : typeCode && TYPE_ICON_BY_CODE[typeCode] ? (
                     <div className="w-full h-full flex items-center justify-center" style={{ color: ACCENT }}>
                       {React.createElement(TYPE_ICON_BY_CODE[typeCode], { className: "w-24 h-24", strokeWidth: 1.5 })}
@@ -1712,38 +1784,64 @@ export function AddEditItemFormModal({
                 {/* Название */}
                 <TextField label="Название" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, Кошелёк" required />
 
-                {/* Контрагент/Банк — только для не-рыночных активов */}
+                {/* Банк — только для не-рыночных активов (счёт, карта, вклад и т.д.) */}
                 {showCounterpartyField && (
-                  <div className="grid gap-2">
-                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Контрагент{isCounterpartyMandatory ? " *" : ""}</Label>
-                    <CounterpartySelector counterparties={counterparties} selectedIds={counterpartyId != null ? [counterpartyId] : []} onChange={(ids) => setCounterpartyId(ids[0] ?? null)} selectionMode="single" placeholder="Начните вводить название" industries={industries} disabled={counterpartyLoading} apiBase={API_BASE} onAddCounterparty={() => setCreateCounterpartyOpen(true)} />
-                    {counterpartyError && <p className="text-xs text-red-600">{counterpartyError}</p>}
-                  </div>
+                  <FormField
+                    label="Банк"
+                    required={isCounterpartyMandatory}
+                    error={counterpartyError ?? undefined}
+                  >
+                    <CounterpartySelector
+                      counterparties={counterparties}
+                      selectedIds={counterpartyId != null ? [counterpartyId] : []}
+                      onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                      selectionMode="single"
+                      placeholder="Начните вводить название банка"
+                      industries={industries}
+                      disabled={counterpartyLoading}
+                      apiBase={API_BASE}
+                      filterByIndustryId={bankIndustryId}
+                      onAddCounterparty={() => setCreateCounterpartyOpen(true)}
+                    />
+                  </FormField>
                 )}
 
-                {/* Дата появления — справа */}
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <DateField label={primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Дата приобретения" : "Дата появления"} value={openDate} onChange={(e) => setOpenDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                {/* Дата появления: заголовок с кликабельной «В дату начала учета» в той же строке */}
+                <div className="grid gap-2 min-w-0">
+                  <div className="flex items-center justify-between min-h-6 flex-wrap gap-x-1.5 gap-y-0">
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>
+                      {primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Дата приобретения" : "Дата появления"}
+                    </Label>
+                    {accountingStartDate && (primaryValueKind !== "ACQUISITION" && primaryValueKind !== "INVESTED") && (
+                      <button
+                        type="button"
+                        className="shrink-0 font-semibold text-sm"
+                        style={{ color: ACCENT }}
+                        onClick={() => setOpenDate(accountingStartDate)}
+                      >
+                        В дату начала учета
+                      </button>
+                    )}
                   </div>
-                  {resolvedHistoryStatus && (
-                    <span
-                      className="inline-flex items-center shrink-0 self-end rounded-md border px-2 py-1 text-sm font-normal mb-0.5"
-                      style={{
-                        borderColor: ACCENT2,
-                        backgroundColor: "rgba(85, 68, 209, 0.15)",
-                        color: ACTIVE_TEXT_DARK,
-                      }}
-                    >
-                      {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <DateField label="" value={openDate} onChange={(e) => setOpenDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                    </div>
+                    {resolvedHistoryStatus && (
+                      <span
+                        className="inline-flex items-center shrink-0 self-end rounded-md border px-2 py-1 text-sm font-normal mb-0.5"
+                        style={{
+                          borderColor: ACCENT2,
+                          backgroundColor: "rgba(85, 68, 209, 0.15)",
+                          color: ACTIVE_TEXT_DARK,
+                        }}
+                      >
+                        {resolvedHistoryStatus === "NEW" ? "Новый" : "Исторический"}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-
-              {showBankCardFields && (
-                <SelectField label="Тип карты" value={cardKind} onValueChange={(v) => setCardKind(v as CardKind)} options={[{ value: "DEBIT", label: "Дебетовая" }, { value: "CREDIT", label: "Кредитная" }]} />
-              )}
             </CollapsibleFormSection>
 
             {/* ══════ 2. Стоимость ══════ */}
@@ -1754,10 +1852,16 @@ export function AddEditItemFormModal({
               titleRight={typeCode ? <>По умолчанию используется <span style={{ color: ACCENT }}>{getPrimaryValueLabel(primaryValueKind)}</span></> : undefined}
               defaultOpen
             >
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className={cn("grid grid-cols-1 gap-4", showOpeningCounterparty ? "md:grid-cols-3" : "md:grid-cols-2")}>
                 {/* Колонка 1: Валюта */}
                 {!showInstrumentBlock && (
-                  <TextField label="Валюта" value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value.toUpperCase().slice(0, 3))} placeholder="RUB" />
+                  <SelectField
+                    label="Валюта"
+                    value={currencyCode}
+                    onValueChange={setCurrencyCode}
+                    options={currencySelectOptions}
+                    placeholder="Выберите валюту"
+                  />
                 )}
                 {/* Колонка 2: Баланс / сумма на дату появления */}
                 {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && (
@@ -1845,20 +1949,133 @@ export function AddEditItemFormModal({
 
             {/* ══════ 3. Планирование ══════ */}
             {showPlanSection && (
-              <CollapsibleFormSection title="Планирование" defaultOpen={false}>
-                <div className="flex items-center gap-2">
-                  <Switch checked={planEnabled} onCheckedChange={setPlanEnabled} />
-                  <Label style={{ color: ACTIVE_TEXT_DARK }}>Плановые транзакции</Label>
-                </div>
+              <CollapsibleFormSection
+                title="Планирование"
+                defaultOpen={false}
+                open={planSectionOpen}
+                onToggle={() => setPlanSectionOpen((v) => !v)}
+                titleRightNoTruncate
+                titleRight={
+                  <span
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-2 shrink-0 text-sm font-medium"
+                    style={{ color: ACTIVE_TEXT_DARK }}
+                  >
+                    Добавить плановые транзакции
+                    <Switch
+                      checked={planEnabled}
+                      onCheckedChange={(checked) => {
+                        setPlanEnabled(checked);
+                        if (checked) setPlanSectionOpen(true);
+                      }}
+                    />
+                  </span>
+                }
+              >
+                {showInterestFields && (
+                  <>
+                    <div className={cn("grid grid-cols-1 gap-4", showDepositFields ? "md:grid-cols-3" : "md:grid-cols-2")}>
+                      <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" required={planEnabled && showInterestPlanSettings} />
+                      <SelectField label="Как часто выплачиваются проценты" value={interestPayoutOrder} onValueChange={setInterestPayoutOrder} options={[{ value: "END_OF_TERM", label: "В конце срока" }, { value: "MONTHLY", label: "Ежемесячно" }]} placeholder="Выберите" required={planEnabled && showInterestPlanSettings} />
+                      {showDepositFields && (
+                        <div className="grid min-w-0 gap-2">
+                          <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-1.5 gap-y-0">
+                            <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium shrink-0">
+                              {depositTermMode === "days" ? "Срок вклада (дней)" : "Дата окончания вклада"}
+                              {planEnabled && showInterestPlanSettings && <span style={{ color: "#FB4C4F" }}> *</span>}
+                            </Label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextMode = depositTermMode === "days" ? "end_date" : "days";
+                                setDepositTermMode(nextMode);
+                                const od = openDate || getTodayDateKey();
+                                if (nextMode === "end_date" && depositTermDays.trim()) {
+                                  const n = Math.trunc(Number(depositTermDays));
+                                  if (Number.isFinite(n) && n >= 0) setDepositEndDate(toDateKey(addDays(parseDateKey(od), n)));
+                                } else if (nextMode === "days" && depositEndDate) {
+                                  const days = Math.round((parseDateKey(depositEndDate).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
+                                  if (Number.isFinite(days) && days >= 0) setDepositTermDays(String(days));
+                                }
+                              }}
+                              className="shrink-0 flex items-center gap-1.5 font-semibold text-sm"
+                              style={{ color: ACCENT }}
+                            >
+                              <RefreshCcw className="w-4 h-4 shrink-0" />
+                              {depositTermMode === "days" ? "Дата окончания" : "Срок (дней)"}
+                            </button>
+                          </div>
+                          {depositTermMode === "days" ? (
+                            <TextField
+                              label=""
+                              value={depositTermDays}
+                              onChange={(e) => {
+                                const val = e.target.value.replace(/\D/g, "");
+                                setDepositTermDays(val);
+                                const od = openDate || getTodayDateKey();
+                                if (od && val.trim()) {
+                                  const n = Math.trunc(Number(val));
+                                  if (Number.isFinite(n) && n >= 0) setDepositEndDate(toDateKey(addDays(parseDateKey(od), n)));
+                                }
+                              }}
+                              placeholder="Необязательно"
+                            />
+                          ) : (
+                            <DateField
+                              label=""
+                              value={depositEndDate}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setDepositEndDate(val);
+                                const od = openDate || getTodayDateKey();
+                                if (od && val) {
+                                  const days = Math.round((parseDateKey(val).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
+                                  if (Number.isFinite(days) && days >= 0) setDepositTermDays(String(days));
+                                }
+                              }}
+                              placeholder="ГГГГ-ММ-ДД"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                      <div className="flex items-center justify-center gap-2 min-w-0">
+                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium">Проценты зачисляются на счет вклада</Label>
+                        <Switch checked={interestToSameAccount} onCheckedChange={(checked) => { setInterestToSameAccount(checked); if (checked) setInterestPayoutAccountId(""); }} />
+                      </div>
+                      {!interestToSameAccount && (
+                        <div className="min-w-0">
+                          <FormField label="Куда зачисляются проценты" required={planEnabled && showInterestPlanSettings}>
+                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && !it.archived_at && !it.closed_at)} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                          </FormField>
+                        </div>
+                      )}
+                    </div>
+                    {interestPayoutOrder === "MONTHLY" && (
+                      <SelectField label="Капитализация" value={interestCapitalization} onValueChange={setInterestCapitalization} options={[{ value: "true", label: "Да" }, { value: "false", label: "Нет" }]} />
+                    )}
+                  </>
+                )}
                 {planEnabled && showInterestPlanSettings && (
-                  <TextField label="Дата окончания планирования (вклад/накопительный)" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" />
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                      <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
+                      <div className="min-w-0">
+                        <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
+                      </div>
+                    </div>
+                    {interestPayoutOrder === "MONTHLY" && (
+                      <SelectField label="Первая дата выплаты процентов" value={firstPayoutRule} onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)} options={[{ value: "MONTH_END", label: "Последний день месяца" }, { value: "SAME_DAY", label: "Тот же день, что и дата появления" }]} placeholder="Выберите" required={planEnabled} />
+                    )}
+                  </>
                 )}
                 {planEnabled && showLoanPlanSettings && (
                   <>
-                    <TextField label="Плановая дата погашения" value={loanEndDate} onChange={(e) => setLoanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" />
-                    <SelectField label="Счет погашения" value={repaymentAccountId} onValueChange={setRepaymentAccountId} options={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at).map((it) => ({ value: String(it.id), label: (it.name || "") + " " + (it.currency_code || "") }))} placeholder="Выберите счет" />
-                    <SelectField label="Периодичность погашения" value={repaymentFrequency} onValueChange={(v) => setRepaymentFrequency(v as TransactionChainFrequency)} options={[{ value: "WEEKLY", label: "Еженедельно" }, { value: "MONTHLY", label: "Ежемесячно" }, { value: "REGULAR", label: "С заданным интервалом (дни)" }]} />
-                    {repaymentFrequency === "MONTHLY" && <SelectField label="Первая дата погашения" value={firstPayoutRule} onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)} options={[{ value: "MONTH_END", label: "Последний день месяца" }, { value: "SAME_DAY", label: "Тот же день, что и дата появления" }]} />}
+                    <TextField label="Плановая дата погашения" value={loanEndDate} onChange={(e) => setLoanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
+                    <SelectField label="Счет погашения" value={repaymentAccountId} onValueChange={setRepaymentAccountId} options={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at).map((it) => ({ value: String(it.id), label: (it.name || "") + " " + (it.currency_code || "") }))} placeholder="Выберите счет" required={planEnabled} />
+                    <SelectField label="Периодичность погашения" value={repaymentFrequency} onValueChange={(v) => setRepaymentFrequency(v as TransactionChainFrequency)} options={[{ value: "WEEKLY", label: "Еженедельно" }, { value: "MONTHLY", label: "Ежемесячно" }, { value: "REGULAR", label: "С заданным интервалом (дни)" }]} required={planEnabled} />
+                    {repaymentFrequency === "MONTHLY" && <SelectField label="Первая дата погашения" value={firstPayoutRule} onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)} options={[{ value: "MONTH_END", label: "Последний день месяца" }, { value: "SAME_DAY", label: "Тот же день, что и дата появления" }]} required={planEnabled} />}
                     {repaymentFrequency === "REGULAR" && <TextField label="Интервал (дней)" value={repaymentIntervalDays} onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))} placeholder="1" />}
                     <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" />
                     {requiresLoanPaymentInput && (
@@ -1895,24 +2112,9 @@ export function AddEditItemFormModal({
                 </>
               )}
 
-              {showDepositFields && <TextField label="Срок вклада (дней)" value={depositTermDays} onChange={(e) => setDepositTermDays(e.target.value.replace(/\D/g, ""))} placeholder="Необязательно" />}
 
-              {(showInterestFields || showLoanPlanSettings) && (
-                <>
-                  <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" />
-                  {showInterestFields && (
-                    <>
-                      <SelectField label="Порядок выплаты процентов" value={interestPayoutOrder} onValueChange={setInterestPayoutOrder} options={[{ value: "END_OF_TERM", label: "В конце срока" }, { value: "MONTHLY", label: "Ежемесячно" }]} />
-                      {interestPayoutOrder === "MONTHLY" && <SelectField label="Капитализация" value={interestCapitalization} onValueChange={setInterestCapitalization} options={[{ value: "true", label: "Да" }, { value: "false", label: "Нет" }]} />}
-                      {interestCapitalization !== "true" && (
-                        <div className="grid gap-2">
-                          <Label style={{ color: ACTIVE_TEXT_DARK }}>Счет выплаты процентов</Label>
-                          <ItemSelector items={items.filter((it) => it.kind === "ASSET" && !it.archived_at && !it.closed_at)} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
-                        </div>
-                      )}
-                    </>
-                  )}
-                </>
+              {showLoanPlanSettings && (
+                <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" />
               )}
             </CollapsibleFormSection>
             </>)}

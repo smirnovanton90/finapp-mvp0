@@ -1538,9 +1538,6 @@ def create_item(
     db.flush()
 
     settings = upsert_plan_settings(db, item, payload.plan_settings)
-    if settings and settings.enabled:
-        create_item_chains(db, user, item, settings)
-
     if history_status == "NEW" and has_opening_value:
         create_opening_transactions(
             db=db,
@@ -1554,6 +1551,8 @@ def create_item(
             plan_settings=settings,
         )
         # position_lots/quantity_units обновляются в create_opening_transactions через _apply_position_delta/_apply_quantity_units_delta
+    if settings and settings.enabled:
+        create_item_chains(db, user, item, settings)
 
     if commission_requested and commission_enabled and commission_payment_item:
         instrument_label = item.instrument_id or item.name
@@ -2246,10 +2245,52 @@ def _compute_acquisition_cost_basis(
     item: Item,
     up_to_date: date_type | None = None,
 ) -> int:
-    """Стоимость приобретения текущего количества (остаток базы после продаж, метод средневзвешенной).
-    Для MOEX использует primary_quantity_lots, для crypto — primary_quantity_units.
+    """Стоимость приобретения.
+    Для НОВОГО актива — сумма всех транзакций ASSET_PURCHASE (в т.ч. комиссии).
+    Для ИСТОРИЧЕСКОГО: прочие активы — сумма покупок + initial_acquisition_rub;
+    MOEX/crypto — средневзвешенная база по quantity + initial_acquisition_rub.
     Если up_to_date задана, учитываются только транзакции с датой <= up_to_date (для истории по датам).
     """
+    history_status = getattr(item, "history_status", None) or "NEW"
+    if history_status == "NEW":
+        # Новый актив: стоимость приобретения = сумма всех транзакций «Приобретение актива».
+        tx_q = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.related_item_id == item_id,
+                Transaction.asset_link_type == "ASSET_PURCHASE",
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+            )
+        )
+        if up_to_date is not None:
+            tx_q = tx_q.filter(Transaction.transaction_date <= up_to_date)
+        txs = tx_q.all()
+        total = 0
+        if txs:
+            primary_ids = {t.primary_item_id for t in txs}
+            primary_by_id: dict[int, str | None] = {}
+            if primary_ids:
+                rows = db.query(Item.id, Item.currency_code).filter(Item.id.in_(primary_ids)).all()
+                primary_by_id = {row.id: row.currency_code for row in rows}
+            item_currency = (item.currency_code or "RUB").upper()
+            for tx in txs:
+                rate_date = (
+                    tx.transaction_date.date()
+                    if hasattr(tx.transaction_date, "date")
+                    else tx.transaction_date
+                )
+                from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
+                total += _convert_amount_between_currencies(
+                    tx.amount_rub or 0,
+                    from_currency,
+                    item_currency,
+                    rate_date,
+                    db,
+                )
+        return total
+
     if not (is_moex_item(item) or is_crypto_item(item)):
         # Для прочих активов — сумма покупок, приведённая к валюте актива через FX + начальная стоимость приобретения (исторические MARKET).
         tx_q = (

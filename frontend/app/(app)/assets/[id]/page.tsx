@@ -442,6 +442,11 @@ export default function AssetDetailPage() {
       .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_INVESTMENT")
       .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
   }, [item?.id, dynamicsTxs]);
+  /** Транзакции для блока «Стоимость вложенных средств»: все «Приобретение актива» + «Вложение в актив» (для нового актива; для исторического — та же логика). */
+  const investedTxsForAsset = useMemo(() => {
+    const merged = [...purchaseTxsForAsset, ...investmentTxsForAsset];
+    return merged.sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
+  }, [purchaseTxsForAsset, investmentTxsForAsset]);
 
   function formatTxDateCell(transactionDate: string) {
     const dateKey = toTxDateKey(transactionDate);
@@ -884,11 +889,17 @@ export default function AssetDetailPage() {
     [allItems, counterpartiesById]
   );
 
+  /** Только фактические/реализованные транзакции для блока «Количество» (плановые не показываем). */
+  const quantityHistoryTxActual = useMemo(
+    () => quantityHistoryTx.filter((tx) => tx.transaction_type === "ACTUAL" || tx.status === "REALIZED"),
+    [quantityHistoryTx]
+  );
+
   const quantityHistoryRows = useMemo(() => {
     const openDate = item?.open_date ?? "";
     const fromOpen = openDate
-      ? quantityHistoryTx.filter((tx) => (tx.transaction_date || "").slice(0, 10) >= openDate)
-      : quantityHistoryTx;
+      ? quantityHistoryTxActual.filter((tx) => (tx.transaction_date || "").slice(0, 10) >= openDate)
+      : quantityHistoryTxActual;
     const sorted = [...fromOpen].sort((a, b) => {
       const dateA = a.transaction_date || "";
       const dateB = b.transaction_date || "";
@@ -936,13 +947,13 @@ export default function AssetDetailPage() {
       const priceCents = qty > 0 ? Math.round(costCents / qty) : null;
       return { tx, type: isBuy ? "Покупка" as const : "Продажа" as const, delta, balanceAfter: balance, priceCents, costCents };
     });
-  }, [quantityHistoryTx, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code]);
+  }, [quantityHistoryTxActual, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code]);
 
   const quantitySummary = useMemo(() => {
     const openDate = item?.open_date ?? "";
     const fromOpen = openDate
-      ? quantityHistoryTx.filter((tx) => (tx.transaction_date || "").slice(0, 10) >= openDate)
-      : quantityHistoryTx;
+      ? quantityHistoryTxActual.filter((tx) => (tx.transaction_date || "").slice(0, 10) >= openDate)
+      : quantityHistoryTxActual;
     const isCrypto = item?.type_code === "crypto";
     const itemId = item?.id;
     const getTxQty = (tx: TransactionOut) => {
@@ -974,7 +985,7 @@ export default function AssetDetailPage() {
     const current = isCrypto ? (item?.quantity_units ?? 0) : (item?.position_lots ?? 0);
     const startQty = current - totalBuy + totalSell;
     return { startQty, totalBuy, totalSell, current };
-  }, [quantityHistoryTx, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code]);
+  }, [quantityHistoryTxActual, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code]);
 
   const qtyChartSeries = useMemo(() => {
     if (!costHistoryData?.points.length) return [];
@@ -1924,12 +1935,12 @@ export default function AssetDetailPage() {
                           <>
                             <div className="mt-3">
                               <div className="min-w-0">
-                                {quantityHistoryRows.length === 0 && quantitySummary.startQty === 0 ? (
+                                {quantityHistoryRows.length === 0 && (item.history_status === "HISTORICAL" ? quantitySummary.startQty : 0) === 0 ? (
                                   <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи</p>
                                 ) : (
                                   <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                                     <tbody>
-                                      {quantitySummary.startQty !== 0 && (() => {
+                                      {quantitySummary.startQty !== 0 && item.history_status === "HISTORICAL" && (() => {
                                         const openDateLabel = item.open_date
                                           ? new Date(item.open_date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })
                                           : "—";
@@ -1985,7 +1996,7 @@ export default function AssetDetailPage() {
                                 );
                                 return (
                                   <>
-                                    <SummaryBlock title="Количество на начало" value={quantitySummary.startQty} />
+                                    <SummaryBlock title="Количество на начало" value={item.history_status === "HISTORICAL" ? quantitySummary.startQty : 0} />
                                     <SummaryBlock title="Всего куплено" value={quantitySummary.totalBuy} />
                                     <SummaryBlock title="Всего продано" value={quantitySummary.totalSell} />
                                     <SummaryBlock title="Количество на текущую дату" value={quantitySummary.current} />
@@ -2217,7 +2228,7 @@ export default function AssetDetailPage() {
                             </div>
                           )}
                           {(key === "acquisition" || key === "invested") && (() => {
-                            const txs = key === "acquisition" ? purchaseTxsForAsset : investmentTxsForAsset;
+                            const txs = key === "acquisition" ? purchaseTxsForAsset : investedTxsForAsset;
                             const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
                             const isCurrencyAsset = currencyCode !== "RUB";
                             const costValueCents = key === "acquisition" ? (costs.acquisition ?? 0) : (costs.invested ?? 0);
@@ -2250,7 +2261,7 @@ export default function AssetDetailPage() {
                             return (
                               <table className="w-full text-left border-collapse text-sm mt-3" style={{ color: ACTIVE_TEXT_DARK }}>
                                 <tbody>
-                                  {hasImplicitInitial && (() => {
+                                  {hasImplicitInitial && item.history_status === "HISTORICAL" && (() => {
                                     const histRubCents =
                                       isCurrencyAsset && rateOnOpen != null && rateOnOpen > 0
                                         ? Math.round((initialRowAssetCents / 100) * rateOnOpen * 100)

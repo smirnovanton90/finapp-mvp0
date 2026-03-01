@@ -46,6 +46,10 @@ export const ACCENT_FILL_LIGHT = "rgba(93, 95, 215, 0.22)";
 // Medium fill: #5D5FD7 @ 40%
 export const ACCENT_FILL_MEDIUM = "rgba(93, 95, 215, 0.40)";
 
+// Pink gradient (e.g. for planned coupon period highlight)
+export const PINK_GRADIENT = "linear-gradient(135deg, rgba(255, 182, 193, 0.28) 0%, rgba(255, 105, 180, 0.18) 100%)";
+export const PINK_OUTLINE = "rgba(255, 105, 180, 0.6)";
+
 // Placeholder colors
 // Dark theme: #C5BFF1 @ 60%
 export const PLACEHOLDER_COLOR_DARK = "rgba(197, 191, 241, 0.6)";

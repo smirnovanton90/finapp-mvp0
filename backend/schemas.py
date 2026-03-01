@@ -956,6 +956,20 @@ class MarketPriceOut(BaseModel):
     price_usd_cents: int | None = None  # для крипты: цена в центах USD
 
 
+class BondCouponOut(BaseModel):
+    """Одна запись о купонной выплате по облигации (из MOEX bondization)."""
+    payment_date: date
+    coupon_value_cents: int
+    currency_code: str
+
+
+class DividendOut(BaseModel):
+    """Одна запись о планируемой выплате дивидендов по акции (из MOEX dividends)."""
+    payment_date: date
+    dividend_value_cents: int
+    currency_code: str
+
+
 class FxRatesBatchRequest(BaseModel):
     dates: list[str] = Field(min_length=1)
 

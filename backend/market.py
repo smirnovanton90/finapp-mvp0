@@ -22,6 +22,8 @@ from coingecko import (
     search_coins,
 )
 from schemas import (
+    BondCouponOut,
+    DividendOut,
     MarketBoardOut,
     MarketInstrumentDetailsOut,
     MarketInstrumentOut,
@@ -976,6 +978,142 @@ def get_instrument_prices(
 
     db.commit()
     return results
+
+
+def fetch_bond_coupons_list(secid: str, currency_code: str = "RUB") -> list[BondCouponOut]:
+    """Загружает расписание купонов по облигации из MOEX bondization. Без доступа к БД."""
+    try:
+        payload = _moex_get(
+            f"securities/{secid}/bondization.json",
+            params={"iss.meta": "off"},
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    rows = _table_rows(payload, "coupons")
+    if currency_code in {"SUR", "RUR"}:
+        currency_code = "RUB"
+
+    result: list[BondCouponOut] = []
+    for row in rows:
+        date_raw = _normalize_text(_get_field(row, "COUPONDATE", "coupondate"))
+        if not date_raw:
+            continue
+        try:
+            payment_date = datetime.strptime(date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        value_raw = _get_field(row, "COUPONVALUE", "VALUE", "value", "value_num")
+        if value_raw is None:
+            continue
+        coupon_cents = _to_cents(value_raw)
+        if coupon_cents is None:
+            continue
+        row_currency = _normalize_currency_code(_get_field(row, "CURRENCYID", "CURRENCY"))
+        result.append(
+            BondCouponOut(
+                payment_date=payment_date,
+                coupon_value_cents=coupon_cents,
+                currency_code=row_currency or currency_code,
+            )
+        )
+    return result
+
+
+@router.get("/instruments/{secid}/coupons", response_model=list[BondCouponOut])
+def get_instrument_coupons(
+    secid: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Расписание купонных выплат по облигации (MOEX bondization). Только для type_code=bonds."""
+    instrument = db.get(MarketInstrument, secid)
+    if not instrument:
+        try:
+            details, _ = _fetch_instrument_details(secid)
+            instrument = _upsert_instrument(db, details)
+        except (requests.RequestException, HTTPException):
+            raise HTTPException(status_code=404, detail="Instrument not found")
+    if instrument.type_code != "bonds":
+        return []
+    currency_code = instrument.currency_code or "RUB"
+    if currency_code in {"SUR", "RUR"}:
+        currency_code = "RUB"
+    return fetch_bond_coupons_list(secid, currency_code)
+
+
+def fetch_dividends_list(secid: str, currency_code: str = "RUB") -> list[DividendOut]:
+    """Загружает расписание дивидендов по акции из MOEX dividends. Без доступа к БД."""
+    try:
+        payload = _moex_get(
+            f"securities/{secid}/dividends.json",
+            params={"iss.meta": "off"},
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    rows = _table_rows(payload, "dividends")
+    if currency_code in {"SUR", "RUR"}:
+        currency_code = "RUB"
+
+    result: list[DividendOut] = []
+    for row in rows:
+        date_raw = _normalize_text(
+            _get_field(
+                row,
+                "REGISTRYCLOSEDATE",
+                "registryclosedate",
+                "PAYMENTDATE",
+                "paymentdate",
+                "RECORDDATE",
+                "recorddate",
+                "CLOSEDATE",
+                "closedate",
+            )
+        )
+        if not date_raw:
+            continue
+        try:
+            payment_date = datetime.strptime(date_raw[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        value_raw = _get_field(row, "VALUE", "value", "DIVIDEND", "dividend", "VALUE_PER_SHARE")
+        if value_raw is None:
+            continue
+        dividend_cents = _to_cents(value_raw)
+        if dividend_cents is None:
+            continue
+        row_currency = _normalize_currency_code(_get_field(row, "CURRENCYID", "CURRENCY", "currencyid"))
+        result.append(
+            DividendOut(
+                payment_date=payment_date,
+                dividend_value_cents=dividend_cents,
+                currency_code=row_currency or currency_code,
+            )
+        )
+    return result
+
+
+@router.get("/instruments/{secid}/dividends", response_model=list[DividendOut])
+def get_instrument_dividends(
+    secid: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Расписание выплат дивидендов по акции (MOEX dividends). Только для type_code=securities."""
+    instrument = db.get(MarketInstrument, secid)
+    if not instrument:
+        try:
+            details, _ = _fetch_instrument_details(secid)
+            instrument = _upsert_instrument(db, details)
+        except (requests.RequestException, HTTPException):
+            raise HTTPException(status_code=404, detail="Instrument not found")
+    if instrument.type_code != "securities":
+        return []
+    currency_code = instrument.currency_code or "RUB"
+    if currency_code in {"SUR", "RUR"}:
+        currency_code = "RUB"
+    return fetch_dividends_list(secid, currency_code)
 
 
 def ensure_moex_history_prices(

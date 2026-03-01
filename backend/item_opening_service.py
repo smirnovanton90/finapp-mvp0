@@ -490,6 +490,7 @@ def create_commission_transaction(
         comment=comment,
         related_item_id=item.id,
         source=AUTO_COMMISSION_SOURCE,
+        asset_link_type="ASSET_PURCHASE",
     )
 
 

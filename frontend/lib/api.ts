@@ -314,6 +314,18 @@ export type MarketPriceOut = {
   price_usd_cents?: number | null;
 };
 
+export type BondCouponOut = {
+  payment_date: string;
+  coupon_value_cents: number;
+  currency_code: string;
+};
+
+export type DividendOut = {
+  payment_date: string;
+  dividend_value_cents: number;
+  currency_code: string;
+};
+
 export type CategoryScope = "INCOME" | "EXPENSE" | "BOTH";
 
 export type CategoryNode = {
@@ -937,6 +949,26 @@ export async function fetchMarketInstrumentPrices(
   const qs = params.toString();
   const res = await authFetch(
     `${API_BASE}/market/instruments/${secid}/prices${qs ? `?${qs}` : ""}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchMarketInstrumentCoupons(
+  secid: string
+): Promise<BondCouponOut[]> {
+  const res = await authFetch(
+    `${API_BASE}/market/instruments/${secid}/coupons`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchMarketInstrumentDividends(
+  secid: string
+): Promise<DividendOut[]> {
+  const res = await authFetch(
+    `${API_BASE}/market/instruments/${secid}/dividends`
   );
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

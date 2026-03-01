@@ -9,11 +9,14 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from category_service import resolve_category_or_400
+from market import fetch_bond_coupons_list, fetch_dividends_list
 from models import Category, Item, ItemPlanSettings, Transaction, TransactionChain, User
 from schemas import ItemPlanSettingsBase
 from transaction_chains import build_schedule_dates
 
 INTEREST_ITEM_TYPES = {"deposit", "savings_account"}
+BOND_ITEM_TYPES = {"bonds"}
+SHARES_ITEM_TYPES = {"securities"}
 LOAN_ASSET_TYPES = {"loan_to_third_party", "third_party_receivables"}
 LOAN_LIABILITY_TYPES = {
     "credit_card_debt",
@@ -95,6 +98,22 @@ def plan_signature(item: Item, settings: ItemPlanSettings | None) -> tuple | Non
             item.interest_capitalization,
             item.interest_payout_account_id,
             settings.first_payout_rule,
+            settings.plan_end_date,
+        )
+    if item.type_code in BOND_ITEM_TYPES:
+        return (
+            "BONDS",
+            item.instrument_id,
+            item.position_lots,
+            item.lot_size,
+            settings.plan_end_date,
+        )
+    if item.type_code in SHARES_ITEM_TYPES:
+        return (
+            "SHARES",
+            item.instrument_id,
+            item.position_lots,
+            item.lot_size,
             settings.plan_end_date,
         )
     if item.type_code in LOAN_ITEM_TYPES:
@@ -180,6 +199,12 @@ def create_item_chains(
 ) -> None:
     if item.type_code in INTEREST_ITEM_TYPES:
         _create_interest_chain(db, user, item, settings)
+        return
+    if item.type_code in BOND_ITEM_TYPES:
+        _create_bond_coupon_chain(db, user, item, settings)
+        return
+    if item.type_code in SHARES_ITEM_TYPES:
+        _create_stock_dividend_chain(db, user, item, settings)
         return
     if item.type_code in LOAN_ITEM_TYPES:
         _create_loan_chains(db, user, item, settings)
@@ -504,6 +529,165 @@ def _create_interest_chain(
         monthly_rule=monthly_rule,
         interval_days=None,
         weekly_day=None,
+        asset_link_type=None,
+    )
+
+
+def _create_bond_coupon_chain(
+    db: Session,
+    user: User,
+    item: Item,
+    settings: ItemPlanSettings,
+) -> None:
+    if not item.instrument_id:
+        raise HTTPException(
+            status_code=400, detail="instrument_id is required for bond coupon plan"
+        )
+    if settings.plan_end_date is None:
+        raise HTTPException(
+            status_code=400, detail="plan_end_date is required for bond coupon plan"
+        )
+    if item.currency_code not in (None, "RUB", "SUR", "RUR"):
+        raise HTTPException(
+            status_code=400,
+            detail="Bond coupon plan is only supported for RUB bonds",
+        )
+    min_date = _resolve_min_date(user, item)
+    plan_end = (
+        settings.plan_end_date
+        if isinstance(settings.plan_end_date, date)
+        else datetime.strptime(settings.plan_end_date, "%Y-%m-%d").date()
+    )
+
+    coupons = fetch_bond_coupons_list(item.instrument_id, item.currency_code or "RUB")
+    quantity = (item.position_lots or 0) * (item.lot_size or 1)
+    if quantity <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="position_lots and lot_size are required for bond coupon plan",
+        )
+
+    today = date.today()
+    schedule_dates: list[date] = []
+    amounts: list[int] = []
+    for c in coupons:
+        if c.payment_date <= today:
+            continue
+        if c.payment_date < min_date:
+            continue
+        if c.payment_date > plan_end:
+            continue
+        total_cents = c.coupon_value_cents * quantity
+        schedule_dates.append(c.payment_date)
+        amounts.append(total_cents)
+
+    if not schedule_dates:
+        return
+
+    category = _resolve_category_by_name(db, user, "Купонный доход от облигаций")
+    _create_chain_with_transactions(
+        db=db,
+        user=user,
+        item=item,
+        settings=settings,
+        chain_name=f"Купоны: {item.name}",
+        schedule_dates=schedule_dates,
+        amounts=amounts,
+        direction="INCOME",
+        primary_item=item,
+        primary_card_item=None,
+        counterparty_item=None,
+        counterparty_card_item=None,
+        counterparty_id=item.counterparty_id,
+        category_id=category.id,
+        purpose="INTEREST",
+        frequency="REGULAR",
+        start_date=schedule_dates[0],
+        end_date=schedule_dates[-1],
+        monthly_day=None,
+        monthly_rule=None,
+        interval_days=None,
+        weekly_day=None,
+        asset_link_type="ASSET_INCOME",
+    )
+
+
+def _create_stock_dividend_chain(
+    db: Session,
+    user: User,
+    item: Item,
+    settings: ItemPlanSettings,
+) -> None:
+    if not item.instrument_id:
+        raise HTTPException(
+            status_code=400, detail="instrument_id is required for dividend plan"
+        )
+    if settings.plan_end_date is None:
+        raise HTTPException(
+            status_code=400, detail="plan_end_date is required for dividend plan"
+        )
+    if item.currency_code not in (None, "RUB", "SUR", "RUR"):
+        raise HTTPException(
+            status_code=400,
+            detail="Dividend plan is only supported for RUB shares",
+        )
+    min_date = _resolve_min_date(user, item)
+    plan_end = (
+        settings.plan_end_date
+        if isinstance(settings.plan_end_date, date)
+        else datetime.strptime(settings.plan_end_date, "%Y-%m-%d").date()
+    )
+
+    dividends = fetch_dividends_list(item.instrument_id, item.currency_code or "RUB")
+    quantity = (item.position_lots or 0) * (item.lot_size or 1)
+    if quantity <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="position_lots and lot_size are required for dividend plan",
+        )
+
+    today = date.today()
+    schedule_dates: list[date] = []
+    amounts: list[int] = []
+    for d in dividends:
+        if d.payment_date <= today:
+            continue
+        if d.payment_date < min_date:
+            continue
+        if d.payment_date > plan_end:
+            continue
+        total_cents = d.dividend_value_cents * quantity
+        schedule_dates.append(d.payment_date)
+        amounts.append(total_cents)
+
+    if not schedule_dates:
+        return
+
+    category = _resolve_category_by_name(db, user, "Доход от акций")
+    _create_chain_with_transactions(
+        db=db,
+        user=user,
+        item=item,
+        settings=settings,
+        chain_name=f"Дивиденды: {item.name}",
+        schedule_dates=schedule_dates,
+        amounts=amounts,
+        direction="INCOME",
+        primary_item=item,
+        primary_card_item=None,
+        counterparty_item=None,
+        counterparty_card_item=None,
+        counterparty_id=item.counterparty_id,
+        category_id=category.id,
+        purpose="INTEREST",
+        frequency="REGULAR",
+        start_date=schedule_dates[0],
+        end_date=schedule_dates[-1],
+        monthly_day=None,
+        monthly_rule=None,
+        interval_days=None,
+        weekly_day=None,
+        asset_link_type="ASSET_INCOME",
     )
 
 
@@ -642,6 +826,7 @@ def _create_loan_chains(
         monthly_rule=monthly_rule,
         interval_days=interval_days,
         weekly_day=weekly_day,
+        asset_link_type=None,
     )
 
     _create_chain_with_transactions(
@@ -667,6 +852,7 @@ def _create_loan_chains(
         monthly_rule=monthly_rule,
         interval_days=interval_days,
         weekly_day=weekly_day,
+        asset_link_type=None,
     )
 
 
@@ -911,6 +1097,7 @@ def _create_chain_with_transactions(
     monthly_rule: str | None,
     interval_days: int | None,
     weekly_day: int | None,
+    asset_link_type: str | None = None,
 ) -> None:
     if len(schedule_dates) != len(amounts):
         raise HTTPException(status_code=400, detail="Schedule length mismatch")
@@ -970,6 +1157,7 @@ def _create_chain_with_transactions(
                 category_id=category_id,
                 comment=None,
                 related_item_id=chain.related_item_id,
+                asset_link_type=asset_link_type,
             )
         )
 

@@ -56,7 +56,7 @@ import {
   RepaymentType,
   PaymentAmountKind,
 } from "@/lib/api";
-import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
+import { formatCentsForInput, formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import { formatAmount, getItemPhotoUrl } from "@/lib/item-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import {
@@ -67,6 +67,7 @@ import {
   LIABILITY_TYPES,
   MOEX_TYPE_CODES,
   ITEM_SECTIONS,
+  REAL_ESTATE_TRANSPORT_VALUABLES_TYPE_CODES,
   COUNTERPARTY_TYPE_CODES,
   MANDATORY_COUNTERPARTY_TYPE_CODES,
   LOAN_LIABILITY_TYPES,
@@ -141,6 +142,10 @@ export function AddEditItemFormModal({
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const instrumentAnchorRef = useRef<HTMLDivElement | null>(null);
   const itemPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  /** Пользователь вручную вводил цену покупки MOEX — при смене даты появления не перезаписывать. */
+  const userDidEditMoexPriceRef = useRef(false);
+  /** Пользователь вручную вводил цену покупки крипты — при смене даты появления не перезаписывать. */
+  const userDidEditCryptoPriceRef = useRef(false);
 
   const [instrumentQuery, setInstrumentQuery] = useState("");
   const [instrumentOptions, setInstrumentOptions] = useState<MarketInstrumentOut[]>([]);
@@ -162,6 +167,8 @@ export function AddEditItemFormModal({
   const [marketPrice, setMarketPrice] = useState<MarketPriceOut | null>(null);
   const [moexDatePrices, setMoexDatePrices] = useState<Record<string, MarketPriceOut | null>>({});
   const [moexDatePricesLoading, setMoexDatePricesLoading] = useState(false);
+  /** Цена крипты на дату появления (для подстановки в поле «Цена» по умолчанию). */
+  const [cryptoPriceOnOpenDate, setCryptoPriceOnOpenDate] = useState<MarketPriceOut | null>(null);
   const [bondCoupons, setBondCoupons] = useState<BondCouponOut[]>([]);
   const [bondCouponsLoading, setBondCouponsLoading] = useState(false);
   const [stockDividends, setStockDividends] = useState<DividendOut[]>([]);
@@ -243,7 +250,18 @@ export function AddEditItemFormModal({
       setAllowedTypeCodes(initialCreateOptions.typeCodes);
       setSectionId(initialCreateOptions.sectionId ?? "");
       setIsGeneralCreate(true);
-      setTypeCode(initialCreateDefaults?.typeCode ?? "");
+      const defaultType = initialCreateDefaults?.typeCode ?? "";
+      const section = (initialCreateOptions.sectionId && initialCreateOptions.kind)
+        ? ITEM_SECTIONS.find((s) => s.id === initialCreateOptions.sectionId && s.kind === initialCreateOptions.kind)
+        : null;
+      const typeFromSection = section?.typeCodes?.[0] ?? "";
+      if (initialCreateOptions.sectionId && !defaultType && typeFromSection) {
+        setTypeCode(typeFromSection);
+        setPrimaryValueKind(getDefaultPrimaryValueKind(typeFromSection, initialCreateOptions.kind));
+      } else {
+        setTypeCode(defaultType);
+        setPrimaryValueKind(getDefaultPrimaryValueKind(defaultType, initialCreateOptions.kind));
+      }
       setCurrencyCode("RUB");
       setName(initialCreateDefaults?.name ?? "");
       setAmountStr(initialCreateDefaults?.amountStr ?? "");
@@ -383,6 +401,10 @@ export function AddEditItemFormModal({
 
   const isMoexType = useMemo(() => MOEX_TYPE_CODES.includes(typeCode), [typeCode]);
   const isCryptoType = useMemo(() => typeCode === "crypto", [typeCode]);
+  const isCostOneRowType = useMemo(
+    () => kind === "ASSET" && REAL_ESTATE_TRANSPORT_VALUABLES_TYPE_CODES.includes(typeCode) && primaryValueKind === "MARKET" && !isMoexType && !isCryptoType,
+    [kind, typeCode, primaryValueKind, isMoexType, isCryptoType]
+  );
   const showInstrumentBlock = useMemo(
     () => (isMoexType || isCryptoType) && kind === "ASSET",
     [isMoexType, isCryptoType, kind]
@@ -612,6 +634,12 @@ export function AddEditItemFormModal({
     [fxRatesByDate]
   );
 
+  /** Форматирование курса: все знаки после запятой (до 6), запятая как разделитель. */
+  const formatRate = useCallback((rate: number): string => {
+    const s = rate % 1 === 0 ? String(rate) : rate.toFixed(6).replace(/\.?0+$/, "");
+    return s.replace(".", ",");
+  }, []);
+
   /** Для крипты: данные для таблицы Цена/Стоимость (дата появления, текущая дата). Аналогично moexPriceTable. */
   const cryptoPriceTable = useMemo(() => {
     if (!isCryptoType) return null;
@@ -630,8 +658,6 @@ export function AddEditItemFormModal({
       openPriceUsdCents != null && quantity > 0 ? Math.round(openPriceUsdCents * quantity) : null;
     const currentValueUsdCents =
       currentPriceUsdCents != null && quantity > 0 ? Math.round(currentPriceUsdCents * quantity) : null;
-    const currentValueRubCents =
-      currentPriceRubCents != null && quantity > 0 ? Math.round(currentPriceRubCents * quantity) : null;
     const openRateFromFx = openDate ? getFxRateForDate(openDate, "USD") : null;
     const currentRateFromFx = getFxRateForDate(todayKey, "USD");
     const openValueRubCents =
@@ -639,6 +665,12 @@ export function AddEditItemFormModal({
         ? Math.round((openValueUsdCents / 100) * openRateFromFx * 100)
         : openValueUsdCents != null && currentPriceUsdCents != null && currentPriceUsdCents !== 0 && currentPriceRubCents != null
           ? Math.round(openValueUsdCents * (currentPriceRubCents / currentPriceUsdCents))
+          : null;
+    const currentValueRubCents =
+      currentValueUsdCents != null && currentRateFromFx != null
+        ? Math.round((currentValueUsdCents / 100) * currentRateFromFx * 100)
+        : currentPriceRubCents != null && quantity > 0
+          ? Math.round(currentPriceRubCents * quantity)
           : null;
     const profitCents =
       currentValueRubCents != null && openValueRubCents != null ? currentValueRubCents - openValueRubCents : null;
@@ -708,9 +740,9 @@ export function AddEditItemFormModal({
       ? `Обязательство появилось${datePhrase} нужно указать источник средств, откуда были переведены средства или погашено обязательство. Если источник не указать, то будет создана транзакция в размере начальной суммы с категорией «Прочие расходы».`
       : `Актив появился${datePhrase} нужно указать источник средств, откуда были переведены средства или оплачен актив. Если источник не указать, то будет создана транзакция в размере начальной суммы с категорией «Прочие доходы».`;
   }, [showOpeningCounterparty, accountingStartDate, kind]);
-  const showMoexCommission =
-    isMoexType && kind === "ASSET" && resolvedHistoryStatus === "NEW" && hasNonZeroLots;
-  const commissionAllowed = showMoexCommission;
+  const showMarketCommission =
+    (isMoexType || isCryptoType) && kind === "ASSET" && resolvedHistoryStatus === "NEW" && (hasNonZeroLots || hasNonZeroCryptoQuantity);
+  const commissionAllowed = showMarketCommission;
 
   function buildPlanSignatureFromItemModal(item: ItemOut): string {
     const settings = item.plan_settings ?? null;
@@ -814,6 +846,7 @@ export function AddEditItemFormModal({
     setCommissionAmount("");
     setCommissionPaymentItemId("");
     setMarketPrice(null);
+    setCryptoPriceOnOpenDate(null);
     setMoexDatePrices({});
     setBondCoupons([]);
     setBondCouponsLoading(false);
@@ -943,6 +976,7 @@ export function AddEditItemFormModal({
       setInstrumentBoards([]);
       setInstrumentBoardId("");
       setMarketPrice(null);
+      setCryptoPriceOnOpenDate(null);
       return;
     }
     let active = true;
@@ -1039,11 +1073,7 @@ export function AddEditItemFormModal({
       .then((price) => {
         if (!active) return;
         setMarketPrice(price);
-        if (selectedInstrument.provider === "COINGECKO" && price?.price_usd_cents != null) {
-          setCryptoPurchasePrice((prev) =>
-            prev.trim() ? prev : (price.price_usd_cents! / 100).toFixed(2).replace(".", ",")
-          );
-        }
+        // Для крипты цену по умолчанию подставляет эффект загрузки цены на дату появления.
       })
       .catch(() => {
         if (!active) return;
@@ -1053,6 +1083,38 @@ export function AddEditItemFormModal({
       active = false;
     };
   }, [selectedInstrument, instrumentBoardId]);
+
+  useEffect(() => {
+    if (!isCryptoType || !selectedInstrument || !instrumentBoardId || !openDate) {
+      setCryptoPriceOnOpenDate(null);
+      return;
+    }
+    const todayKey = getTodayDateKey();
+    if (openDate > todayKey) {
+      setCryptoPriceOnOpenDate(null);
+      return;
+    }
+    let active = true;
+    setCryptoPriceOnOpenDate(null);
+    fetchMarketInstrumentPrices(selectedInstrument.secid, {
+      from: openDate,
+      to: openDate,
+      boardId: instrumentBoardId,
+    })
+      .then((prices) => {
+        if (!active) return;
+        const priceOnOpen = prices?.length ? prices.find((p) => p.price_date === openDate) ?? prices[0] : null;
+        setCryptoPriceOnOpenDate(priceOnOpen ?? null);
+        // Цена в поле обновляется в отдельном эффекте при изменении cryptoPriceOnOpenDate (и если пользователь не вводил вручную)
+      })
+      .catch(() => {
+        if (!active) return;
+        setCryptoPriceOnOpenDate(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isCryptoType, selectedInstrument, instrumentBoardId, openDate]);
 
   useEffect(() => {
     if (!isMoexType || kind !== "ASSET") {
@@ -1122,6 +1184,28 @@ export function AddEditItemFormModal({
       cancelled = true;
     };
   }, [accountingStartDate, instrumentBoardId, isMoexType, kind, openDate, selectedInstrument]);
+
+  useEffect(() => {
+    userDidEditMoexPriceRef.current = false;
+    userDidEditCryptoPriceRef.current = false;
+  }, [openDate, selectedInstrument]);
+
+  useEffect(() => {
+    if (!isMoexType || !openDate) return;
+    if (userDidEditMoexPriceRef.current) return;
+    const priceOnOpen = moexDatePrices[openDate];
+    if (priceOnOpen?.price_cents != null) {
+      setMoexPurchasePrice(formatCentsForInput(priceOnOpen.price_cents));
+    }
+  }, [isMoexType, openDate, moexDatePrices]);
+
+  useEffect(() => {
+    if (!isCryptoType || userDidEditCryptoPriceRef.current) return;
+    const priceOnOpen = cryptoPriceOnOpenDate;
+    if (priceOnOpen?.price_usd_cents != null) {
+      setCryptoPurchasePrice(formatCentsForInput(priceOnOpen.price_usd_cents));
+    }
+  }, [isCryptoType, cryptoPriceOnOpenDate]);
 
   useEffect(() => {
     const needFx = showInstrumentBlock && (isCryptoType || (isMoexType && currencyCode !== "RUB")) && openDate;
@@ -1215,10 +1299,10 @@ export function AddEditItemFormModal({
   }, [requiresLoanPaymentInput, paymentAmountKind, paymentAmountStr]);
 
   useEffect(() => {
-    if (!showMoexCommission) {
+    if (!showMarketCommission) {
       if (commissionEnabled) setCommissionEnabled(false);
     }
-  }, [showMoexCommission, commissionEnabled]);
+  }, [showMarketCommission, commissionEnabled]);
 
   useEffect(() => {
     if (!showOpeningCounterparty || !openingCounterpartyId) return;
@@ -1308,6 +1392,22 @@ export function AddEditItemFormModal({
         setFormError("Количество должно быть положительным числом.");
         return;
       }
+      const hasCommissionCrypto = commissionAllowed && commissionAmount.trim() && commissionAmountCents != null && commissionAmountCents > 0;
+      if (hasCommissionCrypto) {
+        if (!openingCounterpartyId) {
+          setFormError("Укажите источник средств (он же используется для оплаты комиссии).");
+          return;
+        }
+        const paymentItem = itemsById.get(Number(openingCounterpartyId));
+        if (!paymentItem || paymentItem.archived_at || paymentItem.closed_at) {
+          setFormError("Источник средств не найден.");
+          return;
+        }
+        if (paymentItem.instrument_id) {
+          setFormError("Оплата комиссии должна быть с не-рыночного счета (укажите обычный счет в источнике средств).");
+          return;
+        }
+      }
     }
 
     const todayKey = getTodayDateKey();
@@ -1340,7 +1440,8 @@ export function AddEditItemFormModal({
         return;
       }
     }
-    const isMarketNonMoex = primaryValueKind === "MARKET" && !isMoexType;
+    // Для крипты рыночная стоимость определяется автоматически (количество × текущая цена), проверку не требуем
+    const isMarketNonMoex = primaryValueKind === "MARKET" && !isMoexType && !isCryptoType;
     if (
       resolvedHistoryStatus === "NEW" &&
       isMarketNonMoex &&
@@ -1690,6 +1791,12 @@ export function AddEditItemFormModal({
             }
           }
         }
+        const hasCommission = commissionAmount.trim() && commissionAmountCents != null && commissionAmountCents > 0;
+        payload.commission_enabled = hasCommission;
+        if (hasCommission) {
+          payload.commission_amount_rub = commissionAmountCents ?? null;
+          payload.commission_payment_item_id = openingCounterpartyId ? Number(openingCounterpartyId) : null;
+        }
       }
 
       if (showBankAccountFields) {
@@ -2008,7 +2115,7 @@ export function AddEditItemFormModal({
                         const section = sectionOptions.find((s) => s.id === value);
                         const firstType = section?.typeCodes?.[0] ?? "";
                         setTypeCode(firstType);
-                        setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
+                        if (firstType) setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
                       }}
                       options={sectionOptions.map((s) => ({ value: s.id, label: s.label }))}
                       placeholder={kind === "ASSET" ? "Выберите раздел актива" : "Выберите раздел обязательства"}
@@ -2034,10 +2141,10 @@ export function AddEditItemFormModal({
             {/* ══════ 1. Основное ══════ */}
             <CollapsibleFormSection title="Основное" defaultOpen>
               <div className={`grid grid-cols-1 gap-4 ${showInstrumentBlock || showCounterpartyField ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
-                {/* Рыночные активы: Ценная бумага | Название | Дата появления */}
+                {/* Рыночные активы: Инструмент | Название | Дата появления */}
                 {showInstrumentBlock && (
                   <div className="grid gap-2">
-                    <Label style={{ color: ACTIVE_TEXT_DARK }} className="min-h-6 flex items-center">{isCryptoType ? "Криптовалюта" : "Ценная бумага"}</Label>
+                    <Label style={{ color: ACTIVE_TEXT_DARK }} className="min-h-6 flex items-center">{isCryptoType ? "Криптовалюта" : "Инструмент"}</Label>
                     <div className="relative" ref={instrumentAnchorRef}>
                       <TextField label="" value={instrumentQuery} onChange={(e) => { setInstrumentQuery(e.target.value); setSelectedInstrument(null); setInstrumentDropdownOpen(true); }} onFocus={() => setInstrumentDropdownOpen(true)} onBlur={() => setTimeout(() => setInstrumentDropdownOpen(false), 150)} placeholder={isCryptoType ? "Введите название или тикер" : "Введите тикер или название"} />
                       {instrumentDropdownOpen && (
@@ -2065,10 +2172,10 @@ export function AddEditItemFormModal({
                 {/* Название */}
                 <TextField label="Название" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, Кошелёк" required />
 
-                {/* Банк / Где открыт — только для не-рыночных активов (счёт, карта, вклад, электронный кошелёк и т.д.) */}
+                {/* Банк / Где открыт / Кому предоставлен займ — только для не-рыночных активов */}
                 {showCounterpartyField && (
                   <FormField
-                    label={typeCode === "e_wallet" ? "Где открыт" : "Банк"}
+                    label={typeCode === "loan_to_third_party" ? "Кому предоставлен займ" : typeCode === "e_wallet" ? "Где открыт" : "Банк"}
                     required={isCounterpartyMandatory}
                     error={counterpartyError ?? undefined}
                   >
@@ -2077,11 +2184,11 @@ export function AddEditItemFormModal({
                       selectedIds={counterpartyId != null ? [counterpartyId] : []}
                       onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
                       selectionMode="single"
-                      placeholder={typeCode === "e_wallet" ? "Начните вводить название" : "Начните вводить название банка"}
+                      placeholder={typeCode === "loan_to_third_party" ? "Начните вводить название контрагента" : typeCode === "e_wallet" ? "Начните вводить название" : "Начните вводить название банка"}
                       industries={industries}
                       disabled={counterpartyLoading}
                       apiBase={API_BASE}
-                      filterByIndustryId={typeCode === "e_wallet" ? null : bankIndustryId}
+                      filterByIndustryId={typeCode === "e_wallet" || typeCode === "loan_to_third_party" ? null : bankIndustryId}
                       onAddCounterparty={() => setCreateCounterpartyOpen(true)}
                     />
                   </FormField>
@@ -2093,7 +2200,7 @@ export function AddEditItemFormModal({
                     <Label style={{ color: ACTIVE_TEXT_DARK }}>
                       {primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Дата приобретения" : "Дата появления"}
                     </Label>
-                    {accountingStartDate && (primaryValueKind !== "ACQUISITION" && primaryValueKind !== "INVESTED") && (
+                    {accountingStartDate && (
                       <button
                         type="button"
                         className="shrink-0 font-semibold text-sm"
@@ -2134,7 +2241,10 @@ export function AddEditItemFormModal({
               defaultOpen
             >
               {((!showInstrumentBlock) || showOpeningCounterparty || (!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType))) && (
-                <div className={cn("grid grid-cols-1 gap-4", showOpeningCounterparty ? "md:grid-cols-3" : "md:grid-cols-2")}>
+                <div className={cn(
+                  "grid grid-cols-1 gap-4",
+                  isCostOneRowType ? (showOpeningCounterparty ? "md:grid-cols-4" : "md:grid-cols-3") : (showOpeningCounterparty ? "md:grid-cols-3" : "md:grid-cols-2")
+                )}>
                   {/* Колонка 1: Валюта */}
                   {!showInstrumentBlock && (
                     <SelectField
@@ -2145,17 +2255,24 @@ export function AddEditItemFormModal({
                       placeholder="Выберите валюту"
                     />
                   )}
-                  {/* Колонка 2: Баланс / сумма на дату появления */}
+                  {/* Колонка 2 (и 3 при isCostOneRowType): Баланс / рыночная стоимость / сумма на дату появления */}
                   {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && !isCryptoType && (
-                    <div className="grid gap-2">
-                      <TextField label="Рыночная стоимость (в валюте актива)" value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
-                      <TextField label="Стоимость приобретения" value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
-                    </div>
+                    isCostOneRowType ? (
+                      <>
+                        <TextField label="Рыночная стоимость (в валюте актива)" value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                        <TextField label="Стоимость приобретения" value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                      </>
+                    ) : (
+                      <div className="grid gap-2">
+                        <TextField label="Рыночная стоимость (в валюте актива)" value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                        <TextField label="Стоимость приобретения" value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                      </div>
+                    )
                   )}
-                  {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType && !isCryptoType) && (
+                  {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType && !isCryptoType) && !(isCryptoType && primaryValueKind === "MARKET") && (
                     <TextField label={primaryValueKind === "BALANCE" ? "Баланс на дату появления" : primaryValueKind === "MARKET" ? "Рыночная стоимость на дату появления" : primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Стоимость приобретения" : "Сумма на дату появления"} value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                   )}
-                  {/* Колонка 3: Источник средств — не показываем здесь для MOEX, он в левой колонке блока рыночных активов */}
+                  {/* Колонка 3/4: Источник средств — не показываем здесь для MOEX, он в левой колонке блока рыночных активов */}
                   {showOpeningCounterparty && !(showInstrumentBlock && (isMoexType || isCryptoType)) && (
                     <div className="grid gap-2">
                       <div className="flex min-h-6 items-center gap-2">
@@ -2177,7 +2294,7 @@ export function AddEditItemFormModal({
                       <div className="flex flex-col gap-4 min-w-0">
                         <TextField label="Количество лотов" value={positionLots} onChange={(e) => setPositionLots(e.target.value)} inputMode="decimal" placeholder="Например: 10" />
                         {resolvedHistoryStatus === "NEW" ? (
-                          <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => setMoexPurchasePrice(formatRubInput(e.target.value))} onBlur={(e) => setMoexPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder="По умолчанию — рыночная цена на дату" />
+                          <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => { userDidEditMoexPriceRef.current = true; setMoexPurchasePrice(formatRubInput(e.target.value)); }} onBlur={(e) => setMoexPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={moexDatePrices[openDate]?.price_cents != null ? formatCentsForInput(moexDatePrices[openDate]!.price_cents) : "По умолчанию — рыночная цена на дату"} />
                         ) : (
                           <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 123,45" />
                         )}
@@ -2256,7 +2373,19 @@ export function AddEditItemFormModal({
                                           </span>
                                         ) : "—"}
                                       </td>
-                                      <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>—</td>
+                                      <td className="px-4 py-2 text-sm text-right tabular-nums align-top" style={{ color: ACTIVE_TEXT_DARK }}>
+                                        {moexPriceTable.openValueInCurrencyCents != null && moexPriceTable.currentValueInCurrencyCents != null ? (() => {
+                                          const delta = moexPriceTable.currentValueInCurrencyCents - moexPriceTable.openValueInCurrencyCents;
+                                          const pct = moexPriceTable.openValueInCurrencyCents !== 0 ? (delta / moexPriceTable.openValueInCurrencyCents) * 100 : null;
+                                          const color = delta >= 0 ? GREEN : RED;
+                                          return (
+                                            <span className="flex flex-col gap-0.5 text-right">
+                                              <span style={{ color }}>{(delta >= 0 ? "+" : "")}{formatAmount(delta)}</span>
+                                              {pct != null && <span style={{ color }}>{(pct >= 0 ? "+" : "")}{pct.toFixed(1)}%</span>}
+                                            </span>
+                                          );
+                                        })() : "—"}
+                                      </td>
                                       <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
                                         {moexPriceTable.currentValueInCurrencyCents != null ? (
                                           <span className="flex items-center gap-2 justify-end">
@@ -2269,11 +2398,23 @@ export function AddEditItemFormModal({
                                     <tr className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
                                       <td className="pl-6 pr-4 py-2 text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Курс</td>
                                       <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
-                                        {moexPriceTable.openRateRubPerCurrency != null ? moexPriceTable.openRateRubPerCurrency.toFixed(2).replace(".", ",") : "—"}
+                                        {moexPriceTable.openRateRubPerCurrency != null ? formatRate(moexPriceTable.openRateRubPerCurrency) : "—"}
                                       </td>
-                                      <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>—</td>
+                                      <td className="px-4 py-2 text-sm text-right tabular-nums align-top" style={{ color: ACTIVE_TEXT_DARK }}>
+                                        {moexPriceTable.openRateRubPerCurrency != null && moexPriceTable.currentRateRubPerCurrency != null ? (() => {
+                                          const d = moexPriceTable.currentRateRubPerCurrency! - moexPriceTable.openRateRubPerCurrency!;
+                                          const pct = moexPriceTable.openRateRubPerCurrency !== 0 ? (d / moexPriceTable.openRateRubPerCurrency) * 100 : null;
+                                          const color = d >= 0 ? GREEN : RED;
+                                          return (
+                                            <span className="flex flex-col gap-0.5 text-right">
+                                              <span style={{ color }}>{(d >= 0 ? "+" : "")}{formatRate(d)}</span>
+                                              {pct != null && <span style={{ color }}>{(pct >= 0 ? "+" : "")}{pct.toFixed(1)}%</span>}
+                                            </span>
+                                          );
+                                        })() : "—"}
+                                      </td>
                                       <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
-                                        {moexPriceTable.currentRateRubPerCurrency != null ? moexPriceTable.currentRateRubPerCurrency.toFixed(2).replace(".", ",") : "—"}
+                                        {moexPriceTable.currentRateRubPerCurrency != null ? formatRate(moexPriceTable.currentRateRubPerCurrency) : "—"}
                                       </td>
                                     </tr>
                                   </>
@@ -2319,9 +2460,12 @@ export function AddEditItemFormModal({
                       <div className="flex flex-col gap-4 min-w-0">
                         <TextField label="Количество" value={quantityUnitsStr} onChange={(e) => setQuantityUnitsStr(e.target.value)} inputMode="decimal" placeholder="Например: 0.5" />
                         {resolvedHistoryStatus === "NEW" ? (
-                          <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => setCryptoPurchasePrice(formatRubInput(e.target.value))} onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={marketPrice?.price_usd_cents != null ? (marketPrice.price_usd_cents / 100).toFixed(2).replace(".", ",") : "По умолчанию — рыночная цена"} />
+                          <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => { userDidEditCryptoPriceRef.current = true; setCryptoPurchasePrice(formatRubInput(e.target.value)); }} onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={cryptoPriceOnOpenDate?.price_usd_cents != null ? formatCentsForInput(cryptoPriceOnOpenDate.price_usd_cents) : marketPrice?.price_usd_cents != null ? formatCentsForInput(marketPrice.price_usd_cents) : "По умолчанию — рыночная цена"} />
                         ) : (
                           <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас (USD)" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 83,32" />
+                        )}
+                        {commissionAllowed && (
+                          <TextField label="Сумма комиссии" value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                         )}
                         {showOpeningCounterparty && (
                           <div className="grid gap-2">
@@ -2392,7 +2536,19 @@ export function AddEditItemFormModal({
                                       </span>
                                     ) : "—"}
                                   </td>
-                                  <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>—</td>
+                                  <td className="px-4 py-2 text-sm text-right tabular-nums align-top" style={{ color: ACTIVE_TEXT_DARK }}>
+                                    {cryptoPriceTable.openValueInCurrencyCents != null && cryptoPriceTable.currentValueInCurrencyCents != null ? (() => {
+                                      const delta = cryptoPriceTable.currentValueInCurrencyCents - cryptoPriceTable.openValueInCurrencyCents;
+                                      const pct = cryptoPriceTable.openValueInCurrencyCents !== 0 ? (delta / cryptoPriceTable.openValueInCurrencyCents) * 100 : null;
+                                      const color = delta >= 0 ? GREEN : RED;
+                                      return (
+                                        <span className="flex flex-col gap-0.5 text-right">
+                                          <span style={{ color }}>{(delta >= 0 ? "+" : "")}{formatAmount(delta)}</span>
+                                          {pct != null && <span style={{ color }}>{(pct >= 0 ? "+" : "")}{pct.toFixed(1)}%</span>}
+                                        </span>
+                                      );
+                                    })() : "—"}
+                                  </td>
                                   <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
                                     {cryptoPriceTable.currentValueInCurrencyCents != null ? (
                                       <span className="flex items-center gap-2 justify-end">
@@ -2405,11 +2561,23 @@ export function AddEditItemFormModal({
                                 <tr className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
                                   <td className="pl-6 pr-4 py-2 text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Курс</td>
                                   <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
-                                    {cryptoPriceTable.openRateRubPerCurrency != null ? cryptoPriceTable.openRateRubPerCurrency.toFixed(2).replace(".", ",") : "—"}
+                                    {cryptoPriceTable.openRateRubPerCurrency != null ? formatRate(cryptoPriceTable.openRateRubPerCurrency) : "—"}
                                   </td>
-                                  <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>—</td>
+                                  <td className="px-4 py-2 text-sm text-right tabular-nums align-top" style={{ color: ACTIVE_TEXT_DARK }}>
+                                    {cryptoPriceTable.openRateRubPerCurrency != null && cryptoPriceTable.currentRateRubPerCurrency != null ? (() => {
+                                      const d = cryptoPriceTable.currentRateRubPerCurrency! - cryptoPriceTable.openRateRubPerCurrency!;
+                                      const pct = cryptoPriceTable.openRateRubPerCurrency !== 0 ? (d / cryptoPriceTable.openRateRubPerCurrency!) * 100 : null;
+                                      const color = d >= 0 ? GREEN : RED;
+                                      return (
+                                        <span className="flex flex-col gap-0.5 text-right">
+                                          <span style={{ color }}>{(d >= 0 ? "+" : "")}{formatRate(d)}</span>
+                                          {pct != null && <span style={{ color }}>{(pct >= 0 ? "+" : "")}{pct.toFixed(1)}%</span>}
+                                        </span>
+                                      );
+                                    })() : "—"}
+                                  </td>
                                   <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
-                                    {cryptoPriceTable.currentRateRubPerCurrency != null ? cryptoPriceTable.currentRateRubPerCurrency.toFixed(2).replace(".", ",") : "—"}
+                                    {cryptoPriceTable.currentRateRubPerCurrency != null ? formatRate(cryptoPriceTable.currentRateRubPerCurrency) : "—"}
                                   </td>
                                 </tr>
                                 <tr className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>

@@ -844,11 +844,14 @@ def get_instrument_prices(
     if instrument.provider == "COINGECKO":
         try:
             chart_data = get_market_chart_range(secid, from_date, to_date, vs_currency="rub")
+            chart_data_usd = get_market_chart_range(secid, from_date, to_date, vs_currency="usd")
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        usd_by_date = {d: int(round(price_usd * 100)) for d, price_usd in chart_data_usd}
         results = []
         for d, price_rub in chart_data:
             price_cents = int(round(price_rub * 100))
+            price_usd_cents = usd_by_date.get(d)
             price_out = MarketPriceOut(
                 instrument_id=secid,
                 board_id=CRYPTO_BOARD_ID,
@@ -859,6 +862,7 @@ def get_instrument_prices(
                 accint_cents=None,
                 yield_bp=None,
                 currency_code="RUB",
+                price_usd_cents=price_usd_cents,
             )
             existing = db.execute(
                 select(MarketPrice).where(

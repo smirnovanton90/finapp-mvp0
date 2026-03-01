@@ -21,8 +21,9 @@ export function getDefaultPrimaryValueKind(typeCode: string, kind: ItemKind): Pr
   if (kind === "LIABILITY") return "BALANCE";
   if (typeCode === "deposit") return "BALANCE";
   if (typeCode === "savings_account" || typeCode === "brokerage") return "BALANCE";
-  if (CASH_TYPES.includes(typeCode) || THIRD_PARTY_DEBT_TYPES.includes(typeCode) || PENSION_TYPES.includes(typeCode) || OTHER_ASSET_TYPES.includes(typeCode))
+  if (CASH_TYPES.includes(typeCode) || THIRD_PARTY_DEBT_TYPES.includes(typeCode) || PENSION_TYPES.includes(typeCode))
     return "BALANCE";
+  if (OTHER_ASSET_TYPES.includes(typeCode)) return "ACQUISITION";
   if (INVESTMENT_TYPES.includes(typeCode) || REAL_ESTATE_TYPES.includes(typeCode) || TRANSPORT_TYPES.includes(typeCode) || VALUABLES_TYPES.includes(typeCode))
     return "MARKET";
   return "BALANCE";
@@ -122,6 +123,9 @@ const LEGAL_LIABILITY_TYPES = ["enforcement_debt", "alimony_debt", "court_debt",
 const OTHER_LIABILITY_TYPES = ["business_liability", "other_liability"];
 
 export const MOEX_TYPE_CODES = ["securities", "bonds", "etf", "bpif", "pif", "precious_metals"];
+
+/** Типы активов из разделов «Недвижимость», «Транспорт», «Имущество» (поля Валюта, Рыночная стоимость, Стоимость приобретения в одну строку). */
+export const REAL_ESTATE_TRANSPORT_VALUABLES_TYPE_CODES = [...REAL_ESTATE_TYPES, ...TRANSPORT_TYPES, ...VALUABLES_TYPES];
 
 export const COUNTERPARTY_TYPE_CODES = [
   "bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account", "consumer_loan", "mortgage", "car_loan", "education_loan",

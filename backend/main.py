@@ -1316,15 +1316,6 @@ def create_item(
         quantity_units = payload.quantity_units
         if payload.position_lots is not None:
             raise HTTPException(status_code=400, detail="position_lots is only allowed for MOEX items")
-        if (
-            payload.commission_enabled is not None
-            or payload.commission_amount_rub is not None
-            or payload.commission_payment_item_id is not None
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="commission fields are only allowed for MOEX items",
-            )
     else:
         if payload.instrument_id is not None:
             raise HTTPException(status_code=400, detail="instrument_id is only allowed for MOEX or crypto items")
@@ -1418,21 +1409,26 @@ def create_item(
     commission_amount_rub = payload.commission_amount_rub
     commission_payment_item = None
     if commission_requested:
-        if not is_moex:
+        if not is_moex and not is_crypto:
             raise HTTPException(
                 status_code=400,
-                detail="commission fields are only allowed for MOEX items",
+                detail="commission fields are only allowed for MOEX or crypto items",
             )
         if commission_enabled:
             if history_status != "NEW":
                 raise HTTPException(
                     status_code=400,
-                    detail="commission is only allowed for NEW MOEX items",
+                    detail="commission is only allowed for NEW MOEX or crypto items",
                 )
-            if opening_quantity_lots is None or opening_quantity_lots <= 0:
+            if is_moex and (opening_quantity_lots is None or opening_quantity_lots <= 0):
                 raise HTTPException(
                     status_code=400,
                     detail="commission requires position_lots > 0",
+                )
+            if is_crypto and (quantity_units is None or quantity_units <= 0):
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission requires quantity_units > 0",
                 )
             if commission_amount_rub is None or commission_amount_rub <= 0:
                 raise HTTPException(
@@ -1791,21 +1787,26 @@ def update_item(
     commission_amount_rub = payload.commission_amount_rub
     commission_payment_item = None
     if commission_requested:
-        if not is_moex:
+        if not is_moex and not is_crypto:
             raise HTTPException(
                 status_code=400,
-                detail="commission fields are only allowed for MOEX items",
+                detail="commission fields are only allowed for MOEX or crypto items",
             )
         if commission_enabled:
             if new_history_status != "NEW":
                 raise HTTPException(
                     status_code=400,
-                    detail="commission is only allowed for NEW MOEX items",
+                    detail="commission is only allowed for NEW MOEX or crypto items",
                 )
-            if opening_quantity_lots is None or opening_quantity_lots <= 0:
+            if is_moex and (opening_quantity_lots is None or opening_quantity_lots <= 0):
                 raise HTTPException(
                     status_code=400,
                     detail="commission requires position_lots > 0",
+                )
+            if is_crypto and (quantity_units is None or quantity_units <= 0):
+                raise HTTPException(
+                    status_code=400,
+                    detail="commission requires quantity_units > 0",
                 )
             if commission_amount_rub is None or commission_amount_rub <= 0:
                 raise HTTPException(

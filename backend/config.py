@@ -1,8 +1,12 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Docker Compose публикует PostgreSQL на порту 5432 (см. docker-compose.yml)
+DEFAULT_DATABASE_URL = "postgresql://finapp:finapp@localhost:5432/finapp"
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    database_url: str
+    database_url: str = DEFAULT_DATABASE_URL
+
     auth_secret: str = "dev-secret-change-me"
     public_base_url: str = "http://localhost:8000"
     moex_base_url: str = "https://iss.moex.com/iss"

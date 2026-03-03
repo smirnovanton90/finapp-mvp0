@@ -196,8 +196,14 @@ export function AddEditItemFormModal({
   const [firstPayoutRule, setFirstPayoutRule] = useState<FirstPayoutRule | "">("");
   const [planEndDate, setPlanEndDate] = useState("");
   const [loanEndDate, setLoanEndDate] = useState("");
+  /** Режим ввода плановой даты погашения кредита: по дням или по дате окончания. */
+  const [loanTermMode, setLoanTermMode] = useState<"days" | "end_date">("end_date");
+  /** Срок до погашения (дней), используется при loanTermMode === "days". */
+  const [loanTermDays, setLoanTermDays] = useState("");
   const [repaymentFrequency, setRepaymentFrequency] = useState<TransactionChainFrequency>("MONTHLY");
   const [repaymentWeeklyDay, setRepaymentWeeklyDay] = useState<number>(() => (new Date().getDay() + 6) % 7);
+  /** Число месяца платежа (1–31) для ежемесячного погашения. */
+  const [repaymentMonthlyDay, setRepaymentMonthlyDay] = useState("");
   const [repaymentIntervalDays, setRepaymentIntervalDays] = useState("1");
   const [repaymentAccountId, setRepaymentAccountId] = useState("");
   const [repaymentType, setRepaymentType] = useState<RepaymentType | "">("");
@@ -332,9 +338,26 @@ export function AddEditItemFormModal({
       setPlanSectionOpen(planOn);
       setFirstPayoutRule(ps?.first_payout_rule ?? "");
       setPlanEndDate(ps?.plan_end_date ?? "");
-      setLoanEndDate(ps?.loan_end_date ?? "");
+      const loanEnd = ps?.loan_end_date ?? "";
+      setLoanEndDate(loanEnd);
+      if (loanEnd) {
+        setLoanTermMode("end_date");
+        const od = editingItem.open_date ?? getTodayDateKey();
+        const days = Math.round((parseDateKey(loanEnd).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
+        setLoanTermDays(Number.isFinite(days) && days >= 0 ? String(days) : "");
+      } else {
+        setLoanTermMode("days");
+        setLoanTermDays("");
+      }
       setRepaymentFrequency(ps?.repayment_frequency ?? "MONTHLY");
       setRepaymentWeeklyDay(ps?.repayment_weekly_day ?? (new Date().getDay() + 6) % 7);
+      if (ps?.repayment_monthly_day != null) {
+        setRepaymentMonthlyDay(String(ps.repayment_monthly_day));
+      } else if (ps?.repayment_monthly_rule === "LAST_DAY") {
+        setRepaymentMonthlyDay("31");
+      } else {
+        setRepaymentMonthlyDay("");
+      }
       setRepaymentIntervalDays(ps?.repayment_interval_days != null ? String(ps.repayment_interval_days) : "1");
       setRepaymentAccountId(ps?.repayment_account_id != null ? String(ps.repayment_account_id) : "");
       setRepaymentType(ps?.repayment_type ?? "");
@@ -461,6 +484,15 @@ export function AddEditItemFormModal({
     () => AUTO_PLAN_LOAN_TYPES.includes(typeCode),
     [typeCode]
   );
+  /** Вычисленная плановая дата погашения: из срока в днях или из поля даты. */
+  const effectiveLoanEndDate = useMemo(() => {
+    const od = openDate || getTodayDateKey();
+    if (loanTermMode === "days" && loanTermDays.trim()) {
+      const n = Math.trunc(Number(loanTermDays));
+      if (Number.isFinite(n) && n >= 0) return toDateKey(addDays(parseDateKey(od), n));
+    }
+    return loanEndDate || null;
+  }, [loanTermMode, loanTermDays, loanEndDate, openDate]);
   const requiresLoanPaymentInput = useMemo(
     () => showLoanPlanSettings && kind === "ASSET",
     [showLoanPlanSettings, kind]
@@ -770,6 +802,7 @@ export function AddEditItemFormModal({
         loanEndDate: settings?.loan_end_date ?? null,
         repaymentFrequency: settings?.repayment_frequency ?? null,
         repaymentWeeklyDay: settings?.repayment_weekly_day ?? null,
+        repaymentMonthlyDay: settings?.repayment_monthly_day ?? null,
         repaymentIntervalDays: settings?.repayment_interval_days ?? null,
         repaymentAccountId: settings?.repayment_account_id ?? null,
         repaymentType: settings?.repayment_type ?? null,
@@ -807,9 +840,13 @@ export function AddEditItemFormModal({
         enabled: planEnabled,
         firstPayoutRule: firstPayoutRule || null,
         planEndDate: planEndDate || null,
-        loanEndDate: loanEndDate || null,
+        loanEndDate: effectiveLoanEndDate || null,
         repaymentFrequency: repaymentFrequency || null,
         repaymentWeeklyDay: repaymentFrequency === "WEEKLY" ? repaymentWeeklyDay : null,
+        repaymentMonthlyDay:
+          repaymentFrequency === "MONTHLY" && repaymentMonthlyDay.trim()
+            ? (() => { const n = Math.trunc(Number(repaymentMonthlyDay)); return Number.isFinite(n) && n >= 1 && n <= 31 ? n : null; })()
+            : null,
         repaymentIntervalDays:
           repaymentFrequency === "REGULAR" && repaymentIntervalDays.trim()
             ? Number(repaymentIntervalDays)
@@ -1286,10 +1323,10 @@ export function AddEditItemFormModal({
 
   useEffect(() => {
     if (!showLoanPlanSettings) return;
-    if (loanEndDate && planEndDate) {
+    if (effectiveLoanEndDate && planEndDate) {
       setPlanEndDate("");
     }
-  }, [loanEndDate, planEndDate, showLoanPlanSettings]);
+  }, [effectiveLoanEndDate, planEndDate, showLoanPlanSettings]);
 
   useEffect(() => {
     if (!requiresLoanPaymentInput) {
@@ -1639,16 +1676,19 @@ export function AddEditItemFormModal({
         return;
       }
       if (!repaymentAccountId) {
-        setFormError("Выберите счет погашения.");
+        setFormError("Укажите, откуда погашается.");
         return;
       }
       if (!repaymentFrequency) {
         setFormError("Выберите периодичность погашения.");
         return;
       }
-      if (repaymentFrequency === "MONTHLY" && !firstPayoutRule) {
-        setFormError("Выберите правило первой даты погашения.");
-        return;
+      if (repaymentFrequency === "MONTHLY") {
+        const dayNum = repaymentMonthlyDay.trim() ? Math.trunc(Number(repaymentMonthlyDay)) : NaN;
+        if (!Number.isFinite(dayNum) || dayNum < 1 || dayNum > 31) {
+          setFormError("Укажите число месяца платежа (1–31).");
+          return;
+        }
       }
       if (repaymentFrequency === "REGULAR") {
         if (!intervalDaysValue || intervalDaysValue < 1) {
@@ -1656,7 +1696,7 @@ export function AddEditItemFormModal({
           return;
         }
       }
-      if (!loanEndDate && !planEndDate) {
+      if (!effectiveLoanEndDate && !planEndDate) {
         setFormError(
           "Укажите плановую дату погашения или дату окончания создания плановых транзакций."
         );
@@ -1713,15 +1753,15 @@ export function AddEditItemFormModal({
     if (planEnabled && showLoanPlanSettings && repaymentAccountId) {
       const repaymentAccount = itemsById.get(Number(repaymentAccountId));
       if (!repaymentAccount) {
-        setFormError("Счет погашения не найден.");
+        setFormError("Откуда погашается: счет не найден.");
         return;
       }
       if (!REPAYMENT_ACCOUNT_TYPE_CODES.includes(repaymentAccount.type_code)) {
-        setFormError("Счет погашения должен быть денежным или брокерским/накопительным счётом.");
+        setFormError("Счет «Откуда погашается» должен быть денежным или брокерским/накопительным счётом.");
         return;
       }
       if (repaymentAccount.currency_code !== currencyCode) {
-        setFormError("Валюта счета погашения должна совпадать с валютой кредита или займа.");
+        setFormError("Валюта счета «Откуда погашается» должна совпадать с валютой кредита или займа.");
         return;
       }
     }
@@ -1837,29 +1877,23 @@ export function AddEditItemFormModal({
       const shouldSendPlanSettings =
         planEnabled || (editingItem?.plan_settings?.enabled ?? false);
       if (shouldSendPlanSettings) {
-        let repaymentMonthlyDay: number | null = null;
-        let repaymentMonthlyRule: TransactionChainMonthlyRule | null = null;
+        let repaymentMonthlyDayPayload: number | null = null;
+        const repaymentMonthlyRulePayload: TransactionChainMonthlyRule | null = null;
         if (
           planEnabled &&
           showLoanPlanSettings &&
           repaymentFrequency === "MONTHLY" &&
-          firstPayoutRule
+          repaymentMonthlyDay.trim()
         ) {
-          if (firstPayoutRule === "MONTH_END") {
-            repaymentMonthlyRule = "LAST_DAY";
-          } else {
-            const baseDate = new Date(`${openDate}T00:00:00`);
-            if (!Number.isNaN(baseDate.getTime())) {
-              repaymentMonthlyDay = baseDate.getDate();
-            }
+          const n = Math.trunc(Number(repaymentMonthlyDay));
+          if (Number.isFinite(n) && n >= 1 && n <= 31) {
+            repaymentMonthlyDayPayload = n;
           }
         }
         const planSettings = {
           enabled: planEnabled,
           first_payout_rule:
-            planEnabled &&
-            ((showInterestPlanSettings && interestPayoutOrder === "MONTHLY") ||
-              (showLoanPlanSettings && repaymentFrequency === "MONTHLY"))
+            planEnabled && showInterestPlanSettings && interestPayoutOrder === "MONTHLY"
               ? (firstPayoutRule as FirstPayoutRule)
               : null,
           plan_end_date: planEnabled
@@ -1867,7 +1901,7 @@ export function AddEditItemFormModal({
               ? toDateKey(addDays(parseDateKey(openDate || getTodayDateKey()), depositTermDaysValue))
               : (planEndDate || null))
             : null,
-          loan_end_date: planEnabled ? (loanEndDate || null) : null,
+          loan_end_date: planEnabled ? (effectiveLoanEndDate || null) : null,
           repayment_frequency:
             planEnabled && showLoanPlanSettings ? repaymentFrequency : null,
           repayment_weekly_day:
@@ -1876,11 +1910,11 @@ export function AddEditItemFormModal({
               : null,
           repayment_monthly_day:
             planEnabled && showLoanPlanSettings && repaymentFrequency === "MONTHLY"
-              ? repaymentMonthlyDay
+              ? repaymentMonthlyDayPayload
               : null,
           repayment_monthly_rule:
             planEnabled && showLoanPlanSettings && repaymentFrequency === "MONTHLY"
-              ? repaymentMonthlyRule
+              ? repaymentMonthlyRulePayload
               : null,
           repayment_interval_days:
             planEnabled && showLoanPlanSettings && repaymentFrequency === "REGULAR"
@@ -2870,12 +2904,83 @@ export function AddEditItemFormModal({
                 )}
                 {planEnabled && showLoanPlanSettings && (
                   <>
-                    <TextField label="Плановая дата погашения" value={loanEndDate} onChange={(e) => setLoanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
-                    <SelectField label="Счет погашения" value={repaymentAccountId} onValueChange={setRepaymentAccountId} options={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at).map((it) => ({ value: String(it.id), label: (it.name || "") + " " + (it.currency_code || "") }))} placeholder="Выберите счет" required={planEnabled} />
-                    <SelectField label="Периодичность погашения" value={repaymentFrequency} onValueChange={(v) => setRepaymentFrequency(v as TransactionChainFrequency)} options={[{ value: "WEEKLY", label: "Еженедельно" }, { value: "MONTHLY", label: "Ежемесячно" }, { value: "REGULAR", label: "С заданным интервалом (дни)" }]} required={planEnabled} />
-                    {repaymentFrequency === "MONTHLY" && <SelectField label="Первая дата погашения" value={firstPayoutRule} onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)} options={[{ value: "MONTH_END", label: "Последний день месяца" }, { value: "SAME_DAY", label: "Тот же день, что и дата появления" }]} required={planEnabled} />}
-                    {repaymentFrequency === "REGULAR" && <TextField label="Интервал (дней)" value={repaymentIntervalDays} onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))} placeholder="1" />}
-                    <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                      <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" />
+                      <div className="min-w-0">
+                        <FormField label="Откуда погашается" required={planEnabled}>
+                          <ItemSelector items={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at)} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => setRepaymentAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                        </FormField>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+                      <div className="grid min-w-0 gap-2">
+                        <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-1.5 gap-y-0">
+                          <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium shrink-0">
+                            {loanTermMode === "days" ? "Срок до погашения (дней)" : "Плановая дата погашения"}
+                            {planEnabled && <span style={{ color: "#FB4C4F" }}> *</span>}
+                          </Label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextMode = loanTermMode === "days" ? "end_date" : "days";
+                              setLoanTermMode(nextMode);
+                              const od = openDate || getTodayDateKey();
+                              if (nextMode === "end_date" && loanTermDays.trim()) {
+                                const n = Math.trunc(Number(loanTermDays));
+                                if (Number.isFinite(n) && n >= 0) setLoanEndDate(toDateKey(addDays(parseDateKey(od), n)));
+                              } else if (nextMode === "days" && loanEndDate) {
+                                const days = Math.round((parseDateKey(loanEndDate).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
+                                if (Number.isFinite(days) && days >= 0) setLoanTermDays(String(days));
+                              }
+                            }}
+                            className="shrink-0 flex items-center gap-1.5 font-semibold text-sm"
+                            style={{ color: ACCENT }}
+                          >
+                            <RefreshCcw className="w-4 h-4 shrink-0" />
+                            {loanTermMode === "days" ? "Дата окончания" : "Срок (дней)"}
+                          </button>
+                        </div>
+                        {loanTermMode === "days" ? (
+                          <TextField
+                            label=""
+                            value={loanTermDays}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, "");
+                              setLoanTermDays(val);
+                              const od = openDate || getTodayDateKey();
+                              if (od && val.trim()) {
+                                const n = Math.trunc(Number(val));
+                                if (Number.isFinite(n) && n >= 0) setLoanEndDate(toDateKey(addDays(parseDateKey(od), n)));
+                              }
+                            }}
+                            placeholder="Необязательно"
+                          />
+                        ) : (
+                          <DateField
+                            label=""
+                            value={loanEndDate}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setLoanEndDate(val);
+                              const od = openDate || getTodayDateKey();
+                              if (od && val) {
+                                const days = Math.round((parseDateKey(val).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
+                                if (Number.isFinite(days) && days >= 0) setLoanTermDays(String(days));
+                              }
+                            }}
+                            placeholder="ГГГГ-ММ-ДД"
+                          />
+                        )}
+                      </div>
+                      <SelectField label="Периодичность погашения" value={repaymentFrequency} onValueChange={(v) => setRepaymentFrequency(v as TransactionChainFrequency)} options={[{ value: "WEEKLY", label: "Еженедельно" }, { value: "MONTHLY", label: "Ежемесячно" }, { value: "REGULAR", label: "С заданным интервалом (дни)" }]} required={planEnabled} />
+                      {repaymentFrequency === "MONTHLY" ? (
+                        <TextField label="Число месяца платежа" value={repaymentMonthlyDay} onChange={(e) => setRepaymentMonthlyDay(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="1–31" required={planEnabled} />
+                      ) : repaymentFrequency === "WEEKLY" ? (
+                        <SelectField label="День недели погашения" value={String(repaymentWeeklyDay)} onValueChange={(v) => setRepaymentWeeklyDay(Number(v))} options={[{ value: "0", label: "Понедельник" }, { value: "1", label: "Вторник" }, { value: "2", label: "Среда" }, { value: "3", label: "Четверг" }, { value: "4", label: "Пятница" }, { value: "5", label: "Суббота" }, { value: "6", label: "Воскресенье" }]} placeholder="Выберите день" required={planEnabled} />
+                      ) : (
+                        <TextField label="Интервал (дней)" value={repaymentIntervalDays} onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))} placeholder="1" required={planEnabled} />
+                      )}
+                    </div>
                     {requiresLoanPaymentInput && (
                       <>
                         <SelectField label="Тип суммы погашения" value={paymentAmountKind} onValueChange={(v) => setPaymentAmountKind(v as PaymentAmountKind)} options={[{ value: "FIXED", label: "Фиксированная сумма" }, { value: "PERCENT", label: "Процент от остатка" }]} placeholder="Выберите" />

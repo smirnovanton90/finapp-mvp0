@@ -724,13 +724,18 @@ def _create_loan_chains(
     interval_days = settings.repayment_interval_days
 
     if settings.repayment_frequency == "MONTHLY":
-        if not settings.first_payout_rule:
-            raise HTTPException(
-                status_code=400, detail="first_payout_rule is required for monthly payouts"
+        if settings.repayment_monthly_day is not None or settings.repayment_monthly_rule is not None:
+            # График по числу месяца или правилу (FIRST_DAY/LAST_DAY), start_date не сдвигаем
+            pass
+        elif settings.first_payout_rule:
+            start_date, monthly_day, monthly_rule = _resolve_monthly_schedule(
+                base_date, end_date, settings.first_payout_rule
             )
-        start_date, monthly_day, monthly_rule = _resolve_monthly_schedule(
-            base_date, end_date, settings.first_payout_rule
-        )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="repayment_monthly_day (1-31) or first_payout_rule is required for monthly payouts",
+            )
 
     schedule_dates = build_schedule_dates(
         start_date,

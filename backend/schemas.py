@@ -161,6 +161,9 @@ class ItemPlanSettingsBase(BaseModel):
     repayment_type: RepaymentType | None = None
     payment_amount_kind: PaymentAmountKind | None = None
     payment_amount_rub: int | None = Field(default=None, ge=0)
+    first_payment_interest_only: bool = False
+    skip_first_payment: bool = False
+    shift_weekend_payment_to_workday: bool = True
 
     @model_validator(mode="after")
     def validate_repayment_frequency_details(self) -> "ItemPlanSettingsBase":

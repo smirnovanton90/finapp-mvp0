@@ -533,6 +533,11 @@ class ItemPlanSettings(Base):
     repayment_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     payment_amount_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
     payment_amount_rub: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    first_payment_interest_only: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    skip_first_payment: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    shift_weekend_payment_to_workday: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
 
     __table_args__ = (
         CheckConstraint(

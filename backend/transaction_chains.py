@@ -104,7 +104,8 @@ def iter_monthly(
         else:
             candidate = date(current.year, current.month, last_day)
 
-        if start <= candidate <= end:
+        # Первый платёж — строго после даты выдачи (следующее число месяца)
+        if start < candidate <= end:
             yield candidate
 
         if current.month == 12:

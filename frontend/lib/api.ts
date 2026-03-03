@@ -28,6 +28,9 @@ export type ItemPlanSettings = {
   repayment_type?: RepaymentType | null;
   payment_amount_kind?: PaymentAmountKind | null;
   payment_amount_rub?: number | null;
+  first_payment_interest_only?: boolean | null;
+  skip_first_payment?: boolean | null;
+  shift_weekend_payment_to_workday?: boolean | null;
 };
 
 export type ItemOut = {

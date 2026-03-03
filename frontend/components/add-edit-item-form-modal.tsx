@@ -90,6 +90,7 @@ import {
 } from "@/lib/asset-item-form-constants";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-type-icons";
 import { assetIconPath } from "@/lib/image-paths";
+import { buildLoanSchedule, type LoanScheduleRow } from "@/lib/loan-schedule";
 
 export type AddEditItemFormModalProps = {
   open: boolean;
@@ -207,6 +208,9 @@ export function AddEditItemFormModal({
   const [repaymentIntervalDays, setRepaymentIntervalDays] = useState("1");
   const [repaymentAccountId, setRepaymentAccountId] = useState("");
   const [repaymentType, setRepaymentType] = useState<RepaymentType | "">("");
+  const [firstPaymentInterestOnly, setFirstPaymentInterestOnly] = useState(false);
+  const [skipFirstPayment, setSkipFirstPayment] = useState(false);
+  const [shiftWeekendPaymentToWorkday, setShiftWeekendPaymentToWorkday] = useState(true);
   const [paymentAmountKind, setPaymentAmountKind] = useState<PaymentAmountKind | "">("");
   const [paymentAmountStr, setPaymentAmountStr] = useState("");
   const [openingCounterpartyId, setOpeningCounterpartyId] = useState("");
@@ -361,6 +365,9 @@ export function AddEditItemFormModal({
       setRepaymentIntervalDays(ps?.repayment_interval_days != null ? String(ps.repayment_interval_days) : "1");
       setRepaymentAccountId(ps?.repayment_account_id != null ? String(ps.repayment_account_id) : "");
       setRepaymentType(ps?.repayment_type ?? "");
+      setFirstPaymentInterestOnly(ps?.first_payment_interest_only ?? false);
+      setSkipFirstPayment(ps?.skip_first_payment ?? false);
+      setShiftWeekendPaymentToWorkday(ps?.shift_weekend_payment_to_workday ?? true);
       setPaymentAmountKind(ps?.payment_amount_kind ?? "");
       setPaymentAmountStr(ps?.payment_amount_rub != null ? formatAmount(ps.payment_amount_rub) : "");
       setOpeningCounterpartyId(editingItem.opening_counterparty_item_id != null ? String(editingItem.opening_counterparty_item_id) : "");
@@ -497,6 +504,58 @@ export function AddEditItemFormModal({
     () => showLoanPlanSettings && kind === "ASSET",
     [showLoanPlanSettings, kind]
   );
+
+  /** График погашения для предпросмотра (кредитные обязательства). */
+  const loanSchedulePreview = useMemo((): LoanScheduleRow[] | null => {
+    if (!planEnabled || !showLoanPlanSettings || !effectiveLoanEndDate) return null;
+    const principalCents = parseRubToCents(amountStr);
+    if (!Number.isFinite(principalCents) || principalCents < 0) return null;
+    const rate = parseFloat(String(interestRate).replace(",", "."));
+    const rateNum = Number.isFinite(rate) && rate >= 0 ? rate : 0;
+    const type = repaymentType === "ANNUITY" ? "ANNUITY" : repaymentType === "DIFFERENTIAL" ? "DIFFERENTIATED" : null;
+    if (!type) return null;
+    const periodStartKey = openDate || getTodayDateKey();
+    const monthlyDayNum =
+      repaymentFrequency === "MONTHLY" && repaymentMonthlyDay.trim()
+        ? Math.trunc(Number(repaymentMonthlyDay))
+        : undefined;
+    const intervalNum =
+      repaymentFrequency === "REGULAR" && repaymentIntervalDays.trim()
+        ? Math.trunc(Number(repaymentIntervalDays))
+        : undefined;
+    if (repaymentFrequency === "MONTHLY" && (monthlyDayNum == null || monthlyDayNum < 1 || monthlyDayNum > 31))
+      return null;
+    if (repaymentFrequency === "REGULAR" && (intervalNum == null || intervalNum < 1)) return null;
+    return buildLoanSchedule({
+      principalCents,
+      rate: rateNum,
+      periodStartKey,
+      endDateKey: effectiveLoanEndDate,
+      repaymentType: type,
+      frequency: repaymentFrequency,
+      weeklyDay: repaymentFrequency === "WEEKLY" ? repaymentWeeklyDay : undefined,
+      monthlyDay: repaymentFrequency === "MONTHLY" ? monthlyDayNum : undefined,
+      intervalDays: repaymentFrequency === "REGULAR" ? intervalNum : undefined,
+      firstPaymentInterestOnly,
+      skipFirstPayment,
+      shiftWeekendToWorkday: shiftWeekendPaymentToWorkday,
+    });
+  }, [
+    planEnabled,
+    showLoanPlanSettings,
+    effectiveLoanEndDate,
+    amountStr,
+    interestRate,
+    repaymentType,
+    repaymentFrequency,
+    openDate,
+    repaymentWeeklyDay,
+    repaymentMonthlyDay,
+    repaymentIntervalDays,
+    firstPaymentInterestOnly,
+    skipFirstPayment,
+    shiftWeekendPaymentToWorkday,
+  ]);
 
   const itemsById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
@@ -808,6 +867,9 @@ export function AddEditItemFormModal({
         repaymentType: settings?.repayment_type ?? null,
         paymentAmountKind: item.kind === "ASSET" ? settings?.payment_amount_kind ?? null : null,
         paymentAmountRub: item.kind === "ASSET" ? settings?.payment_amount_rub ?? null : null,
+        firstPaymentInterestOnly: settings?.first_payment_interest_only ?? null,
+        skipFirstPayment: settings?.skip_first_payment ?? null,
+        shiftWeekendPaymentToWorkday: settings?.shift_weekend_payment_to_workday ?? null,
       },
     });
   }
@@ -857,6 +919,9 @@ export function AddEditItemFormModal({
         paymentAmountRub: requiresLoanPaymentInput && Number.isFinite(paymentAmountCents)
           ? paymentAmountCents
           : null,
+        firstPaymentInterestOnly: firstPaymentInterestOnly,
+        skipFirstPayment: skipFirstPayment,
+        shiftWeekendPaymentToWorkday: shiftWeekendPaymentToWorkday,
       },
     });
   }
@@ -913,6 +978,9 @@ export function AddEditItemFormModal({
     setRepaymentIntervalDays("1");
     setRepaymentAccountId("");
     setRepaymentType("");
+    setFirstPaymentInterestOnly(false);
+    setSkipFirstPayment(false);
+    setShiftWeekendPaymentToWorkday(true);
     setPaymentAmountKind("");
     setPaymentAmountStr("");
     setOpeningCounterpartyId("");
@@ -1675,10 +1743,6 @@ export function AddEditItemFormModal({
         setFormError("Укажите дату появления обязательства.");
         return;
       }
-      if (!repaymentAccountId) {
-        setFormError("Укажите, откуда погашается.");
-        return;
-      }
       if (!repaymentFrequency) {
         setFormError("Выберите периодичность погашения.");
         return;
@@ -1939,6 +2003,9 @@ export function AddEditItemFormModal({
             Number.isFinite(paymentAmountCents)
               ? paymentAmountCents
               : null,
+          first_payment_interest_only: planEnabled && showLoanPlanSettings ? firstPaymentInterestOnly : undefined,
+          skip_first_payment: planEnabled && showLoanPlanSettings ? skipFirstPayment : undefined,
+          shift_weekend_payment_to_workday: planEnabled && showLoanPlanSettings ? shiftWeekendPaymentToWorkday : undefined,
         };
         payload.plan_settings = planSettings;
       }
@@ -2904,13 +2971,14 @@ export function AddEditItemFormModal({
                 )}
                 {planEnabled && showLoanPlanSettings && (
                   <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
                       <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" />
                       <div className="min-w-0">
-                        <FormField label="Откуда погашается" required={planEnabled}>
+                        <FormField label="Откуда погашается">
                           <ItemSelector items={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at)} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => setRepaymentAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
                         </FormField>
                       </div>
+                      <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" />
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
                       <div className="grid min-w-0 gap-2">
@@ -2981,11 +3049,53 @@ export function AddEditItemFormModal({
                         <TextField label="Интервал (дней)" value={repaymentIntervalDays} onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))} placeholder="1" required={planEnabled} />
                       )}
                     </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium">Первый платеж — только проценты</Label>
+                        <Switch checked={firstPaymentInterestOnly} onCheckedChange={setFirstPaymentInterestOnly} />
+                      </div>
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium">Пропустить первый месяц</Label>
+                        <Switch checked={skipFirstPayment} onCheckedChange={setSkipFirstPayment} />
+                      </div>
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium">Переносить платеж с выходных дней</Label>
+                        <Switch checked={shiftWeekendPaymentToWorkday} onCheckedChange={setShiftWeekendPaymentToWorkday} />
+                      </div>
+                    </div>
                     {requiresLoanPaymentInput && (
                       <>
                         <SelectField label="Тип суммы погашения" value={paymentAmountKind} onValueChange={(v) => setPaymentAmountKind(v as PaymentAmountKind)} options={[{ value: "FIXED", label: "Фиксированная сумма" }, { value: "PERCENT", label: "Процент от остатка" }]} placeholder="Выберите" />
                         <TextField label="Сумма погашения" value={paymentAmountStr} onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setPaymentAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                       </>
+                    )}
+                    {loanSchedulePreview && loanSchedulePreview.length > 0 && (
+                      <div className="rounded-lg overflow-hidden border border-white/10">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse text-sm">
+                            <thead>
+                              <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
+                                <th className="pl-6 pr-4 py-3 text-sm font-medium">Дата</th>
+                                <th className="px-4 py-3 text-sm font-medium text-right">Общая сумма платежа</th>
+                                <th className="px-4 py-3 text-sm font-medium text-right">Основной долг</th>
+                                <th className="px-4 py-3 text-sm font-medium text-right">Проценты</th>
+                                <th className="px-6 py-3 text-sm font-medium text-right">Остаток основного долга после погашения</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {loanSchedulePreview.map((row) => (
+                                <tr key={row.dateKey} className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
+                                  <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{formatShortDate(row.dateKey)}</td>
+                                  <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(row.totalCents)}</td>
+                                  <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(row.principalCents)}</td>
+                                  <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(row.interestCents)}</td>
+                                  <td className="px-6 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(row.remainingCents)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     )}
                   </>
                 )}
@@ -3016,9 +3126,6 @@ export function AddEditItemFormModal({
               )}
 
 
-              {showLoanPlanSettings && (
-                <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" />
-              )}
             </CollapsibleFormSection>
             </>)}
         </div>

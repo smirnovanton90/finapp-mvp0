@@ -1323,7 +1323,7 @@ export default function Page() {
   );
   const openingCounterpartyLabel =
     kind === "LIABILITY"
-      ? "Актив для зачисления"
+      ? "Куда зачислить"
       : "Источник средств";
   const openingHint = useMemo(() => {
     if (!showOpeningCounterparty) return null;

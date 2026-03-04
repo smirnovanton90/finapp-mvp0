@@ -200,6 +200,13 @@ export function addDays(date: Date, days: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
 
+/** Добавляет months месяцев к дате. День месяца сохраняется, при переполнении — последний день месяца (напр. 31 янв + 1 мес = 28 фев). */
+export function addMonths(date: Date, months: number): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+
 export function toDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");

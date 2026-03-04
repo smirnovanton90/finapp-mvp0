@@ -85,6 +85,7 @@ import {
   toDateKey,
   findPriceOnOrBefore,
   BANK_CARD_TYPE_CODES,
+  addMonths,
   getDefaultPrimaryValueKind,
   getPrimaryValueLabel,
 } from "@/lib/asset-item-form-constants";
@@ -197,10 +198,10 @@ export function AddEditItemFormModal({
   const [firstPayoutRule, setFirstPayoutRule] = useState<FirstPayoutRule | "">("");
   const [planEndDate, setPlanEndDate] = useState("");
   const [loanEndDate, setLoanEndDate] = useState("");
-  /** Режим ввода плановой даты погашения кредита: по дням или по дате окончания. */
-  const [loanTermMode, setLoanTermMode] = useState<"days" | "end_date">("end_date");
-  /** Срок до погашения (дней), используется при loanTermMode === "days". */
-  const [loanTermDays, setLoanTermDays] = useState("");
+  /** Режим ввода плановой даты погашения кредита: по месяцам или по дате окончания. */
+  const [loanTermMode, setLoanTermMode] = useState<"months" | "end_date">("end_date");
+  /** Срок до погашения (мес.), используется при loanTermMode === "months". */
+  const [loanTermMonths, setLoanTermMonths] = useState("");
   const [repaymentFrequency, setRepaymentFrequency] = useState<TransactionChainFrequency>("MONTHLY");
   const [repaymentWeeklyDay, setRepaymentWeeklyDay] = useState<number>(() => (new Date().getDay() + 6) % 7);
   /** Число месяца платежа (1–31) для ежемесячного погашения. */
@@ -284,13 +285,16 @@ export function AddEditItemFormModal({
     if (editingItem) {
       setKind(editingItem.kind);
       setAllowedTypeCodes(editingItem.kind === "ASSET" ? ASSET_TYPE_CODES : LIABILITY_TYPE_CODES);
-      setSectionId("");
-      setIsGeneralCreate(true);
-      setTypeCode(
+      const resolvedTypeCode =
         editingItem.type_code === "bank_card"
           ? (editingItem.card_kind === "CREDIT" ? "bank_card_credit" : "bank_card_debit")
-          : editingItem.type_code
+          : editingItem.type_code;
+      const sectionForType = ITEM_SECTIONS.find(
+        (s) => s.kind === editingItem.kind && s.typeCodes.includes(resolvedTypeCode)
       );
+      setSectionId(sectionForType?.id ?? "");
+      setIsGeneralCreate(true);
+      setTypeCode(resolvedTypeCode);
       setCurrencyCode(editingItem.type_code === "crypto" ? "USD" : editingItem.currency_code);
       setName(editingItem.name);
       setAmountStr(formatAmount(editingItem.initial_value_rub));
@@ -345,13 +349,16 @@ export function AddEditItemFormModal({
       const loanEnd = ps?.loan_end_date ?? "";
       setLoanEndDate(loanEnd);
       if (loanEnd) {
-        setLoanTermMode("end_date");
         const od = editingItem.open_date ?? getTodayDateKey();
-        const days = Math.round((parseDateKey(loanEnd).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
-        setLoanTermDays(Number.isFinite(days) && days >= 0 ? String(days) : "");
+        const start = parseDateKey(od);
+        const end = parseDateKey(loanEnd);
+        let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+        if (end.getDate() < start.getDate()) months -= 1;
+        setLoanTermMonths(Number.isFinite(months) && months >= 0 ? String(months) : "");
+        setLoanTermMode("months");
       } else {
-        setLoanTermMode("days");
-        setLoanTermDays("");
+        setLoanTermMode("months");
+        setLoanTermMonths("");
       }
       setRepaymentFrequency(ps?.repayment_frequency ?? "MONTHLY");
       setRepaymentWeeklyDay(ps?.repayment_weekly_day ?? (new Date().getDay() + 6) % 7);
@@ -491,15 +498,15 @@ export function AddEditItemFormModal({
     () => AUTO_PLAN_LOAN_TYPES.includes(typeCode),
     [typeCode]
   );
-  /** Вычисленная плановая дата погашения: из срока в днях или из поля даты. */
+  /** Вычисленная плановая дата погашения: из срока в месяцах или из поля даты. */
   const effectiveLoanEndDate = useMemo(() => {
     const od = openDate || getTodayDateKey();
-    if (loanTermMode === "days" && loanTermDays.trim()) {
-      const n = Math.trunc(Number(loanTermDays));
-      if (Number.isFinite(n) && n >= 0) return toDateKey(addDays(parseDateKey(od), n));
+    if (loanTermMode === "months" && loanTermMonths.trim()) {
+      const n = Math.trunc(Number(loanTermMonths));
+      if (Number.isFinite(n) && n >= 0) return toDateKey(addMonths(parseDateKey(od), n));
     }
     return loanEndDate || null;
-  }, [loanTermMode, loanTermDays, loanEndDate, openDate]);
+  }, [loanTermMode, loanTermMonths, loanEndDate, openDate]);
   const requiresLoanPaymentInput = useMemo(
     () => showLoanPlanSettings && kind === "ASSET",
     [showLoanPlanSettings, kind]
@@ -507,7 +514,7 @@ export function AddEditItemFormModal({
 
   /** График погашения для предпросмотра (кредитные обязательства). */
   const loanSchedulePreview = useMemo((): LoanScheduleRow[] | null => {
-    if (!planEnabled || !showLoanPlanSettings || !effectiveLoanEndDate) return null;
+    if (!showLoanPlanSettings || !effectiveLoanEndDate) return null;
     const principalCents = parseRubToCents(amountStr);
     if (!Number.isFinite(principalCents) || principalCents < 0) return null;
     const rate = parseFloat(String(interestRate).replace(",", "."));
@@ -541,7 +548,6 @@ export function AddEditItemFormModal({
       shiftWeekendToWorkday: shiftWeekendPaymentToWorkday,
     });
   }, [
-    planEnabled,
     showLoanPlanSettings,
     effectiveLoanEndDate,
     amountStr,
@@ -831,6 +837,15 @@ export function AddEditItemFormModal({
       ? `Обязательство появилось${datePhrase} нужно указать источник средств, откуда были переведены средства или погашено обязательство. Если источник не указать, то будет создана транзакция в размере начальной суммы с категорией «Прочие расходы».`
       : `Актив появился${datePhrase} нужно указать источник средств, откуда были переведены средства или оплачен актив. Если источник не указать, то будет создана транзакция в размере начальной суммы с категорией «Прочие доходы».`;
   }, [showOpeningCounterparty, accountingStartDate, kind]);
+  const openingCounterpartyLabel = kind === "LIABILITY" ? "Куда зачислить" : "Источник средств";
+  const getCounterpartyForItemId = useCallback(
+    (id: number): CounterpartyOut | null => {
+      const item = items.find((i) => i.id === id);
+      if (!item?.counterparty_id) return null;
+      return counterparties.find((c) => c.id === item.counterparty_id) ?? null;
+    },
+    [items, counterparties]
+  );
   const showMarketCommission =
     (isMoexType || isCryptoType) && kind === "ASSET" && resolvedHistoryStatus === "NEW" && (hasNonZeroLots || hasNonZeroCryptoQuantity);
   const commissionAllowed = showMarketCommission;
@@ -1475,7 +1490,7 @@ export function AddEditItemFormModal({
         }
         const paymentItem = itemsById.get(Number(openingCounterpartyId));
         if (!paymentItem || paymentItem.archived_at || paymentItem.closed_at) {
-          setFormError("Источник средств не найден.");
+          setFormError(`${openingCounterpartyLabel} не найден.`);
           return;
         }
         if (paymentItem.instrument_id) {
@@ -1505,7 +1520,7 @@ export function AddEditItemFormModal({
         }
         const paymentItem = itemsById.get(Number(openingCounterpartyId));
         if (!paymentItem || paymentItem.archived_at || paymentItem.closed_at) {
-          setFormError("Источник средств не найден.");
+          setFormError(`${openingCounterpartyLabel} не найден.`);
           return;
         }
         if (paymentItem.instrument_id) {
@@ -2377,12 +2392,12 @@ export function AddEditItemFormModal({
                   {showOpeningCounterparty && !(showInstrumentBlock && (isMoexType || isCryptoType)) && (
                     <div className="grid gap-2">
                       <div className="flex min-h-6 items-center gap-2">
-                        <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
+                        <Label style={{ color: ACTIVE_TEXT_DARK }}>{openingCounterpartyLabel}</Label>
                         <Tooltip content={openingHintModal ?? ""} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
                           <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
                         </Tooltip>
                       </div>
-                      <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                      <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                     </div>
                   )}
                 </div>
@@ -2405,12 +2420,12 @@ export function AddEditItemFormModal({
                         {showOpeningCounterparty && (
                           <div className="grid gap-2">
                             <div className="flex min-h-6 items-center gap-2">
-                              <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
+                              <Label style={{ color: ACTIVE_TEXT_DARK }}>{openingCounterpartyLabel}</Label>
                               <Tooltip content={openingHintModal ?? ""} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
                                 <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
                               </Tooltip>
                             </div>
-                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                           </div>
                         )}
                       </div>
@@ -2571,12 +2586,12 @@ export function AddEditItemFormModal({
                         {showOpeningCounterparty && (
                           <div className="grid gap-2">
                             <div className="flex min-h-6 items-center gap-2">
-                              <Label style={{ color: ACTIVE_TEXT_DARK }}>Источник средств</Label>
+                              <Label style={{ color: ACTIVE_TEXT_DARK }}>{openingCounterpartyLabel}</Label>
                               <Tooltip content={openingHintModal ?? ""} contentClassName="w-80 max-w-[calc(100vw-2rem)]">
                                 <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
                               </Tooltip>
                             </div>
-                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                           </div>
                         )}
                       </div>
@@ -2753,14 +2768,12 @@ export function AddEditItemFormModal({
                 )}
                 {typeCode === "bonds" && selectedInstrument?.secid && (
                   <div className="min-w-0">
-                    {typeCode === "bonds" && planEnabled && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mb-4">
-                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
-                        <div className="min-w-0">
-                          <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required />
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mb-4">
+                      <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
+                      <div className="min-w-0">
+                        <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
                       </div>
-                    )}
+                    </div>
                     {bondCouponsLoading && <p className="text-xs mb-2" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка купонов...</p>}
                     {!bondCouponsLoading && bondCoupons.length > 0 && (
                       <div className="rounded-lg overflow-hidden">
@@ -2812,14 +2825,12 @@ export function AddEditItemFormModal({
                 )}
                 {typeCode === "securities" && selectedInstrument?.secid && (
                   <div className="min-w-0">
-                    {typeCode === "securities" && planEnabled && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mb-4">
-                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
-                        <div className="min-w-0">
-                          <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required />
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mb-4">
+                      <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
+                      <div className="min-w-0">
+                        <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
                       </div>
-                    )}
+                    </div>
                     {stockDividendsLoading && <p className="text-xs mb-2" style={{ color: SIDEBAR_TEXT_INACTIVE }}>Загрузка дивидендов...</p>}
                     {!stockDividendsLoading && stockDividends.length > 0 && (
                       <div className="rounded-lg overflow-hidden">
@@ -2954,7 +2965,7 @@ export function AddEditItemFormModal({
                     )}
                   </>
                 )}
-                {planEnabled && showInterestPlanSettings && (
+                {showInterestPlanSettings && (
                   <>
                     {!showDepositFields && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
@@ -2969,13 +2980,13 @@ export function AddEditItemFormModal({
                     )}
                   </>
                 )}
-                {planEnabled && showLoanPlanSettings && (
+                {showLoanPlanSettings && (
                   <>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
                       <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" />
                       <div className="min-w-0">
                         <FormField label="Откуда погашается">
-                          <ItemSelector items={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at)} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => setRepaymentAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                          <ItemSelector items={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at)} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => setRepaymentAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                         </FormField>
                       </div>
                       <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" />
@@ -2984,41 +2995,44 @@ export function AddEditItemFormModal({
                       <div className="grid min-w-0 gap-2">
                         <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-1.5 gap-y-0">
                           <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium shrink-0">
-                            {loanTermMode === "days" ? "Срок до погашения (дней)" : "Плановая дата погашения"}
+                            {loanTermMode === "months" ? "Срок до погашения (мес.)" : "Плановая дата погашения"}
                             {planEnabled && <span style={{ color: "#FB4C4F" }}> *</span>}
                           </Label>
                           <button
                             type="button"
                             onClick={() => {
-                              const nextMode = loanTermMode === "days" ? "end_date" : "days";
+                              const nextMode = loanTermMode === "months" ? "end_date" : "months";
                               setLoanTermMode(nextMode);
                               const od = openDate || getTodayDateKey();
-                              if (nextMode === "end_date" && loanTermDays.trim()) {
-                                const n = Math.trunc(Number(loanTermDays));
-                                if (Number.isFinite(n) && n >= 0) setLoanEndDate(toDateKey(addDays(parseDateKey(od), n)));
-                              } else if (nextMode === "days" && loanEndDate) {
-                                const days = Math.round((parseDateKey(loanEndDate).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
-                                if (Number.isFinite(days) && days >= 0) setLoanTermDays(String(days));
+                              if (nextMode === "end_date" && loanTermMonths.trim()) {
+                                const n = Math.trunc(Number(loanTermMonths));
+                                if (Number.isFinite(n) && n >= 0) setLoanEndDate(toDateKey(addMonths(parseDateKey(od), n)));
+                              } else if (nextMode === "months" && loanEndDate) {
+                                const start = parseDateKey(od);
+                                const end = parseDateKey(loanEndDate);
+                                let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+                                if (end.getDate() < start.getDate()) months -= 1;
+                                if (Number.isFinite(months) && months >= 0) setLoanTermMonths(String(months));
                               }
                             }}
                             className="shrink-0 flex items-center gap-1.5 font-semibold text-sm"
                             style={{ color: ACCENT }}
                           >
                             <RefreshCcw className="w-4 h-4 shrink-0" />
-                            {loanTermMode === "days" ? "Дата окончания" : "Срок (дней)"}
+                            {loanTermMode === "months" ? "Дата окончания" : "Срок (мес.)"}
                           </button>
                         </div>
-                        {loanTermMode === "days" ? (
+                        {loanTermMode === "months" ? (
                           <TextField
                             label=""
-                            value={loanTermDays}
+                            value={loanTermMonths}
                             onChange={(e) => {
                               const val = e.target.value.replace(/\D/g, "");
-                              setLoanTermDays(val);
+                              setLoanTermMonths(val);
                               const od = openDate || getTodayDateKey();
                               if (od && val.trim()) {
                                 const n = Math.trunc(Number(val));
-                                if (Number.isFinite(n) && n >= 0) setLoanEndDate(toDateKey(addDays(parseDateKey(od), n)));
+                                if (Number.isFinite(n) && n >= 0) setLoanEndDate(toDateKey(addMonths(parseDateKey(od), n)));
                               }
                             }}
                             placeholder="Необязательно"
@@ -3032,8 +3046,11 @@ export function AddEditItemFormModal({
                               setLoanEndDate(val);
                               const od = openDate || getTodayDateKey();
                               if (od && val) {
-                                const days = Math.round((parseDateKey(val).getTime() - parseDateKey(od).getTime()) / (24 * 60 * 60 * 1000));
-                                if (Number.isFinite(days) && days >= 0) setLoanTermDays(String(days));
+                                const start = parseDateKey(od);
+                                const end = parseDateKey(val);
+                                let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+                                if (end.getDate() < start.getDate()) months -= 1;
+                                if (Number.isFinite(months) && months >= 0) setLoanTermMonths(String(months));
                               }
                             }}
                             placeholder="ГГГГ-ММ-ДД"

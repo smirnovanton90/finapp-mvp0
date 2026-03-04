@@ -865,6 +865,7 @@ def _create_loan_chains(
         asset_link_type=None,
     )
 
+    interest_counterparty_id = item.counterparty_id if item.kind == "LIABILITY" else None
     _create_chain_with_transactions(
         db=db,
         user=user,
@@ -878,7 +879,7 @@ def _create_loan_chains(
         primary_card_item=repayment_side.card_item,
         counterparty_item=None,
         counterparty_card_item=None,
-        counterparty_id=None,
+        counterparty_id=interest_counterparty_id,
         category_id=interest_category.id,
         purpose="INTEREST",
         frequency=settings.repayment_frequency,

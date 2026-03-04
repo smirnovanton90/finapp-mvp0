@@ -47,6 +47,7 @@ export function CollapsibleFormSection({
       >
         <div className="flex items-center gap-2 min-w-0">
           <IconButton
+            type="button"
             aria-label={isOpen ? "Свернуть" : "Развернуть"}
             onClick={(e) => { e.stopPropagation(); toggle(); }}
           >

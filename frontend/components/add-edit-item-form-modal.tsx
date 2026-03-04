@@ -195,6 +195,7 @@ export function AddEditItemFormModal({
   const [planEnabled, setPlanEnabled] = useState(false);
   /** Раскрыт ли блок «Планирование»; при включении тоггла «Добавить плановые транзакции» блок раскрывается. */
   const [planSectionOpen, setPlanSectionOpen] = useState(false);
+  const prevShowPlanSectionRef = useRef<boolean | null>(null);
   const [firstPayoutRule, setFirstPayoutRule] = useState<FirstPayoutRule | "">("");
   const [planEndDate, setPlanEndDate] = useState("");
   const [loanEndDate, setLoanEndDate] = useState("");
@@ -1389,14 +1390,20 @@ export function AddEditItemFormModal({
   }, [typeCode, selectedInstrument?.secid]);
 
   useEffect(() => {
-    if (!showPlanSection) {
+    if (!open) {
+      prevShowPlanSectionRef.current = null;
+      return;
+    }
+    const prev = prevShowPlanSectionRef.current;
+    prevShowPlanSectionRef.current = showPlanSection;
+    if (prev === true && !showPlanSection) {
       setPlanEnabled(false);
       setPlanSectionOpen(false);
       setFirstPayoutRule("");
       setPlanEndDate("");
       setLoanEndDate("");
     }
-  }, [showPlanSection]);
+  }, [open, showPlanSection]);
 
   useEffect(() => {
     if ((typeCode === "bonds" || typeCode === "securities") && !selectedInstrument?.secid && planEnabled) {
@@ -1749,6 +1756,11 @@ export function AddEditItemFormModal({
         return;
       }
     }
+    // При отключённой капитализации счёт для процентов обязателен всегда (бэкенд требует interest_payout_account_id).
+    if (showInterestFields && !interestToSameAccount && !interestPayoutAccountId) {
+      setFormError("Укажите, куда зачисляются проценты.");
+      return;
+    }
     if (planEnabled && showLoanPlanSettings) {
       if (interestRateValue === null) {
         setFormError("Укажите процентную ставку по кредиту или займу.");
@@ -1946,10 +1958,14 @@ export function AddEditItemFormModal({
         if (interestPayoutOrder) {
           payload.interest_payout_order = interestPayoutOrder as "END_OF_TERM" | "MONTHLY";
         }
-        if (interestCapitalization === "true") payload.interest_capitalization = true;
-        if (interestCapitalization === "false") payload.interest_capitalization = false;
-        if (!interestToSameAccount && interestPayoutAccountId) {
-          payload.interest_payout_account_id = Number(interestPayoutAccountId);
+        // Явно передаём капитализацию: проценты на счёт вклада = true, иначе false (нужен счёт выплат).
+        if (interestToSameAccount) {
+          payload.interest_capitalization = true;
+        } else {
+          payload.interest_capitalization = false;
+          if (interestPayoutAccountId) {
+            payload.interest_payout_account_id = Number(interestPayoutAccountId);
+          }
         }
       }
 
@@ -2747,7 +2763,9 @@ export function AddEditItemFormModal({
                 titleRightNoTruncate
                 titleRight={(showInterestPlanSettings || typeCode === "bonds" || typeCode === "securities" || showLoanPlanSettings) ? (
                   <span
+                    role="presentation"
                     onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
                     className="flex items-center gap-2 shrink-0 text-sm font-medium"
                     style={{ color: ACTIVE_TEXT_DARK }}
                   >
@@ -2954,7 +2972,7 @@ export function AddEditItemFormModal({
                       </div>
                       {!interestToSameAccount && (
                         <div className="min-w-0">
-                          <FormField label="Куда зачисляются проценты" required={planEnabled && showInterestPlanSettings}>
+                          <FormField label="Куда зачисляются проценты" required={showInterestFields && !interestToSameAccount}>
                             <ItemSelector items={items.filter((it) => it.kind === "ASSET" && !it.archived_at && !it.closed_at)} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
                           </FormField>
                         </div>

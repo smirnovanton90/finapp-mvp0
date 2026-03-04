@@ -4,6 +4,7 @@
  */
 
 import { parseDateKey, addDays, toDateKey } from "./asset-item-form-constants";
+import { getNextWorkday } from "./russian-workdays";
 
 function daysInYear(d: Date): number {
   const y = d.getFullYear();
@@ -18,13 +19,9 @@ function roundCents(x: number): number {
   return Math.round(x);
 }
 
-/** Если дата попадает на субботу (6) или воскресенье (0), возвращает следующий понедельник. */
+/** Перенос даты на первый рабочий день (сб/вс, праздники и перенесённые выходные по ТК РФ). */
 function shiftDateToWorkday(dateKey: string): string {
-  const d = parseDateKey(dateKey);
-  const w = d.getDay(); // 0=Sun, 6=Sat
-  if (w >= 1 && w <= 5) return dateKey;
-  const daysToMonday = w === 0 ? 1 : 2;
-  return toDateKey(addDays(d, daysToMonday));
+  return getNextWorkday(dateKey);
 }
 
 /** Проценты за период: с start по день перед end (дата платежа не включается в начисление). */
@@ -132,23 +129,27 @@ function annuityPaymentByFormula(principalCents: number, annualRatePercent: numb
   return Math.round(payment);
 }
 
+/** Проценты за период: число дней = дата текущего платежа − дата предыдущего платежа (фактические даты). */
 function buildAnnuitySchedule(
   principalCents: number,
   rate: number,
   periodStartKey: string,
   payoutDateKeys: string[],
+  nominalDateKeys: string[],
   firstPaymentInterestOnly: boolean = false
 ): { principal: number[]; interest: number[] } {
-  if (payoutDateKeys.length === 0) return { principal: [], interest: [] };
+  if (payoutDateKeys.length === 0 || payoutDateKeys.length !== nominalDateKeys.length) return { principal: [], interest: [] };
   const paymentCents = annuityPaymentByFormula(principalCents, rate, payoutDateKeys.length);
   const interestPrecise: number[] = [];
   const interestRounded: number[] = [];
   const principalPayments: number[] = [];
   let outstanding = principalCents;
-  let startKey = periodStartKey;
   for (let i = 0; i < payoutDateKeys.length; i++) {
     const payoutKey = payoutDateKeys[i]!;
-    const interestVal = sumInterestCents(outstanding, rate, startKey, payoutKey);
+    const startKey = i === 0 ? periodStartKey : toDateKey(addDays(parseDateKey(payoutDateKeys[i - 1]!), 1));
+    const interestEndKey =
+      i === 0 ? payoutKey : toDateKey(addDays(parseDateKey(payoutKey), 1));
+    const interestVal = sumInterestCents(outstanding, rate, startKey, interestEndKey);
     interestPrecise.push(interestVal);
     const roundedInterest = roundCents(interestVal);
     interestRounded.push(roundedInterest);
@@ -165,31 +166,33 @@ function buildAnnuitySchedule(
     }
     principalPayments.push(principalPayment);
     outstanding = Math.max(outstanding - principalPayment, 0);
-    const d = parseDateKey(payoutKey);
-    startKey = toDateKey(addDays(d, 1));
   }
   applyTailAdjustment(interestPrecise, interestRounded);
   return { principal: principalPayments, interest: interestRounded };
 }
 
+/** Проценты за период: число дней = дата текущего платежа − дата предыдущего платежа (фактические даты). */
 function buildDifferentiatedSchedule(
   principalCents: number,
   rate: number,
   periodStartKey: string,
   payoutDateKeys: string[],
+  nominalDateKeys: string[],
   firstPaymentInterestOnly: boolean = false
 ): { principal: number[]; interest: number[] } {
-  if (payoutDateKeys.length === 0) return { principal: [], interest: [] };
+  if (payoutDateKeys.length === 0 || payoutDateKeys.length !== nominalDateKeys.length) return { principal: [], interest: [] };
   const totalPeriods = payoutDateKeys.length;
   const basePrincipal = Math.floor(principalCents / totalPeriods);
   const interestPrecise: number[] = [];
   const interestRounded: number[] = [];
   const principalPayments: number[] = [];
   let outstanding = principalCents;
-  let startKey = periodStartKey;
   for (let i = 0; i < payoutDateKeys.length; i++) {
     const payoutKey = payoutDateKeys[i]!;
-    const interestVal = sumInterestCents(outstanding, rate, startKey, payoutKey);
+    const startKey = i === 0 ? periodStartKey : toDateKey(addDays(parseDateKey(payoutDateKeys[i - 1]!), 1));
+    const interestEndKey =
+      i === 0 ? payoutKey : toDateKey(addDays(parseDateKey(payoutKey), 1));
+    const interestVal = sumInterestCents(outstanding, rate, startKey, interestEndKey);
     interestPrecise.push(interestVal);
     interestRounded.push(roundCents(interestVal));
     const isLast = i === totalPeriods - 1;
@@ -201,8 +204,6 @@ function buildDifferentiatedSchedule(
           : basePrincipal;
     principalPayments.push(principalPayment);
     outstanding = Math.max(outstanding - principalPayment, 0);
-    const d = parseDateKey(payoutKey);
-    startKey = toDateKey(addDays(d, 1));
   }
   applyTailAdjustment(interestPrecise, interestRounded);
   return { principal: principalPayments, interest: interestRounded };
@@ -253,23 +254,25 @@ export function buildLoanSchedule(params: BuildLoanScheduleParams): LoanSchedule
 
   if (principalCents < 0 || rate < 0) return null;
 
-  let dateKeys = buildScheduleDateKeys(frequency, periodStartKey, endDateKey, {
+  let nominalDateKeys = buildScheduleDateKeys(frequency, periodStartKey, endDateKey, {
     weeklyDay,
     monthlyDay: monthlyDay != null && monthlyDay >= 1 && monthlyDay <= 31 ? monthlyDay : undefined,
     intervalDays: intervalDays != null && intervalDays >= 1 ? intervalDays : undefined,
   });
 
-  if (dateKeys.length === 0) return null;
+  if (nominalDateKeys.length === 0) return null;
 
   const fullRepayment = true;
-  if (fullRepayment && dateKeys[dateKeys.length - 1] !== endDateKey) {
-    dateKeys = [...dateKeys, endDateKey].sort();
+  if (fullRepayment && nominalDateKeys[nominalDateKeys.length - 1] !== endDateKey) {
+    nominalDateKeys = [...nominalDateKeys, endDateKey].sort();
   }
+  let dateKeys = nominalDateKeys;
   if (shiftWeekendToWorkday) {
-    dateKeys = dateKeys.map(shiftDateToWorkday);
+    dateKeys = nominalDateKeys.map(shiftDateToWorkday);
     dateKeys = [...new Set(dateKeys)].sort();
   }
   if (skipFirstPayment && dateKeys.length > 1) {
+    nominalDateKeys = nominalDateKeys.slice(1);
     dateKeys = dateKeys.slice(1);
   }
 
@@ -285,8 +288,8 @@ export function buildLoanSchedule(params: BuildLoanScheduleParams): LoanSchedule
 
   const { principal: principalList, interest: interestList } =
     repaymentType === "ANNUITY"
-      ? buildAnnuitySchedule(principalCents, rate, periodStartKey, dateKeys, firstPaymentInterestOnly)
-      : buildDifferentiatedSchedule(principalCents, rate, periodStartKey, dateKeys, firstPaymentInterestOnly);
+      ? buildAnnuitySchedule(principalCents, rate, periodStartKey, dateKeys, nominalDateKeys, firstPaymentInterestOnly)
+      : buildDifferentiatedSchedule(principalCents, rate, periodStartKey, dateKeys, nominalDateKeys, firstPaymentInterestOnly);
 
   if (principalList.length !== dateKeys.length) return null;
 

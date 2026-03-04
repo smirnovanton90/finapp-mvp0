@@ -3076,10 +3076,10 @@ export function AddEditItemFormModal({
                             <thead>
                               <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
                                 <th className="pl-6 pr-4 py-3 text-sm font-medium">Дата</th>
-                                <th className="px-4 py-3 text-sm font-medium text-right">Общая сумма платежа</th>
+                                <th className="px-4 py-3 text-sm font-medium text-right">Платеж</th>
                                 <th className="px-4 py-3 text-sm font-medium text-right">Основной долг</th>
                                 <th className="px-4 py-3 text-sm font-medium text-right">Проценты</th>
-                                <th className="px-6 py-3 text-sm font-medium text-right">Остаток основного долга после погашения</th>
+                                <th className="px-6 py-3 text-sm font-medium text-right">Остаток долга</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -3093,6 +3093,15 @@ export function AddEditItemFormModal({
                                 </tr>
                               ))}
                             </tbody>
+                            <tfoot>
+                              <tr className="border-t border-white/10 font-medium" style={{ backgroundColor: BACKGROUND_DT, color: ACTIVE_TEXT_DARK }}>
+                                <td className="pl-6 pr-4 py-3 text-sm">Итого</td>
+                                <td className="px-4 py-3 text-sm text-right tabular-nums">{formatAmount(loanSchedulePreview.reduce((s, r) => s + r.totalCents, 0))}</td>
+                                <td className="px-4 py-3 text-sm text-right tabular-nums">{formatAmount(loanSchedulePreview.reduce((s, r) => s + r.principalCents, 0))}</td>
+                                <td className="px-4 py-3 text-sm text-right tabular-nums">{formatAmount(loanSchedulePreview.reduce((s, r) => s + r.interestCents, 0))}</td>
+                                <td className="px-6 py-3 text-sm text-right" />
+                              </tr>
+                            </tfoot>
                           </table>
                         </div>
                       </div>

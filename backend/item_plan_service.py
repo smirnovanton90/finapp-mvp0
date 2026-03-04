@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from category_service import resolve_category_or_400
 from market import fetch_bond_coupons_list, fetch_dividends_list
 from models import Category, Item, ItemPlanSettings, Transaction, TransactionChain, User
+from russian_workdays import get_next_workday
 from schemas import ItemPlanSettingsBase
 from transaction_chains import build_schedule_dates
 
@@ -297,11 +298,8 @@ def _round_cents(value: Decimal) -> int:
 
 
 def _shift_date_to_workday(d: date) -> date:
-    """Если дата попадает на субботу (5) или воскресенье (6), возвращает следующий понедельник."""
-    w = d.weekday()  # Monday=0, Sunday=6
-    if w < 5:
-        return d
-    return d + timedelta(days=7 - w)
+    """Перенос даты на первый рабочий день (сб/вс, праздники и перенесённые выходные по ТК РФ)."""
+    return get_next_workday(d)
 
 
 def _sum_interest_cents(
@@ -770,11 +768,15 @@ def _create_loan_chains(
     schedule_dates = sorted({dt for dt in schedule_dates})
     schedule_dates = [dt for dt in schedule_dates if dt >= min_date]
 
+    nominal_schedule_dates = schedule_dates
     if getattr(settings, "shift_weekend_payment_to_workday", True):
         schedule_dates = [_shift_date_to_workday(d) for d in schedule_dates]
         schedule_dates = sorted({dt for dt in schedule_dates})
         schedule_dates = [dt for dt in schedule_dates if dt >= min_date]
+    else:
+        nominal_schedule_dates = list(schedule_dates)
     if getattr(settings, "skip_first_payment", False) and len(schedule_dates) > 1:
+        nominal_schedule_dates = nominal_schedule_dates[1:]
         schedule_dates = schedule_dates[1:]
 
     if not schedule_dates:
@@ -801,6 +803,7 @@ def _create_loan_chains(
             rate=item.interest_rate,
             period_start=base_date,
             payout_dates=schedule_dates,
+            nominal_payout_dates=nominal_schedule_dates,
             repayment_type=settings.repayment_type,
             first_payment_interest_only=getattr(
                 settings, "first_payment_interest_only", False
@@ -928,7 +931,8 @@ def _build_loan_schedule(
             outstanding = max(outstanding - principal_payment, 0)
             principal_payments.append(principal_payment)
 
-        period_start = payout_date + timedelta(days=1)
+        # Следующий период: с даты этого платежа (эталон — «дней от предыдущего платежа»)
+        period_start = payout_date
 
     _apply_tail_adjustment(interest_precise, interest_rounded)
 
@@ -955,6 +959,7 @@ def _build_auto_loan_schedule(
     rate: float,
     period_start: date,
     payout_dates: list[date],
+    nominal_payout_dates: list[date],
     repayment_type: str,
     first_payment_interest_only: bool = False,
 ) -> tuple[list[int], list[int]]:
@@ -964,6 +969,7 @@ def _build_auto_loan_schedule(
             rate,
             period_start,
             payout_dates,
+            nominal_payout_dates,
             first_payment_interest_only=first_payment_interest_only,
         )
     if repayment_type == "DIFFERENTIATED":
@@ -972,6 +978,7 @@ def _build_auto_loan_schedule(
             rate,
             period_start,
             payout_dates,
+            nominal_payout_dates,
             first_payment_interest_only=first_payment_interest_only,
         )
     raise HTTPException(status_code=400, detail="Invalid repayment_type")
@@ -996,18 +1003,20 @@ def _build_annuity_schedule(
     rate: float,
     period_start: date,
     payout_dates: list[date],
+    nominal_payout_dates: list[date],
     first_payment_interest_only: bool = False,
 ) -> tuple[list[int], list[int]]:
-    if not payout_dates:
+    if not payout_dates or len(payout_dates) != len(nominal_payout_dates):
         raise HTTPException(status_code=400, detail="No dates generated for loan plan")
     payment_cents = _annuity_payment_by_formula(principal_cents, rate, len(payout_dates))
     interest_precise: list[Decimal] = []
     interest_rounded: list[int] = []
     principal_payments: list[int] = []
     outstanding = principal_cents
-    start = period_start
     for idx, payout_date in enumerate(payout_dates):
-        interest_value = _sum_interest_cents(outstanding, rate, start, payout_date)
+        start = period_start if idx == 0 else payout_dates[idx - 1] + timedelta(days=1)
+        interest_end = payout_date if idx == 0 else payout_date + timedelta(days=1)
+        interest_value = _sum_interest_cents(outstanding, rate, start, interest_end)
         interest_precise.append(interest_value)
         rounded_interest = _round_cents(interest_value)
         interest_rounded.append(rounded_interest)
@@ -1026,7 +1035,6 @@ def _build_annuity_schedule(
             principal_payment = min(principal_payment, outstanding)
         principal_payments.append(int(principal_payment))
         outstanding = max(outstanding - principal_payment, 0)
-        start = payout_date + timedelta(days=1)
 
     _apply_tail_adjustment(interest_precise, interest_rounded)
     return principal_payments, interest_rounded
@@ -1037,9 +1045,10 @@ def _build_differentiated_schedule(
     rate: float,
     period_start: date,
     payout_dates: list[date],
+    nominal_payout_dates: list[date],
     first_payment_interest_only: bool = False,
 ) -> tuple[list[int], list[int]]:
-    if not payout_dates:
+    if not payout_dates or len(payout_dates) != len(nominal_payout_dates):
         raise HTTPException(status_code=400, detail="No dates generated for loan plan")
     total_periods = len(payout_dates)
     base_principal = principal_cents // total_periods if total_periods else 0
@@ -1047,9 +1056,10 @@ def _build_differentiated_schedule(
     interest_rounded: list[int] = []
     principal_payments: list[int] = []
     outstanding = principal_cents
-    start = period_start
     for idx, payout_date in enumerate(payout_dates):
-        interest_value = _sum_interest_cents(outstanding, rate, start, payout_date)
+        start = period_start if idx == 0 else payout_dates[idx - 1] + timedelta(days=1)
+        interest_end = payout_date if idx == 0 else payout_date + timedelta(days=1)
+        interest_value = _sum_interest_cents(outstanding, rate, start, interest_end)
         interest_precise.append(interest_value)
         interest_rounded.append(_round_cents(interest_value))
         is_last = idx == total_periods - 1
@@ -1059,7 +1069,6 @@ def _build_differentiated_schedule(
             principal_payment = max(outstanding, 0) if is_last else base_principal
         principal_payments.append(int(principal_payment))
         outstanding = max(outstanding - principal_payment, 0)
-        start = payout_date + timedelta(days=1)
 
     _apply_tail_adjustment(interest_precise, interest_rounded)
     return principal_payments, interest_rounded

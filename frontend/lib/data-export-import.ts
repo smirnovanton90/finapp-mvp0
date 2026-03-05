@@ -266,9 +266,27 @@ const TRANSACTION_DIRECTION_ORDER: Record<string, number> = {
   EXPENSE: 2,
 };
 
-/** Сортирует транзакции для импорта: по дню по возрастанию, внутри дня — сначала доходы, потом переводы, потом расходы, затем по времени (чтобы не было отрицательного сальдо в течение дня). */
+/** Для перевода возвращает (receiver_old_id, sender_old_id): кто получает, кто отправляет. По правилам бэкенда: ASSET теряет, LIABILITY получает. */
+function getTransferReceiverSender(
+  row: Record<string, string>,
+  itemRows: Array<Record<string, string>>
+): { receiverOldId: number; senderOldId: number } | null {
+  const primaryId = num(row.primary_item_id);
+  const counterpartyId = num(row.counterparty_item_id);
+  if (primaryId == null || counterpartyId == null) return null;
+  const primaryRow = itemRows.find((r) => num(r.id) === primaryId);
+  const kind = primaryRow ? str(primaryRow.kind).toUpperCase() : "ASSET";
+  const isPrimaryReceiver = kind === "LIABILITY";
+  return {
+    receiverOldId: isPrimaryReceiver ? primaryId : counterpartyId,
+    senderOldId: isPrimaryReceiver ? counterpartyId : primaryId,
+  };
+}
+
+/** Сортирует транзакции для импорта: по дню по возрастанию, внутри дня — доходы → переводы → расходы; внутри переводов — сначала переводы НА счёт (получатель), потом СО счёта (отправитель), чтобы избежать отрицательного сальдо. */
 function sortTransactionsForImport(
-  rows: Array<Record<string, string>>
+  rows: Array<Record<string, string>>,
+  itemRows?: Array<Record<string, string>>
 ): Array<Record<string, string>> {
   return [...rows].sort((a, b) => {
     const rawA = str(a.transaction_date).trim();
@@ -279,6 +297,14 @@ function sortTransactionsForImport(
     const dirA = TRANSACTION_DIRECTION_ORDER[str(a.direction)] ?? 2;
     const dirB = TRANSACTION_DIRECTION_ORDER[str(b.direction)] ?? 2;
     if (dirA !== dirB) return dirA - dirB;
+    if (str(a.direction) === "TRANSFER" && str(b.direction) === "TRANSFER" && itemRows?.length) {
+      const rsA = getTransferReceiverSender(a, itemRows);
+      const rsB = getTransferReceiverSender(b, itemRows);
+      if (rsA && rsB) {
+        if (rsA.receiverOldId !== rsB.receiverOldId) return rsA.receiverOldId - rsB.receiverOldId;
+        if (rsA.senderOldId !== rsB.senderOldId) return rsA.senderOldId - rsB.senderOldId;
+      }
+    }
     return rawA.slice(0, 19).localeCompare(rawB.slice(0, 19));
   });
 }
@@ -1164,10 +1190,10 @@ export async function runImport(
       counts.transactionChains += 1;
     }
 
-    // 5. Транзакции (сортируем по дате и внутри дня: доходы → переводы → расходы, чтобы не было отрицательного сальдо)
+    // 5. Транзакции (сортируем по дате и внутри дня: доходы → переводы → расходы; внутри переводов — сначала НА счёт, потом СО счёта)
     // Транзакции открытия по обязательствам/активам не импортируем — бэкенд создаёт их при создании позиции (createItem).
     const OPENING_COMMENT_PREFIX = "Открытие: ";
-    const sortedTransactions = sortTransactionsForImport(data.transactions);
+    const sortedTransactions = sortTransactionsForImport(data.transactions, data.items);
     const totalTx = sortedTransactions.length;
     for (let i = 0; i < totalTx; i++) {
       const row = sortedTransactions[i];

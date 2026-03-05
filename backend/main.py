@@ -92,6 +92,7 @@ from item_opening_service import (
     AUTO_CLOSING_SOURCE,
     _build_item_comment,
 )
+from counterparty_settlements import ensure_counterparty_settlements_item
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1325,10 +1326,28 @@ def create_item(
     user: User = Depends(get_current_user),
 ):
     if payload.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
-        raise HTTPException(
-            status_code=400,
-            detail="Взаиморасчёты создаются автоматически при первой транзакции «Долги» с контрагентом.",
+        if payload.counterparty_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="counterparty_id is required for Взаиморасчёты.",
+            )
+        accounting_start_date = _ensure_accounting_start_date(user)
+        open_date = payload.open_date
+        if hasattr(open_date, "date"):
+            open_date = open_date.date()
+        item = ensure_counterparty_settlements_item(
+            db=db,
+            user=user,
+            counterparty_id=payload.counterparty_id,
+            currency_code=payload.currency_code or "RUB",
+            open_date=open_date,
+            accounting_start_date=accounting_start_date,
         )
+        db.commit()
+        db.refresh(item)
+        _apply_item_photo_url(item)
+        return item
+
     accounting_start_date = _ensure_accounting_start_date(user)
     is_moex = is_moex_type(payload.type_code)
     is_crypto = is_crypto_type(payload.type_code)

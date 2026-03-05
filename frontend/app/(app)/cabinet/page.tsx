@@ -1024,11 +1024,11 @@ export default function CabinetPage() {
                               ].map(({ label, value }) => (
                                 <div
                                   key={label}
-                                  className="rounded-lg p-6 flex flex-col items-center justify-center"
+                                  className="rounded-lg p-6 flex flex-col items-center justify-center text-center"
                                   style={{ backgroundColor: BACKGROUND_DT }}
                                 >
                                   <span
-                                    className="mb-2"
+                                    className="mb-2 block w-full text-center"
                                     style={{ fontSize: 32, fontWeight: 500, color: ACTIVE_TEXT_DARK }}
                                   >
                                     {label}

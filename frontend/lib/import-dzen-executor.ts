@@ -338,17 +338,23 @@ export async function executeImportDzen(
         makeCategoryPathKey("Прочие расходы", "Прочие расходы", "")
       ) ?? null;
 
-    // 4. Создать транзакции: по дням от раннего к позднему; внутри дня — сначала доходы, потом переводы, затем расходы (чтобы не получать отрицательное сальдо в течение дня)
+    // 4. Создать транзакции: по дням от раннего к позднему; внутри дня — доходы → переводы → расходы; внутри переводов — сначала НА счёт (income), потом СО счёта (outcome), чтобы не получать отрицательное сальдо
     const TYPE_ORDER: Record<"income" | "transfer" | "expense", number> = {
       income: 0,
       transfer: 1,
       expense: 2,
     };
+    const transferSortKey = (tx: DzenParsedTransaction) =>
+      `${tx.incomeAccountName ?? ""}|${tx.incomeCurrency ?? ""}|${tx.outcomeAccountName ?? ""}|${tx.outcomeCurrency ?? ""}`;
     const sortedTransactions = [...(parsedData.transactions ?? [])].sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date);
       const orderA = TYPE_ORDER[a.type] ?? 2;
       const orderB = TYPE_ORDER[b.type] ?? 2;
       if (orderA !== orderB) return orderA - orderB;
+      if (a.type === "transfer" && b.type === "transfer") {
+        const keyCmp = transferSortKey(a).localeCompare(transferSortKey(b));
+        if (keyCmp !== 0) return keyCmp;
+      }
       return getTransactionDateTimeSortKey(a).localeCompare(getTransactionDateTimeSortKey(b));
     });
     for (const tx of sortedTransactions) {

@@ -671,6 +671,15 @@ export async function setAccountingStartDate(
   return res.json();
 }
 
+/** Удаляет все данные пользователя и сбрасывает в начальное состояние (онбординг). */
+export async function resetAllUserData(): Promise<UserMeOut> {
+  const res = await authFetch(`${API_BASE}/users/me/reset-all-data`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export type TelegramStatusOut = {
   linked: boolean;
   telegram_chat_id: number | null;

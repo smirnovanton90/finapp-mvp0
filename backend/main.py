@@ -18,13 +18,19 @@ from db import get_db
 from models import (
     Item,
     ItemMarketValue,
+    ItemPlanSettings,
     User,
     OnboardingState,
     Currency,
     FxRate,
     Counterparty,
     CounterpartyIndustry,
+    Category,
+    UserCategoryState,
     Transaction,
+    TransactionChain,
+    Goal,
+    TelegramLinkCode,
     MarketPrice,
 )
 from config import settings
@@ -995,6 +1001,60 @@ def get_user_photo(
         raise HTTPException(status_code=404, detail="Photo not found.")
     media_type = user.photo_mime or "application/octet-stream"
     return Response(content=user.photo_data, media_type=media_type)
+
+
+@app.post("/users/me/reset-all-data", response_model=UserMeOut)
+def reset_all_user_data(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete all data for the current user and reset to initial state (onboarding)."""
+    # 1. Transactions
+    db.query(Transaction).filter(Transaction.user_id == user.id).delete(synchronize_session=False)
+    # 2. Transaction chains
+    db.query(TransactionChain).filter(TransactionChain.user_id == user.id).delete(synchronize_session=False)
+    # 3. Goals (limits)
+    db.query(Goal).filter(Goal.user_id == user.id).delete(synchronize_session=False)
+    # 4. User category state
+    db.query(UserCategoryState).filter(UserCategoryState.user_id == user.id).delete(synchronize_session=False)
+    # 5. Item market values
+    db.query(ItemMarketValue).filter(ItemMarketValue.user_id == user.id).delete(synchronize_session=False)
+    # 6. Item plan settings (via item_id in user's items)
+    item_ids = [r[0] for r in db.query(Item.id).filter(Item.user_id == user.id).all()]
+    if item_ids:
+        db.query(ItemPlanSettings).filter(ItemPlanSettings.item_id.in_(item_ids)).delete(synchronize_session=False)
+    # 7. Items
+    db.query(Item).filter(Item.user_id == user.id).delete(synchronize_session=False)
+    # 8. User's counterparties (owner_user_id = user.id)
+    db.query(Counterparty).filter(Counterparty.owner_user_id == user.id).delete(synchronize_session=False)
+    # 9. User's categories (owner_user_id = user.id)
+    db.query(Category).filter(Category.owner_user_id == user.id).delete(synchronize_session=False)
+    # 10. Telegram link codes
+    db.query(TelegramLinkCode).filter(TelegramLinkCode.user_id == user.id).delete(synchronize_session=False)
+    # 11. Onboarding: set to PENDING so onboarding shows again
+    stmt = select(OnboardingState).where(
+        OnboardingState.user_id == user.id,
+        OnboardingState.device_type == "WEB",
+    )
+    state = db.execute(stmt).scalar_one_or_none()
+    if state:
+        state.status = "PENDING"
+        db.add(state)
+    else:
+        db.add(OnboardingState(user_id=user.id, device_type="WEB", status="PENDING"))
+    # 12. User: clear photo, telegram, accounting start date
+    user.photo_url = None
+    user.photo_mime = None
+    user.photo_data = None
+    user.telegram_chat_id = None
+    user.telegram_notify_hour = None
+    user.telegram_notify_minute = None
+    user.telegram_notify_enabled = True
+    user.accounting_start_date = None
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @app.get("/items", response_model=list[ItemOut])

@@ -17,19 +17,36 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _column_exists(table: str, column: str) -> bool:
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
+        return False
+    r = bind.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ),
+        {"t": table, "c": column},
+    )
+    return r.scalar() is not None
+
+
 def upgrade() -> None:
-    op.add_column(
-        "item_plan_settings",
-        sa.Column("first_payment_interest_only", sa.Boolean(), nullable=False, server_default="false"),
-    )
-    op.add_column(
-        "item_plan_settings",
-        sa.Column("skip_first_payment", sa.Boolean(), nullable=False, server_default="false"),
-    )
-    op.add_column(
-        "item_plan_settings",
-        sa.Column("shift_weekend_payment_to_workday", sa.Boolean(), nullable=False, server_default="true"),
-    )
+    if not _column_exists("item_plan_settings", "first_payment_interest_only"):
+        op.add_column(
+            "item_plan_settings",
+            sa.Column("first_payment_interest_only", sa.Boolean(), nullable=False, server_default="false"),
+        )
+    if not _column_exists("item_plan_settings", "skip_first_payment"):
+        op.add_column(
+            "item_plan_settings",
+            sa.Column("skip_first_payment", sa.Boolean(), nullable=False, server_default="false"),
+        )
+    if not _column_exists("item_plan_settings", "shift_weekend_payment_to_workday"):
+        op.add_column(
+            "item_plan_settings",
+            sa.Column("shift_weekend_payment_to_workday", sa.Boolean(), nullable=False, server_default="true"),
+        )
 
 
 def downgrade() -> None:

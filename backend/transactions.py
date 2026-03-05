@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from db import get_db
 from auth import get_current_user
-from category_service import resolve_category_or_400
+from category_service import resolve_category_or_400, resolve_category_or_none
 from models import Transaction, Item, User, Counterparty, Category
 from market_utils import is_crypto_item, is_moex_item
 from schemas import (
@@ -114,7 +114,10 @@ def get_min_balance(item: Item) -> int:
     if item.type_code == "bank_card" and item.card_kind == "CREDIT":
         return -(item.credit_limit or 0)
     if item.type_code == "counterparty_settlements":
-        return - (2 ** 62)
+        return -(2**62)
+    # Обязательства (кредиты, займы): допускаем отрицательное сальдо (переплата) при импорте и вводе
+    if item.kind == "LIABILITY":
+        return -(2**62)
     return 0
 
 
@@ -628,7 +631,9 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
     status_value = data.status or "CONFIRMED"
 
     category_id = data.category_id
-    if category_id is None and data.direction in ("INCOME", "EXPENSE"):
+    category = resolve_category_or_none(db, user, category_id)
+    if category is None and data.direction in ("INCOME", "EXPENSE"):
+        # category_id was not provided or not found (e.g. import from another DB) — use default
         scope_filter = "INCOME" if data.direction == "INCOME" else "EXPENSE"
         default_cat = (
             db.query(Category)
@@ -641,12 +646,12 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         )
         if default_cat:
             category_id = default_cat.id
+            category = resolve_category_or_400(db, user, category_id)
         else:
             raise HTTPException(
                 status_code=400,
                 detail="Нет доступной категории. Создайте категорию или укажите category_id.",
             )
-    category = resolve_category_or_400(db, user, category_id)
 
     tx = Transaction(
         user_id=user.id,

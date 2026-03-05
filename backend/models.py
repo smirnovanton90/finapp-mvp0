@@ -441,11 +441,11 @@ class Item(Base):
     __table_args__ = (
         CheckConstraint("kind in ('ASSET','LIABILITY')", name="ck_items_kind"),
         CheckConstraint(
-            "(initial_value_rub >= 0) or (type_code = 'bank_card' and card_kind = 'CREDIT') or (type_code = 'counterparty_settlements')",
+            "(initial_value_rub >= 0) or (type_code = 'bank_card' and card_kind = 'CREDIT') or (type_code = 'counterparty_settlements') or (kind = 'LIABILITY')",
             name="ck_items_initial_non_negative",
         ),
         CheckConstraint(
-            "(current_value_rub >= 0) or (type_code = 'bank_card' and card_kind = 'CREDIT') or (type_code = 'counterparty_settlements')",
+            "(current_value_rub >= 0) or (type_code = 'bank_card' and card_kind = 'CREDIT') or (type_code = 'counterparty_settlements') or (kind = 'LIABILITY')",
             name="ck_items_current_non_negative",
         ),
         CheckConstraint(

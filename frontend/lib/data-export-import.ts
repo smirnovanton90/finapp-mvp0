@@ -74,6 +74,48 @@ function flattenUserCategories(nodes: CategoryNode[]): CategoryNode[] {
   return out;
 }
 
+/** Собрать все категории дерева в плоский список (и пользовательские, и системные). */
+function flattenAllCategories(nodes: CategoryNode[]): CategoryNode[] {
+  const out: CategoryNode[] = [];
+  function walk(list: CategoryNode[]) {
+    for (const n of list) {
+      out.push({ ...n, children: undefined });
+      if (n.children?.length) walk(n.children);
+    }
+  }
+  walk(nodes);
+  return out;
+}
+
+/** Собрать id категорий, на которые ссылаются транзакции/цепочки/цели, плюс все их предки. */
+function getCategoryIdsToExport(
+  allCategoriesFlat: CategoryNode[],
+  transactions: { category_id?: number | null }[],
+  chains: { category_id?: number | null }[],
+  goals: { category_id: number }[]
+): Set<number> {
+  const byId = new Map(allCategoriesFlat.map((c) => [c.id, c]));
+  const referenced = new Set<number>();
+  for (const t of transactions) {
+    if (t.category_id != null) referenced.add(t.category_id);
+  }
+  for (const ch of chains) {
+    if (ch.category_id != null) referenced.add(ch.category_id);
+  }
+  for (const g of goals) {
+    referenced.add(g.category_id);
+  }
+  const toExport = new Set<number>(referenced);
+  for (const id of referenced) {
+    let c = byId.get(id);
+    while (c?.parent_id != null) {
+      toExport.add(c.parent_id);
+      c = byId.get(c.parent_id);
+    }
+  }
+  return toExport;
+}
+
 /** Сортировка категорий: сначала корневые, потом по parent_id. */
 function sortCategoriesForImport(cats: CategoryNode[]): CategoryNode[] {
   const byId = new Map(cats.map((c) => [c.id, c]));
@@ -88,6 +130,26 @@ function sortCategoriesForImport(cats: CategoryNode[]): CategoryNode[] {
   return result;
 }
 
+/** Строит полный путь категории от корня: "Уровень1 > Уровень2 > Уровень3". */
+function buildCategoryFullPathMap(
+  sortedCats: { id: number; name: string; parent_id?: number | null }[]
+): Map<number, string> {
+  const byId = new Map(sortedCats.map((c) => [c.id, c]));
+  const pathById = new Map<number, string>();
+  for (const c of sortedCats) {
+    const path: string[] = [c.name.trim()];
+    let p: number | null | undefined = c.parent_id;
+    while (p != null) {
+      const parent = byId.get(p);
+      if (!parent) break;
+      path.unshift(parent.name.trim());
+      p = parent.parent_id;
+    }
+    pathById.set(c.id, path.join(" > "));
+  }
+  return pathById;
+}
+
 /** Плоский список категорий для поиска по имени и parent_id. */
 function flattenCategoriesForLookup(nodes: CategoryNode[]): { id: number; name: string; parent_id: number | null }[] {
   const out: { id: number; name: string; parent_id: number | null }[] = [];
@@ -99,6 +161,59 @@ function flattenCategoriesForLookup(nodes: CategoryNode[]): { id: number; name: 
   }
   walk(nodes);
   return out;
+}
+
+type CategoryFlatWithPath = { id: number; name: string; parent_id: number | null; full_path: string };
+
+/** Плоский список категорий с полным путём "Уровень1 > Уровень2 > Уровень3" для поиска по полному совпадению. */
+function flattenCategoriesWithFullPath(nodes: CategoryNode[], parentPath: string[] = []): CategoryFlatWithPath[] {
+  const out: CategoryFlatWithPath[] = [];
+  function walk(list: CategoryNode[], path: string[]) {
+    for (const n of list) {
+      const fullPath = [...path, n.name.trim()].join(" > ");
+      out.push({
+        id: n.id,
+        name: n.name,
+        parent_id: n.parent_id ?? null,
+        full_path: fullPath,
+      });
+      if (n.children?.length) walk(n.children, [...path, n.name.trim()]);
+    }
+  }
+  walk(nodes, parentPath);
+  return out;
+}
+
+/** Полный путь категории из строки CSV: из колонки full_path или по цепочке parent_id. */
+function getCategoryFullPathFromRow(
+  catRows: Array<Record<string, string>>,
+  row: Record<string, string>
+): string {
+  const fromCol = str(row.full_path).trim();
+  if (fromCol) return fromCol;
+  const byId = new Map<number, Record<string, string>>();
+  for (const r of catRows) {
+    const id = num(r.id);
+    if (id != null) byId.set(id, r);
+  }
+  const path: string[] = [str(row.name).trim() || "Категория"];
+  let p: number | null = num(row.parent_id);
+  while (p != null) {
+    const parent = byId.get(p);
+    if (!parent) break;
+    path.unshift(str(parent.name).trim() || "Категория");
+    p = num(parent.parent_id);
+  }
+  return path.join(" > ");
+}
+
+/** Ищет существующую категорию по полному пути (все уровни, точное совпадение). */
+function findExistingCategoryByFullPath(
+  flat: CategoryFlatWithPath[],
+  fullPath: string
+): CategoryFlatWithPath | null {
+  const norm = fullPath.trim();
+  return flat.find((c) => c.full_path === norm) ?? null;
 }
 
 /** Ищет среди существующих категорий одну с тем же именем и тем же parent_id (как на бэкенде). */
@@ -223,8 +338,18 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
   const counterpartiesToExport = counterparties.filter(
     (c) => c.owner_user_id != null || counterpartyIdsReferenced.has(c.id)
   );
-  const userCategories = flattenUserCategories(categoriesTree);
-  const sortedCategories = sortCategoriesForImport(userCategories);
+  const allCategoriesFlat = flattenAllCategories(categoriesTree);
+  const categoryIdsToExport = getCategoryIdsToExport(
+    allCategoriesFlat,
+    transactions,
+    chains,
+    goals
+  );
+  const categoriesToExport = allCategoriesFlat.filter(
+    (c) => c.owner_user_id != null || categoryIdsToExport.has(c.id)
+  );
+  const sortedCategories = sortCategoriesForImport(categoriesToExport);
+  const categoryFullPathById = buildCategoryFullPathMap(sortedCategories);
 
   const lines: string[] = [];
   lines.push(UTF8_BOM);
@@ -265,10 +390,10 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
   }
   lines.push("");
 
-  // CATEGORIES
+  // CATEGORIES (все уровни: корень, дочерние, внуки — с полным путём для импорта)
   lines.push(SECTION_CATEGORIES);
   lines.push(
-    csvRow(["id", "name", "scope", "icon_name", "parent_id", "enabled", "synonyms"])
+    csvRow(["id", "name", "scope", "icon_name", "parent_id", "enabled", "synonyms", "full_path"])
   );
   for (const c of sortedCategories) {
     lines.push(
@@ -280,6 +405,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
         c.parent_id ?? "",
         c.enabled,
         (c.synonyms ?? []).join(";"),
+        categoryFullPathById.get(c.id) ?? c.name,
       ])
     );
   }
@@ -809,9 +935,9 @@ export async function runImport(
       }
     }
 
-    // 2. Категории: сначала корневые, потом дочерние; если с таким именем и parent уже есть — используем её
+    // 2. Категории: все уровни; поиск по полному пути (Уровень1 > Уровень2 > Уровень3); если не найдено — создаём
     const existingCategoriesTree = await fetchCategories({ includeArchived: false });
-    let existingCategoriesFlat = flattenCategoriesForLookup(existingCategoriesTree);
+    let existingCategoriesFlat: CategoryFlatWithPath[] = flattenCategoriesWithFullPath(existingCategoriesTree);
     const catRows = data.categories;
     const sortedCats: Array<Record<string, string>> = [];
     const added = new Set<number>();
@@ -843,7 +969,8 @@ export async function runImport(
       const newParentId =
         parentId != null && categoryIdMap.has(parentId) ? categoryIdMap.get(parentId)! : null;
       const name = str(row.name) || "Категория";
-      const existingCat = findExistingCategory(existingCategoriesFlat, name, newParentId);
+      const fullPath = getCategoryFullPathFromRow(catRows, row);
+      const existingCat = findExistingCategoryByFullPath(existingCategoriesFlat, fullPath);
       if (existingCat) {
         categoryIdMap.set(oldId, existingCat.id);
         counts.categories += 1;
@@ -859,18 +986,22 @@ export async function runImport(
         };
         const created = await createCategory(payload);
         categoryIdMap.set(oldId, created.id);
+        const parentFullPath =
+          newParentId != null ? existingCategoriesFlat.find((c) => c.id === newParentId)?.full_path : null;
+        const newFullPath = parentFullPath ? `${parentFullPath} > ${created.name}` : created.name;
         existingCategoriesFlat.push({
           id: created.id,
           name: created.name,
           parent_id: created.parent_id ?? null,
+          full_path: newFullPath,
         });
         counts.categories += 1;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("same name already exists")) {
           const refreshed = await fetchCategories({ includeArchived: false });
-          existingCategoriesFlat = flattenCategoriesForLookup(refreshed);
-          const found = findExistingCategory(existingCategoriesFlat, name, newParentId);
+          existingCategoriesFlat = flattenCategoriesWithFullPath(refreshed);
+          const found = findExistingCategoryByFullPath(existingCategoriesFlat, fullPath);
           if (found) {
             categoryIdMap.set(oldId, found.id);
             counts.categories += 1;
@@ -1034,11 +1165,15 @@ export async function runImport(
     }
 
     // 5. Транзакции (сортируем по дате и внутри дня: доходы → переводы → расходы, чтобы не было отрицательного сальдо)
+    // Транзакции открытия по обязательствам/активам не импортируем — бэкенд создаёт их при создании позиции (createItem).
+    const OPENING_COMMENT_PREFIX = "Открытие: ";
     const sortedTransactions = sortTransactionsForImport(data.transactions);
     const totalTx = sortedTransactions.length;
     for (let i = 0; i < totalTx; i++) {
       const row = sortedTransactions[i];
       report("Транзакции", i + 1, totalTx);
+      const comment = str(row.comment).trim();
+      if (comment.startsWith(OPENING_COMMENT_PREFIX)) continue;
       const primaryItemId = num(row.primary_item_id);
       const counterpartyItemId = num(row.counterparty_item_id);
       const counterpartyId = num(row.counterparty_id);

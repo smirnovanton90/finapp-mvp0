@@ -15,6 +15,7 @@ import {
   createTelegramLinkCode,
   getTelegramStatus,
   unlinkTelegram,
+  resetAllUserData,
   UserProfileUpdate,
   UserMeOut,
 } from "@/lib/api";
@@ -31,6 +32,7 @@ import {
   parseExportCsv,
   runImport,
   type ImportProgress,
+  type ParsedExport,
 } from "@/lib/data-export-import";
 import {
   MODAL_BG,
@@ -40,6 +42,7 @@ import {
   ACCENT2,
   BACKGROUND_DT,
 } from "@/lib/colors";
+import { PINK_GRADIENT } from "@/lib/gradients";
 import { cn } from "@/lib/utils";
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
@@ -79,7 +82,7 @@ function CabinetCard({
 export default function CabinetPage() {
   const { data: session } = useSession();
   const { theme, setTheme } = useTheme();
-  const { accountingStartDate } = useAccountingStart();
+  const { accountingStartDate, refresh: refreshAccountingStart, setDateSetupComplete } = useAccountingStart();
   const [profile, setProfile] = useState<UserMeOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -103,6 +106,9 @@ export default function CabinetPage() {
   const [importFileModalOpen, setImportFileModalOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importFileDragOver, setImportFileDragOver] = useState(false);
+  const [parsedFileData, setParsedFileData] = useState<ParsedExport | null>(null);
+  const [parseFileError, setParseFileError] = useState<string | null>(null);
+  const [isParsingFile, setIsParsingFile] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importResult, setImportResult] = useState<{ success: boolean; error?: string; counts?: Record<string, number> } | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -115,6 +121,10 @@ export default function CabinetPage() {
   } | null>(null);
   const [telegramLinkCode, setTelegramLinkCode] = useState<string | null>(null);
   const [telegramLoading, setTelegramLoading] = useState(false);
+
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [resetConfirmStep, setResetConfirmStep] = useState<1 | 2>(1);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -165,6 +175,38 @@ export default function CabinetPage() {
     }
   };
 
+  const openResetConfirm = () => {
+    setResetConfirmStep(1);
+    setResetConfirmOpen(true);
+    setError(null);
+  };
+
+  const handleResetConfirmStep1 = () => {
+    setResetConfirmStep(2);
+  };
+
+  const handleResetConfirmStep2 = async () => {
+    setResetting(true);
+    setError(null);
+    try {
+      await resetAllUserData();
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("finapp-date-setup-complete");
+      }
+      setDateSetupComplete(false);
+      await refreshAccountingStart();
+      setResetConfirmOpen(false);
+      setResetConfirmStep(1);
+      setProfile(null);
+      loadProfile();
+      loadTelegramStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка сброса данных.");
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const handleExportData = async () => {
     setExporting(true);
     setError(null);
@@ -189,6 +231,8 @@ export default function CabinetPage() {
   const openImportFileModal = () => {
     setImportFile(null);
     setImportFileDragOver(false);
+    setParsedFileData(null);
+    setParseFileError(null);
     setImportProgress(null);
     setImportResult(null);
     if (importFileInputRef.current) importFileInputRef.current.value = "";
@@ -197,26 +241,52 @@ export default function CabinetPage() {
 
   const handleImportFileSelect = (file: File | null) => {
     setImportFile(file ?? null);
+    setParsedFileData(null);
+    setParseFileError(null);
     setImportProgress(null);
     setImportResult(null);
   };
 
+  useEffect(() => {
+    if (!importFile) {
+      setParsedFileData(null);
+      setParseFileError(null);
+      return;
+    }
+    let cancelled = false;
+    setIsParsingFile(true);
+    setParseFileError(null);
+    importFile.text().then(
+      (text) => {
+        if (cancelled) return;
+        try {
+          const data = parseExportCsv(text);
+          setParsedFileData(data);
+        } catch (e) {
+          setParseFileError(e instanceof Error ? e.message : "Не удалось прочитать файл.");
+        }
+      },
+      () => {
+        if (!cancelled) setParseFileError("Не удалось прочитать файл.");
+      }
+    ).finally(() => {
+      if (!cancelled) setIsParsingFile(false);
+    });
+    return () => { cancelled = true; };
+  }, [importFile]);
+
   const handleImportFromFile = async () => {
-    if (!importFile) return;
+    if (!parsedFileData) return;
     setImportProgress({ stage: "Загрузка файла...", current: 0, total: 1 });
     setImportResult(null);
     try {
-      const text = await importFile.text();
-      const data = parseExportCsv(text);
-      const result = await runImport(data, (p) => setImportProgress(p));
+      const result = await runImport(parsedFileData, (p) => setImportProgress(p));
       setImportResult({
         success: result.success,
         error: result.error,
         counts: result.counts,
       });
       if (result.success) {
-        setImportFile(null);
-        if (importFileInputRef.current) importFileInputRef.current.value = "";
         setSuccess("Данные импортированы.");
         setTimeout(() => setSuccess(null), 3000);
       }
@@ -737,17 +807,113 @@ export default function CabinetPage() {
               >
                 Импорт истории из других приложений
               </Button>
+              <Button
+                type="button"
+                variant="glass"
+                className="rounded-lg border-0 ml-auto"
+                style={
+                  {
+                    "--glass-bg": "rgba(239, 68, 68, 0.2)",
+                    "--glass-bg-hover": "rgba(239, 68, 68, 0.4)",
+                    color: "#EF4444",
+                  } as React.CSSProperties
+                }
+                onClick={openResetConfirm}
+              >
+                Начать сначала
+              </Button>
             </div>
           </div>
         </CabinetCard>
 
-        {/* Модальное окно: импорт из ранее экспортированного CSV (оформление как первое окно импорта Дзен-мани, без степпера) */}
+        {/* Подтверждение сброса данных: 2 шага */}
+        <Dialog open={resetConfirmOpen} onOpenChange={(open) => { if (!resetting) { setResetConfirmOpen(open); if (!open) setResetConfirmStep(1); } }}>
+          <DialogContent
+            showCloseButton={!resetting}
+            title={resetConfirmStep === 1 ? "Начать сначала?" : "Подтвердите ещё раз"}
+            className={cn("border-0 rounded-[9px] max-w-md")}
+            style={{ backgroundColor: MODAL_BG }}
+          >
+            <div className="space-y-4" style={{ color: ACTIVE_TEXT_DARK }}>
+              {resetConfirmStep === 1 ? (
+                <>
+                  <p className="text-sm">
+                    Будут безвозвратно удалены все ваши данные: активы и обязательства, транзакции и цепочки,
+                    добавленные контрагенты и категории, изменения контрагентов и категорий, загруженные картинки,
+                    подключение Telegram, дата начала учета. Вы вернётесь к окну онбординга.
+                  </p>
+                  <p className="text-sm font-medium" style={{ color: "#FB4C4F" }}>
+                    Продолжить?
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm">
+                    Для окончательного подтверждения нажмите «Начать сначала» ещё раз.
+                  </p>
+                </>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-4">
+              {resetConfirmStep === 1 ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="rounded-lg"
+                    onClick={() => setResetConfirmOpen(false)}
+                    disabled={resetting}
+                  >
+                    Отмена
+                  </Button>
+                  <Button
+                    type="button"
+                    className="rounded-lg border-0"
+                    style={{
+                      backgroundColor: "rgba(239, 68, 68, 0.2)",
+                      color: "#EF4444",
+                    }}
+                    onClick={handleResetConfirmStep1}
+                  >
+                    Продолжить
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="rounded-lg"
+                    onClick={() => setResetConfirmStep(1)}
+                    disabled={resetting}
+                  >
+                    Назад
+                  </Button>
+                  <Button
+                    type="button"
+                    className="rounded-lg border-0"
+                    style={{
+                      backgroundColor: "#EF4444",
+                      color: "#fff",
+                    }}
+                    onClick={handleResetConfirmStep2}
+                    disabled={resetting}
+                  >
+                    {resetting ? "Сброс..." : "Начать сначала"}
+                  </Button>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Модальное окно: импорт из файла — оформление как модалка Дзен-мани */}
         <Dialog open={importFileModalOpen} onOpenChange={setImportFileModalOpen}>
           <DialogContent
             showCloseButton={true}
             title="Импорт истории из файла"
             className={cn(
-              "w-full max-w-[calc(100%-2rem)] h-[520px] max-h-[min(520px,90dvh)] p-0 gap-0 overflow-hidden flex flex-col",
+              "w-full max-w-[calc(100%-2rem)] h-[920px] max-h-[min(920px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
               "border-0 rounded-[9px]"
             )}
             style={{ backgroundColor: MODAL_BG, width: 1000, maxWidth: "min(1000px, calc(100vw - 2rem))" }}
@@ -765,23 +931,15 @@ export default function CabinetPage() {
 
               <div
                 className="flex-1 min-h-0 overflow-auto overscroll-contain px-6 py-6"
-                style={{
-                  color: ACTIVE_TEXT_DARK,
-                  fontSize: 18,
-                  fontWeight: 400,
-                }}
+                style={{ color: ACTIVE_TEXT_DARK, fontSize: 18, fontWeight: 400 }}
               >
                 <div className="flex flex-col gap-6">
-                  <h3
-                    className="text-2xl font-medium"
-                    style={{ color: ACTIVE_TEXT_DARK }}
-                  >
+                  <h3 className="text-2xl font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
                     Резервная копия ПРОСТОФИН
                   </h3>
                   <p style={{ lineHeight: 1.4 }}>
-                    Выберите ранее экспортированный файл в формате{" "}
-                    <span style={{ color: ACCENT }}>.csv</span>
-                    {" "}и нажмите «Импортировать». Будут созданы контрагенты, категории, активы и обязательства, цепочки транзакций, транзакции и цели.
+                    Импортируйте ранее экспортированный файл в формате{" "}
+                    <span style={{ color: ACCENT }}>.csv</span>. Будут созданы контрагенты, категории, активы и обязательства, цепочки транзакций, транзакции и цели.
                   </p>
                   <div className="flex flex-col gap-2">
                     <div
@@ -818,10 +976,7 @@ export default function CabinetPage() {
                           : "rgba(85, 68, 209, 0.08)",
                       }}
                     >
-                      <Upload
-                        className="w-10 h-10 shrink-0"
-                        style={{ color: ACCENT }}
-                      />
+                      <Upload className="w-10 h-10 shrink-0" style={{ color: ACCENT }} />
                       {importFile ? (
                         <span className="px-4 text-center break-all" style={{ color: ACTIVE_TEXT_DARK }}>
                           {importFile.name}
@@ -839,89 +994,154 @@ export default function CabinetPage() {
                       className="hidden"
                       onChange={(e) => handleImportFileSelect(e.target.files?.[0] ?? null)}
                     />
-
-                    {importProgress && (
-                      <div
-                        className="p-4 rounded-lg"
-                        style={{
-                          backgroundColor: BACKGROUND_DT,
-                          borderRadius: 9,
-                          color: ACTIVE_TEXT_DARK,
-                        }}
-                      >
-                        {importProgress.error ? (
-                          <p className="text-base" style={{ color: "#FB4C4F" }}>
-                            {importProgress.error}
-                          </p>
-                        ) : (
-                          <p className="text-base" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                            {importProgress.total > 0
-                              ? `${importProgress.stage} ${importProgress.current} / ${importProgress.total}`
-                              : importProgress.stage}
-                          </p>
+                    {importFile && (
+                      <>
+                        {isParsingFile && (
+                          <div className="p-4" style={{ backgroundColor: BACKGROUND_DT, borderRadius: 9 }}>
+                            <p className="text-base" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                              Обработка файла…
+                            </p>
+                          </div>
                         )}
-                      </div>
-                    )}
-                    {importResult && (
-                      <div
-                        className="p-4 rounded-lg border"
-                        style={{
-                          backgroundColor: importResult.success
-                            ? "rgba(52, 211, 153, 0.08)"
-                            : "rgba(251, 76, 79, 0.08)",
-                          borderColor: importResult.success
-                            ? "rgba(52, 211, 153, 0.3)"
-                            : "rgba(251, 76, 79, 0.3)",
-                          color: importResult.success ? "#34D399" : "#FB4C4F",
-                        }}
-                      >
-                        <p className="text-base">
-                          {importResult.success && importResult.counts ? (
-                            <>
-                              Импорт завершён: контрагенты {importResult.counts.counterparties}, категории{" "}
-                              {importResult.counts.categories}, активы/обязательства {importResult.counts.items}, цепочки{" "}
-                              {importResult.counts.transactionChains}, транзакции {importResult.counts.transactions}, цели{" "}
-                              {importResult.counts.goals}.
-                            </>
-                          ) : importResult.success ? (
-                            "Данные успешно импортированы."
-                          ) : (
-                            importResult.error ?? "Ошибка импорта."
-                          )}
-                        </p>
-                      </div>
+                        {!isParsingFile && parseFileError && (
+                          <div className="p-4" style={{ backgroundColor: BACKGROUND_DT, borderRadius: 9 }}>
+                            <p className="text-base" style={{ color: "#FB4C4F" }}>{parseFileError}</p>
+                          </div>
+                        )}
+                        {!isParsingFile && parsedFileData && !parseFileError && (
+                          <>
+                            <div className="shrink-0 text-center" style={{ fontSize: 18, fontWeight: 400, color: ACTIVE_TEXT_DARK, lineHeight: 1.4 }}>
+                              <p>Будут импортированы</p>
+                            </div>
+                            <div className="grid grid-cols-3 gap-4">
+                              {[
+                                { label: "Контрагенты", value: parsedFileData.counterparties.length },
+                                { label: "Категории", value: parsedFileData.categories.length },
+                                { label: "Активы и обязательства", value: parsedFileData.items.length },
+                                { label: "Цепочки транзакций", value: parsedFileData.transactionChains.length },
+                                { label: "Транзакции", value: parsedFileData.transactions.length.toLocaleString("ru-RU") },
+                                { label: "Цели", value: parsedFileData.goals.length },
+                              ].map(({ label, value }) => (
+                                <div
+                                  key={label}
+                                  className="rounded-lg p-6 flex flex-col items-center justify-center"
+                                  style={{ backgroundColor: BACKGROUND_DT }}
+                                >
+                                  <span
+                                    className="mb-2"
+                                    style={{ fontSize: 32, fontWeight: 500, color: ACTIVE_TEXT_DARK }}
+                                  >
+                                    {label}
+                                  </span>
+                                  <span
+                                    className="font-semibold"
+                                    style={{
+                                      fontSize: 96,
+                                      fontWeight: 600,
+                                      background: PINK_GRADIENT,
+                                      WebkitBackgroundClip: "text",
+                                      WebkitTextFillColor: "transparent",
+                                      backgroundClip: "text",
+                                    }}
+                                  >
+                                    {value}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
                     )}
                   </div>
+                  {importProgress && (
+                    <div className="p-4" style={{ backgroundColor: BACKGROUND_DT, borderRadius: 9 }}>
+                      {importProgress.error ? (
+                        <p className="text-base" style={{ color: "#FB4C4F" }}>{importProgress.error}</p>
+                      ) : (
+                        <p className="text-base" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                          {importProgress.total > 0
+                            ? `${importProgress.stage} ${importProgress.current} / ${importProgress.total}`
+                            : importProgress.stage}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {importResult && (
+                    <div
+                      className="p-4 rounded-lg border"
+                      style={{
+                        backgroundColor: importResult.success ? "rgba(52, 211, 153, 0.08)" : "rgba(251, 76, 79, 0.08)",
+                        borderColor: importResult.success ? "rgba(52, 211, 153, 0.3)" : "rgba(251, 76, 79, 0.3)",
+                        color: importResult.success ? "#34D399" : "#FB4C4F",
+                      }}
+                    >
+                      <p className="text-base">
+                        {importResult.success && importResult.counts ? (
+                          <>
+                            Импорт завершён: контрагенты {importResult.counts.counterparties}, категории {importResult.counts.categories}, активы/обязательства {importResult.counts.items}, цепочки {importResult.counts.transactionChains}, транзакции {importResult.counts.transactions}, цели {importResult.counts.goals}.
+                          </>
+                        ) : importResult.success ? (
+                          "Данные успешно импортированы."
+                        ) : (
+                          importResult.error ?? "Ошибка импорта."
+                        )}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-3 shrink-0 px-6 pb-6 pt-2">
                 <Button
-                  variant="ghost"
-                  className="h-auto py-2 px-0 rounded-none border-0 bg-transparent font-normal hover:!bg-transparent dark:hover:!bg-transparent hover:no-underline"
-                  style={{ color: ACCENT, fontSize: 18, fontWeight: 400 }}
-                  onClick={() => setImportFileModalOpen(false)}
-                >
-                  Закрыть
-                </Button>
-                <Button
-                  variant="authPrimary"
-                  className="h-12 rounded-lg border-0 px-8 font-normal"
+                  variant="glass"
+                  className="h-12 rounded-lg border-0 px-6 font-normal"
                   style={
                     {
-                      "--auth-primary-bg":
-                        "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-                      "--auth-primary-bg-hover":
-                        "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                      "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                      "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
                       fontSize: 18,
                       fontWeight: 400,
                     } as React.CSSProperties
                   }
-                  disabled={!importFile || !!importProgress}
-                  onClick={handleImportFromFile}
+                  onClick={() => setImportFileModalOpen(false)}
                 >
-                  Импортировать
+                  Отмена
                 </Button>
+                {!importResult ? (
+                  <Button
+                    variant="authPrimary"
+                    className="h-12 rounded-lg border-0 px-8 font-normal"
+                    style={
+                      {
+                        "--auth-primary-bg": "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                        "--auth-primary-bg-hover": "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                        fontSize: 18,
+                        fontWeight: 400,
+                      } as React.CSSProperties
+                    }
+                    disabled={isParsingFile || !!importProgress || !parsedFileData}
+                    onClick={handleImportFromFile}
+                  >
+                    {isParsingFile ? "Обработка…" : importProgress ? "Импорт…" : "Импортировать"}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="authPrimary"
+                    className="h-12 rounded-lg border-0 px-8 font-normal"
+                    style={
+                      {
+                        "--auth-primary-bg": "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                        "--auth-primary-bg-hover": "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                        fontSize: 18,
+                        fontWeight: 400,
+                      } as React.CSSProperties
+                    }
+                    onClick={() => setImportFileModalOpen(false)}
+                  >
+                    Закрыть
+                  </Button>
+                )}
               </div>
             </div>
           </DialogContent>

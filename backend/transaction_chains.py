@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
-from category_service import resolve_category_or_400
+from category_service import resolve_category_or_none
 from db import get_db
 from models import Item, Transaction, TransactionChain, User, Counterparty
 from schemas import TransactionChainCreate, TransactionChainOut
@@ -255,7 +255,7 @@ def create_transaction_chain(
     if data.related_item_id is not None:
         load_item_for_related(db, user, data.related_item_id, False, "related_item")
 
-    category = resolve_category_or_400(db, user, data.category_id)
+    category = resolve_category_or_none(db, user, data.category_id)
 
     chain = TransactionChain(
         user_id=user.id,

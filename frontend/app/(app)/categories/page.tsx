@@ -905,6 +905,16 @@ export default function CategoriesPage() {
                     alt=""
                     className="w-full h-full object-cover"
                   />
+                ) : editTarget ? (
+                  <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
+                    <CategoryIconImage
+                      categoryId={editTarget.id}
+                      categoryLookup={categoryLookup}
+                      apiBase={API_BASE}
+                      size={200}
+                      fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                    />
+                  </div>
                 ) : (
                   <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
                     <Camera className="w-12 h-12" style={{ color: PLACEHOLDER_COLOR_DARK }} />

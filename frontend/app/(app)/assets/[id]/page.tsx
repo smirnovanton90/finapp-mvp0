@@ -1843,7 +1843,7 @@ export default function AssetDetailPage() {
                 <div className="w-full">
                   <div className="rounded-[9px] overflow-hidden" style={{ backgroundColor: BACKGROUND_DT }}>
                     <div
-                      className="flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90"
+                      className={`flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90 ${quantityBlockOpen ? "rounded-t-[9px] border-b border-white/10" : ""}`}
                       onClick={() => setQuantityBlockOpen((v) => !v)}
                     >
                       <IconButton
@@ -2047,7 +2047,7 @@ export default function AssetDetailPage() {
                           style={{ backgroundColor: BACKGROUND_DT }}
                         >
                           <div
-                            className="flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90"
+                            className={`flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90 ${isExpanded ? "rounded-t-[9px] border-b border-white/10" : ""}`}
                             onClick={() => setCostHistoryOpen((v) => (v === key ? null : key))}
                           >
                           <IconButton
@@ -2598,7 +2598,7 @@ export default function AssetDetailPage() {
                         }}
                       >
                         <div
-                          className="flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90"
+                          className={`flex w-full items-center gap-2 py-3 px-3 cursor-pointer transition-colors hover:opacity-90 ${isExpanded ? "rounded-t-[9px] border-b border-white/10" : ""}`}
                           onClick={() => setRentabilityOpen((v) => (v === key ? null : key))}
                           style={{
                             backgroundImage: `linear-gradient(90deg, ${amountColor}22, transparent 50%)`,

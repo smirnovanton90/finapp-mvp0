@@ -70,6 +70,7 @@ import {
   REAL_ESTATE_TRANSPORT_VALUABLES_TYPE_CODES,
   COUNTERPARTY_TYPE_CODES,
   MANDATORY_COUNTERPARTY_TYPE_CODES,
+  CREDIT_LIABILITY_TYPES,
   LOAN_LIABILITY_TYPES,
   AUTO_PLAN_INTEREST_TYPES,
   AUTO_PLAN_LOAN_TYPES,
@@ -266,7 +267,12 @@ export function AddEditItemFormModal({
       const section = (initialCreateOptions.sectionId && initialCreateOptions.kind)
         ? ITEM_SECTIONS.find((s) => s.id === initialCreateOptions.sectionId && s.kind === initialCreateOptions.kind)
         : null;
-      const typeFromSection = section?.typeCodes?.[0] ?? "";
+      const typeFromSection =
+        initialCreateOptions.sectionId === "third_party_assets"
+          ? "loan_to_third_party"
+          : initialCreateOptions.sectionId === "third_party_loans"
+            ? "private_loan"
+            : (section?.typeCodes?.[0] ?? "");
       if (initialCreateOptions.sectionId && !defaultType && typeFromSection) {
         setTypeCode(typeFromSection);
         setPrimaryValueKind(getDefaultPrimaryValueKind(typeFromSection, initialCreateOptions.kind));
@@ -511,6 +517,11 @@ export function AddEditItemFormModal({
   const requiresLoanPaymentInput = useMemo(
     () => showLoanPlanSettings && kind === "ASSET",
     [showLoanPlanSettings, kind]
+  );
+  /** Для кредитных обязательств и «Полученные займы от третьих лиц» при включённом тогле «Планирование» все поля блока обязательны. */
+  const isCreditLiabilityWithPlan = useMemo(
+    () => Boolean(planEnabled && kind === "LIABILITY" && (CREDIT_LIABILITY_TYPES.includes(typeCode) || typeCode === "private_loan")),
+    [planEnabled, kind, typeCode]
   );
 
   /** График погашения для предпросмотра (кредитные обязательства). */
@@ -1762,6 +1773,16 @@ export function AddEditItemFormModal({
       return;
     }
     if (planEnabled && showLoanPlanSettings) {
+      if (isCreditLiabilityWithPlan) {
+        if (!repaymentType) {
+          setFormError("Выберите тип погашения.");
+          return;
+        }
+        if (!repaymentAccountId) {
+          setFormError("Укажите, откуда погашается.");
+          return;
+        }
+      }
       if (interestRateValue === null) {
         setFormError("Укажите процентную ставку по кредиту или займу.");
         return;
@@ -2245,9 +2266,14 @@ export function AddEditItemFormModal({
                       onValueChange={(value) => {
                         setSectionId(value);
                         const section = sectionOptions.find((s) => s.id === value);
-                        const firstType = section?.typeCodes?.[0] ?? "";
-                        setTypeCode(firstType);
-                        if (firstType) setPrimaryValueKind(getDefaultPrimaryValueKind(firstType, kind));
+                        const nextType =
+                          value === "third_party_assets"
+                            ? "loan_to_third_party"
+                            : value === "third_party_loans"
+                              ? "private_loan"
+                              : (section?.typeCodes?.[0] ?? "");
+                        setTypeCode(nextType);
+                        if (nextType) setPrimaryValueKind(getDefaultPrimaryValueKind(nextType, kind));
                       }}
                       options={sectionOptions.map((s) => ({ value: s.id, label: s.label }))}
                       placeholder={kind === "ASSET" ? "Выберите раздел актива" : "Выберите раздел обязательства"}
@@ -2304,10 +2330,18 @@ export function AddEditItemFormModal({
                 {/* Название */}
                 <TextField label="Название" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, Кошелёк" required />
 
-                {/* Банк / Где открыт / Кому предоставлен займ — только для не-рыночных активов */}
+                {/* Банк / Кредитор / Где открыт / Кому предоставлен займ — только для не-рыночных активов */}
                 {showCounterpartyField && (
                   <FormField
-                    label={typeCode === "loan_to_third_party" ? "Кому предоставлен займ" : typeCode === "e_wallet" ? "Где открыт" : "Банк"}
+                    label={
+                      typeCode === "loan_to_third_party"
+                        ? "Кому предоставлен займ"
+                        : typeCode === "e_wallet"
+                          ? "Где открыт"
+                          : kind === "LIABILITY"
+                            ? "Кредитор"
+                            : "Банк"
+                    }
                     required={isCounterpartyMandatory}
                     error={counterpartyError ?? undefined}
                   >
@@ -2316,11 +2350,23 @@ export function AddEditItemFormModal({
                       selectedIds={counterpartyId != null ? [counterpartyId] : []}
                       onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
                       selectionMode="single"
-                      placeholder={typeCode === "loan_to_third_party" ? "Начните вводить название контрагента" : typeCode === "e_wallet" ? "Начните вводить название" : "Начните вводить название банка"}
+                      placeholder={
+                        typeCode === "loan_to_third_party"
+                          ? "Начните вводить название контрагента"
+                          : typeCode === "e_wallet"
+                            ? "Начните вводить название"
+                            : kind === "LIABILITY"
+                              ? "Начните вводить название кредитора"
+                              : "Начните вводить название банка"
+                      }
                       industries={industries}
                       disabled={counterpartyLoading}
                       apiBase={API_BASE}
-                      filterByIndustryId={typeCode === "e_wallet" || typeCode === "loan_to_third_party" ? null : bankIndustryId}
+                      filterByIndustryId={
+                        kind === "LIABILITY"
+                          ? (sectionId === "credit_liabilities" && typeCode !== "microloan" && typeCode !== "installment" ? bankIndustryId : null)
+                          : (typeCode === "e_wallet" || typeCode === "loan_to_third_party" ? null : bankIndustryId)
+                      }
                       onAddCounterparty={() => setCreateCounterpartyOpen(true)}
                     />
                   </FormField>
@@ -2787,7 +2833,7 @@ export function AddEditItemFormModal({
                 {typeCode === "bonds" && selectedInstrument?.secid && (
                   <div className="min-w-0">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mb-4">
-                      <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
+                      <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до{planEnabled && <span style={{ color: "#FB4C4F" }}> *</span>}</Label>
                       <div className="min-w-0">
                         <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
                       </div>
@@ -2844,7 +2890,7 @@ export function AddEditItemFormModal({
                 {typeCode === "securities" && selectedInstrument?.secid && (
                   <div className="min-w-0">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mb-4">
-                      <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
+                      <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до{planEnabled && <span style={{ color: "#FB4C4F" }}> *</span>}</Label>
                       <div className="min-w-0">
                         <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
                       </div>
@@ -2987,7 +3033,7 @@ export function AddEditItemFormModal({
                   <>
                     {!showDepositFields && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до</Label>
+                        <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium flex items-center min-h-10">Планировать до{planEnabled && <span style={{ color: "#FB4C4F" }}> *</span>}</Label>
                         <div className="min-w-0">
                           <DateField label="" value={planEndDate} onChange={(e) => setPlanEndDate(e.target.value)} placeholder="ГГГГ-ММ-ДД" required={planEnabled} />
                         </div>
@@ -3001,20 +3047,20 @@ export function AddEditItemFormModal({
                 {showLoanPlanSettings && (
                   <>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
-                      <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" />
+                      <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" required={isCreditLiabilityWithPlan} />
                       <div className="min-w-0">
-                        <FormField label="Откуда погашается">
+                        <FormField label="Откуда погашается" required={isCreditLiabilityWithPlan}>
                           <ItemSelector items={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at)} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => setRepaymentAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                         </FormField>
                       </div>
-                      <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" />
+                      <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" required={isCreditLiabilityWithPlan} />
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
                       <div className="grid min-w-0 gap-2">
                         <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-1.5 gap-y-0">
                           <Label style={{ color: ACTIVE_TEXT_DARK }} className="text-sm font-medium shrink-0">
                             {loanTermMode === "months" ? "Срок до погашения (мес.)" : "Плановая дата погашения"}
-                            {planEnabled && <span style={{ color: "#FB4C4F" }}> *</span>}
+                            {(planEnabled || isCreditLiabilityWithPlan) && <span style={{ color: "#FB4C4F" }}> *</span>}
                           </Label>
                           <button
                             type="button"
@@ -3075,13 +3121,13 @@ export function AddEditItemFormModal({
                           />
                         )}
                       </div>
-                      <SelectField label="Периодичность погашения" value={repaymentFrequency} onValueChange={(v) => setRepaymentFrequency(v as TransactionChainFrequency)} options={[{ value: "WEEKLY", label: "Еженедельно" }, { value: "MONTHLY", label: "Ежемесячно" }, { value: "REGULAR", label: "С заданным интервалом (дни)" }]} required={planEnabled} />
+                      <SelectField label="Периодичность погашения" value={repaymentFrequency} onValueChange={(v) => setRepaymentFrequency(v as TransactionChainFrequency)} options={[{ value: "WEEKLY", label: "Еженедельно" }, { value: "MONTHLY", label: "Ежемесячно" }, { value: "REGULAR", label: "С заданным интервалом (дни)" }]} required={planEnabled || isCreditLiabilityWithPlan} />
                       {repaymentFrequency === "MONTHLY" ? (
-                        <TextField label="Число месяца платежа" value={repaymentMonthlyDay} onChange={(e) => setRepaymentMonthlyDay(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="1–31" required={planEnabled} />
+                        <TextField label="Число месяца платежа" value={repaymentMonthlyDay} onChange={(e) => setRepaymentMonthlyDay(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="1–31" required={planEnabled || isCreditLiabilityWithPlan} />
                       ) : repaymentFrequency === "WEEKLY" ? (
-                        <SelectField label="День недели погашения" value={String(repaymentWeeklyDay)} onValueChange={(v) => setRepaymentWeeklyDay(Number(v))} options={[{ value: "0", label: "Понедельник" }, { value: "1", label: "Вторник" }, { value: "2", label: "Среда" }, { value: "3", label: "Четверг" }, { value: "4", label: "Пятница" }, { value: "5", label: "Суббота" }, { value: "6", label: "Воскресенье" }]} placeholder="Выберите день" required={planEnabled} />
+                        <SelectField label="День недели погашения" value={String(repaymentWeeklyDay)} onValueChange={(v) => setRepaymentWeeklyDay(Number(v))} options={[{ value: "0", label: "Понедельник" }, { value: "1", label: "Вторник" }, { value: "2", label: "Среда" }, { value: "3", label: "Четверг" }, { value: "4", label: "Пятница" }, { value: "5", label: "Суббота" }, { value: "6", label: "Воскресенье" }]} placeholder="Выберите день" required={planEnabled || isCreditLiabilityWithPlan} />
                       ) : (
-                        <TextField label="Интервал (дней)" value={repaymentIntervalDays} onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))} placeholder="1" required={planEnabled} />
+                        <TextField label="Интервал (дней)" value={repaymentIntervalDays} onChange={(e) => setRepaymentIntervalDays(e.target.value.replace(/\D/g, ""))} placeholder="1" required={planEnabled || isCreditLiabilityWithPlan} />
                       )}
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
@@ -3100,8 +3146,8 @@ export function AddEditItemFormModal({
                     </div>
                     {requiresLoanPaymentInput && (
                       <>
-                        <SelectField label="Тип суммы погашения" value={paymentAmountKind} onValueChange={(v) => setPaymentAmountKind(v as PaymentAmountKind)} options={[{ value: "FIXED", label: "Фиксированная сумма" }, { value: "PERCENT", label: "Процент от остатка" }]} placeholder="Выберите" />
-                        <TextField label="Сумма погашения" value={paymentAmountStr} onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setPaymentAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                        <SelectField label="Тип суммы погашения" value={paymentAmountKind} onValueChange={(v) => setPaymentAmountKind(v as PaymentAmountKind)} options={[{ value: "FIXED", label: "Фиксированная сумма" }, { value: "PERCENT", label: "Процент от остатка" }]} placeholder="Выберите" required={planEnabled} />
+                        <TextField label="Сумма погашения" value={paymentAmountStr} onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setPaymentAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" required={planEnabled} />
                       </>
                     )}
                     {loanSchedulePreview && loanSchedulePreview.length > 0 && (

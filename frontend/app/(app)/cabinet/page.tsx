@@ -25,11 +25,20 @@ import {
   type ImportSourceKey,
 } from "@/components/import-history-modal-content";
 import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  buildExportCsv,
+  parseExportCsv,
+  runImport,
+  type ImportProgress,
+} from "@/lib/data-export-import";
 import {
   MODAL_BG,
   ACTIVE_TEXT_DARK,
   PLACEHOLDER_COLOR_DARK,
+  ACCENT,
+  ACCENT2,
+  BACKGROUND_DT,
 } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 
@@ -91,6 +100,14 @@ export default function CabinetPage() {
   const [importServiceModalOpen, setImportServiceModalOpen] = useState(false);
   const [importSource, setImportSource] = useState<ImportSourceKey>(null);
 
+  const [importFileModalOpen, setImportFileModalOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importFileDragOver, setImportFileDragOver] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [importResult, setImportResult] = useState<{ success: boolean; error?: string; counts?: Record<string, number> } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [telegramStatus, setTelegramStatus] = useState<{
     linked: boolean;
     notify_time: string;
@@ -145,6 +162,71 @@ export default function CabinetPage() {
       setError(e instanceof Error ? e.message : "Ошибка");
     } finally {
       setTelegramLoading(false);
+    }
+  };
+
+  const handleExportData = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const { csv, filename } = await buildExportCsv();
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSuccess("Данные экспортированы.");
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка экспорта.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const openImportFileModal = () => {
+    setImportFile(null);
+    setImportFileDragOver(false);
+    setImportProgress(null);
+    setImportResult(null);
+    if (importFileInputRef.current) importFileInputRef.current.value = "";
+    setImportFileModalOpen(true);
+  };
+
+  const handleImportFileSelect = (file: File | null) => {
+    setImportFile(file ?? null);
+    setImportProgress(null);
+    setImportResult(null);
+  };
+
+  const handleImportFromFile = async () => {
+    if (!importFile) return;
+    setImportProgress({ stage: "Загрузка файла...", current: 0, total: 1 });
+    setImportResult(null);
+    try {
+      const text = await importFile.text();
+      const data = parseExportCsv(text);
+      const result = await runImport(data, (p) => setImportProgress(p));
+      setImportResult({
+        success: result.success,
+        error: result.error,
+        counts: result.counts,
+      });
+      if (result.success) {
+        setImportFile(null);
+        if (importFileInputRef.current) importFileInputRef.current.value = "";
+        setSuccess("Данные импортированы.");
+        setTimeout(() => setSuccess(null), 3000);
+      }
+    } catch (e) {
+      setImportResult({
+        success: false,
+        error: e instanceof Error ? e.message : "Ошибка импорта.",
+      });
+    } finally {
+      setImportProgress(null);
     }
   };
 
@@ -597,7 +679,7 @@ export default function CabinetPage() {
           </div>
         </CabinetCard>
 
-        {/* Импорт истории */}
+        {/* Данные: экспорт, импорт из файла, импорт из других приложений */}
         <CabinetCard>
           <div className="space-y-4">
             <h3
@@ -606,23 +688,244 @@ export default function CabinetPage() {
             >
               Данные
             </h3>
-            <Button
-              variant="authPrimary"
-              className="w-full sm:w-auto rounded-lg border-0"
-              style={
-                {
-                  "--auth-primary-bg":
-                    "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-                  "--auth-primary-bg-hover":
-                    "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
-                } as React.CSSProperties
-              }
-              onClick={() => setImportModalOpen(true)}
+            <p
+              className="text-sm"
+              style={{ color: PLACEHOLDER_COLOR_DARK }}
             >
-              Импорт истории из других приложений
-            </Button>
+              Экспорт всех ваших данных в CSV и импорт ранее экспортированного файла.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="authPrimary"
+                className="rounded-lg border-0"
+                disabled={exporting}
+                style={
+                  {
+                    "--auth-primary-bg":
+                      "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                    "--auth-primary-bg-hover":
+                      "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                  } as React.CSSProperties
+                }
+                onClick={handleExportData}
+              >
+                {exporting ? "Экспорт..." : "Экспорт данных в CSV"}
+              </Button>
+              <Button
+                variant="glass"
+                className="rounded-lg border-0"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as React.CSSProperties
+                }
+                onClick={openImportFileModal}
+              >
+                Импорт истории из файла
+              </Button>
+              <Button
+                variant="glass"
+                className="rounded-lg border-0"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as React.CSSProperties
+                }
+                onClick={() => setImportModalOpen(true)}
+              >
+                Импорт истории из других приложений
+              </Button>
+            </div>
           </div>
         </CabinetCard>
+
+        {/* Модальное окно: импорт из ранее экспортированного CSV (оформление как первое окно импорта Дзен-мани, без степпера) */}
+        <Dialog open={importFileModalOpen} onOpenChange={setImportFileModalOpen}>
+          <DialogContent
+            showCloseButton={true}
+            title="Импорт истории из файла"
+            className={cn(
+              "w-full max-w-[calc(100%-2rem)] h-[520px] max-h-[min(520px,90dvh)] p-0 gap-0 overflow-hidden flex flex-col",
+              "border-0 rounded-[9px]"
+            )}
+            style={{ backgroundColor: MODAL_BG, width: 1000, maxWidth: "min(1000px, calc(100vw - 2rem))" }}
+          >
+            <div className="flex flex-col w-full h-full min-h-0">
+              <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
+                <DialogTitle
+                  className="flex items-center gap-3 text-[32px] font-medium"
+                  style={{ color: ACTIVE_TEXT_DARK }}
+                >
+                  <Upload className="w-8 h-8 shrink-0" style={{ color: ACCENT }} />
+                  Импорт истории из файла
+                </DialogTitle>
+              </DialogHeader>
+
+              <div
+                className="flex-1 min-h-0 overflow-auto overscroll-contain px-6 py-6"
+                style={{
+                  color: ACTIVE_TEXT_DARK,
+                  fontSize: 18,
+                  fontWeight: 400,
+                }}
+              >
+                <div className="flex flex-col gap-6">
+                  <h3
+                    className="text-2xl font-medium"
+                    style={{ color: ACTIVE_TEXT_DARK }}
+                  >
+                    Резервная копия ПРОСТОФИН
+                  </h3>
+                  <p style={{ lineHeight: 1.4 }}>
+                    Выберите ранее экспортированный файл в формате{" "}
+                    <span style={{ color: ACCENT }}>.csv</span>
+                    {" "}и нажмите «Импортировать». Будут созданы контрагенты, категории, активы и обязательства, цепочки транзакций, транзакции и цели.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => importFileInputRef.current?.click()}
+                      onKeyDown={(e) =>
+                        (e.key === "Enter" || e.key === " ") && importFileInputRef.current?.click()
+                      }
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setImportFileDragOver(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setImportFileDragOver(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setImportFileDragOver(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file && (file.name.endsWith(".csv") || file.type === "text/csv")) {
+                          handleImportFileSelect(file);
+                        }
+                      }}
+                      className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed min-h-[140px] cursor-pointer transition-colors hover:opacity-90"
+                      style={{
+                        borderColor: importFileDragOver ? ACCENT : ACCENT2,
+                        backgroundColor: importFileDragOver
+                          ? "rgba(127, 92, 255, 0.12)"
+                          : "rgba(85, 68, 209, 0.08)",
+                      }}
+                    >
+                      <Upload
+                        className="w-10 h-10 shrink-0"
+                        style={{ color: ACCENT }}
+                      />
+                      {importFile ? (
+                        <span className="px-4 text-center break-all" style={{ color: ACTIVE_TEXT_DARK }}>
+                          {importFile.name}
+                        </span>
+                      ) : (
+                        <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                          Нажмите для выбора или перетащите файл
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      ref={importFileInputRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      onChange={(e) => handleImportFileSelect(e.target.files?.[0] ?? null)}
+                    />
+
+                    {importProgress && (
+                      <div
+                        className="p-4 rounded-lg"
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderRadius: 9,
+                          color: ACTIVE_TEXT_DARK,
+                        }}
+                      >
+                        {importProgress.error ? (
+                          <p className="text-base" style={{ color: "#FB4C4F" }}>
+                            {importProgress.error}
+                          </p>
+                        ) : (
+                          <p className="text-base" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                            {importProgress.total > 0
+                              ? `${importProgress.stage} ${importProgress.current} / ${importProgress.total}`
+                              : importProgress.stage}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {importResult && (
+                      <div
+                        className="p-4 rounded-lg border"
+                        style={{
+                          backgroundColor: importResult.success
+                            ? "rgba(52, 211, 153, 0.08)"
+                            : "rgba(251, 76, 79, 0.08)",
+                          borderColor: importResult.success
+                            ? "rgba(52, 211, 153, 0.3)"
+                            : "rgba(251, 76, 79, 0.3)",
+                          color: importResult.success ? "#34D399" : "#FB4C4F",
+                        }}
+                      >
+                        <p className="text-base">
+                          {importResult.success && importResult.counts ? (
+                            <>
+                              Импорт завершён: контрагенты {importResult.counts.counterparties}, категории{" "}
+                              {importResult.counts.categories}, активы/обязательства {importResult.counts.items}, цепочки{" "}
+                              {importResult.counts.transactionChains}, транзакции {importResult.counts.transactions}, цели{" "}
+                              {importResult.counts.goals}.
+                            </>
+                          ) : importResult.success ? (
+                            "Данные успешно импортированы."
+                          ) : (
+                            importResult.error ?? "Ошибка импорта."
+                          )}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-3 shrink-0 px-6 pb-6 pt-2">
+                <Button
+                  variant="ghost"
+                  className="h-auto py-2 px-0 rounded-none border-0 bg-transparent font-normal hover:!bg-transparent dark:hover:!bg-transparent hover:no-underline"
+                  style={{ color: ACCENT, fontSize: 18, fontWeight: 400 }}
+                  onClick={() => setImportFileModalOpen(false)}
+                >
+                  Закрыть
+                </Button>
+                <Button
+                  variant="authPrimary"
+                  className="h-12 rounded-lg border-0 px-8 font-normal"
+                  style={
+                    {
+                      "--auth-primary-bg":
+                        "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                      "--auth-primary-bg-hover":
+                        "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                      fontSize: 18,
+                      fontWeight: 400,
+                    } as React.CSSProperties
+                  }
+                  disabled={!importFile || !!importProgress}
+                  onClick={handleImportFromFile}
+                >
+                  Импортировать
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
           <DialogContent

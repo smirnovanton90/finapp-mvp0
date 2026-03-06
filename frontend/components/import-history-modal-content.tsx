@@ -72,7 +72,7 @@ export function ImportHistoryModalContent({
   onStartImport,
 }: ImportHistoryModalContentProps) {
   const cards: {
-    key: ImportSourceKey;
+    key: NonNullable<ImportSourceKey>;
     title: string;
     description: string;
     instructionLabel: string | null;

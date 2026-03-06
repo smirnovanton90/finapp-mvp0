@@ -51,11 +51,11 @@ import {
   fetchCounterpartyIndustries,
   API_BASE,
 } from "@/lib/api";
-import { validateStep2 } from "@/lib/import-step2-validation";
+import { validateStep2, getAccountValidationError } from "@/lib/import-step2-validation";
 import { validateStep3 } from "@/lib/import-step3-validation";
 import { validateStep4 } from "@/lib/import-step4-validation";
 import { executeImportDzen, getStatementAccountingStartDate, getStatementLastTransactionDate, getEarliestStatementTransactionDate } from "@/lib/import-dzen-executor";
-import { getTypeOptionsForKind } from "@/lib/item-type-options";
+import { getTypeOptionsForKind, normalizeDisplayTypeCode } from "@/lib/item-type-options";
 import {
   readFileToHeadersAndRows,
   applyMappingToDzenParsedData,
@@ -444,6 +444,23 @@ export function ImportAccountsOperationsModal({
       return changed ? next : prev;
     });
   }, [step, stepCounterparties, counterparties, counterpartyCardStates.size]);
+
+  // Ошибки валидации по каждому счёту для отображения в карточках на шаге «Счета»
+  const accountValidationErrors = React.useMemo(() => {
+    if (!parsedData) return new Map<string, string | null>();
+    const accounts =
+      importSource === "dzen"
+        ? parsedData.accounts.filter((acc) => !isDzenDebtsAccount(acc))
+        : parsedData.accounts;
+    const map = new Map<string, string | null>();
+    for (const account of accounts) {
+      const key = `${account.name}|${account.currency}`;
+      const state = accountCardStates.get(key) ?? getInitialAccountCardState(account);
+      const error = getAccountValidationError(account, parsedData.transactions, state);
+      map.set(key, error);
+    }
+    return map;
+  }, [parsedData, accountCardStates, importSource]);
 
   const ownMappingPreview = React.useMemo((): DzenParsedData | null => {
     if (importSource !== "own" || !parsedFileData) return null;
@@ -1471,6 +1488,7 @@ export function ImportAccountsOperationsModal({
                           setAddCounterpartyForAccountKey(key);
                           setAddCounterpartyModalOpen(true);
                         }}
+                        validationError={accountValidationErrors.get(key) ?? null}
                       />
                     );
                   })}
@@ -1946,10 +1964,11 @@ export function ImportAccountsOperationsModal({
         const cardState = accountCardStates.get(addCounterpartyForAccountKey);
         if (!cardState) return undefined;
         const typeOptions = getTypeOptionsForKind(cardState.kind);
-        const effectiveType = cardState.typeCode && typeOptions.some((o) => o.code === cardState.typeCode)
+        const displayType = normalizeDisplayTypeCode(cardState.typeCode || "", cardState.kind);
+        const effectiveType = (cardState.typeCode && typeOptions.some((o) => o.code === cardState.typeCode))
           ? cardState.typeCode
-          : typeOptions[0]?.code ?? "";
-        const isBankType = ["bank_account", "bank_card", "deposit", "savings_account"].includes(effectiveType);
+          : (displayType && typeOptions.some((o) => o.code === displayType) ? displayType : typeOptions[0]?.code ?? "");
+        const isBankType = ["bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account"].includes(effectiveType);
         return isBankType ? industries.find((ind) => ind.name === "Банки")?.id ?? undefined : undefined;
       })()}
       overlayClassName="z-[100] import-add-counterparty-modal"

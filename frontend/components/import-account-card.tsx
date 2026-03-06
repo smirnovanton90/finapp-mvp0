@@ -2,40 +2,27 @@
 
 import * as React from "react";
 import {
-  ACCENT,
-  ACCENT_FILL_LIGHT,
   ACTIVE_TEXT_DARK,
   BACKGROUND_DT,
+  GREEN,
   GREEN_TRANSACTION,
-  PLACEHOLDER_COLOR_DARK,
   RED,
 } from "@/lib/colors";
-import { Pencil, PencilOff, Link, Unlink, ChevronDown, ChevronUp } from "lucide-react";
+import { Pencil, PencilOff, Link, Unlink, CheckCircle2, AlertCircle } from "lucide-react";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { TextField, SelectField } from "@/components/ui/form-field";
 import { IconButton } from "@/components/ui/icon-button";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { getItemTypeLabel } from "@/lib/item-types";
-import { getTypeOptionsForKind } from "@/lib/item-type-options";
+import { getTypeOptionsForKind, normalizeDisplayTypeCode } from "@/lib/item-type-options";
+import { MANDATORY_COUNTERPARTY_TYPE_CODES as MANDATORY_CP_CODES } from "@/lib/asset-item-form-constants";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
-import { type DzenParsedAccount, type DzenParsedTransaction, getTransactionDateTimeSortKey } from "@/lib/dzen-csv-parser";
+import { type DzenParsedAccount, type DzenParsedTransaction } from "@/lib/dzen-csv-parser";
 import type { ItemOut, CounterpartyOut, CounterpartyIndustryOut, ItemKind } from "@/lib/api";
 
-const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set([
-  "bank_account",
-  "bank_card",
-  "deposit",
-  "savings_account",
-  "consumer_loan",
-  "mortgage",
-  "car_loan",
-  "education_loan",
-  "loan_to_third_party",
-  "third_party_receivables",
-  "private_loan",
-  "third_party_payables",
-]);
+const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set(MANDATORY_CP_CODES);
+const BANK_TYPE_CODES = ["bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account"];
 
 import { CurrencyChip } from "@/components/currency-chip";
 
@@ -43,55 +30,6 @@ function formatShortDate(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
   if (!year || !month || !day) return dateKey;
   return `${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}.${year}`;
-}
-
-/** Дата и время для списка транзакций (время всегда выводится) */
-function formatShortDateTime(dateKey: string, timeStr: string) {
-  const datePart = formatShortDate(dateKey);
-  const t = (timeStr ?? "").trim() || "00:00:00";
-  const [h, m] = t.split(":");
-  const timePart = `${String(Number(h) || 0).padStart(2, "0")}:${String(Number(m) || 0).padStart(2, "0")}`;
-  return `${datePart} ${timePart}`;
-}
-
-function formatAmount(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
-    .format(value)
-    .replace(".", ",");
-}
-
-/** Транзакции по счёту с подписью типа и суммы для отображения */
-export type AccountTransactionRow = {
-  tx: DzenParsedTransaction;
-  typeLabel: "Доход" | "Расход" | "Перевод";
-  amount: number; // для расхода отрицательное, для дохода положительное, для перевода ± в зависимости от стороны
-};
-
-function getTransactionsForAccount(
-  account: DzenParsedAccount,
-  transactions: DzenParsedTransaction[]
-): AccountTransactionRow[] {
-  const rows: AccountTransactionRow[] = [];
-  const typeLabels: Record<DzenParsedTransaction["type"], AccountTransactionRow["typeLabel"]> = {
-    expense: "Расход",
-    income: "Доход",
-    transfer: "Перевод",
-  };
-  for (const tx of transactions) {
-    const isOutcome = tx.outcomeAccountName === account.name && tx.outcomeCurrency === account.currency;
-    const isIncome = tx.incomeAccountName === account.name && tx.incomeCurrency === account.currency;
-    if (!isOutcome && !isIncome) continue;
-    const typeLabel = typeLabels[tx.type];
-    let amount = 0;
-    if (isOutcome && tx.outcome != null) amount -= tx.outcome;
-    if (isIncome && tx.income != null) amount += tx.income;
-    rows.push({ tx, typeLabel, amount });
-  }
-  rows.sort((a, b) => getTransactionDateTimeSortKey(a.tx).localeCompare(getTransactionDateTimeSortKey(b.tx)));
-  return rows;
 }
 
 /** Рассчитать начальную сумму: current - income + outcome */
@@ -162,6 +100,8 @@ export type ImportAccountCardProps = {
   statementLastTransactionDate?: string | null;
   /** When set, shows "Добавить" in bank/counterparty selector; on click calls this. */
   onAddCounterparty?: () => void;
+  /** Сообщение об ошибке валидации для этого счёта; null/пустая строка — проверка пройдена */
+  validationError?: string | null;
 };
 
 export function ImportAccountCard({
@@ -177,6 +117,7 @@ export function ImportAccountCard({
   statementAccountingStartDate,
   statementLastTransactionDate,
   onAddCounterparty,
+  validationError,
 }: ImportAccountCardProps) {
   const typeOptions = getTypeOptionsForKind(state.kind);
   const effectiveKind =
@@ -202,12 +143,6 @@ export function ImportAccountCard({
 
   const [isEditingName, setIsEditingName] = React.useState(false);
   const [isEditingCurrency, setIsEditingCurrency] = React.useState(false);
-  const [transactionsExpanded, setTransactionsExpanded] = React.useState(false);
-
-  const accountTransactions = React.useMemo(
-    () => getTransactionsForAccount(account, transactions),
-    [account, transactions]
-  );
 
   const effectiveCurrency = state.currency ?? account.currency;
   const currencyOptions = React.useMemo(() => {
@@ -334,19 +269,17 @@ export function ImportAccountCard({
             </div>
           ) : (
             (() => {
-              const effectiveType =
+              const candidate =
                 state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
                   ? state.typeCode
-                  : typeOptions[0]?.code ?? "";
+                  : normalizeDisplayTypeCode(state.typeCode || "", state.kind);
+              const effectiveType = typeOptions.some((o) => o.code === candidate) ? candidate : (typeOptions[0]?.code ?? "");
               const showCounterpartyField =
                 MANDATORY_COUNTERPARTY_TYPE_CODES.has(effectiveType);
               const bankIndustryId = industries.find(
                 (ind) => ind.name === "Банки"
               )?.id;
-              const isBankType =
-                ["bank_account", "bank_card", "deposit", "savings_account"].includes(
-                  effectiveType
-                );
+              const isBankType = BANK_TYPE_CODES.includes(effectiveType);
 
               return (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3 w-full">
@@ -491,52 +424,20 @@ export function ImportAccountCard({
           )}
         </div>
 
-        {/* Раскрываемый список транзакций по счёту */}
-        {accountTransactions.length > 0 && (
-          <div className="flex flex-col min-w-0 border-t pt-3 mt-1" style={{ borderColor: "var(--border-color, #e5e7eb)" }}>
-            <button
-              type="button"
-              onClick={() => setTransactionsExpanded((v) => !v)}
-              className="flex flex-row items-center gap-2 w-full text-left py-1 rounded hover:opacity-80"
-              style={{ color: ACTIVE_TEXT_DARK, fontSize: 14 }}
-            >
-              {transactionsExpanded ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
-              <span>
-                {transactionsExpanded ? "Свернуть транзакции" : "Показать транзакции"}
-              </span>
-              <span className="text-[12px] opacity-70">({accountTransactions.length})</span>
-            </button>
-            {transactionsExpanded && (
-              <div className="mt-2 max-h-[280px] overflow-y-auto rounded border py-2 px-3" style={{ backgroundColor: "var(--muted, #f3f4f6)", borderColor: "var(--border-color, #e5e7eb)" }}>
-                <table className="w-full text-left border-collapse" style={{ fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                      <th className="py-1.5 pr-3 font-normal">Дата и время</th>
-                      <th className="py-1.5 pr-3 font-normal">Тип</th>
-                      <th className="py-1.5 text-right font-normal">Сумма</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {accountTransactions.map((row, idx) => (
-                      <tr key={idx} className="border-t border-b-0" style={{ borderColor: "var(--border-color, #e5e7eb)" }}>
-                        <td className="py-1 pr-3" style={{ color: ACTIVE_TEXT_DARK }}>{formatShortDateTime(row.tx.date, row.tx.time)}</td>
-                        <td className="py-1 pr-3" style={{ color: ACTIVE_TEXT_DARK }}>{row.typeLabel}</td>
-                        <td
-                          className="py-1 text-right tabular-nums"
-                          style={{
-                            color: row.amount >= 0 ? GREEN_TRANSACTION : RED,
-                          }}
-                        >
-                          {row.amount >= 0 ? "+" : ""}{formatAmount(Math.abs(row.amount))} {effectiveCurrency}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Статус валидации */}
+        <div className="flex flex-col gap-1 min-w-0 pt-3">
+          {validationError ? (
+            <div className="flex flex-row items-center gap-2" style={{ color: "#FB4C4F", fontSize: 13 }}>
+              <AlertCircle className="h-4 w-4 shrink-0 flex-shrink-0" aria-hidden />
+              <pre className="whitespace-pre-wrap break-words font-sans m-0 flex-1 min-w-0 leading-snug">{validationError}</pre>
+            </div>
+          ) : (
+            <div className="flex flex-row items-center gap-2" style={{ color: GREEN, fontSize: 13 }}>
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>Готов к импорту</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

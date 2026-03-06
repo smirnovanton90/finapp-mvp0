@@ -3,7 +3,8 @@
  */
 
 import { parseRubToCents } from "@/lib/format-rub";
-import { getTypeOptionsForKind } from "@/lib/item-type-options";
+import { getTypeOptionsForKind, normalizeDisplayTypeCode } from "@/lib/item-type-options";
+import { MANDATORY_COUNTERPARTY_TYPE_CODES as MANDATORY_CP_CODES } from "@/lib/asset-item-form-constants";
 import {
   type DzenParsedAccount,
   type DzenParsedTransaction,
@@ -11,20 +12,7 @@ import {
 } from "@/lib/dzen-csv-parser";
 import type { ImportAccountCardState } from "@/components/import-account-card";
 
-const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set([
-  "bank_account",
-  "bank_card",
-  "deposit",
-  "savings_account",
-  "consumer_loan",
-  "mortgage",
-  "car_loan",
-  "education_loan",
-  "loan_to_third_party",
-  "third_party_receivables",
-  "private_loan",
-  "third_party_payables",
-]);
+const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set(MANDATORY_CP_CODES);
 
 function calcInitial(
   account: DzenParsedAccount,
@@ -92,9 +80,13 @@ function formatDelta(value: number): string {
   return value >= 0 ? `+${formatted}` : `-${formatted}`;
 }
 
+/** Порог (в рублях): сальдо считаем допустимым, если не ниже -epsilon (погрешность округления). */
+const NEGATIVE_BALANCE_EPSILON = 0.01;
+
 /**
  * Проверяет, что баланс по счёту не уходит в минус на конец каждого дня.
  * Внутри дня транзакции могут идти в любом порядке, проверка только по итогу дня.
+ * Сальдо в пределах [-epsilon, 0] (например -0,00 из-за float) считается нулём и допускается.
  * При отрицательном сальдо возвращает разбивку: начальное сальдо и дельты по дням до минуса.
  */
 function checkBalanceNeverNegative(
@@ -111,6 +103,8 @@ function checkBalanceNeverNegative(
   let prevDate: string | null = null;
   let dayDelta = 0;
 
+  const isNegative = (b: number) => b < -NEGATIVE_BALANCE_EPSILON;
+
   const flushDay = (date: string) => {
     if (date) {
       breakdown.push(
@@ -122,7 +116,7 @@ function checkBalanceNeverNegative(
   for (const e of events) {
     if (e.date !== prevDate && prevDate != null) {
       flushDay(prevDate);
-      if (balance < 0) return { ok: false, date: prevDate, balance, breakdown };
+      if (isNegative(balance)) return { ok: false, date: prevDate, balance, breakdown };
       dayDelta = 0;
     }
     balance += e.delta;
@@ -131,7 +125,7 @@ function checkBalanceNeverNegative(
   }
 
   if (prevDate != null) flushDay(prevDate);
-  if (balance < 0) {
+  if (isNegative(balance)) {
     const date = prevDate ?? "";
     return { ok: false, date, balance, breakdown };
   }
@@ -158,6 +152,76 @@ export type Step2ValidationResult =
   | { valid: true }
   | { valid: false; error: string };
 
+/**
+ * Возвращает сообщение об ошибке валидации для одного счёта или null, если проверки пройдены.
+ * Используется для отображения статуса валидации в карточке счёта на шаге «Счета».
+ */
+export function getAccountValidationError(
+  account: DzenParsedAccount,
+  transactions: DzenParsedTransaction[],
+  state: ImportAccountCardState
+): string | null {
+  if (state.linkEnabled) {
+    if (state.linkedItemId == null) {
+      return `Для счёта «${account.name}» выберите актив/обязательство для связи.`;
+    }
+    return null;
+  }
+
+  const typeOptions = getTypeOptionsForKind(state.kind);
+  const displayType = normalizeDisplayTypeCode(state.typeCode || "", state.kind);
+  const effectiveType =
+    displayType && typeOptions.some((o) => o.code === displayType)
+      ? displayType
+      : (state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
+          ? state.typeCode
+          : typeOptions[0]?.code ?? "");
+
+  if (!effectiveType) {
+    return `Для счёта «${account.name}» укажите вид актива/обязательства.`;
+  }
+
+  if (
+    MANDATORY_COUNTERPARTY_TYPE_CODES.has(effectiveType) &&
+    !state.counterpartyId
+  ) {
+    return 'Заполните поле «Банк, в котором открыт счет»';
+  }
+
+  const displayName = (state.name || account.name).trim();
+  if (!displayName) {
+    return `Для счёта «${account.name}» укажите название.`;
+  }
+
+  // Сначала проверяем, что поле заполнено; только потом проверка отрицательного сальдо
+  const balanceStrTrimmed = (state.balanceStr ?? "").trim();
+  if (!balanceStrTrimmed) {
+    return 'Заполните поле «Текущий остаток»';
+  }
+  const balanceCents = parseRubToCents(state.balanceStr);
+  if (!Number.isFinite(balanceCents)) {
+    return 'Заполните поле «Текущий остаток»';
+  }
+
+  const currentBalance = balanceCents / 100;
+
+  if (state.kind === "ASSET") {
+    const result = checkBalanceNeverNegative(
+      account,
+      transactions,
+      currentBalance
+    );
+    if (!result.ok) {
+      const dateStr = formatDateForError(result.date);
+      const balanceStr = formatBalanceForError(result.balance);
+      const breakdownText = result.breakdown.join("\n");
+      return `По счёту «${account.name}» при указанном остатке и транзакциях формируется отрицательное сальдо: ${balanceStr} на ${dateStr}. Проверьте остаток или транзакции.\n\nРасчёт по дням:\n${breakdownText}`;
+    }
+  }
+
+  return null;
+}
+
 export function validateStep2(
   accounts: DzenParsedAccount[],
   transactions: DzenParsedTransaction[],
@@ -168,75 +232,8 @@ export function validateStep2(
     const state = accountCardStates.get(key);
     if (!state) continue;
 
-    if (state.linkEnabled) {
-      if (state.linkedItemId == null) {
-        return {
-          valid: false,
-          error: `Для счёта «${account.name}» выберите актив/обязательство для связи.`,
-        };
-      }
-      continue;
-    }
-
-    // Режим создания нового: проверяем обязательные поля
-    const typeOptions = getTypeOptionsForKind(state.kind);
-    const effectiveType =
-      state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
-        ? state.typeCode
-        : typeOptions[0]?.code ?? "";
-
-    if (!effectiveType) {
-      return {
-        valid: false,
-        error: `Для счёта «${account.name}» укажите вид актива/обязательства.`,
-      };
-    }
-
-    if (
-      MANDATORY_COUNTERPARTY_TYPE_CODES.has(effectiveType) &&
-      !state.counterpartyId
-    ) {
-      return {
-        valid: false,
-        error: `Для счёта «${account.name}» выберите банк/контрагента.`,
-      };
-    }
-
-    const displayName = (state.name || account.name).trim();
-    if (!displayName) {
-      return {
-        valid: false,
-        error: `Для счёта «${account.name}» укажите название.`,
-      };
-    }
-
-    const balanceCents = parseRubToCents(state.balanceStr);
-    if (!Number.isFinite(balanceCents)) {
-      return {
-        valid: false,
-        error: `Для счёта «${account.name}» укажите остаток.`,
-      };
-    }
-
-    const currentBalance = balanceCents / 100;
-
-    // Для активов проверяем, что баланс никогда не уходит в минус
-    if (state.kind === "ASSET") {
-      const result = checkBalanceNeverNegative(
-        account,
-        transactions,
-        currentBalance
-      );
-      if (!result.ok) {
-        const dateStr = formatDateForError(result.date);
-        const balanceStr = formatBalanceForError(result.balance);
-        const breakdownText = result.breakdown.join("\n");
-        return {
-          valid: false,
-          error: `По счёту «${account.name}» при указанном остатке и транзакциях формируется отрицательное сальдо: ${balanceStr} на ${dateStr}. Проверьте остаток или транзакции.\n\nРасчёт по дням:\n${breakdownText}`,
-        };
-      }
-    }
+    const error = getAccountValidationError(account, transactions, state);
+    if (error) return { valid: false, error };
   }
 
   return { valid: true };

@@ -6,7 +6,7 @@
 
 import { parseRubToCents } from "@/lib/format-rub";
 import { buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
-import { getTypeOptionsForKind } from "@/lib/item-type-options";
+import { getTypeOptionsForKind, normalizeDisplayTypeCode } from "@/lib/item-type-options";
 import {
   addCategorySynonyms,
   addItemSynonyms,
@@ -17,6 +17,7 @@ import {
   fetchUserMe,
   setAccountingStartDate,
 } from "@/lib/api";
+import type { CardKind } from "@/lib/api";
 import {
   type DzenParsedData,
   type DzenParsedTransaction,
@@ -282,10 +283,27 @@ export async function executeImportDzen(
         accountKeyToItemId.set(key, state.linkedItemId);
       } else {
         const typeOptions = getTypeOptionsForKind(state.kind);
+        const displayType = normalizeDisplayTypeCode(state.typeCode || "", state.kind);
         const typeCode =
-          state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
-            ? state.typeCode
-            : typeOptions[0]?.code ?? "cash";
+          displayType && typeOptions.some((o) => o.code === displayType)
+            ? displayType
+            : (state.typeCode && typeOptions.some((o) => o.code === state.typeCode)
+                ? state.typeCode
+                : typeOptions[0]?.code ?? "cash");
+
+        // API принимает type_code "bank_card" + card_kind; в UI — bank_card_debit / bank_card_credit
+        const apiTypeCode =
+          typeCode === "bank_card_credit" || typeCode === "bank_card_debit"
+            ? "bank_card"
+            : typeCode;
+        const cardKind: CardKind | undefined =
+          typeCode === "bank_card_credit"
+            ? "CREDIT"
+            : typeCode === "bank_card_debit"
+              ? "DEBIT"
+              : undefined;
+        const creditLimit =
+          typeCode === "bank_card_credit" ? 0 : undefined;
 
         const balanceCents = parseRubToCents(state.balanceStr);
         const currentBalance = Number.isFinite(balanceCents)
@@ -317,7 +335,9 @@ export async function executeImportDzen(
 
         const created = await createItem({
           kind: state.kind,
-          type_code: typeCode,
+          type_code: apiTypeCode,
+          ...(cardKind != null ? { card_kind: cardKind } : {}),
+          ...(creditLimit !== undefined ? { credit_limit: creditLimit } : {}),
           name: (state.name || acc.name).trim(),
           currency_code: (state.currency ?? acc.currency) || "RUB",
           open_date: accountOpenDate,

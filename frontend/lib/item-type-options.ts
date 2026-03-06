@@ -1,75 +1,34 @@
 /**
  * Типы активов и обязательств для селекторов (импорт, создание и т.д.)
+ * Синхронизировано с текущим списком видов активов/обязательств из asset-item-form-constants.
  */
 
+import { ASSET_TYPES, LIABILITY_TYPES } from "@/lib/asset-item-form-constants";
 
-export const ASSET_TYPE_OPTIONS = [
-  { code: "cash", label: "Наличные" },
-  { code: "bank_account", label: "Банковский счёт" },
-  { code: "bank_card", label: "Банковская карта" },
-  { code: "savings_account", label: "Накопительный счет" },
-  { code: "e_wallet", label: "Электронный кошелек" },
-  { code: "brokerage", label: "Брокерский счёт" },
-  { code: "deposit", label: "Вклад" },
-  { code: "securities", label: "Акции" },
-  { code: "bonds", label: "Облигации" },
-  { code: "etf", label: "ETF" },
-  { code: "bpif", label: "БПИФ" },
-  { code: "pif", label: "ПИФ" },
-  { code: "iis", label: "ИИС" },
-  { code: "precious_metals", label: "Драгоценные металлы" },
-  { code: "crypto", label: "Криптовалюта" },
-  { code: "loan_to_third_party", label: "Предоставленные займы третьим лицам" },
-  { code: "real_estate", label: "Квартира" },
-  { code: "townhouse", label: "Дом / таунхаус" },
-  { code: "land_plot", label: "Земельный участок" },
-  { code: "garage", label: "Гараж / машиноместо" },
-  { code: "commercial_real_estate", label: "Коммерческая недвижимость" },
-  { code: "real_estate_share", label: "Доля в недвижимости" },
-  { code: "car", label: "Автомобиль" },
-  { code: "motorcycle", label: "Мотоцикл" },
-  { code: "boat", label: "Катер / лодка" },
-  { code: "trailer", label: "Прицеп" },
-  { code: "special_vehicle", label: "Спецтехника" },
-  { code: "jewelry", label: "Драгоценности" },
-  { code: "electronics", label: "Техника и электроника" },
-  { code: "art", label: "Ценные предметы искусства" },
-  { code: "collectibles", label: "Коллекционные вещи" },
-  { code: "other_valuables", label: "Прочие ценные вещи" },
-  { code: "npf", label: "НПФ" },
-  { code: "investment_life_insurance", label: "ИСЖ" },
-  { code: "business_share", label: "Доля в бизнесе" },
-  { code: "sole_proprietor", label: "ИП (оценка бизнеса)" },
-  { code: "other_asset", label: "Прочие активы" },
-] as const;
+/** Опции видов активов (тот же список, что в форме создания актива). */
+export const ASSET_TYPE_OPTIONS = ASSET_TYPES.map((t) => ({
+  code: t.code,
+  label: t.label,
+}));
 
-export const LIABILITY_TYPE_OPTIONS = [
-  { code: "consumer_loan", label: "Потребительский кредит" },
-  { code: "mortgage", label: "Ипотека" },
-  { code: "car_loan", label: "Автокредит" },
-  { code: "education_loan", label: "Образовательный кредит" },
-  { code: "installment", label: "Рассрочка" },
-  { code: "microloan", label: "МФО" },
-  { code: "private_loan", label: "Полученные займы от третьих лиц" },
-  { code: "credit_card_debt", label: "Задолженность по кредитной карте" },
-  { code: "third_party_payables", label: "Долги третьим лицам" },
-  { code: "tax_debt", label: "Налоги и обязательные платежи" },
-  { code: "personal_income_tax_debt", label: "Задолженность по НДФЛ" },
-  { code: "property_tax_debt", label: "Задолженность по налогу на имущество" },
-  { code: "land_tax_debt", label: "Задолженность по земельному налогу" },
-  { code: "transport_tax_debt", label: "Задолженность по транспортному налогу" },
-  { code: "fns_debt", label: "Задолженности перед ФНС" },
-  { code: "utilities_debt", label: "Задолженность по ЖКХ" },
-  { code: "telecom_debt", label: "Задолженность за интернет / связь" },
-  { code: "traffic_fines_debt", label: "Задолженность по штрафам (ГИБДД и прочие)" },
-  { code: "enforcement_debt", label: "Задолженность по исполнительным листам" },
-  { code: "alimony_debt", label: "Задолженность по алиментам" },
-  { code: "court_debt", label: "Судебные задолженности" },
-  { code: "court_fine_debt", label: "Штрафы по решениям суда" },
-  { code: "business_liability", label: "Бизнес-обязательства" },
-  { code: "other_liability", label: "Прочие обязательства" },
-] as const;
+/** Опции видов обязательств (тот же список, что в форме создания обязательства). */
+export const LIABILITY_TYPE_OPTIONS = LIABILITY_TYPES.map((t) => ({
+  code: t.code,
+  label: t.label,
+}));
 
 export function getTypeOptionsForKind(kind: "ASSET" | "LIABILITY") {
   return kind === "ASSET" ? ASSET_TYPE_OPTIONS : LIABILITY_TYPE_OPTIONS;
+}
+
+/**
+ * Нормализует typeCode из старого формата (bank_card) в текущий (bank_card_debit)
+ * для отображения в селекторе при импорте.
+ */
+export function normalizeDisplayTypeCode(
+  typeCode: string,
+  kind: "ASSET" | "LIABILITY"
+): string {
+  if (kind === "ASSET" && typeCode === "bank_card") return "bank_card_debit";
+  return typeCode;
 }

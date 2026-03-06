@@ -531,8 +531,10 @@ export function AddEditItemFormModal({
     if (!Number.isFinite(principalCents) || principalCents < 0) return null;
     const rate = parseFloat(String(interestRate).replace(",", "."));
     const rateNum = Number.isFinite(rate) && rate >= 0 ? rate : 0;
-    const type = repaymentType === "ANNUITY" ? "ANNUITY" : repaymentType === "DIFFERENTIAL" ? "DIFFERENTIATED" : null;
+    const type = repaymentType === "ANNUITY" ? "ANNUITY" : repaymentType === "DIFFERENTIATED" ? "DIFFERENTIATED" : null;
     if (!type) return null;
+    if (repaymentFrequency !== "WEEKLY" && repaymentFrequency !== "MONTHLY" && repaymentFrequency !== "REGULAR")
+      return null;
     const periodStartKey = openDate || getTodayDateKey();
     const monthlyDayNum =
       repaymentFrequency === "MONTHLY" && repaymentMonthlyDay.trim()
@@ -1921,7 +1923,7 @@ export function AddEditItemFormModal({
             }
           }
         }
-        const hasCommission = commissionAmount.trim() && commissionAmountCents != null && commissionAmountCents > 0;
+        const hasCommission = Boolean(commissionAmount.trim() && commissionAmountCents != null && commissionAmountCents > 0);
         payload.commission_enabled = hasCommission;
         if (hasCommission) {
           payload.commission_amount_rub = commissionAmountCents ?? null;
@@ -1943,7 +1945,7 @@ export function AddEditItemFormModal({
             }
           }
         }
-        const hasCommission = commissionAmount.trim() && commissionAmountCents != null && commissionAmountCents > 0;
+        const hasCommission = Boolean(commissionAmount.trim() && commissionAmountCents != null && commissionAmountCents > 0);
         payload.commission_enabled = hasCommission;
         if (hasCommission) {
           payload.commission_amount_rub = commissionAmountCents ?? null;
@@ -3047,7 +3049,7 @@ export function AddEditItemFormModal({
                 {showLoanPlanSettings && (
                   <>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
-                      <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIAL", label: "Дифференцированный" }]} placeholder="Не выбрано" required={isCreditLiabilityWithPlan} />
+                      <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIATED", label: "Дифференцированный" }]} placeholder="Не выбрано" required={isCreditLiabilityWithPlan} />
                       <div className="min-w-0">
                         <FormField label="Откуда погашается" required={isCreditLiabilityWithPlan}>
                           <ItemSelector items={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at)} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => setRepaymentAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />

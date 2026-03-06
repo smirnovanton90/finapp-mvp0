@@ -18,6 +18,13 @@ type AccountingStartContextType = {
   setDateSetupComplete: (v: boolean) => void;
 };
 
+const DATE_SETUP_COMPLETE_KEY = "finapp-date-setup-complete";
+
+function getDateSetupCompletePersisted(): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  return sessionStorage.getItem(DATE_SETUP_COMPLETE_KEY) === "1";
+}
+
 const AccountingStartContext = createContext<AccountingStartContextType | undefined>(
   undefined
 );
@@ -28,17 +35,20 @@ export function AccountingStartProvider({ children }: { children: React.ReactNod
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDateConfirmation, setPendingDateConfirmation] = useState(false);
-  const [dateSetupComplete, setDateSetupComplete] = useState(false);
+  const [dateSetupComplete, setDateSetupComplete] = useState(getDateSetupCompletePersisted);
 
   const refresh = useCallback(async () => {
-    if (status !== "authenticated") {
+    if (status === "unauthenticated") {
       setAccountingStartDate(null);
       setLoading(false);
       setError(null);
       setDateSetupComplete(false);
       if (typeof sessionStorage !== "undefined") {
-        sessionStorage.removeItem("finapp-date-setup-complete");
+        sessionStorage.removeItem(DATE_SETUP_COMPLETE_KEY);
       }
+      return;
+    }
+    if (status !== "authenticated") {
       return;
     }
 
@@ -46,9 +56,17 @@ export function AccountingStartProvider({ children }: { children: React.ReactNod
     setError(null);
     try {
       const me = await fetchUserMe();
-      setAccountingStartDate(me.accounting_start_date ?? null);
+      const date = me.accounting_start_date ?? null;
+      setAccountingStartDate(date);
+      if (date) {
+        setDateSetupComplete(true);
+        if (typeof sessionStorage !== "undefined") {
+          sessionStorage.setItem(DATE_SETUP_COMPLETE_KEY, "1");
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load profile.");
+      // Не сбрасываем accountingStartDate при ошибке — оставляем текущее значение
     } finally {
       setLoading(false);
     }
@@ -58,12 +76,22 @@ export function AccountingStartProvider({ children }: { children: React.ReactNod
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (status === "authenticated" && getDateSetupCompletePersisted()) {
+      setDateSetupComplete(true);
+    }
+  }, [status]);
+
   const setDate = useCallback(async (date: string, options?: { skipLoading?: boolean }) => {
     if (!options?.skipLoading) setLoading(true);
     setError(null);
     try {
       const me = await setAccountingStartDateApi({ accounting_start_date: date });
       setAccountingStartDate(me.accounting_start_date ?? null);
+      setDateSetupComplete(true);
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.setItem(DATE_SETUP_COMPLETE_KEY, "1");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to set accounting start date.");
       throw err;

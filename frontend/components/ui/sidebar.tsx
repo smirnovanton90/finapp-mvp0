@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import {
   Wallet,
@@ -108,6 +108,7 @@ export function Sidebar() {
     setMobileOpen,
   } = useSidebar();
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
+  const userPhotoBlobRef = useRef<string | null>(null);
   const isCabinetActive = pathname === "/cabinet" || pathname.startsWith("/cabinet/");
   const hasFilters = FILTER_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"));
   const showFiltersSection = hasFilters && !isCollapsed;
@@ -116,40 +117,51 @@ export function Sidebar() {
   // На мобильном фильтры рендерятся в MobileFiltersDrawer, не в сайдбаре
   const renderFilterSlot = hasFilters && isDesktop;
 
-  // Загрузка фото пользователя
+  // Загрузка фото пользователя и обновление при смене в личном кабинете
   useEffect(() => {
-    let blobUrl: string | null = null;
     const loadUserPhoto = async () => {
       try {
         const me = await fetchUserMe();
         if (me.photo_url) {
-          // Если это URL из Google, используем напрямую
           if (me.photo_url.includes("googleusercontent.com")) {
+            if (userPhotoBlobRef.current) {
+              URL.revokeObjectURL(userPhotoBlobRef.current);
+              userPhotoBlobRef.current = null;
+            }
             setUserPhotoUrl(me.photo_url);
           } else {
-            // Иначе загружаем через API с авторизацией
             const blob = await fetchUserPhotoAsBlob();
             if (blob) {
-              blobUrl = blob;
+              if (userPhotoBlobRef.current) {
+                URL.revokeObjectURL(userPhotoBlobRef.current);
+              }
+              userPhotoBlobRef.current = blob;
               setUserPhotoUrl(blob);
             } else {
+              userPhotoBlobRef.current = null;
               setUserPhotoUrl(null);
             }
           }
         } else {
+          userPhotoBlobRef.current = null;
           setUserPhotoUrl(null);
         }
       } catch {
+        userPhotoBlobRef.current = null;
         setUserPhotoUrl(null);
       }
     };
 
     loadUserPhoto();
 
-    // Очистка blob URL при размонтировании
+    const onPhotoUpdated = () => loadUserPhoto();
+    window.addEventListener("user-photo-updated", onPhotoUpdated);
+
     return () => {
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
+      window.removeEventListener("user-photo-updated", onPhotoUpdated);
+      if (userPhotoBlobRef.current) {
+        URL.revokeObjectURL(userPhotoBlobRef.current);
+        userPhotoBlobRef.current = null;
       }
     };
   }, []);

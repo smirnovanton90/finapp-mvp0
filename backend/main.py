@@ -177,7 +177,14 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 from fastapi.middleware.cors import CORSMiddleware
 
-_CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "http://157.22.230.201", "https://157.22.230.201"]
+_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://localhost:3000",
+    "https://127.0.0.1:3000",
+    "http://157.22.230.201",
+    "https://157.22.230.201",
+]
 
 app.add_middleware(
     CORSMiddleware,

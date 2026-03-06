@@ -9,6 +9,8 @@ import hmac
 import json
 import secrets
 import time
+import urllib.request
+from datetime import date as date_type
 
 from config import settings
 from db import get_db
@@ -73,6 +75,92 @@ def hash_password(password: str) -> str:
     )
 
 
+YANDEX_USERINFO_URL = "https://login.yandex.ru/info?format=json"
+
+
+def _parse_yandex_birthday(value: str | None) -> date_type | None:
+    """Парсит дату рождения из ответа Яндекса (YYYY-MM-DD или null)."""
+    if not value or not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or value.startswith("0000"):
+        return None
+    try:
+        parts = value.split("-")
+        if len(parts) != 3:
+            return None
+        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+        if y < 1900 or m < 1 or m > 12 or d < 1 or d > 31:
+            return None
+        return date_type(y, m, d)
+    except (ValueError, TypeError):
+        return None
+
+
+def _get_user_by_yandex_token(token: str, db: Session) -> User | None:
+    """Проверяет токен через API Яндекса, возвращает пользователя или None."""
+    try:
+        req = urllib.request.Request(
+            YANDEX_USERINFO_URL,
+            headers={"Authorization": f"OAuth {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception:
+        return None
+    yandex_id = data.get("id")
+    if not yandex_id:
+        return None
+    yandex_id_str = str(yandex_id)
+    stmt = select(User).where(User.yandex_id == yandex_id_str)
+    user = db.execute(stmt).scalar_one_or_none()
+    if not user:
+        display_name = data.get("display_name") or data.get("real_name")
+        default_email = data.get("default_email")
+        login = data.get("login")
+        first_name = data.get("first_name")
+        last_name = data.get("last_name")
+        birth_date = _parse_yandex_birthday(data.get("birthday"))
+        user = User(
+            yandex_id=yandex_id_str,
+            email=default_email,
+            name=display_name or login,
+            first_name=first_name,
+            last_name=last_name,
+            login=login,
+            birth_date=birth_date,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        db.add(
+            OnboardingState(
+                user_id=user.id,
+                device_type="WEB",
+                status="PENDING",
+            )
+        )
+        db.commit()
+    else:
+        display_name = data.get("display_name") or data.get("real_name")
+        default_email = data.get("default_email")
+        first_name = data.get("first_name")
+        last_name = data.get("last_name")
+        birth_date = _parse_yandex_birthday(data.get("birthday"))
+        if not user.first_name and first_name:
+            user.first_name = first_name
+        if not user.last_name and last_name:
+            user.last_name = last_name
+        if not user.email and default_email:
+            user.email = default_email
+        if not user.name and display_name:
+            user.name = display_name
+        if not user.birth_date and birth_date is not None:
+            user.birth_date = birth_date
+        db.commit()
+    return user
+
+
 def verify_password(password: str, stored: str | None) -> bool:
     if not stored:
         return False
@@ -114,6 +202,9 @@ def get_current_user(
     try:
         payload = id_token.verify_oauth2_token(token, GOOGLE_REQUEST)
     except Exception:
+        user = _get_user_by_yandex_token(token, db)
+        if user is not None:
+            return user
         raise HTTPException(status_code=401, detail="Invalid token")
 
     sub = payload.get("sub")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { Camera, Upload, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -389,55 +389,82 @@ export default function CabinetPage() {
     image.src = objectUrl;
   };
 
-  const handlePhotoUpload = async () => {
-    if (!photoFile) return;
+  const uploadPhotoFile = useCallback(async (file: File) => {
     setUploadingPhoto(true);
     setPhotoError(null);
     try {
-      const updated = await uploadUserPhoto(photoFile);
+      const updated = await uploadUserPhoto(file);
+      setPhotoFile(null);
+      setProfile(updated);
       if (photoPreview?.startsWith("blob:")) {
         URL.revokeObjectURL(photoPreview);
       }
-      setPhotoFile(null);
-      setProfile(updated);
       const blobUrl = await fetchUserPhotoAsBlob();
       setPhotoPreview(blobUrl ?? null);
       setSuccess("Фотография успешно загружена.");
       setTimeout(() => setSuccess(null), 3000);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("user-photo-updated"));
+      }
       if (photoInputRef.current) photoInputRef.current.value = "";
     } catch (err) {
       setPhotoError(err instanceof Error ? err.message : "Не удалось загрузить фотографию.");
     } finally {
       setUploadingPhoto(false);
     }
-  };
+  }, [photoPreview]);
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const payload: UserProfileUpdate = {
-        first_name: firstName.trim() || null,
-        last_name: lastName.trim() || null,
-        birth_date: birthDate || null,
-      };
-      if (!payload.first_name) {
-        setError("Имя является обязательным полем.");
-        setSaving(false);
-        return;
-      }
-      const updated = await updateUserProfile(payload);
-      setProfile(updated);
-      setSuccess("Профиль успешно обновлен.");
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось обновить профиль.");
-    } finally {
-      setSaving(false);
+  useEffect(() => {
+    if (!photoFile) return;
+    uploadPhotoFile(photoFile);
+  }, [photoFile, uploadPhotoFile]);
+
+  const saveProfileRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const PROFILE_DEBOUNCE_MS = 600;
+
+  useEffect(() => {
+    if (!profile) return;
+    const fn = firstName.trim() || null;
+    const ln = lastName.trim() || null;
+    const bd = birthDate || null;
+    if (fn === (profile.first_name ?? null) && ln === (profile.last_name ?? null) && bd === (profile.birth_date ?? null)) {
+      return;
     }
-  };
+    if (!firstName.trim()) return;
+
+    if (saveProfileRef.current) clearTimeout(saveProfileRef.current);
+    saveProfileRef.current = setTimeout(() => {
+      saveProfileRef.current = null;
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
+      const payload: UserProfileUpdate = {
+        first_name: fn || null,
+        last_name: ln || null,
+        birth_date: bd || null,
+      };
+      updateUserProfile(payload)
+        .then((updated) => {
+          setProfile(updated);
+          setFirstName(updated.first_name ?? "");
+          setLastName(updated.last_name ?? "");
+          setBirthDate(updated.birth_date ?? "");
+          setSuccess("Профиль сохранён.");
+          setTimeout(() => setSuccess(null), 3000);
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Не удалось обновить профиль.");
+        })
+        .finally(() => setSaving(false));
+    }, PROFILE_DEBOUNCE_MS);
+
+    return () => {
+      if (saveProfileRef.current) {
+        clearTimeout(saveProfileRef.current);
+        saveProfileRef.current = null;
+      }
+    };
+  }, [firstName, lastName, birthDate, profile]);
 
   const photoUrl = photoPreview;
 
@@ -500,7 +527,7 @@ export default function CabinetPage() {
             <div className="relative flex-shrink-0">
               <div
                 className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
-                onClick={() => photoInputRef.current?.click()}
+                onClick={() => !uploadingPhoto && photoInputRef.current?.click()}
               >
                 {photoUrl ? (
                   <img
@@ -522,6 +549,14 @@ export default function CabinetPage() {
                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
                   <Upload className="w-8 h-8 text-white" />
                 </div>
+                {uploadingPhoto && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center rounded-lg pointer-events-none"
+                    style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
+                  >
+                    <span className="text-sm text-white">Загрузка...</span>
+                  </div>
+                )}
               </div>
               <input
                 ref={photoInputRef}
@@ -535,46 +570,14 @@ export default function CabinetPage() {
                   {photoError}
                 </p>
               )}
-              {photoFile && (
-                <div className="mt-2 flex items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={handlePhotoUpload}
-                    disabled={uploadingPhoto}
-                    variant="authPrimary"
-                    className="rounded-lg border-0"
-                    style={
-                      {
-                        "--auth-primary-bg":
-                          "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-                        "--auth-primary-bg-hover":
-                          "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
-                      } as React.CSSProperties
-                    }
-                  >
-                    {uploadingPhoto ? "Загрузка..." : "Загрузить"}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="glass"
-                    className="rounded-lg border-0"
-                    style={
-                      {
-                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                      } as React.CSSProperties
-                    }
-                    onClick={() => handlePhotoChange(null)}
-                  >
-                    Отмена
-                  </Button>
-                </div>
-              )}
             </div>
 
-            <form onSubmit={handleSubmit} className="flex-1 grid gap-4 min-w-0">
+            <div className="flex-1 grid gap-4 min-w-0">
+              {saving && (
+                <p className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                  Сохранение...
+                </p>
+              )}
               <div className="grid gap-4 sm:grid-cols-2">
                 <TextField
                   label="Имя"
@@ -594,25 +597,7 @@ export default function CabinetPage() {
                 onChange={(e) => setBirthDate(e.target.value)}
                 max={new Date().toISOString().split("T")[0]}
               />
-              <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  type="submit"
-                  variant="authPrimary"
-                  disabled={saving}
-                  className="rounded-lg border-0"
-                  style={
-                    {
-                      "--auth-primary-bg":
-                        "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-                      "--auth-primary-bg-hover":
-                        "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
-                    } as React.CSSProperties
-                  }
-                >
-                  {saving ? "Сохранение..." : "Сохранить"}
-                </Button>
-              </div>
-            </form>
+            </div>
           </div>
         </CabinetCard>
 

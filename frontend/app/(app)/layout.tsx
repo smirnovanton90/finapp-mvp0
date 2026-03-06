@@ -77,35 +77,35 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [status]);
 
-  if (status === "loading") {
-    return (
-      <div className="relative min-h-screen overflow-hidden flex items-center justify-center">
-        {/* Dark gradient — fixed so APP_BG_GRADIENT stays visible */}
-        <div
-          className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
-          style={{
-            background: APP_BG_GRADIENT,
-            opacity: isDark ? 1 : 0,
-          }}
-        />
-        <div
-          className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
-          style={{
-            background: AUTH_BG_GRADIENT_LIGHT,
-            opacity: isDark ? 0 : 1,
-          }}
-        />
-        <div className="relative z-10 text-muted-foreground">Загрузка…</div>
-      </div>
-    );
-  }
-
-  if (!session) {
+  if (!session && status !== "loading") {
     return null;
   }
 
+  const loadingContent = (
+    <div className="relative min-h-screen overflow-hidden flex items-center justify-center">
+      <div
+        className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
+        style={{
+          background: APP_BG_GRADIENT,
+          opacity: isDark ? 1 : 0,
+        }}
+      />
+      <div
+        className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
+        style={{
+          background: AUTH_BG_GRADIENT_LIGHT,
+          opacity: isDark ? 0 : 1,
+        }}
+      />
+      <div className="relative z-10 text-muted-foreground">Загрузка…</div>
+    </div>
+  );
+
   return (
     <AccountingStartGate>
+      {status === "loading" ? (
+        loadingContent
+      ) : (
       <div
         className="relative min-h-screen overflow-hidden"
         key={sessionKey}
@@ -151,6 +151,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </div>
+      )}
     </AccountingStartGate>
   );
 }

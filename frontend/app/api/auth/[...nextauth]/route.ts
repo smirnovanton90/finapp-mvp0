@@ -1,5 +1,6 @@
 import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import YandexProvider from "next-auth/providers/yandex";
 import CredentialsProvider from "next-auth/providers/credentials";
 
 const TOKEN_REFRESH_BUFFER_MS = 60 * 1000;
@@ -77,6 +78,15 @@ const handler = NextAuth({
         },
       },
     }),
+    YandexProvider({
+      clientId: process.env.YANDEX_CLIENT_ID ?? "",
+      clientSecret: process.env.YANDEX_CLIENT_SECRET ?? "",
+      // Scope: login:birthday — дата рождения (должна быть включена в OAuth-кабинете Яндекса).
+      authorization: {
+        url: "https://oauth.yandex.ru/authorize",
+        params: { scope: "login:info login:email login:birthday" },
+      },
+    }),
     CredentialsProvider({
       name: "Credentials",
       credentials: {
@@ -120,6 +130,13 @@ const handler = NextAuth({
           : (account as any).expires_in
             ? Date.now() + (account as any).expires_in * 1000
             : (token as any).expiresAt;
+        return token;
+      }
+
+      if (account?.provider === "yandex") {
+        (token as any).provider = "yandex";
+        (token as any).idToken = (account as any).access_token;
+        (token as any).accessToken = (account as any).access_token;
         return token;
       }
 

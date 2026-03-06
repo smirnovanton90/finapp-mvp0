@@ -644,6 +644,7 @@ export default function GoalsPage() {
             // ignore
           }
         }}
+        categoryNodes={categoryNodes}
       />
       <CreateCounterpartyModal
         open={createCounterpartyOpen}

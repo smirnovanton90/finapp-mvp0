@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { CSSProperties } from "react";
-import { MoreVertical, Pencil, Trash2, Archive, TrendingUp } from "lucide-react";
+import { MoreVertical, Pencil, Trash2, Archive, TrendingUp, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -173,6 +173,7 @@ export function AssetCard({
     (useCreditPrincipalLabel ? "Остаток основного долга" : useMarketValueLabel ? "Рыночная стоимость" : "Баланс");
 
   const displayBalanceCents = getItemDisplayBalanceCents(item);
+  const hasNegativeBalance = isAsset && displayBalanceCents < 0;
   const ps = item.plan_settings;
   const showBalanceAndRate =
     ((currencyCode && currencyCode !== "RUB") || isMoexItem) && !isDeleted;
@@ -657,7 +658,8 @@ export function AssetCard({
                 </span>
               </div>
               {/* Строка сумм: одна линия */}
-              <div className="flex h-9 w-full items-center justify-center text-xl font-normal" style={{ color: textColor }}>
+              <div className="flex h-9 w-full items-center justify-center gap-1.5 text-xl font-normal" style={{ color: textColor }}>
+                {hasNegativeBalance && <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Отрицательное сальдо" />}
                 {isMoexItem
                   ? item.position_lots != null
                     ? new Intl.NumberFormat("ru-RU").format(item.position_lots)
@@ -697,7 +699,8 @@ export function AssetCard({
                   {valueLabel}
                 </span>
               </div>
-              <div className="col-span-3 flex h-9 w-full items-center justify-center">
+              <div className="col-span-3 flex h-9 w-full items-center justify-center gap-1.5">
+                {hasNegativeBalance && <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Отрицательное сальдо" />}
                 <span
                   className="text-2xl font-medium"
                   style={{

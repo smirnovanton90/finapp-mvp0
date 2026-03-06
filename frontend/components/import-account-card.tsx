@@ -6,6 +6,7 @@ import {
   BACKGROUND_DT,
   GREEN,
   GREEN_TRANSACTION,
+  PLACEHOLDER_COLOR_DARK,
   RED,
 } from "@/lib/colors";
 import { Pencil, PencilOff, Link, Unlink, CheckCircle2, AlertCircle } from "lucide-react";
@@ -20,6 +21,7 @@ import { MANDATORY_COUNTERPARTY_TYPE_CODES as MANDATORY_CP_CODES } from "@/lib/a
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import { type DzenParsedAccount, type DzenParsedTransaction } from "@/lib/dzen-csv-parser";
 import type { ItemOut, CounterpartyOut, CounterpartyIndustryOut, ItemKind } from "@/lib/api";
+import { getAccountBalanceStats } from "@/lib/import-step2-validation";
 
 const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set(MANDATORY_CP_CODES);
 const BANK_TYPE_CODES = ["bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account"];
@@ -32,12 +34,12 @@ function formatShortDate(dateKey: string) {
   return `${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}.${year}`;
 }
 
-/** Рассчитать начальную сумму: current - income + outcome */
+/** Рассчитать начальное сальдо в копейках: currentCents - income + outcome (все в копейках). */
 function calcInitialFromTransactions(
   account: DzenParsedAccount,
   transactions: DzenParsedTransaction[],
-  currentBalance: number
-): { initial: number; earliestDate: string | null } {
+  currentBalanceCents: number
+): { initialCents: number; earliestDate: string | null } {
   let incomeSum = 0;
   let outcomeSum = 0;
   let earliestDate: string | null = null;
@@ -56,8 +58,8 @@ function calcInitialFromTransactions(
     }
   }
 
-  const initial = currentBalance - incomeSum + outcomeSum;
-  return { initial, earliestDate };
+  const initialCents = currentBalanceCents - incomeSum + outcomeSum;
+  return { initialCents, earliestDate };
 }
 
 const COMMON_CURRENCY_CODES = ["RUB", "USD", "EUR", "GBP", "CHF", "JPY", "CNY", "KZT", "UAH", "BYN", "GEL"];
@@ -102,6 +104,8 @@ export type ImportAccountCardProps = {
   onAddCounterparty?: () => void;
   /** Сообщение об ошибке валидации для этого счёта; null/пустая строка — проверка пройдена */
   validationError?: string | null;
+  /** Предупреждение (не блокирует импорт), например об отрицательном сальдо в течение периода */
+  validationWarning?: string | null;
 };
 
 export function ImportAccountCard({
@@ -118,6 +122,7 @@ export function ImportAccountCard({
   statementLastTransactionDate,
   onAddCounterparty,
   validationError,
+  validationWarning,
 }: ImportAccountCardProps) {
   const typeOptions = getTypeOptionsForKind(state.kind);
   const effectiveKind =
@@ -131,10 +136,9 @@ export function ImportAccountCard({
     return Number.isFinite(parsed) ? parsed : 0;
   }, [state.balanceStr]);
 
-  const currentBalance = balanceCents / 100;
-  const { initial, earliestDate } = React.useMemo(
-    () => calcInitialFromTransactions(account, transactions, currentBalance),
-    [account, transactions, currentBalance]
+  const { initialCents, earliestDate } = React.useMemo(
+    () => calcInitialFromTransactions(account, transactions, balanceCents),
+    [account, transactions, balanceCents]
   );
 
   const update = (patch: Partial<ImportAccountCardState>) => {
@@ -157,6 +161,25 @@ export function ImportAccountCard({
     statementLastTransactionDate
       ? `Остаток на ${formatShortDate(statementLastTransactionDate)}`
       : "Текущий остаток";
+
+  const balanceStats = React.useMemo(() => {
+    const trimmed = (state.balanceStr ?? "").trim();
+    if (!trimmed) return null;
+    const cents = parseRubToCents(state.balanceStr);
+    if (!Number.isFinite(cents)) return null;
+    return getAccountBalanceStats(account, transactions, cents);
+  }, [account, transactions, state.balanceStr]);
+
+  /** Форматирует сумму в копейках для отображения в рублях (околонулевые как 0,00). */
+  function formatBalanceValue(valueCents: number): string {
+    const rub = Math.abs(valueCents) <= 1 ? 0 : valueCents / 100;
+    return new Intl.NumberFormat("ru-RU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+      .format(rub)
+      .replace(".", ",");
+  }
 
   return (
     <div
@@ -424,6 +447,36 @@ export function ImportAccountCard({
           )}
         </div>
 
+        {/* Показатели сальдо по выписке */}
+        {balanceStats && (balanceStats.earliestDate != null || balanceStats.latestDate != null) && (
+          <div className="flex flex-col gap-1 min-w-0 pt-3" style={{ fontSize: 13, color: ACTIVE_TEXT_DARK }}>
+            {balanceStats.latestDate != null && balanceStats.balanceAtLatestDate != null && (
+              <div className="flex flex-row gap-2">
+                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Сальдо на {formatShortDate(balanceStats.latestDate)}:</span>
+                <span className="tabular-nums">{formatBalanceValue(balanceStats.balanceAtLatestDate)} {effectiveCurrency}</span>
+              </div>
+            )}
+            {balanceStats.earliestDate != null && balanceStats.balanceAtEarliestDate != null && (
+              <div className="flex flex-row gap-2">
+                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Сальдо на {formatShortDate(balanceStats.earliestDate)}:</span>
+                <span className="tabular-nums">{formatBalanceValue(balanceStats.balanceAtEarliestDate)} {effectiveCurrency}</span>
+              </div>
+            )}
+            {balanceStats.minBalance != null && (
+              <div className="flex flex-row gap-2">
+                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Минимальное сальдо:</span>
+                <span className="tabular-nums">{formatBalanceValue(balanceStats.minBalance)} {effectiveCurrency}</span>
+              </div>
+            )}
+            {balanceStats.maxBalance != null && (
+              <div className="flex flex-row gap-2">
+                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Максимальное сальдо:</span>
+                <span className="tabular-nums">{formatBalanceValue(balanceStats.maxBalance)} {effectiveCurrency}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Статус валидации */}
         <div className="flex flex-col gap-1 min-w-0 pt-3">
           {validationError ? (
@@ -432,10 +485,18 @@ export function ImportAccountCard({
               <pre className="whitespace-pre-wrap break-words font-sans m-0 flex-1 min-w-0 leading-snug">{validationError}</pre>
             </div>
           ) : (
-            <div className="flex flex-row items-center gap-2" style={{ color: GREEN, fontSize: 13 }}>
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <span>Готов к импорту</span>
-            </div>
+            <>
+              <div className="flex flex-row items-center gap-2" style={{ color: GREEN, fontSize: 13 }}>
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>Готов к импорту</span>
+              </div>
+              {validationWarning ? (
+                <div className="flex flex-row items-center gap-2" style={{ color: "#F59E0B", fontSize: 13 }}>
+                  <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
+                  <span>{validationWarning}</span>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
       </div>

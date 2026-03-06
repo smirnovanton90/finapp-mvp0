@@ -30,18 +30,16 @@ import type { ImportCounterpartyCardState } from "@/components/import-counterpar
 import type { CategoryNode } from "@/lib/categories";
 
 /**
- * Начальный остаток и дата первой операции по счёту.
- * Учитываются все операции из выписки по этому счёту: расходы, доходы и переводы,
- * в которых счёт — исходящий или входящий (в т.ч. переводы с активом «Долги» с другой стороны).
- * Если задан minDate, учитываются только операции с датой >= minDate (остаток на начало дня minDate).
+ * Начальный остаток (в копейках) и дата первой операции по счёту.
+ * Все суммы в копейках. Если задан minDate, учитываются только операции с датой >= minDate.
  */
 function calcInitialFromTransactions(
   accountName: string,
   accountCurrency: string,
   transactions: DzenParsedTransaction[],
-  currentBalance: number,
+  currentBalanceCents: number,
   minDate?: string | null
-): { initial: number; earliestDate: string } {
+): { initialCents: number; earliestDate: string } {
   let incomeSum = 0;
   let outcomeSum = 0;
   let earliestDate = minDate ?? new Date().toISOString().slice(0, 10);
@@ -65,8 +63,8 @@ function calcInitialFromTransactions(
     }
   }
 
-  const initial = currentBalance - incomeSum + outcomeSum;
-  return { initial, earliestDate: minDate ?? earliestDate };
+  const initialCents = currentBalanceCents - incomeSum + outcomeSum;
+  return { initialCents, earliestDate: minDate ?? earliestDate };
 }
 
 /** Самая ранняя дата транзакции в выписке (только по полю date). */
@@ -99,12 +97,12 @@ export function getStatementAccountingStartDate(
       const state = accountCardStates.get(key);
       if (!state || state.linkEnabled) continue;
       const balanceCents = parseRubToCents(state.balanceStr);
-      const currentBalance = Number.isFinite(balanceCents) ? balanceCents / 100 : 0;
+      const cents = Number.isFinite(balanceCents) ? balanceCents : 0;
       const { earliestDate: accEarliest } = calcInitialFromTransactions(
         acc.name,
         acc.currency,
         transactions,
-        currentBalance
+        cents
       );
       if (!earliest || accEarliest < earliest) earliest = accEarliest;
     }
@@ -166,13 +164,13 @@ export async function executeImportDzen(
         const key = `${acc.name}|${acc.currency}`;
         const state = accountCardStates.get(key);
         if (!state || state.linkEnabled) continue;
+        const balanceCents = parseRubToCents(state.balanceStr);
+        const cents = Number.isFinite(balanceCents) ? balanceCents : 0;
         const { earliestDate: accEarliest } = calcInitialFromTransactions(
           acc.name,
           acc.currency,
           transactions,
-          Number.isFinite(parseRubToCents(state.balanceStr) / 100)
-            ? parseRubToCents(state.balanceStr) / 100
-            : 0
+          cents
         );
         if (!earliestDate || accEarliest < earliestDate) earliestDate = accEarliest;
       }
@@ -306,32 +304,31 @@ export async function executeImportDzen(
           typeCode === "bank_card_credit" ? 0 : undefined;
 
         const balanceCents = parseRubToCents(state.balanceStr);
-        const currentBalance = Number.isFinite(balanceCents)
-          ? balanceCents / 100
+        const currentBalanceCents = Number.isFinite(balanceCents)
+          ? balanceCents
           : 0;
         const transactions = parsedData.transactions ?? [];
-        const { initial: balanceAtStart } = calcInitialFromTransactions(
+        const { initialCents: balanceAtStartCents } = calcInitialFromTransactions(
           acc.name,
           acc.currency,
           transactions,
-          currentBalance,
+          currentBalanceCents,
           statementAccountingStartDate ?? undefined
         );
-        const { initial, earliestDate: earliestTxForAccount } = calcInitialFromTransactions(
+        const { initialCents, earliestDate: earliestTxForAccount } = calcInitialFromTransactions(
           acc.name,
           acc.currency,
           transactions,
-          currentBalance,
+          currentBalanceCents,
           null
         );
-        const hasNonZeroBalanceAtStart = balanceAtStart !== 0;
+        const hasNonZeroBalanceAtStart = balanceAtStartCents !== 0;
         const accountOpenDate =
           statementAccountingStartDate && hasNonZeroBalanceAtStart
             ? statementAccountingStartDate
             : earliestTxForAccount;
-        const initialValueCents = Math.round(
-          (hasNonZeroBalanceAtStart ? balanceAtStart : initial) * 100
-        );
+        const initialValueCents =
+          hasNonZeroBalanceAtStart ? balanceAtStartCents : initialCents;
 
         const created = await createItem({
           kind: state.kind,
@@ -395,7 +392,7 @@ export async function executeImportDzen(
               transaction_date: getTransactionDateTimeSortKey(tx),
               primary_item_id: incomeItemId,
               counterparty_id: counterpartyId,
-              amount: Math.round(tx.income * 100),
+              amount: tx.income,
               direction: "INCOME",
               transaction_type: "ACTUAL",
               status: "CONFIRMED",
@@ -414,7 +411,7 @@ export async function executeImportDzen(
               transaction_date: getTransactionDateTimeSortKey(tx),
               primary_item_id: outcomeItemId,
               counterparty_id: counterpartyId,
-              amount: Math.round(tx.outcome * 100),
+              amount: tx.outcome,
               direction: "EXPENSE",
               transaction_type: "ACTUAL",
               status: "CONFIRMED",
@@ -428,28 +425,28 @@ export async function executeImportDzen(
 
       let primaryItemId: number | null = null;
       let direction: "INCOME" | "EXPENSE" | "TRANSFER" = "EXPENSE";
-      let amountRub = 0;
+      let amountCents = 0;
 
       if (tx.type === "expense" && tx.outcome != null && tx.outcome > 0) {
         const key = `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
         primaryItemId = accountKeyToItemId.get(key) ?? null;
         direction = "EXPENSE";
-        amountRub = Math.round(tx.outcome * 100);
+        amountCents = tx.outcome;
       } else if (tx.type === "income" && tx.income != null && tx.income > 0) {
         const key = `${tx.incomeAccountName}|${tx.incomeCurrency}`;
         primaryItemId = accountKeyToItemId.get(key) ?? null;
         direction = "INCOME";
-        amountRub = Math.round(tx.income * 100);
+        amountCents = tx.income;
       } else if (tx.type === "transfer") {
         if (tx.outcome != null && tx.outcome > 0) {
           const key = `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
           primaryItemId = accountKeyToItemId.get(key) ?? null;
           direction = "EXPENSE";
-          amountRub = Math.round(tx.outcome * 100);
+          amountCents = tx.outcome;
         }
       }
 
-      if (primaryItemId == null || amountRub <= 0) continue;
+      if (primaryItemId == null || amountCents <= 0) continue;
 
       const hasCategoryName = (tx.categoryName ?? "").trim().length > 0;
       const categoryId =
@@ -471,13 +468,13 @@ export async function executeImportDzen(
         if (counterpartyItemId != null) {
           const amountCounterparty =
             tx.outcomeCurrency !== tx.incomeCurrency && tx.income != null
-              ? Math.round(tx.income * 100)
+              ? tx.income
               : undefined;
           await createTransaction({
             transaction_date: getTransactionDateTimeSortKey(tx),
             primary_item_id: primaryItemId,
             counterparty_item_id: counterpartyItemId,
-            amount: amountRub,
+            amount: amountCents,
             amount_counterparty: amountCounterparty,
             direction: "TRANSFER",
             transaction_type: "ACTUAL",
@@ -493,7 +490,7 @@ export async function executeImportDzen(
         transaction_date: getTransactionDateTimeSortKey(tx),
         primary_item_id: primaryItemId,
         counterparty_id: counterpartyId,
-        amount: amountRub,
+        amount: amountCents,
         direction,
         transaction_type: "ACTUAL",
         status: "CONFIRMED",

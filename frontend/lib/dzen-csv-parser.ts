@@ -29,12 +29,15 @@ export type DzenParsedTransaction = {
   counterparty: string;
   comment: string;
   outcomeAccountName: string;
+  /** Сумма расхода в копейках (целое число) */
   outcome: number | null;
   outcomeCurrency: string;
   incomeAccountName: string;
+  /** Сумма дохода в копейках (целое число) */
   income: number | null;
   incomeCurrency: string;
   type: DzenTransactionType;
+  /** Сумма операции в копейках (целое число) */
   amount: number;
 };
 
@@ -95,13 +98,14 @@ function parseCSVLine(line: string, delimiter: "," | ";" = ","): string[] {
   return result;
 }
 
-/** Преобразует строку суммы "2945,08" в число */
-function parseAmount(value: string): number | null {
+/** Преобразует строку суммы "2945,08" (рубли) в копейки (целое число). */
+function parseAmountToCents(value: string): number | null {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return null;
   const normalized = trimmed.replace(",", ".");
   const num = parseFloat(normalized);
-  return Number.isNaN(num) ? null : num;
+  if (Number.isNaN(num)) return null;
+  return Math.round(num * 100);
 }
 
 /** Проверяет, заполнено ли значение (не пустая строка) */
@@ -181,8 +185,8 @@ export function parseDzenCSV(text: string): DzenParsedData {
     const incomeStr = getCol("income");
     const incomeCurrency = getCol("incomeCurrencyShortTitle") || "RUB";
 
-    const outcome = parseAmount(outcomeStr);
-    const income = parseAmount(incomeStr);
+    const outcome = parseAmountToCents(outcomeStr);
+    const income = parseAmountToCents(incomeStr);
 
     const hasOutcome = isFilled(outcomeStr) && outcome != null && outcome !== 0;
     const hasIncome = isFilled(incomeStr) && income != null && income !== 0;

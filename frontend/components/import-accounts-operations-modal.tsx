@@ -51,7 +51,7 @@ import {
   fetchCounterpartyIndustries,
   API_BASE,
 } from "@/lib/api";
-import { validateStep2, getAccountValidationError } from "@/lib/import-step2-validation";
+import { validateStep2, getAccountValidationError, getAccountValidationWarning } from "@/lib/import-step2-validation";
 import { validateStep3 } from "@/lib/import-step3-validation";
 import { validateStep4 } from "@/lib/import-step4-validation";
 import { executeImportDzen, getStatementAccountingStartDate, getStatementLastTransactionDate, getEarliestStatementTransactionDate } from "@/lib/import-dzen-executor";
@@ -445,7 +445,7 @@ export function ImportAccountsOperationsModal({
     });
   }, [step, stepCounterparties, counterparties, counterpartyCardStates.size]);
 
-  // Ошибки валидации по каждому счёту для отображения в карточках на шаге «Счета»
+  // Ошибки и предупреждения валидации по каждому счёту для отображения в карточках на шаге «Счета»
   const accountValidationErrors = React.useMemo(() => {
     if (!parsedData) return new Map<string, string | null>();
     const accounts =
@@ -458,6 +458,22 @@ export function ImportAccountsOperationsModal({
       const state = accountCardStates.get(key) ?? getInitialAccountCardState(account);
       const error = getAccountValidationError(account, parsedData.transactions, state);
       map.set(key, error);
+    }
+    return map;
+  }, [parsedData, accountCardStates, importSource]);
+
+  const accountValidationWarnings = React.useMemo(() => {
+    if (!parsedData) return new Map<string, string | null>();
+    const accounts =
+      importSource === "dzen"
+        ? parsedData.accounts.filter((acc) => !isDzenDebtsAccount(acc))
+        : parsedData.accounts;
+    const map = new Map<string, string | null>();
+    for (const account of accounts) {
+      const key = `${account.name}|${account.currency}`;
+      const state = accountCardStates.get(key) ?? getInitialAccountCardState(account);
+      const warning = getAccountValidationWarning(account, parsedData.transactions, state);
+      map.set(key, warning);
     }
     return map;
   }, [parsedData, accountCardStates, importSource]);
@@ -1489,6 +1505,7 @@ export function ImportAccountsOperationsModal({
                           setAddCounterpartyModalOpen(true);
                         }}
                         validationError={accountValidationErrors.get(key) ?? null}
+                        validationWarning={accountValidationWarnings.get(key) ?? null}
                       />
                     );
                   })}
@@ -1936,6 +1953,7 @@ export function ImportAccountsOperationsModal({
           .catch(() => setCategories([]));
         setCreateCategoryOpen(false);
       }}
+      categoryNodes={categories}
     />
     <CreateCounterpartyModal
       open={addCounterpartyModalOpen}

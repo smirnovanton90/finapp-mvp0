@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Camera, Folder, Upload } from "lucide-react";
 import { FormModal } from "@/components/form-modal";
 import { Label } from "@/components/ui/label";
 import { TextField, SelectField } from "@/components/ui/form-field";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
+import { CategorySelector } from "@/components/category-selector";
 import { CATEGORY_ICON_OPTIONS } from "@/lib/category-icons";
 import type { CategoryScope } from "@/lib/categories";
+import { buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
+import type { CategoryNode } from "@/lib/api";
 import { createCategory, uploadCategoryPhoto } from "@/lib/api";
 import { ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 
@@ -18,12 +21,15 @@ export type CreateCategoryModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: (created: { id: number; name: string }) => void;
+  /** Список категорий для выбора родителя. Если передан и не пуст — показывается поле «Родительская категория». */
+  categoryNodes?: CategoryNode[];
 };
 
 export function CreateCategoryModal({
   open,
   onOpenChange,
   onSuccess,
+  categoryNodes = [],
 }: CreateCategoryModalProps) {
   const [newName, setNewName] = useState("");
   const [newScope, setNewScope] = useState<CategoryScope>("EXPENSE");
@@ -31,10 +37,16 @@ export function CreateCategoryModal({
   const [newIconImage, setNewIconImage] = useState<File | null>(null);
   const [newIconImagePreview, setNewIconImagePreview] = useState<string | null>(null);
   const [newIconImageError, setNewIconImageError] = useState<string | null>(null);
+  const [parentPath, setParentPath] = useState<{ l1: string; l2: string; l3: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const addIconInputRef = useRef<HTMLInputElement>(null);
   const addIconPreviewUrlRef = useRef<string | null>(null);
+
+  const categoryLookup = useMemo(
+    () => (categoryNodes.length > 0 ? buildCategoryLookup(categoryNodes) : null),
+    [categoryNodes]
+  );
 
   const handleIconImageChange = useCallback((file: File | null) => {
     setNewIconImageError(null);
@@ -70,6 +82,7 @@ export function CreateCategoryModal({
         setNewName("");
         setNewScope("EXPENSE");
         setNewIcon("");
+        setParentPath(null);
         if (addIconPreviewUrlRef.current) {
           URL.revokeObjectURL(addIconPreviewUrlRef.current);
           addIconPreviewUrlRef.current = null;
@@ -93,9 +106,15 @@ export function CreateCategoryModal({
     setFormError(null);
     setSyncing(true);
     try {
+      const parentId =
+        categoryLookup && parentPath
+          ? categoryLookup.pathToId.get(
+              makeCategoryPathKey(parentPath.l1, parentPath.l2, parentPath.l3)
+            ) ?? null
+          : null;
       const created = await createCategory({
         name: trimmed,
-        parent_id: null,
+        parent_id: parentId ?? null,
         scope: newScope,
         icon_name: newIcon ? newIcon : null,
       });
@@ -197,6 +216,21 @@ export function CreateCategoryModal({
                 }))]}
               placeholder="Без иконки"
             />
+            {categoryNodes.length > 0 && (
+              <div className="grid gap-2" role="group" aria-label="Родительская категория">
+                <Label style={{ color: ACTIVE_TEXT_DARK }}>Родительская категория</Label>
+                <CategorySelector
+                  categoryNodes={categoryNodes}
+                  selectedPath={parentPath}
+                  onChange={(path) => setParentPath(path)}
+                  placeholder="Без родителя (корневая категория)"
+                  emptyMessage="Нет категорий."
+                  maxDepth={2}
+                  showChips={false}
+                  direction={newScope === "BOTH" ? undefined : newScope}
+                />
+              </div>
+            )}
           </div>
         </div>
         <TextField

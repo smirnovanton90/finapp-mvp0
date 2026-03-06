@@ -14,10 +14,11 @@ import type { ImportAccountCardState } from "@/components/import-account-card";
 
 const MANDATORY_COUNTERPARTY_TYPE_CODES = new Set(MANDATORY_CP_CODES);
 
+/** Начальное сальдо в копейках. Все суммы в транзакциях — в копейках. */
 function calcInitial(
   account: DzenParsedAccount,
   transactions: DzenParsedTransaction[],
-  currentBalance: number
+  currentBalanceCents: number
 ): number {
   let incomeSum = 0;
   let outcomeSum = 0;
@@ -31,14 +32,14 @@ function calcInitial(
     if (isOut && tx.outcome != null) outcomeSum += tx.outcome;
     if (isIn && tx.income != null) incomeSum += tx.income;
   }
-  return currentBalance - incomeSum + outcomeSum;
+  return currentBalanceCents - incomeSum + outcomeSum;
 }
 
-/** События по счёту с датой и временем для хронологической сортировки */
+/** События по счёту с датой и временем для хронологической сортировки. delta в копейках. */
 type AccountTxEvent = {
   date: string;
   dateTimeSortKey: string;
-  delta: number; // положительное = приход, отрицательное = расход
+  delta: number;
 };
 
 function getAccountTxEvents(
@@ -65,36 +66,36 @@ function getAccountTxEvents(
   return events;
 }
 
-/** Результат проверки сальдо: либо ок, либо дата, сумма и разбивка по дням */
+/** Результат проверки сальдо: либо ок, либо дата, сумма (копейки) и разбивка по дням */
 type BalanceCheckResult =
   | { ok: true }
   | { ok: false; date: string; balance: number; breakdown: string[] };
 
-function formatDelta(value: number): string {
+/** Форматирует дельту в копейках для отображения в рублях */
+function formatDelta(valueCents: number): string {
+  const rub = valueCents / 100;
   const formatted = new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
-    .format(Math.abs(value))
+    .format(Math.abs(rub))
     .replace(".", ",");
-  return value >= 0 ? `+${formatted}` : `-${formatted}`;
+  return valueCents >= 0 ? `+${formatted}` : `-${formatted}`;
 }
 
-/** Порог (в рублях): сальдо считаем допустимым, если не ниже -epsilon (погрешность округления). */
-const NEGATIVE_BALANCE_EPSILON = 0.01;
+/** Порог в копейках: сальдо считаем допустимым, если не ниже -epsilon (погрешность округления). */
+const NEGATIVE_BALANCE_EPSILON_CENTS = 1;
 
 /**
  * Проверяет, что баланс по счёту не уходит в минус на конец каждого дня.
- * Внутри дня транзакции могут идти в любом порядке, проверка только по итогу дня.
- * Сальдо в пределах [-epsilon, 0] (например -0,00 из-за float) считается нулём и допускается.
- * При отрицательном сальдо возвращает разбивку: начальное сальдо и дельты по дням до минуса.
+ * Все суммы в копейках. Сальдо в пределах [-1, 0] коп. считается нулём и допускается.
  */
 function checkBalanceNeverNegative(
   account: DzenParsedAccount,
   transactions: DzenParsedTransaction[],
-  currentBalance: number
+  currentBalanceCents: number
 ): BalanceCheckResult {
-  const initial = calcInitial(account, transactions, currentBalance);
+  const initial = calcInitial(account, transactions, currentBalanceCents);
   const events = getAccountTxEvents(account, transactions);
   const breakdown: string[] = [];
   breakdown.push(`Начальное сальдо: ${formatBalanceForError(initial)}`);
@@ -103,7 +104,7 @@ function checkBalanceNeverNegative(
   let prevDate: string | null = null;
   let dayDelta = 0;
 
-  const isNegative = (b: number) => b < -NEGATIVE_BALANCE_EPSILON;
+  const isNegative = (b: number) => b < -NEGATIVE_BALANCE_EPSILON_CENTS;
 
   const flushDay = (date: string) => {
     if (date) {
@@ -139,13 +140,85 @@ function formatDateForError(dateKey: string): string {
   return `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y}`;
 }
 
-function formatBalanceForError(value: number): string {
+/** Форматирует сумму в копейках для отображения в рублях (нормализация околонулевых). */
+function formatBalanceForError(valueCents: number): string {
+  const normalized =
+    Math.abs(valueCents) <= NEGATIVE_BALANCE_EPSILON_CENTS ? 0 : valueCents / 100;
   return new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
-    .format(value)
+    .format(normalized)
     .replace(".", ",");
+}
+
+/** Все балансы в копейках (целые числа). */
+export type AccountBalanceStats = {
+  earliestDate: string | null;
+  balanceAtEarliestDate: number | null;
+  latestDate: string | null;
+  balanceAtLatestDate: number | null;
+  minBalance: number | null;
+  maxBalance: number | null;
+};
+
+/**
+ * Считает по счёту: сальдо на дату самой ранней и самой поздней транзакции, мин и макс сальдо.
+ * Все суммы в копейках. Если по счёту нет транзакций, все поля null.
+ */
+export function getAccountBalanceStats(
+  account: DzenParsedAccount,
+  transactions: DzenParsedTransaction[],
+  currentBalanceCents: number
+): AccountBalanceStats {
+  const events = getAccountTxEvents(account, transactions);
+  if (events.length === 0) {
+    return {
+      earliestDate: null,
+      balanceAtEarliestDate: null,
+      latestDate: null,
+      balanceAtLatestDate: null,
+      minBalance: null,
+      maxBalance: null,
+    };
+  }
+  const initial = calcInitial(account, transactions, currentBalanceCents);
+  let balance = initial;
+  let minB: number = Infinity;
+  let maxB: number = -Infinity;
+  let balanceAtEarliestDate: number | null = null;
+  const earliestDate: string = events[0]!.date;
+  let balanceAtLatestDate: number = balance;
+  let latestDate: string = events[0]!.date;
+
+  let prevDate: string | null = null;
+  for (const e of events) {
+    if (prevDate !== null && e.date !== prevDate) {
+      if (balanceAtEarliestDate === null) balanceAtEarliestDate = balance;
+      balanceAtLatestDate = balance;
+      latestDate = prevDate;
+      minB = Math.min(minB, balance);
+      maxB = Math.max(maxB, balance);
+    }
+    balance += e.delta;
+    prevDate = e.date;
+  }
+  balanceAtLatestDate = balance;
+  latestDate = prevDate ?? latestDate;
+  if (balanceAtEarliestDate === null) balanceAtEarliestDate = balance;
+  minB = Math.min(minB, balance);
+  maxB = Math.max(maxB, balance);
+
+  const norm = (b: number) =>
+    Math.abs(b) <= NEGATIVE_BALANCE_EPSILON_CENTS ? 0 : b;
+  return {
+    earliestDate,
+    balanceAtEarliestDate: balanceAtEarliestDate != null ? norm(balanceAtEarliestDate) : null,
+    latestDate,
+    balanceAtLatestDate: norm(balanceAtLatestDate),
+    minBalance: Number.isFinite(minB) ? norm(minB) : null,
+    maxBalance: Number.isFinite(maxB) ? norm(maxB) : null,
+  };
 }
 
 export type Step2ValidationResult =
@@ -203,22 +276,33 @@ export function getAccountValidationError(
     return 'Заполните поле «Текущий остаток»';
   }
 
-  const currentBalance = balanceCents / 100;
+  return null;
+}
 
-  if (state.kind === "ASSET") {
-    const result = checkBalanceNeverNegative(
-      account,
-      transactions,
-      currentBalance
-    );
-    if (!result.ok) {
-      const dateStr = formatDateForError(result.date);
-      const balanceStr = formatBalanceForError(result.balance);
-      const breakdownText = result.breakdown.join("\n");
-      return `По счёту «${account.name}» при указанном остатке и транзакциях формируется отрицательное сальдо: ${balanceStr} на ${dateStr}. Проверьте остаток или транзакции.\n\nРасчёт по дням:\n${breakdownText}`;
-    }
+/**
+ * Возвращает предупреждение для одного счёта, если в течение периода по нему возникает отрицательное сальдо.
+ * Не блокирует импорт — только информирует.
+ */
+export function getAccountValidationWarning(
+  account: DzenParsedAccount,
+  transactions: DzenParsedTransaction[],
+  state: ImportAccountCardState
+): string | null {
+  if (state.linkEnabled) return null;
+  const balanceStrTrimmed = (state.balanceStr ?? "").trim();
+  if (!balanceStrTrimmed) return null;
+  const balanceCents = parseRubToCents(state.balanceStr);
+  if (!Number.isFinite(balanceCents)) return null;
+  if (state.kind !== "ASSET") return null;
+
+  const result = checkBalanceNeverNegative(
+    account,
+    transactions,
+    balanceCents
+  );
+  if (!result.ok) {
+    return "В течение действия актива есть моменты, когда у него появляется отрицательное сальдо.";
   }
-
   return null;
 }
 

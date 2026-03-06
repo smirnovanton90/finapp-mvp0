@@ -358,8 +358,8 @@ class ItemCreate(BaseModel):
                 if self.initial_value_rub < 0:
                     raise ValueError("initial_value_rub must be non-negative")
         else:
-            if self.initial_value_rub < 0:
-                raise ValueError("initial_value_rub must be non-negative")
+            # Активы: отрицательное сальдо допускается
+            pass
         return self
 
     @field_validator("synonyms", mode="before")
@@ -539,6 +539,7 @@ class TransactionBase(BaseModel):
     primary_quantity_lots: int | None = Field(default=None, ge=0)
     counterparty_quantity_lots: int | None = Field(default=None, ge=0)
     primary_quantity_units: float | None = Field(default=None, ge=0)
+    counterparty_quantity_units: float | None = Field(default=None, ge=0)
     direction: TransactionDirection
     transaction_type: TransactionType
     category_id: int | None = None

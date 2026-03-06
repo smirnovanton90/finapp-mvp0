@@ -209,7 +209,8 @@ const LIABILITY_TYPE_CODES = LIABILITY_TYPES.map((type) => type.code);
 const ALL_TYPE_CODES = [...ASSET_TYPE_CODES, ...LIABILITY_TYPE_CODES];
 
 // Категории активов (синхронно с asset-item-form-constants)
-const CASH_TYPES = ["cash", "bank_account", "bank_card_debit", "bank_card_credit", "e_wallet"];
+/** Включает legacy type_code "bank_card" для отображения старых дебетовых карт в секции «Денежные активы». */
+const CASH_TYPES = ["cash", "bank_account", "bank_card", "bank_card_debit", "bank_card_credit", "e_wallet"];
 const INVESTMENT_TYPES = [
   "deposit",
   "savings_account",
@@ -219,7 +220,7 @@ const INVESTMENT_TYPES = [
   "crypto",
   "precious_metals",
 ];
-const REPAYMENT_ACCOUNT_TYPE_CODES = ["cash", "bank_account", "bank_card_debit", "bank_card_credit", "e_wallet", "savings_account", "brokerage"];
+const REPAYMENT_ACCOUNT_TYPE_CODES = ["cash", "bank_account", "bank_card", "bank_card_debit", "bank_card_credit", "e_wallet", "savings_account", "brokerage"];
 const MOEX_TYPE_CODES = [
   "securities",
   "bonds",
@@ -316,6 +317,9 @@ const BANK_COUNTERPARTY_TYPE_CODES = [
   "education_loan",
 ];
 const BANK_CARD_TYPE_CODES = ["bank_card_debit", "bank_card_credit"];
+function isBankCardItem(item: { type_code?: string | null }): boolean {
+  return item.type_code === "bank_card" || BANK_CARD_TYPE_CODES.includes(item.type_code ?? "");
+}
 
 // Все типы, где контрагент релевантен
 const COUNTERPARTY_TYPE_CODES = [
@@ -906,7 +910,7 @@ export default function Page() {
 
   const getItemDisplayBalanceCents = useCallback(
     (item: ItemOut) => {
-      if (item.type_code === "bank_card" && item.card_account_id) {
+      if (isBankCardItem(item) && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
         if (linked) return getItemPrimaryValueCents(linked);
       }
@@ -1227,7 +1231,7 @@ export default function Page() {
     const map = new Map<number, ItemOut[]>();
     items.forEach((item) => {
       if (item.closed_at || item.archived_at) return;
-      if (item.type_code !== "bank_card" || !item.card_account_id) return;
+      if (!isBankCardItem(item) || !item.card_account_id) return;
       const bucket = map.get(item.card_account_id) ?? [];
       bucket.push(item);
       map.set(item.card_account_id, bucket);
@@ -1365,7 +1369,7 @@ export default function Page() {
   const activeItemsForTotals = useMemo(
     () =>
       activeItems.filter(
-        (item) => !(item.type_code === "bank_card" && item.card_account_id)
+        (item) => !(isBankCardItem(item) && item.card_account_id)
       ),
     [activeItems]
   );
@@ -1466,7 +1470,7 @@ export default function Page() {
       return (section: (typeof ITEM_SECTIONS)[0]) => {
         if (kind !== section.kind) return false;
         if (section.id === "credit_liabilities")
-          return CREDIT_LIABILITY_TYPES.includes(item.type_code) || item.type_code === "bank_card";
+          return CREDIT_LIABILITY_TYPES.includes(item.type_code) || item.type_code === "bank_card" || item.type_code === "bank_card_credit";
         return section.typeCodes.includes(item.type_code);
       };
     }
@@ -1690,7 +1694,7 @@ export default function Page() {
       visibleItems.filter(
         (x) =>
           resolveItemEffectiveKind(x) === "LIABILITY" &&
-          (CREDIT_LIABILITY_TYPES.includes(x.type_code) || x.type_code === "bank_card")
+          (CREDIT_LIABILITY_TYPES.includes(x.type_code) || x.type_code === "bank_card" || x.type_code === "bank_card_credit")
       ),
     [visibleItems, resolveItemEffectiveKind]
   );
@@ -1847,7 +1851,7 @@ export default function Page() {
         .filter(
           (x) =>
             resolveItemEffectiveKind(x) === "LIABILITY" &&
-            (CREDIT_LIABILITY_TYPES.includes(x.type_code) || x.type_code === "bank_card")
+            (CREDIT_LIABILITY_TYPES.includes(x.type_code) || x.type_code === "bank_card" || x.type_code === "bank_card_credit")
         )
         .reduce((sum, x) => sum + (getRubEquivalentCents(x) ?? 0), 0),
     [activeItemsForTotals, rateByCode]
@@ -2561,7 +2565,7 @@ export default function Page() {
       const positionLots = item.position_lots ?? 0;
       return positionLots !== 0;
     } else {
-      return item.type_code !== "bank_card" && item.current_value_rub !== 0;
+      return !isBankCardItem(item) && item.current_value_rub !== 0;
     }
   }
 
@@ -2670,7 +2674,7 @@ export default function Page() {
     const linkedCardsByAccountId = new Map<number, ItemOut[]>();
     const groupedCardIds = new Set<number>();
     categoryItems.forEach((item) => {
-      if (item.type_code !== "bank_card" || !item.card_account_id) return;
+      if (!isBankCardItem(item) || !item.card_account_id) return;
       if (!accountIds.has(item.card_account_id)) return;
       const bucket = linkedCardsByAccountId.get(item.card_account_id) ?? [];
       bucket.push(item);
@@ -2772,13 +2776,13 @@ export default function Page() {
                   const TypeIcon = TYPE_ICON_BY_CODE[it.type_code];
                   const isArchived = Boolean(it.archived_at);
                   const isClosed = Boolean(it.closed_at);
-                  const isLinkedCard = it.type_code === "bank_card" && Boolean(it.card_account_id);
+                  const isLinkedCard = isBankCardItem(it) && Boolean(it.card_account_id);
                   const isSettlements = it.type_code === "counterparty_settlements";
                   const canEdit = !isArchived && !isClosed && !isSettlements;
                   const canClose = !isArchived && !isClosed && !isSettlements;
                   const canDelete = !isArchived && !isSettlements;
                   const linkedAccount =
-                    it.type_code === "bank_card" && it.card_account_id
+                    isBankCardItem(it) && it.card_account_id
                       ? itemsById.get(it.card_account_id)
                       : null;
                   const historyStatus =
@@ -3504,7 +3508,11 @@ export default function Page() {
               <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
             </Button>
           </div>
-            {visibleItems.length === 0 && !loading ? (
+            {loading ? (
+              <div className="flex items-center justify-center py-16" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                Загрузка…
+              </div>
+            ) : visibleItems.length === 0 ? (
               <EmptyState />
             ) : (
               <div className="relative">

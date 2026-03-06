@@ -216,7 +216,8 @@ export function parseCoinKeeperCSV(text: string): DzenParsedData {
 
   for (const row of rawRows) {
     const type = inferType(row);
-    const amount = Math.abs(row.amount);
+    /** Сумма в копейках (целое число), как в DzenParsedTransaction */
+    const amountCents = Math.round(Math.abs(row.amount) * 100);
     const currency = row.currency || "RUB";
 
     let outcomeAccountName = "";
@@ -257,13 +258,13 @@ export function parseCoinKeeperCSV(text: string): DzenParsedData {
       counterparty: "",
       comment: row.note,
       outcomeAccountName,
-      outcome: type === "expense" || type === "transfer" ? amount : null,
+      outcome: type === "expense" || type === "transfer" ? amountCents : null,
       outcomeCurrency: currency,
       incomeAccountName,
-      income: type === "income" || type === "transfer" ? amount : null,
+      income: type === "income" || type === "transfer" ? amountCents : null,
       incomeCurrency: currency,
       type,
-      amount,
+      amount: amountCents,
     });
   }
 

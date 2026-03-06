@@ -318,6 +318,9 @@ export function buildDzenParsedDataFromMapping(
     const val = parseAmount(row[idxSigned]);
     if (val == null || val === 0) continue;
 
+    /** Сумма в копейках (как в DzenParsedTransaction) */
+    const amountCents = Math.round(Math.abs(val) * 100);
+
     const accountName = getCol(row, "account").trim();
     if (!accountName) continue;
 
@@ -326,13 +329,11 @@ export function buildDzenParsedDataFromMapping(
     const transferAccountName = getCol(row, "account_transfer").trim();
 
     let type: DzenTransactionType;
-    let amount: number;
     let outAcc: string;
     let inAcc: string;
 
     if (transferAccountName) {
       type = "transfer";
-      amount = Math.abs(val);
       if (val < 0) {
         outAcc = accountName;
         inAcc = transferAccountName;
@@ -341,7 +342,6 @@ export function buildDzenParsedDataFromMapping(
         inAcc = accountName;
       }
     } else {
-      amount = Math.abs(val);
       if (val < 0) {
         type = "expense";
         outAcc = accountName;
@@ -381,13 +381,13 @@ export function buildDzenParsedDataFromMapping(
       counterparty: counterparty.trim(),
       comment: getCol(row, "comment").trim(),
       outcomeAccountName: outAcc,
-      outcome: type === "expense" || type === "transfer" ? amount : null,
+      outcome: type === "expense" || type === "transfer" ? amountCents : null,
       outcomeCurrency: currency,
       incomeAccountName: inAcc,
-      income: type === "income" || type === "transfer" ? amount : null,
+      income: type === "income" || type === "transfer" ? amountCents : null,
       incomeCurrency: currency,
       type,
-      amount,
+      amount: amountCents,
     });
   }
 

@@ -118,6 +118,9 @@ def get_min_balance(item: Item) -> int:
     # Обязательства (кредиты, займы): допускаем отрицательное сальдо (переплата) при импорте и вводе
     if item.kind == "LIABILITY":
         return -(2**62)
+    # Активы: допускаем отрицательное сальдо (по требованию продукта)
+    if item.kind == "ASSET":
+        return -(2**62)
     return 0
 
 
@@ -668,6 +671,9 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         primary_quantity_lots=data.primary_quantity_lots,
         counterparty_quantity_lots=data.counterparty_quantity_lots,
         primary_quantity_units=data.primary_quantity_units,
+        counterparty_quantity_units=(
+            data.counterparty_quantity_units if data.direction == "TRANSFER" else None
+        ),
         direction=data.direction,
         transaction_type=data.transaction_type,
         status=status_value,

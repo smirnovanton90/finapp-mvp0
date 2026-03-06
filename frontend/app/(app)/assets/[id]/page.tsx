@@ -101,6 +101,49 @@ function buildAreaPath(points: ChartPoint[], baselineY: number) {
   return `${line} L ${points[points.length - 1].x} ${baselineY} L ${points[0].x} ${baselineY} Z`;
 }
 
+/** Вставляет точки пересечения нуля между парами точек для разбиения графика на положительную и отрицательную части */
+function insertZeroCrossings(points: ChartPoint[], baselineY: number): ChartPoint[] {
+  if (points.length === 0) return [];
+  const result: ChartPoint[] = [points[0]!];
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1]!;
+    const curr = points[i]!;
+    if ((prev.value >= 0) !== (curr.value >= 0) && prev.value !== curr.value) {
+      const t = (0 - prev.value) / (curr.value - prev.value);
+      const x = prev.x + t * (curr.x - prev.x);
+      result.push({ x, y: baselineY, value: 0 });
+    }
+    result.push(curr);
+  }
+  return result;
+}
+
+/** Разбивает точки на сегменты с одинаковым знаком (положительные и отрицательные) */
+function splitSegmentsBySign(points: ChartPoint[]): { positive: ChartPoint[][]; negative: ChartPoint[][] } {
+  const positive: ChartPoint[][] = [];
+  const negative: ChartPoint[][] = [];
+  let posSeg: ChartPoint[] = [];
+  let negSeg: ChartPoint[] = [];
+  for (const p of points) {
+    if (p.value >= 0) {
+      posSeg.push(p);
+      if (negSeg.length > 0) {
+        negative.push(negSeg);
+        negSeg = [];
+      }
+    } else {
+      negSeg.push(p);
+      if (posSeg.length > 0) {
+        positive.push(posSeg);
+        posSeg = [];
+      }
+    }
+  }
+  if (posSeg.length > 0) positive.push(posSeg);
+  if (negSeg.length > 0) negative.push(negSeg);
+  return { positive, negative };
+}
+
 function niceStep(range: number, targetTicks: number) {
   const rough = range / targetTicks;
   const power = Math.pow(10, Math.floor(Math.log10(rough)));
@@ -1094,6 +1137,12 @@ export default function AssetDetailPage() {
       const y = padding.top + innerHeight - innerHeight * valueToRatio(p.valueRub);
       return { x, y, value: p.valueRub };
     });
+    const pointsWithZero = insertZeroCrossings(points, baselineY);
+    const { positive: posSegments, negative: negSegments } = splitSegmentsBySign(pointsWithZero);
+    const linePathPositiveSegments = posSegments.map((seg) => buildLinePath(seg)).filter(Boolean);
+    const areaPathPositiveSegments = posSegments.map((seg) => buildAreaPath(seg, baselineY)).filter(Boolean);
+    const linePathNegativeSegments = negSegments.map((seg) => buildLinePath(seg)).filter(Boolean);
+    const areaPathNegativeSegments = negSegments.map((seg) => buildAreaPath(seg, baselineY)).filter(Boolean);
     const dayMarks: { label: string; x: number }[] = [];
     const step = Math.max(1, Math.ceil(costChartDisplaySeries.length / 7));
     for (let i = 0; i < costChartDisplaySeries.length; i += step) {
@@ -1124,6 +1173,10 @@ export default function AssetDetailPage() {
       valueToRatio,
       chartMin,
       chartMax,
+      linePathPositiveSegments,
+      areaPathPositiveSegments,
+      linePathNegativeSegments,
+      areaPathNegativeSegments,
     };
   }, [costChartDisplaySeries, costChartSize, costChartPadding]);
 
@@ -2184,9 +2237,23 @@ export default function AssetDetailPage() {
                                     <stop offset="0%" stopColor={costChartColor} stopOpacity={0.35} />
                                     <stop offset="100%" stopColor={costChartColor} stopOpacity={0} />
                                   </linearGradient>
+                                  <linearGradient id="asset-detail-chart-area-negative" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={RED} stopOpacity={0.35} />
+                                    <stop offset="100%" stopColor={RED} stopOpacity={0} />
+                                  </linearGradient>
                                 </defs>
-                                <path d={costChartGeometry.areaPath} fill="url(#asset-detail-chart-area)" />
-                                <path d={costChartGeometry.linePath} fill="none" stroke={costChartColor} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                                {costChartGeometry.areaPathNegativeSegments.map((d, idx) => (
+                                  <path key={`neg-area-${idx}`} d={d} fill="url(#asset-detail-chart-area-negative)" />
+                                ))}
+                                {costChartGeometry.areaPathPositiveSegments.map((d, idx) => (
+                                  <path key={`pos-area-${idx}`} d={d} fill="url(#asset-detail-chart-area)" />
+                                ))}
+                                {costChartGeometry.linePathNegativeSegments.map((d, idx) => (
+                                  <path key={`neg-line-${idx}`} d={d} fill="none" stroke={RED} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                                ))}
+                                {costChartGeometry.linePathPositiveSegments.map((d, idx) => (
+                                  <path key={`pos-line-${idx}`} d={d} fill="none" stroke={costChartColor} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                                ))}
                                 {costChartDividers.map((div, idx) => (
                                   <line
                                     key={`div-${idx}-${div.x}`}
@@ -2203,7 +2270,7 @@ export default function AssetDetailPage() {
                                 {costChartHoverPoint && (
                                   <>
                                     <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
-                                    <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={6} fill={costChartColor} stroke="#fff" strokeWidth={2} />
+                                    <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={6} fill={costChartHoverPoint.value < 0 ? RED : costChartColor} stroke="#fff" strokeWidth={2} />
                                   </>
                                 )}
                                 {costChartGeometry.dayMarks.map((mark, idx) => (

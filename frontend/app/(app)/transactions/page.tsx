@@ -3245,11 +3245,23 @@ function TransactionsView({
     setError(null);
     try {
       const updated = await updateTransactionStatus(tx.id, "CONFIRMED");
-      setTxs((prev) =>
-        prev.map((item) =>
+      setTxs((prev) => {
+        const next = prev.map((item) =>
           item.id === tx.id ? { ...item, status: updated.status } : item
-        )
-      );
+        );
+        if (!showConfirmed && updated.status === "CONFIRMED") {
+          return next.filter((item) => item.id !== tx.id);
+        }
+        return next;
+      });
+      if (!showConfirmed) {
+        setSelectedTxIds((prev) => {
+          if (prev.size === 0) return prev;
+          const next = new Set(prev);
+          next.delete(tx.id);
+          return next;
+        });
+      }
     } catch (e: any) {
       setError(e?.message ?? "Не удалось подтвердить транзакцию.");
     } finally {
@@ -3594,11 +3606,23 @@ function TransactionsView({
       });
 
       if (confirmedIds.size > 0) {
-        setTxs((prev) =>
-          prev.map((item) =>
-            confirmedIds.has(item.id) ? { ...item, status: "CONFIRMED" } : item
-          )
-        );
+        setTxs((prev) => {
+          const next = prev.map((item) =>
+            confirmedIds.has(item.id) ? { ...item, status: "CONFIRMED" as const } : item
+          );
+          if (!showConfirmed) {
+            return next.filter((item) => !confirmedIds.has(item.id));
+          }
+          return next;
+        });
+        if (!showConfirmed) {
+          setSelectedTxIds((prev) => {
+            if (prev.size === 0) return prev;
+            const next = new Set(prev);
+            confirmedIds.forEach((id) => next.delete(id));
+            return next;
+          });
+        }
       }
 
       if (hasErrors) {
@@ -6644,6 +6668,7 @@ function TransactionsView({
             // ignore
           }
         }}
+        categoryNodes={categoryNodes}
       />
       <CreateCounterpartyModal
         open={createCounterpartyOpen}

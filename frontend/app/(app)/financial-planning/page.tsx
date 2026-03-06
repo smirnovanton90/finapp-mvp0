@@ -1927,6 +1927,7 @@ export default function FinancialPlanningPage() {
             // ignore
           }
         }}
+        categoryNodes={categoryNodes}
       />
       <CreateCounterpartyModal
         open={createCounterpartyOpen}

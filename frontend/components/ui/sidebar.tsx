@@ -95,6 +95,13 @@ function IconFrame({ children }: { children: React.ReactNode }) {
 
 const FILTER_PAGES = ["/assets", "/transactions", "/financial-planning", "/goals", "/categories", "/counterparties"];
 
+/** Страница детального просмотра актива /assets/[id] — без панели фильтров. */
+function isAssetDetailPage(pathname: string): boolean {
+  if (!pathname.startsWith("/assets/")) return false;
+  const segments = pathname.split("/").filter(Boolean);
+  return segments.length === 2;
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -110,7 +117,9 @@ export function Sidebar() {
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
   const userPhotoBlobRef = useRef<string | null>(null);
   const isCabinetActive = pathname === "/cabinet" || pathname.startsWith("/cabinet/");
-  const hasFilters = FILTER_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  const hasFilters =
+    !isAssetDetailPage(pathname ?? "") &&
+    FILTER_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"));
   const showFiltersSection = hasFilters && !isCollapsed;
   const isMobile = !isDesktop;
 

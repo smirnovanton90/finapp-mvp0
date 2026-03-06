@@ -1,18 +1,20 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { User, Building2 } from "lucide-react";
 import { ItemOut, CounterpartyOut } from "@/lib/api";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { CardIcon } from "@/components/card-icon";
 import { assetIconPath } from "@/lib/image-paths";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
+import { getItemPhotoUrl } from "@/lib/item-utils";
 
 /**
  * Иконка актива по приоритету:
  * 1. Иконка контрагента (если есть)
- * 2. 3D иконка актива
- * 3. 2D иконка актива (Lucide)
+ * 2. Фото актива (если пользователь загрузил)
+ * 3. 3D иконка актива
+ * 4. 2D иконка актива (Lucide)
  */
 export function AssetItemIcon({
   item,
@@ -36,8 +38,14 @@ export function AssetItemIcon({
   objectFit?: "contain" | "cover";
 }) {
   const [iconFormat, setIconFormat] = useState<"png" | null>("png");
+  const [photoError, setPhotoError] = useState(false);
   const icon3dPath = assetIconPath(item.type_code, iconFormat);
   const TypeIcon = TYPE_ICON_BY_CODE[item.type_code];
+  const itemPhotoUrl = getItemPhotoUrl(item, apiBase);
+
+  useEffect(() => {
+    setPhotoError(false);
+  }, [item?.id, item?.photo_url, apiBase]);
 
   const {
     currentSrc: counterpartySrc,
@@ -63,7 +71,24 @@ export function AssetItemIcon({
     );
   }
 
-  // 2. 3D иконка актива
+  // 2. Фото актива (загруженное пользователем)
+  if (itemPhotoUrl && !photoError) {
+    return (
+      <CardIcon
+        src={itemPhotoUrl}
+        alt={alt}
+        fallbackIcon={TypeIcon ?? undefined}
+        size={size}
+        shadow={shadow}
+        className={className}
+        fallbackIconColor={fallbackIconColor}
+        objectFit={objectFit}
+        onError={() => setPhotoError(true)}
+      />
+    );
+  }
+
+  // 3. 3D иконка актива
   if (icon3dPath) {
     return (
       <CardIcon
@@ -80,7 +105,7 @@ export function AssetItemIcon({
     );
   }
 
-  // 3. 2D иконка актива
+  // 4. 2D иконка актива
   if (TypeIcon) {
     return (
       <CardIcon

@@ -15,10 +15,18 @@ const FILTER_PAGES = [
   "/counterparties",
 ];
 
+function isAssetDetailPage(pathname: string): boolean {
+  if (!pathname.startsWith("/assets/")) return false;
+  const segments = pathname.split("/").filter(Boolean);
+  return segments.length === 2;
+}
+
 export function AppHeader() {
   const pathname = usePathname();
   const { setMobileOpen, setMobileFiltersOpen, isDesktop } = useSidebar();
-  const hasFilters = FILTER_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  const hasFilters =
+    !isAssetDetailPage(pathname ?? "") &&
+    FILTER_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"));
 
   if (isDesktop) return null;
 

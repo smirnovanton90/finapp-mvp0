@@ -131,6 +131,7 @@ import { getDefaultPrimaryValueKind, getPrimaryValueLabel } from "@/lib/asset-it
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, getItemPrimaryValueCents, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
+import { resolveApiImageUrlToBase } from "@/lib/api-image-url";
 import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { assetIconPath } from "@/lib/image-paths";
 
@@ -1207,9 +1208,10 @@ export default function Page() {
     if (!cpId) return null;
     const counterparty = counterpartiesById.get(cpId);
     if (!counterparty) return null;
-    return counterparty.entity_type === "PERSON"
+    const raw = counterparty.entity_type === "PERSON"
       ? counterparty.photo_url ?? null
       : counterparty.logo_url ?? null;
+    return raw ? resolveApiImageUrlToBase(raw, API_BASE) : null;
   };
   const itemCounterpartyName = (id: number | null | undefined) => {
     if (!id) return "";
@@ -1573,10 +1575,11 @@ export default function Page() {
   );
   const logoLayerStyle = useMemo(() => {
     if (!showCounterpartyField || !selectedCounterparty) return undefined;
-    const imageUrl =
+    const raw =
       selectedCounterparty.entity_type === "PERSON"
         ? selectedCounterparty.photo_url
         : selectedCounterparty.logo_url;
+    const imageUrl = raw ? resolveApiImageUrlToBase(raw, API_BASE) : null;
     if (!imageUrl) return undefined;
     const mask = "linear-gradient(to bottom, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0) 100%)";
     return {
@@ -2198,10 +2201,11 @@ export default function Page() {
       setLogoOverlayHeight(0);
       return;
     }
-    const imageUrl =
+    const raw =
       selectedCounterparty.entity_type === "PERSON"
         ? selectedCounterparty.photo_url
         : selectedCounterparty.logo_url;
+    const imageUrl = raw ? resolveApiImageUrlToBase(raw, API_BASE) : null;
     if (!imageUrl) {
       logoNaturalSizeRef.current = null;
       setLogoOverlayHeight(0);
@@ -2762,10 +2766,13 @@ export default function Page() {
                   const displayBalanceCents = getItemDisplayBalanceCents(it);
                   const currencyCode = it.currency_code || "";
                   const counterparty = it.counterparty_id ? counterpartiesById.get(it.counterparty_id) ?? null : null;
-                  const counterpartyLogoUrl =
+                  const counterpartyLogoRaw =
                     counterparty?.entity_type === "PERSON"
                       ? counterparty?.photo_url ?? null
                       : counterparty?.logo_url ?? null;
+                  const counterpartyLogoUrl = counterpartyLogoRaw
+                    ? resolveApiImageUrlToBase(counterpartyLogoRaw, API_BASE)
+                    : null;
                   const counterpartyName = counterparty
                     ? counterparty.entity_type === "PERSON"
                       ? [counterparty.last_name, counterparty.first_name, counterparty.middle_name]

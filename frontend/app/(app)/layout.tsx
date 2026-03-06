@@ -25,11 +25,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isDark = theme === "dark";
   const isTransactionsPage = pathname === "/transactions" || pathname?.startsWith("/transactions/");
   const isAssetsPage = pathname === "/assets" || pathname?.startsWith("/assets/");
+  const isAssetDetailPage =
+    pathname?.startsWith("/assets/") && (pathname.split("/").filter(Boolean).length === 2);
+  const isAssetsPageWithFilters = isAssetsPage && !isAssetDetailPage;
   const isFinancialPlanningPage = pathname === "/financial-planning" || pathname?.startsWith("/financial-planning/");
   const isGoalsPage = pathname === "/goals" || pathname?.startsWith("/goals/");
   const isCategoriesPage = pathname === "/categories" || pathname?.startsWith("/categories/");
   const isCounterpartiesPage = pathname === "/counterparties" || pathname?.startsWith("/counterparties/");
-  const isSpecialPage = isTransactionsPage || isAssetsPage || isFinancialPlanningPage || isGoalsPage || isCategoriesPage || isCounterpartiesPage;
+  const isSpecialPage = isTransactionsPage || isAssetsPageWithFilters || isFinancialPlanningPage || isGoalsPage || isCategoriesPage || isCounterpartiesPage;
   const filtersOpen = isSpecialPage && !isFilterPanelCollapsed;
   const showFiltersStrip = isSpecialPage && !isCollapsed;
   const asidePadding = 20;
@@ -139,8 +142,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             )}
             style={{ marginLeft: contentMarginLeft }}
           >
-            {isSpecialPage ? (
-              children
+            {isSpecialPage || isAssetDetailPage ? (
+              <div className="w-full min-w-0">
+                {children}
+              </div>
             ) : (
               <div className="w-full h-full flex items-center">
                 <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto">

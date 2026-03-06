@@ -19,15 +19,25 @@ export function getItemPrimaryValueCents(item: ItemOut): number {
   return item.current_value_rub;
 }
 
-/** Build full item photo URL with cache-busting so updated images refresh without reload. */
+/** Build full item photo URL with cache-busting so updated images refresh without reload.
+ * Always uses apiBase so the image is loaded from the same backend the app uses
+ * (backend may return full URL with public_base_url that is not reachable from the browser). */
 export function getItemPhotoUrl(
   item: { photo_url: string | null; photo_updated_at?: string | null } | null,
   apiBase: string
 ): string | null {
   if (!item?.photo_url) return null;
-  const base = item.photo_url.startsWith("http")
-    ? item.photo_url
-    : `${apiBase}${item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`}`;
+  let path: string;
+  if (item.photo_url.startsWith("http")) {
+    try {
+      path = new URL(item.photo_url).pathname;
+    } catch {
+      path = item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`;
+    }
+  } else {
+    path = item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`;
+  }
+  const base = `${apiBase.replace(/\/$/, "")}${path}`;
   const qs = item.photo_updated_at
     ? `?t=${new Date(item.photo_updated_at).getTime()}`
     : "";

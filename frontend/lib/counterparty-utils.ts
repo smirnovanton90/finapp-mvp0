@@ -1,5 +1,5 @@
 import { CounterpartyOut, CounterpartyIndustryOut, TransactionOut } from "@/lib/api";
-import { resolveApiImageUrl } from "@/lib/api-image-url";
+import { resolveApiImageUrlToBase } from "@/lib/api-image-url";
 import {
   counterpartyDefaultIconPath,
   counterpartyStaticIconPath,
@@ -33,7 +33,7 @@ export function getCounterpartyImageUrlCandidates(
       counterparty.entity_type === "PERSON"
         ? counterparty.photo_url
         : counterparty.logo_url;
-    const resolved = resolveApiImageUrl(apiUrl, apiBase);
+    const resolved = resolveApiImageUrlToBase(apiUrl, apiBase);
     if (resolved) candidates.push(resolved);
   }
   candidates.push(counterpartyDefaultIconPath(counterparty.entity_type));

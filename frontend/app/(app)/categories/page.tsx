@@ -262,7 +262,7 @@ function CategoryCard({
               <User className="h-4 w-4" />
             </IconButton>
           )}
-          {depth < MAX_DEPTH && !isDeleted && (
+          {depth < MAX_DEPTH - 1 && !isDeleted && (
             <IconButton
               aria-label="Добавить подкатегорию"
               onClick={() => onAddChild(node, depth)}

@@ -14,6 +14,7 @@ import { FormModal } from "@/components/form-modal";
 import { TextField, SelectField } from "@/components/ui/form-field";
 import { ChipsInput } from "@/components/ui/chips-input";
 import {
+  API_BASE,
   CounterpartyCreate,
   CounterpartyIndustryOut,
   CounterpartyOut,
@@ -28,6 +29,7 @@ import {
   uploadCounterpartyLogo,
   uploadCounterpartyPhoto,
 } from "@/lib/api";
+import { resolveApiImageUrlToBase } from "@/lib/api-image-url";
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterSection } from "@/components/filter-panel";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
@@ -314,10 +316,10 @@ export default function CounterpartiesPage() {
     setSynonyms(editing.synonyms ?? []);
     setLogoFile(null);
     setLogoError(null);
-    setLogoPreview(editing.logo_url ?? null);
+    setLogoPreview(editing.logo_url ? resolveApiImageUrlToBase(editing.logo_url, API_BASE) : null);
     setPhotoFile(null);
     setPhotoError(null);
-    setPhotoPreview(editing.photo_url ?? null);
+    setPhotoPreview(editing.photo_url ? resolveApiImageUrlToBase(editing.photo_url, API_BASE) : null);
     setFormError(null);
   }, [editing, isDialogOpen, searchParams]);
 
@@ -341,23 +343,24 @@ export default function CounterpartiesPage() {
       URL.revokeObjectURL(logoPreview);
     }
 
+    const fallbackLogoUrl = editing?.logo_url ? resolveApiImageUrlToBase(editing.logo_url, API_BASE) : null;
     if (!file) {
       setLogoFile(null);
-      setLogoPreview(editing?.logo_url ?? null);
+      setLogoPreview(fallbackLogoUrl);
       return;
     }
 
     if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
       setLogoError("Разрешены PNG, JPG или WEBP.");
       setLogoFile(null);
-      setLogoPreview(editing?.logo_url ?? null);
+      setLogoPreview(fallbackLogoUrl);
       return;
     }
 
     if (file.size > MAX_LOGO_BYTES) {
       setLogoError(`Размер логотипа не больше ${formatSize(MAX_LOGO_BYTES)}.`);
       setLogoFile(null);
-      setLogoPreview(editing?.logo_url ?? null);
+      setLogoPreview(fallbackLogoUrl);
       return;
     }
 
@@ -368,7 +371,7 @@ export default function CounterpartiesPage() {
         setLogoError(`Разрешение не больше ${MAX_LOGO_DIM}px.`);
         URL.revokeObjectURL(objectUrl);
         setLogoFile(null);
-        setLogoPreview(editing?.logo_url ?? null);
+        setLogoPreview(fallbackLogoUrl);
         return;
       }
       setLogoFile(file);
@@ -378,7 +381,7 @@ export default function CounterpartiesPage() {
       setLogoError("Не удалось прочитать изображение.");
       URL.revokeObjectURL(objectUrl);
       setLogoFile(null);
-      setLogoPreview(editing?.logo_url ?? null);
+      setLogoPreview(fallbackLogoUrl);
     };
     image.src = objectUrl;
   };
@@ -390,23 +393,24 @@ export default function CounterpartiesPage() {
       URL.revokeObjectURL(photoPreview);
     }
 
+    const fallbackPhotoUrl = editing?.photo_url ? resolveApiImageUrlToBase(editing.photo_url, API_BASE) : null;
     if (!file) {
       setPhotoFile(null);
-      setPhotoPreview(editing?.photo_url ?? null);
+      setPhotoPreview(fallbackPhotoUrl);
       return;
     }
 
     if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
       setPhotoError("Разрешены PNG, JPG или WEBP.");
       setPhotoFile(null);
-      setPhotoPreview(editing?.photo_url ?? null);
+      setPhotoPreview(fallbackPhotoUrl);
       return;
     }
 
     if (file.size > MAX_LOGO_BYTES) {
       setPhotoError(`Размер фотографии не больше ${formatSize(MAX_LOGO_BYTES)}.`);
       setPhotoFile(null);
-      setPhotoPreview(editing?.photo_url ?? null);
+      setPhotoPreview(fallbackPhotoUrl);
       return;
     }
 
@@ -417,7 +421,7 @@ export default function CounterpartiesPage() {
         setPhotoError(`Разрешение не больше ${MAX_LOGO_DIM}px.`);
         URL.revokeObjectURL(objectUrl);
         setPhotoFile(null);
-        setPhotoPreview(editing?.photo_url ?? null);
+        setPhotoPreview(fallbackPhotoUrl);
         return;
       }
       setPhotoFile(file);
@@ -427,7 +431,7 @@ export default function CounterpartiesPage() {
       URL.revokeObjectURL(objectUrl);
       setPhotoError("Не удалось прочитать изображение.");
       setPhotoFile(null);
-      setPhotoPreview(editing?.photo_url ?? null);
+      setPhotoPreview(fallbackPhotoUrl);
     };
     image.src = objectUrl;
   };

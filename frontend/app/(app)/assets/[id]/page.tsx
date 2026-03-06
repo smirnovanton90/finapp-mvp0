@@ -557,6 +557,9 @@ export default function AssetDetailPage() {
     let totalExpenseCur = 0;
     let totalTransferRub = 0;
     let totalTransferCur = 0;
+    let totalSaleRub = 0;
+    let totalSaleCur = 0;
+    const isCrypto = isCryptoItem(it);
     txsInRange.forEach(({ tx, deltaCents, inCurrency }) => {
       const d = toTxDateKey(tx.transaction_date);
       const rate = currencyCode !== "RUB" ? getRate(d) : null;
@@ -581,6 +584,10 @@ export default function AssetDetailPage() {
       if (tx.direction === "INCOME") {
         totalIncomeRub += rubCents;
         if (curUnits != null) totalIncomeCur += curUnits;
+        if (isMarketOrCrypto && tx.related_item_id === it.id && tx.asset_link_type === "ASSET_SALE") {
+          totalSaleRub += rubCents;
+          if (curUnits != null) totalSaleCur += curUnits;
+        }
         return;
       }
       if (tx.direction === "EXPENSE") {
@@ -599,7 +606,6 @@ export default function AssetDetailPage() {
     let totalBuyQty = 0;
     let totalSellQty = 0;
     if (isMarketOrCrypto) {
-      const isCrypto = isCryptoItem(it);
       const getTxQty = (tx: TransactionOut) => {
         if (tx.related_item_id === it.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
         if (tx.counterparty_item_id === it.id || tx.counterparty_card_item_id === it.id) return isCrypto ? (tx.counterparty_quantity_units ?? 0) : (tx.counterparty_quantity_lots ?? 0);
@@ -716,6 +722,13 @@ export default function AssetDetailPage() {
         courseDiffRub = 0;
         profitLossFromPriceRub = totalNonFlowRub;
       }
+      const capitalFlowRub = totalSaleRub - totalExpenseRub + totalTransferRub;
+      const capitalFlowCur = totalSaleCur - totalExpenseCur + totalTransferCur;
+      const priceChangeRub = signedFinalRub - signedInitialRub - capitalFlowRub;
+      const priceChangeCur =
+        currencyCode !== "RUB"
+          ? (finalCurCents - initialCurCents) / 100 - capitalFlowCur
+          : priceChangeRub / 100;
 
       const rowGrowthPercent =
         initialRubCents != null && initialRubCents !== 0
@@ -737,10 +750,14 @@ export default function AssetDetailPage() {
         courseDiffRub,
         profitLossFromPriceRub,
         profitLossFromPriceCur,
+        priceChangeRub,
+        priceChangeCur,
         totalIncomeRub,
         totalExpenseRub,
         totalIncomeCur,
         totalExpenseCur,
+        totalSaleRub,
+        totalSaleCur,
         totalTransferRub,
         totalTransferCur,
         totalBuyQty,
@@ -1642,16 +1659,16 @@ export default function AssetDetailPage() {
 
   if (loading && !item) {
     return (
-      <main className="min-h-screen px-8 py-8">
-        <div className="mx-auto w-full max-w-6xl" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</div>
+      <main className="min-h-screen px-8 py-8 w-full max-w-6xl mx-auto box-border">
+        <div className="w-full" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</div>
       </main>
     );
   }
 
   if (error && !item) {
     return (
-      <main className="min-h-screen px-8 py-8">
-        <div className="mx-auto w-full max-w-6xl">
+      <main className="min-h-screen px-8 py-8 w-full max-w-6xl mx-auto box-border">
+        <div className="w-full">
           <p className="text-red-600">{error}</p>
           <Button variant="outline" className="mt-4" asChild>
             <Link href="/assets">К активам</Link>
@@ -1663,8 +1680,8 @@ export default function AssetDetailPage() {
 
   if (!item) {
     return (
-      <main className="min-h-screen px-8 py-8">
-        <div className="mx-auto w-full max-w-6xl">
+      <main className="min-h-screen px-8 py-8 w-full max-w-6xl mx-auto box-border">
+        <div className="w-full">
           <p style={{ color: PLACEHOLDER_COLOR_DARK }}>Актив не найден.</p>
           <Button variant="outline" className="mt-4" asChild>
             <Link href="/assets">К активам</Link>
@@ -1689,8 +1706,8 @@ export default function AssetDetailPage() {
       : "";
 
   return (
-    <main className="min-h-screen px-8 py-8">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <main className="min-h-screen px-8 py-8 w-full max-w-6xl mx-auto box-border">
+      <div className="flex w-full flex-col gap-6">
         <div className="flex flex-wrap items-center gap-2 -ml-2">
           <Button variant="ghost" size="sm" asChild>
             <Link href="/assets" className="flex items-center gap-2">
@@ -2603,8 +2620,8 @@ export default function AssetDetailPage() {
                                   <>
                                     <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={d.qtyStart} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
                                     <SummaryBlock title="Куплено" qtyVal={d.totalBuyQty} curVal={showCurRow ? d.totalExpenseCur : null} rubVal={d.totalExpenseRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Продано" qtyVal={-d.totalSellQty} curVal={showCurRow ? -d.totalIncomeCur : null} rubVal={-d.totalIncomeRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.profitLossFromPriceCur != null ? d.profitLossFromPriceCur : null} rubVal={d.profitLossFromPriceRub} amountColor={d.profitLossFromPriceRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} showEmptyQtyRow={true} />
+                                    <SummaryBlock title="Продано" qtyVal={-d.totalSellQty} curVal={showCurRow ? -d.totalSaleCur : null} rubVal={-d.totalSaleRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
+                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.priceChangeCur != null ? d.priceChangeCur : null} rubVal={d.priceChangeRub} amountColor={d.priceChangeRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} showEmptyQtyRow={true} />
                                     {showCurRow && (
                                       <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />
                                     )}
@@ -2613,7 +2630,7 @@ export default function AssetDetailPage() {
                                 ) : (
                                   <>
                                     <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.profitLossFromPriceCur != null ? d.profitLossFromPriceCur : null} rubVal={d.profitLossFromPriceRub} amountColor={d.profitLossFromPriceRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} />
+                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.priceChangeCur != null ? d.priceChangeCur : null} rubVal={d.priceChangeRub} amountColor={d.priceChangeRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} />
                                     {showCurRow && (
                                       <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />
                                     )}

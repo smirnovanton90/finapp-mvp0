@@ -450,7 +450,7 @@ function buildDeltasByDate(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey > todayKey && !isRealized) return;
+    if (dateKey <= todayKey && !isRealized) return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -521,7 +521,7 @@ function buildLotDeltasByDate(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey > todayKey && !isRealized) return;
+    if (dateKey <= todayKey && !isRealized) return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -583,7 +583,7 @@ function buildUnitsDeltasByDate(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey > todayKey && !isRealized) return;
+    if (dateKey <= todayKey && !isRealized) return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -3018,12 +3018,15 @@ export default function AssetsDynamicsPage() {
                                             const rate = getRateForDate(fxRatesByDate, dateKey, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
                                             return rate ?? latestRatesByCurrency.get(currencyCode)?.rate ?? null;
                                           };
+                                          const isMarketOrCryptoForFlow = isMoexItem(item) || isCryptoItem(item);
                                           let totalIncomeRub = 0;
                                           let totalExpenseRub = 0;
                                           let totalIncomeCur = 0;
                                           let totalExpenseCur = 0;
                                           let totalTransferRub = 0;
                                           let totalTransferCur = 0;
+                                          let totalSaleRub = 0;
+                                          let totalSaleCur = 0;
                                           txsInRange.forEach(({ tx, deltaCents, inCurrency }) => {
                                             const d = toTxDateKey(tx.transaction_date);
                                             const rate = getRate(d);
@@ -3048,6 +3051,10 @@ export default function AssetsDynamicsPage() {
                                             if (tx.direction === "INCOME") {
                                               totalIncomeRub += rubCents;
                                               if (curUnits != null) totalIncomeCur += curUnits;
+                                              if (isMarketOrCryptoForFlow && tx.related_item_id === item.id && tx.asset_link_type === "ASSET_SALE") {
+                                                totalSaleRub += rubCents;
+                                                if (curUnits != null) totalSaleCur += curUnits;
+                                              }
                                               return;
                                             }
                                             if (tx.direction === "EXPENSE") {
@@ -3156,8 +3163,15 @@ export default function AssetsDynamicsPage() {
                                             courseDiffRub = 0;
                                             profitLossFromPriceRub = totalNonFlowRub;
                                           }
-                                          const priceChangeRubVal = profitLossFromPriceRub;
-                                          const priceChangeCurVal = showCurRow && profitLossFromPriceCur != null ? profitLossFromPriceCur : null;
+                                          const capitalFlowRub = totalSaleRub - totalExpenseRub + totalTransferRub;
+                                          const capitalFlowCur = totalSaleCur - totalExpenseCur + totalTransferCur;
+                                          const priceChangeRubVal = signedFinalRubForPrice - signedInitialRubForPrice - capitalFlowRub;
+                                          const priceChangeCurVal =
+                                            showCurRow && currencyCode !== "RUB"
+                                              ? finalCurForPrice - initialCurForPrice - capitalFlowCur
+                                              : showCurRow
+                                                ? priceChangeRubVal / 100
+                                                : null;
                                           if (isBalanceMode) {
                                             return (
                                               <div className="flex w-full gap-4 mt-4 flex-wrap">
@@ -3184,13 +3198,13 @@ export default function AssetsDynamicsPage() {
                                               <div className="flex w-full gap-4 mt-4 flex-wrap">
                                                 <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={qtyStart} curVal={showCurRow ? (initialDisplayCurResolved ?? null) : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
                                                 <SummaryBlock title="Куплено" qtyVal={totalBuyQty} curVal={showCurRow ? totalExpenseCur : null} rubVal={totalExpenseRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
-                                                <SummaryBlock title="Продано" qtyVal={-totalSellQty} curVal={showCurRow ? -totalIncomeCur : null} rubVal={-totalIncomeRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
+                                                <SummaryBlock title="Продано" qtyVal={-totalSellQty} curVal={showCurRow ? -totalSaleCur : null} rubVal={-totalSaleRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
                                                 <SummaryBlock
                                                   title="Изменение цены"
                                                   qtyVal={undefined}
                                                   curVal={priceChangeCurVal}
                                                   rubVal={priceChangeRubVal}
-                                                  amountColor={priceChangeRubVal != null ? (profitLossFromPriceRub >= 0 ? GREEN : RED) : undefined}
+                                                  amountColor={priceChangeRubVal != null ? (priceChangeRubVal >= 0 ? GREEN : RED) : undefined}
                                                   showCurRow={showCurRow}
                                                   showQtyRow={false}
                                                   showEmptyQtyRow={true}
@@ -3217,7 +3231,7 @@ export default function AssetsDynamicsPage() {
                                                 qtyVal={undefined}
                                                 curVal={priceChangeCurVal}
                                                 rubVal={priceChangeRubVal}
-                                                amountColor={priceChangeRubVal != null ? (profitLossFromPriceRub >= 0 ? GREEN : RED) : undefined}
+                                                amountColor={priceChangeRubVal != null ? (priceChangeRubVal >= 0 ? GREEN : RED) : undefined}
                                                 showCurRow={showCurRow}
                                                 showQtyRow={false}
                                               />

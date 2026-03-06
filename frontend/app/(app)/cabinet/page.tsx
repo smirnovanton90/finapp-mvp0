@@ -743,12 +743,6 @@ export default function CabinetPage() {
             >
               Данные
             </h3>
-            <p
-              className="text-sm"
-              style={{ color: PLACEHOLDER_COLOR_DARK }}
-            >
-              Экспорт всех ваших данных в CSV и импорт ранее экспортированного файла.
-            </p>
             <div className="flex flex-wrap gap-3">
               <Button
                 variant="authPrimary"
@@ -764,33 +758,22 @@ export default function CabinetPage() {
                 }
                 onClick={handleExportData}
               >
-                {exporting ? "Экспорт..." : "Экспорт данных в CSV"}
+                {exporting ? "Экспорт..." : "Экспорт данных"}
               </Button>
               <Button
-                variant="glass"
+                variant="authPrimary"
                 className="rounded-lg border-0"
                 style={
                   {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as React.CSSProperties
-                }
-                onClick={openImportFileModal}
-              >
-                Импорт истории из файла
-              </Button>
-              <Button
-                variant="glass"
-                className="rounded-lg border-0"
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                    "--auth-primary-bg":
+                      "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                    "--auth-primary-bg-hover":
+                      "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
                   } as React.CSSProperties
                 }
                 onClick={() => setImportModalOpen(true)}
               >
-                Импорт истории из других приложений
+                Импорт истории
               </Button>
               <Button
                 type="button"
@@ -1135,7 +1118,7 @@ export default function CabinetPage() {
         <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
           <DialogContent
             showCloseButton={true}
-            title="Импорт истории из других приложений"
+            title="Импорт истории"
             className={cn(
               "w-full max-w-[calc(100%-2rem)] sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl h-[920px] max-h-[min(920px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
               "bg-black border-0 rounded-[9px]"
@@ -1146,7 +1129,10 @@ export default function CabinetPage() {
               onSelectSource={setImportSource}
               onLater={() => setImportModalOpen(false)}
               onStartImport={() => {
-                if (importSource) {
+                if (importSource === "file") {
+                  setImportModalOpen(false);
+                  openImportFileModal();
+                } else if (importSource) {
                   setImportModalOpen(false);
                   setImportServiceModalOpen(true);
                 }

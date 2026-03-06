@@ -70,9 +70,12 @@ import {
   findMatchingItemId,
 } from "@/lib/import-match-helpers";
 
+/** Источники, для которых открывается пошаговый импорт (без «файла» резервной копии) */
+type ServiceImportSourceKey = "dzen" | "coinkeeper" | "own";
+
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
-  NonNullable<ImportSourceKey>,
+  ServiceImportSourceKey,
   { title: string; description: string; instructionLabel: string }
 > = {
   dzen: {
@@ -239,7 +242,7 @@ export function ImportAccountsOperationsModal({
 
   const step1Content =
     importSource && importSource in STEP1_CONTENT
-      ? STEP1_CONTENT[importSource]
+      ? STEP1_CONTENT[importSource as ServiceImportSourceKey]
       : STEP1_CONTENT.dzen;
 
   React.useEffect(() => {

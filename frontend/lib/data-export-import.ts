@@ -1231,7 +1231,7 @@ export async function runImport(
         counterparty_quantity_units: num(row.counterparty_quantity_units) ?? null,
         direction: (str(row.direction) || "EXPENSE") as TransactionDirection,
         transaction_type: (str(row.transaction_type) || "ACTUAL") as TransactionType,
-        status: (str(row.status) || "CONFIRMED") as TransactionStatus,
+        status: "UNCONFIRMED",
         category_id:
           categoryId != null && categoryIdMap.has(categoryId) ? categoryIdMap.get(categoryId)! : null,
         comment: str(row.comment) || null,

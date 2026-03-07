@@ -73,6 +73,43 @@ export const DZEN_DEBTS_ACCOUNT_NAME = "Долги";
 export const IMPORT_DEFAULT_CATEGORY_EXPENSE = "Прочие расходы / Прочие расходы";
 export const IMPORT_DEFAULT_CATEGORY_INCOME = "Прочие доходы / Прочие доходы";
 
+/** Имя синтетической категории для операций с пустой категорией — показывается карточкой на шаге маппинга. */
+export const IMPORT_UNDEFINED_CATEGORY_NAME = "Категория не определена";
+
+/**
+ * Если в выгрузке есть транзакции с пустой категорией, добавляет в categories запись
+ * «Категория не определена» и проставляет её таким операциям, чтобы на шаге маппинга
+ * отображалась карточка для привязки или создания категории.
+ */
+export function normalizeParsedDataUndefinedCategory(
+  data: DzenParsedData
+): DzenParsedData {
+  const hasEmpty =
+    data.transactions?.some(
+      (tx) => !(tx.categoryName ?? "").trim()
+    ) ?? false;
+  if (!hasEmpty || !data.transactions?.length) return data;
+
+  const undef = IMPORT_UNDEFINED_CATEGORY_NAME;
+  const categories = data.categories ?? [];
+  const hasUndef = categories.some((c) => c.name === undef);
+  const newCategories = hasUndef
+    ? categories
+    : [...categories, { name: undef }];
+
+  const newTransactions = data.transactions.map((tx) =>
+    (tx.categoryName ?? "").trim()
+      ? tx
+      : { ...tx, categoryName: undef }
+  );
+
+  return {
+    ...data,
+    categories: newCategories,
+    transactions: newTransactions,
+  };
+}
+
 export function isDzenDebtsAccount(account: { name: string }): boolean {
   return (account.name ?? "").trim() === DZEN_DEBTS_ACCOUNT_NAME;
 }

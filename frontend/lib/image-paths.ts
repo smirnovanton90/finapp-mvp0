@@ -45,17 +45,18 @@ export function counterpartyStaticIconPath(
 }
 
 /** Ключи банков в модалке импорта → ИНН (те же файлы, что и иконки контрагентов). */
-export const IMPORT_BANK_INN: Record<"tbank" | "sber" | "alfa", string> = {
+export const IMPORT_BANK_INN: Record<"tbank" | "sber" | "alfa" | "ozon", string> = {
   tbank: "7710140679",
   sber: "7707083893",
   alfa: "7728168971",
+  ozon: "9703077050",
 };
 
 /**
  * Путь к иконке банка для модалки импорта (тот же каталог и именование, что у контрагентов).
  */
 export function importBankIconPath(
-  bankKey: "tbank" | "sber" | "alfa"
+  bankKey: "tbank" | "sber" | "alfa" | "ozon"
 ): string {
   const inn = IMPORT_BANK_INN[bankKey];
   return counterpartyStaticIconPath(inn) ?? counterpartyDefaultIconPath("LEGAL");

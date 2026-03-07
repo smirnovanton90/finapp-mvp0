@@ -153,6 +153,22 @@ export async function executeImportDzen(
   const counterpartyNameToId = new Map<string, number>();
   const categoryLookup = buildCategoryLookup(categoryNodes);
 
+  // Категории по умолчанию из набора у каждого пользователя — привязываем по имени, не создаём дубликатов
+  const otherIncomeCategoryId =
+    categoryLookup.pathToId.get(
+      makeCategoryPathKey("Прочие доходы", "Прочие доходы", "")
+    ) ?? null;
+  const otherExpenseCategoryId =
+    categoryLookup.pathToId.get(
+      makeCategoryPathKey("Прочие расходы", "Прочие расходы", "")
+    ) ?? null;
+  if (otherIncomeCategoryId != null) {
+    categoryNameToId.set(IMPORT_DEFAULT_CATEGORY_INCOME, otherIncomeCategoryId);
+  }
+  if (otherExpenseCategoryId != null) {
+    categoryNameToId.set(IMPORT_DEFAULT_CATEGORY_EXPENSE, otherExpenseCategoryId);
+  }
+
   try {
     const me = await fetchUserMe();
     const transactions = parsedData.transactions ?? [];
@@ -203,6 +219,13 @@ export async function executeImportDzen(
       return (aHasParent ? 1 : 0) - (bHasParent ? 1 : 0);
     });
     for (const cat of sortedCats) {
+      // Дефолтные категории уже привязаны к дереву выше — не создаём и не линкуем
+      if (
+        cat.name === IMPORT_DEFAULT_CATEGORY_INCOME ||
+        cat.name === IMPORT_DEFAULT_CATEGORY_EXPENSE
+      ) {
+        continue;
+      }
       const state = categoryCardStates.get(cat.name)!;
       if (state.linkEnabled && state.linkedPath) {
         const key = makeCategoryPathKey(
@@ -211,7 +234,18 @@ export async function executeImportDzen(
           state.linkedPath.l3
         );
         const id = categoryLookup.pathToId.get(key);
-        if (id != null) categoryNameToId.set(cat.name, id);
+        if (id != null) {
+          categoryNameToId.set(cat.name, id);
+        } else {
+          // Путь в дереве не найден — создаём категорию, чтобы транзакции получили category_id
+          const created = await createCategory({
+            name: (state.name || cat.name).trim(),
+            parent_id: null,
+            scope: state.scope,
+            icon_name: state.iconName || null,
+          });
+          categoryNameToId.set(cat.name, created.id);
+        }
       } else {
         const parentId = (() => {
           if (!state.parentPath?.l1?.trim()) return null;
@@ -347,16 +381,6 @@ export async function executeImportDzen(
       }
     }
 
-    // Категории по умолчанию для операций счёта «Долги» (второй уровень)
-    const otherIncomeCategoryId =
-      categoryLookup.pathToId.get(
-        makeCategoryPathKey("Прочие доходы", "Прочие доходы", "")
-      ) ?? null;
-    const otherExpenseCategoryId =
-      categoryLookup.pathToId.get(
-        makeCategoryPathKey("Прочие расходы", "Прочие расходы", "")
-      ) ?? null;
-
     // 4. Создать транзакции: по дням от раннего к позднему; внутри дня — доходы → переводы → расходы; внутри переводов — сначала НА счёт (income), потом СО счёта (outcome), чтобы не получать отрицательное сальдо
     const TYPE_ORDER: Record<"income" | "transfer" | "expense", number> = {
       income: 0,
@@ -397,7 +421,7 @@ export async function executeImportDzen(
               amount: tx.income,
               direction: "INCOME",
               transaction_type: "ACTUAL",
-              status: "CONFIRMED",
+              status: "UNCONFIRMED",
               category_id: otherIncomeCategoryId,
               comment: tx.comment || null,
             });
@@ -416,7 +440,7 @@ export async function executeImportDzen(
               amount: tx.outcome,
               direction: "EXPENSE",
               transaction_type: "ACTUAL",
-              status: "CONFIRMED",
+              status: "UNCONFIRMED",
               category_id: otherExpenseCategoryId,
               comment: tx.comment || null,
             });
@@ -485,7 +509,7 @@ export async function executeImportDzen(
             amount_counterparty: amountCounterparty,
             direction: "TRANSFER",
             transaction_type: "ACTUAL",
-            status: "CONFIRMED",
+            status: "UNCONFIRMED",
             category_id: null,
             comment: tx.comment || null,
           });
@@ -500,7 +524,7 @@ export async function executeImportDzen(
         amount: amountCents,
         direction,
         transaction_type: "ACTUAL",
-        status: "CONFIRMED",
+        status: "UNCONFIRMED",
         category_id: categoryId,
         comment: tx.comment || null,
       });

@@ -6,4 +6,5 @@ export type { DzenParsedData, DzenParsedAccount, DzenParsedCategory, DzenParsedC
 export { parseTBankXlsxFile } from "./tbank";
 export { parseSberPdfFile } from "./sber-pdf";
 export { parseAlfaPdfFile } from "./alfa-pdf";
+export { parseOzonPdfFile } from "./ozon-pdf";
 export * from "./pdf-utils";

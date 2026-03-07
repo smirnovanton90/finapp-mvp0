@@ -1,6 +1,6 @@
 /**
  * Парсер выписки Альфа-Банк (PDF).
- * Счёт — из шапки первого листа (блок «Операции по счету» / номер счёта).
+ * Счёт — из поля «Описание» операций («Операция по карте: 555947++++++5809»); если не указан — из шапки выписки.
  * Категория — из «Описание» после «MCC», контрагент — между «место совершения операции: » и «MCC».
  */
 
@@ -15,6 +15,7 @@ import {
   IMPORT_DEFAULT_CATEGORY_EXPENSE,
   IMPORT_DEFAULT_CATEGORY_INCOME,
 } from "@/lib/dzen-csv-parser";
+import { formatMccCategoryForImport } from "@/lib/mcc-codes";
 import type { PdfTextItem } from "./pdf-utils";
 import {
   buildPdfLines,
@@ -67,9 +68,26 @@ function parseDateFromPdf(dateStr: string): { dateKey: string; time: string } {
 
 const ACCOUNT_NUMBER_REGEX = /(?:операции\s+по\s+счету|номер\s+счета|счет[а]?)\s*[:\s]*(\d{10,20})/i;
 
+/** «Операция по карте: 555947++++++5809» — извлекаем номер карты из поля «Описание». */
+const CARD_IN_DESCRIPTION_REGEX = /операция\s+по\s+карте\s*:?\s*(\d+[\s*+·]*\d{4})\s*/i;
+
 function extractAccountFromLine(lineText: string): string {
   const m = lineText.match(ACCOUNT_NUMBER_REGEX);
   return m ? m[1].trim() : "";
+}
+
+/**
+ * Извлекает номер карты из текста описания операции (например «Операция по карте: 555947++++++5809»).
+ * Нормализует к виду 555947******5809 (плюсы/точки заменяются на *) для сравнения с названиями активов и синонимами.
+ */
+function extractAccountFromDescriptionAlfa(descriptionText: string): string {
+  const normalized = normalizePdfText(descriptionText);
+  const m = normalized.match(CARD_IN_DESCRIPTION_REGEX);
+  if (!m || !m[1]) return "";
+  const raw = m[1].replace(/\s/g, "");
+  const masked = raw.replace(/[+·]/g, "*");
+  if (!/^\d+[*]*\d{4}$/.test(masked)) return "";
+  return masked;
 }
 
 export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
@@ -184,10 +202,13 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
           const amountMeta = parsePdfAmount(currentRow.amountText);
           if (amountMeta) {
             const { counterparty, category } = parseDescriptionAlfa(currentRow.descriptionText);
-            const accountName = headerAccountNumber || "Счёт";
-            const effectiveCategory =
-              category ||
-              (amountMeta.isIncome ? IMPORT_DEFAULT_CATEGORY_INCOME : IMPORT_DEFAULT_CATEGORY_EXPENSE);
+            const accountName =
+              extractAccountFromDescriptionAlfa(currentRow.descriptionText) ||
+              headerAccountNumber ||
+              "Счёт";
+            const effectiveCategory = category
+              ? formatMccCategoryForImport(category)
+              : (amountMeta.isIncome ? IMPORT_DEFAULT_CATEGORY_INCOME : IMPORT_DEFAULT_CATEGORY_EXPENSE);
 
             const key = `${accountName}|${defaultCurrency}`;
             if (!accountsMap.has(key)) {
@@ -299,10 +320,13 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
       const amountMeta = parsePdfAmount(currentRow.amountText);
       if (amountMeta) {
         const { counterparty, category } = parseDescriptionAlfa(currentRow.descriptionText);
-        const accountName = headerAccountNumber || "Счёт";
-        const effectiveCategory =
-          category ||
-          (amountMeta.isIncome ? IMPORT_DEFAULT_CATEGORY_INCOME : IMPORT_DEFAULT_CATEGORY_EXPENSE);
+        const accountName =
+          extractAccountFromDescriptionAlfa(currentRow.descriptionText) ||
+          headerAccountNumber ||
+          "Счёт";
+        const effectiveCategory = category
+          ? formatMccCategoryForImport(category)
+          : (amountMeta.isIncome ? IMPORT_DEFAULT_CATEGORY_INCOME : IMPORT_DEFAULT_CATEGORY_EXPENSE);
 
         const key = `${accountName}|${defaultCurrency}`;
         if (!accountsMap.has(key)) {

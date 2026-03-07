@@ -25,12 +25,14 @@ import {
   parseDzenCSVFile,
   type DzenParsedData,
   isDzenDebtsAccount,
+  normalizeParsedDataUndefinedCategory,
 } from "@/lib/dzen-csv-parser";
 import { parseCoinKeeperCSVFile } from "@/lib/coinkeeper-csv-parser";
 import {
   parseTBankXlsxFile,
   parseSberPdfFile,
   parseAlfaPdfFile,
+  parseOzonPdfFile,
 } from "@/lib/import";
 import { parseExportCsv } from "@/lib/data-export-import";
 import { parsedExportToDzenParsedData } from "@/lib/prostofin-to-dzen";
@@ -85,6 +87,7 @@ type ServiceImportSourceKey =
   | "tbank"
   | "sber"
   | "alfa"
+  | "ozon"
   | "file";
 
 /** Контент шага 1 по источнику импорта */
@@ -123,6 +126,11 @@ const STEP1_CONTENT: Record<
   alfa: {
     title: "Альфа-Банк",
     description: "Загрузите выписку по счёту или карте в формате .pdf",
+    instructionLabel: "",
+  },
+  ozon: {
+    title: "Озон Банк",
+    description: "Загрузите выписку (справка о движении средств) в формате .pdf",
     instructionLabel: "",
   },
   file: {
@@ -238,7 +246,7 @@ export function ImportAccountsOperationsModal({
       ? ".csv,.xlsx,.xls"
       : importSource === "tbank"
         ? ".xlsx"
-        : importSource === "sber" || importSource === "alfa"
+        : importSource === "sber" || importSource === "alfa" || importSource === "ozon"
           ? ".pdf"
           : importSource === "file"
             ? ".csv"
@@ -253,7 +261,7 @@ export function ImportAccountsOperationsModal({
 
   // Парсинг файла при выборе — чтобы показать параметры выписки на шаге 1
   React.useEffect(() => {
-    const parseableSources = ["dzen", "coinkeeper", "tbank", "sber", "alfa", "file"];
+    const parseableSources = ["dzen", "coinkeeper", "tbank", "sber", "alfa", "ozon", "file"];
     if (
       !selectedFile ||
       !importSource ||
@@ -279,7 +287,7 @@ export function ImportAccountsOperationsModal({
               setParseError("В файле не найдено транзакций.");
               return;
             }
-            setParsedData(dzenData);
+            setParsedData(normalizeParsedDataUndefinedCategory(dzenData));
             setParseError(null);
           } catch (err) {
             setParseError(
@@ -311,10 +319,12 @@ export function ImportAccountsOperationsModal({
             ? parseSberPdfFile
             : importSource === "alfa"
               ? parseAlfaPdfFile
-              : parseDzenCSVFile;
+              : importSource === "ozon"
+                ? parseOzonPdfFile
+                : parseDzenCSVFile;
     parseFile(selectedFile)
       .then((data) => {
-        if (!cancelled) setParsedData(data);
+        if (!cancelled) setParsedData(normalizeParsedDataUndefinedCategory(data));
       })
       .catch((err) => {
         if (!cancelled) {
@@ -600,6 +610,7 @@ export function ImportAccountsOperationsModal({
       importSource === "tbank" ||
       importSource === "sber" ||
       importSource === "alfa" ||
+      importSource === "ozon" ||
       importSource === "file";
     if (step === 1 && step1CsvOrBank) {
       if (!selectedFile) {
@@ -663,7 +674,7 @@ export function ImportAccountsOperationsModal({
           );
           return;
         }
-        setParsedData(data);
+        setParsedData(normalizeParsedDataUndefinedCategory(data));
         setStep(3);
       } catch (err) {
         setStep2MappingError(
@@ -725,6 +736,7 @@ export function ImportAccountsOperationsModal({
       importSource === "tbank" ||
       importSource === "sber" ||
       importSource === "alfa" ||
+      importSource === "ozon" ||
       importSource === "file";
     if (step === stepConfirm && parsedData && confirmWithDzenExecutor) {
       setStep5Error(null);
@@ -1114,6 +1126,7 @@ export function ImportAccountsOperationsModal({
                     importSource === "tbank" ||
                     importSource === "sber" ||
                     importSource === "alfa" ||
+                    importSource === "ozon" ||
                     importSource === "file") &&
                     selectedFile && (
                     <div className="flex flex-col gap-4">
@@ -1324,24 +1337,6 @@ export function ImportAccountsOperationsModal({
                               </div>
                             </div>
                           </div>
-                          {accountingStartDate && (() => {
-                            const earliest = getEarliestStatementTransactionDate(parsedData);
-                            if (!earliest || accountingStartDate <= earliest) return null;
-                            return (
-                              <div
-                                className="mt-4 p-4 rounded-lg border"
-                                style={{
-                                  backgroundColor: "rgba(251, 76, 79, 0.1)",
-                                  borderColor: "#FB4C4F",
-                                  color: ACTIVE_TEXT_DARK,
-                                }}
-                              >
-                                <p className="text-base">
-                                  В выписке есть операции раньше установленной даты начала учета ({formatShortDateDisplay(accountingStartDate)}). Будут импортированы только транзакции начиная с {formatShortDateDisplay(accountingStartDate)}. Дата начала действия импортируемых счетов будет установлена на {formatShortDateDisplay(accountingStartDate)}.
-                                </p>
-                              </div>
-                            );
-                          })()}
                         </>
                       )}
                     </div>

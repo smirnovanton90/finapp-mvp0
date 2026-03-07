@@ -64,7 +64,7 @@ from transactions import (
     transfer_delta,
 )
 from transaction_chains import router as transaction_chains_router
-from categories import router as categories_router
+from categories import router as categories_router, invalidate_category_cache
 from goals import router as goals_router
 from counterparties import router as counterparties_router
 from receipts import router as receipts_router
@@ -1045,6 +1045,14 @@ def reset_all_user_data(
             Category.parent_id.in_(user_category_ids),
         ).update({Category.parent_id: None}, synchronize_session=False)
     db.query(Category).filter(Category.owner_user_id == user.id).delete(synchronize_session=False)
+    invalidate_category_cache(user.id)
+    # 9b. Очистить синонимы у категорий и контрагентов по умолчанию (owner_user_id IS NULL)
+    db.query(Category).filter(Category.owner_user_id.is_(None)).update(
+        {Category.synonyms: []}, synchronize_session=False
+    )
+    db.query(Counterparty).filter(Counterparty.owner_user_id.is_(None)).update(
+        {Counterparty.synonyms: []}, synchronize_session=False
+    )
     # 10. Telegram link codes
     db.query(TelegramLinkCode).filter(TelegramLinkCode.user_id == user.id).delete(synchronize_session=False)
     # 11. Onboarding: set to PENDING so onboarding shows again

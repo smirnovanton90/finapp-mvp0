@@ -3794,6 +3794,7 @@ function TransactionsView({
   async function loadAll() {
     await refreshAfterMutation();
     await loadBanks();
+    await loadCategories();
     return;
     /*
     setLoading(true);

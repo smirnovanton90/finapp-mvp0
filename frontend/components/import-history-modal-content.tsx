@@ -23,6 +23,7 @@ export type ImportSourceKey =
   | "tbank"
   | "sber"
   | "alfa"
+  | "ozon"
   | "dzen"
   | "coinkeeper"
   | "own"
@@ -59,7 +60,7 @@ function ImportCardIcon({
   source,
   size = CARD_ICON_SIZE,
 }: {
-  source: "dzen" | "coinkeeper" | "own" | "file" | "tbank" | "sber" | "alfa";
+  source: "dzen" | "coinkeeper" | "own" | "file" | "tbank" | "sber" | "alfa" | "ozon";
   size?: number;
 }) {
   const [imgError, setImgError] = useState(false);
@@ -83,7 +84,7 @@ function ImportCardIcon({
     );
   }
 
-  if (source === "tbank" || source === "sber" || source === "alfa") {
+  if (source === "tbank" || source === "sber" || source === "alfa" || source === "ozon") {
     const src = imgError ? null : importBankIconPath(source);
     return (
       <div style={boxStyle}>
@@ -133,6 +134,7 @@ const BANKS: SourceCard[] = [
   { key: "tbank", title: "Т-Банк", description: "Выписка в формате .xlsx" },
   { key: "sber", title: "Сбер", description: "Выписка в формате .pdf" },
   { key: "alfa", title: "Альфа-Банк", description: "Выписка в формате .pdf" },
+  { key: "ozon", title: "Озон Банк", description: "Выписка в формате .pdf" },
 ];
 
 const OTHER_TOOLS: SourceCard[] = [

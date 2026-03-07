@@ -79,6 +79,12 @@ import {
 import * as XLSX from "xlsx";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import jsQR from "jsqr";
+import type { PdfTextItem, PdfLineItem } from "@/lib/import";
+import {
+  PDF_AMOUNT_REGEX,
+  PDF_DATE_REGEX,
+  PDF_DATE_TIME_REGEX,
+} from "@/lib/import";
 
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -181,6 +187,11 @@ import { useImagePreloader } from "@/hooks/use-image-preloader";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { useCategoryImage } from "@/hooks/use-category-icon";
 import { CardIcon } from "@/components/card-icon";
+import {
+  ImportHistoryModalContent,
+  type ImportSourceKey,
+} from "@/components/import-history-modal-content";
+import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
 
 type TransactionsViewMode = "actual" | "planning";
 
@@ -214,44 +225,7 @@ type CategoryPathOption = {
   searchKey: string;
 };
 
-type PdfTextItem = {
-  str: string;
-  transform: number[];
-};
-
-type PdfLineItem = {
-  text: string;
-  x: number;
-  y: number;
-};
-
-type ParsedPdfRow = {
-  dateTime: string;
-  category: string;
-  descriptionLines: string[];
-  amountText: string;
-};
-
 const PAGE_SIZE = 50;
-GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
-).toString();
-const IMPORT_BANK_READY_INN = "7710140679"; // Т-Банк
-const IMPORT_BANK_IN_PROGRESS_INN = "7707083893"; // Сбер
-const IMPORT_BANK_ALFA_INN = "7728168971"; // Альфа-Банк
-const IMPORT_BANK_PDF_INNS = new Set([
-  IMPORT_BANK_IN_PROGRESS_INN,
-  IMPORT_BANK_ALFA_INN,
-]);
-const IMPORT_BANK_INNS = new Set([
-  IMPORT_BANK_READY_INN,
-  IMPORT_BANK_IN_PROGRESS_INN,
-  IMPORT_BANK_ALFA_INN,
-]);
-const PDF_AMOUNT_REGEX = /[+\-\u2212]?\d{1,3}(?:[ \u00A0]\d{3})*(?:,\d{2})/g;
-const PDF_DATE_TIME_REGEX = /\b\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\b/;
-const PDF_DATE_REGEX = /^\d{2}\.\d{2}\.\d{4}$/;
 const EMPTY_NUMBER_ARRAY: number[] = [];
 const EMPTY_DIRECTION_ARRAY: TransactionOut["direction"][] = [];
 const MOEX_TYPE_CODES = new Set([
@@ -651,6 +625,13 @@ function extractPdfRightAmountText(items: PdfLineItem[], pageWidth: number) {
   candidates.sort((a, b) => a.x - b.x);
   return candidates[candidates.length - 1].text;
 }
+
+type ParsedPdfRow = {
+  dateTime: string;
+  category: string;
+  descriptionLines: string[];
+  amountText: string;
+};
 
 async function parsePdfStatementRows(file: File): Promise<ParsedPdfRow[]> {
   const buffer = await file.arrayBuffer();
@@ -2098,16 +2079,10 @@ function TransactionsView({
   const [relatedItemId, setRelatedItemId] = useState<number | null>(null);
   const [assetLinkType, setAssetLinkType] = useState<AssetLinkType | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importSource, setImportSource] = useState<ImportSourceKey>(null);
+  const [importOperationsModalOpen, setImportOperationsModalOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const [importBankId, setImportBankId] = useState<number | null>(null);
-  const [importFileDragOver, setImportFileDragOver] = useState(false);
-  const [importPdfFile, setImportPdfFile] = useState<File | null>(null);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importItemId, setImportItemId] = useState<number | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importConfirmed, setImportConfirmed] = useState(false);
   const [isQrCodeLoading, setIsQrCodeLoading] = useState(false);
   const qrCodeInputRef = useRef<HTMLInputElement>(null);
   const [receiptRecognizing, setReceiptRecognizing] = useState(false);
@@ -2316,25 +2291,6 @@ function TransactionsView({
       })
     );
   }, [selectableCounterparties]);
-  const importBankCounterparties = useMemo(
-    () =>
-      counterparties.filter(
-        (cp) => cp.inn != null && IMPORT_BANK_INNS.has(cp.inn)
-      ),
-    [counterparties]
-  );
-
-  const selectedImportBank = useMemo(() => {
-    const cp = importBankId ? counterpartiesById.get(importBankId) : null;
-    if (!cp?.inn || !IMPORT_BANK_INNS.has(cp.inn)) return null;
-    return { inn: cp.inn };
-  }, [importBankId, counterpartiesById]);
-  const isImportBankReady = selectedImportBank?.inn === IMPORT_BANK_READY_INN;
-  const isImportBankInProgress = selectedImportBank
-    ? IMPORT_BANK_PDF_INNS.has(selectedImportBank.inn)
-    : false;
-  const isImportSupported = isImportBankReady || isImportBankInProgress;
-  const isImportFormDisabled = isImporting;
   const resolveItemEffectiveKind = useCallback(
     (item: ItemOut) => getEffectiveItemKind(item, item.current_value_rub),
     []
@@ -2343,21 +2299,6 @@ function TransactionsView({
     () => activeItems.filter((item) => resolveItemEffectiveKind(item) === "ASSET"),
     [activeItems, resolveItemEffectiveKind]
   );
-  const selectedImportBankCounterparty = useMemo(
-    () => (importBankId ? counterpartiesById.get(importBankId) ?? null : null),
-    [importBankId, counterpartiesById]
-  );
-  const importBankAccountItems = useMemo(
-    () =>
-      importBankId
-        ? assetItems.filter((item) => item.counterparty_id === importBankId)
-        : [],
-    [assetItems, importBankId]
-  );
-  const importAccountFieldLabel =
-    selectedImportBankCounterparty
-      ? `Счета в ${buildCounterpartyName(selectedImportBankCounterparty)}`
-      : "Счет";
   const liabilityItems = useMemo(
     () => activeItems.filter((item) => resolveItemEffectiveKind(item) === "LIABILITY"),
     [activeItems, resolveItemEffectiveKind]
@@ -3635,347 +3576,8 @@ function TransactionsView({
     }
   };
 
-  const resetImportForm = () => {
-    setImportBankId(null);
-    setImportFileDragOver(false);
-    setImportPdfFile(null);
-    setImportFile(null);
-    setImportItemId(null);
-    setImportError(null);
-    setImportConfirmed(false);
-    if (importInputRef.current) {
-      importInputRef.current.value = "";
-    }
-    if (importPdfInputRef.current) {
-      importPdfInputRef.current.value = "";
-    }
-  };
-
   const handleImportOpenChange = (open: boolean) => {
     setIsImportDialogOpen(open);
-    if (!open) {
-      resetImportForm();
-      return;
-    }
-    setImportError(null);
-  };
-
-  const handleImportSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setImportError(null);
-
-    if (!selectedImportBank) {
-      setImportError("Выберите банк для импорта.");
-      return;
-    }
-
-    if (importItemId == null) {
-      setImportError("Выберите счет, на который импортируются транзакции.");
-      return;
-    }
-    const selectedImportItemId = importItemId;
-    const item = itemsById.get(selectedImportItemId);
-    const itemMeta = getEffectiveItemMeta(selectedImportItemId);
-    if (!item) {
-      setImportError("Выбранный счет недоступен.");
-      return;
-    }
-    if (categoryMaps.l1.length === 0) {
-      setImportError("Нет доступных категорий для сопоставления.");
-      return;
-    }
-    const importTxType = isPlanningView ? "PLANNED" : "ACTUAL";
-
-    let rowsToImport: Array<{ rowNumber: number; payload: TransactionCreate }> = [];
-
-    if (isImportBankReady) {
-      if (!importFile) {
-        setImportError("Выберите файл .xlsx для импорта.");
-        return;
-      }
-      if (!importFile.name.toLowerCase().endsWith(".xlsx")) {
-        setImportError("Формат файла должен быть .xlsx.");
-        return;
-      }
-
-      try {
-        const arrayBuffer = await importFile.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
-        if (workbook.SheetNames.length !== 1) {
-          throw new Error("Файл должен содержать ровно один лист.");
-        }
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          blankrows: false,
-          defval: "",
-        }) as unknown[][];
-
-        if (rows.length < 2) {
-          throw new Error("Файл не содержит данных для импорта.");
-        }
-
-        const headerRow = rows[0] ?? [];
-        const normalizedHeader = headerRow.map((cell) =>
-          normalizeHeader(String(cell ?? ""))
-        );
-        const expectedHeader = IMPORT_HEADERS.map(normalizeHeader);
-
-        const isHeaderValid =
-          normalizedHeader.length === expectedHeader.length &&
-          expectedHeader.every((value, index) => value === normalizedHeader[index]);
-
-        if (!isHeaderValid) {
-          throw new Error(
-            `Файл не соответствует формату. Ожидаемые столбцы: ${IMPORT_HEADERS.join(
-              ", "
-            )}.`
-          );
-        }
-
-        for (let i = 1; i < rows.length; i += 1) {
-          const row = rows[i] ?? [];
-          const rowNumber = i + 1;
-          const hasValues = row.some((cell) => String(cell ?? "").trim() !== "");
-          if (!hasValues) {
-            continue;
-          }
-
-          if (
-            row.slice(IMPORT_HEADERS.length).some((cell) => String(cell ?? "").trim() !== "")
-          ) {
-            throw new Error(
-              `Строка ${rowNumber}: ожидается ровно ${IMPORT_HEADERS.length} столбцов.`
-            );
-          }
-
-          const rawOperationDate = row[0];
-          const rawStatus = row[3];
-          const rawPaymentAmount = row[6];
-          const rawCategory = row[9];
-          const rawMcc = row[10];
-          const rawDescription = row[11];
-
-          const statusValue = String(rawStatus ?? "").trim().toUpperCase();
-          if (statusValue !== "OK") {
-            continue;
-          }
-
-          const parsedDate = parseExcelDate(rawOperationDate);
-          if (!parsedDate) {
-            throw new Error(`Строка ${rowNumber}: не удалось распознать дату операции.`);
-          }
-          const transactionDateKey = formatDateForApi(parsedDate);
-          const transactionDate = formatDateTimeForApi(parsedDate);
-          if (importTxType === "PLANNED") {
-            const today = new Date().toISOString().slice(0, 10);
-            if (transactionDateKey < today) {
-              throw new Error(
-                `Строка ${rowNumber}: запланированная дата не может быть в прошлом.`
-              );
-            }
-          }
-          if (itemMeta?.minDate && transactionDateKey < itemMeta.minDate) {
-            throw new Error(
-              `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
-            );
-          }
-
-          const amountValue = parseAmountCell(rawPaymentAmount);
-          if (amountValue == null || !Number.isFinite(amountValue)) {
-            throw new Error(
-              `Строка ${rowNumber}: не удалось распознать сумму операции.`
-            );
-          }
-          const direction = amountValue < 0 ? "EXPENSE" : "INCOME";
-          const amountCents = Math.round(Math.abs(amountValue) * 100);
-
-          const mccCategory = resolveCategoryFromMcc(rawMcc);
-          const categoryValue = (mccCategory ?? String(rawCategory ?? "")).trim();
-          if (!categoryValue) {
-            throw new Error(`Строка ${rowNumber}: категория не заполнена.`);
-          }
-          let categoryId =
-            findCategoryIdByExactNameOrSynonym(categoryValue, categoryNodes) ?? null;
-          if (categoryId == null) {
-            const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
-            if (!categoryL1) {
-              throw new Error(
-                `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
-              );
-            }
-            categoryId = resolveCategoryId(
-              categoryL1,
-              CATEGORY_PLACEHOLDER,
-              CATEGORY_PLACEHOLDER
-            );
-          }
-          if (!categoryId) {
-            throw new Error(
-              `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
-            );
-          }
-
-          const description = String(rawDescription ?? "").trim();
-          const matchedCounterpartyId = findExactMatchingCounterpartyId(
-            description,
-            counterparties
-          );
-
-          rowsToImport.push({
-            rowNumber,
-            payload: {
-              transaction_date: transactionDate,
-              primary_item_id: selectedImportItemId,
-              amount: amountCents,
-              direction,
-              transaction_type: importTxType,
-              status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
-              category_id: categoryId,
-              counterparty_id: matchedCounterpartyId ?? null,
-              comment: matchedCounterpartyId ? null : (description || null),
-            },
-          });
-        }
-
-        if (rowsToImport.length === 0) {
-          throw new Error("Файл не содержит данных для импорта.");
-        }
-      } catch (err: any) {
-        setImportError(err?.message ?? "Не удалось обработать файл для импорта.");
-        return;
-      }
-    } else if (isImportBankInProgress) {
-      if (!importPdfFile) {
-        setImportError("Выберите файл .pdf для импорта.");
-        return;
-      }
-      if (!importPdfFile.name.toLowerCase().endsWith(".pdf")) {
-        setImportError("Формат файла должен быть .pdf.");
-        return;
-      }
-
-      try {
-        const parsedRows =
-          selectedImportBank.inn === IMPORT_BANK_ALFA_INN
-            ? await parseAlfaStatementRows(importPdfFile)
-            : await parsePdfStatementRows(importPdfFile);
-        if (parsedRows.length === 0) {
-          throw new Error("В выписке не найдены операции.");
-        }
-
-        const isAlfaImport = selectedImportBank.inn === IMPORT_BANK_ALFA_INN;
-
-        for (let i = 0; i < parsedRows.length; i += 1) {
-          const row = parsedRows[i];
-          const rowNumber = i + 1;
-          const parsedDate = parseDateFromString(row.dateTime);
-          if (!parsedDate) {
-            throw new Error(`Строка ${rowNumber}: не удалось распознать дату операции.`);
-          }
-
-          const transactionDateKey = formatDateForApi(parsedDate);
-          if (itemMeta?.minDate && transactionDateKey < itemMeta.minDate) {
-            throw new Error(
-              `Строка ${rowNumber}: дата операции раньше даты открытия счета.`
-            );
-          }
-
-          const amountMeta = parsePdfAmount(row.amountText);
-          if (!amountMeta) {
-            throw new Error(
-              `Строка ${rowNumber}: не удалось распознать сумму операции.`
-            );
-          }
-
-          const fallbackCategory = row.descriptionLines[0] ?? "";
-          const statementCategory = (row.category || fallbackCategory).trim();
-          const categoryValue = amountMeta.isIncome
-            ? statementCategory
-            : "Прочие расходы";
-          if (!categoryValue) {
-            throw new Error(`Строка ${rowNumber}: не удалось распознать категорию.`);
-          }
-          let categoryId =
-            findCategoryIdByExactNameOrSynonym(categoryValue, categoryNodes) ?? null;
-          if (categoryId == null) {
-            const categoryL1 = findClosestCategory(categoryValue, categoryMaps.l1);
-            if (!categoryL1) {
-              throw new Error(
-                `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
-              );
-            }
-            categoryId = resolveCategoryId(
-              categoryL1,
-              CATEGORY_PLACEHOLDER,
-              CATEGORY_PLACEHOLDER
-            );
-          }
-          if (!categoryId) {
-            throw new Error(
-              `Строка ${rowNumber}: не удалось сопоставить категорию операции.`
-            );
-          }
-
-          const descriptionLines = row.category
-            ? row.descriptionLines
-            : isAlfaImport
-              ? row.descriptionLines
-              : row.descriptionLines.slice(1);
-          const commentValue = normalizePdfText(descriptionLines.join(" "));
-
-          rowsToImport.push({
-            rowNumber,
-            payload: {
-              transaction_date: formatDateTimeForApi(parsedDate),
-              primary_item_id: selectedImportItemId,
-              amount: amountMeta.amountCents,
-              direction: amountMeta.isIncome ? "INCOME" : "EXPENSE",
-              transaction_type: importTxType,
-              status: importConfirmed ? "CONFIRMED" : "UNCONFIRMED",
-              category_id: categoryId,
-              comment: commentValue ? commentValue : null,
-            },
-          });
-        }
-      } catch (err: any) {
-        setImportError(err?.message ?? "Не удалось обработать PDF-выписку.");
-        return;
-      }
-    } else {
-      setImportError("Импорт для выбранного банка пока не поддерживается.");
-      return;
-    }
-
-    // Создаём транзакции в хронологическом порядке (от старых к новым), чтобы не возникало ошибки отрицательного сальдо
-    rowsToImport.sort((a, b) =>
-      (a.payload.transaction_date ?? "").localeCompare(
-        b.payload.transaction_date ?? ""
-      )
-    );
-
-    setIsImporting(true);
-    try {
-      for (const row of rowsToImport) {
-        try {
-          await createTransaction(row.payload);
-        } catch (err: any) {
-          const message =
-            err?.message ??
-            "Не удалось создать транзакцию по данным импорта.";
-          throw new Error(`Строка ${row.rowNumber}: ${message}`);
-        }
-      }
-      handleImportOpenChange(false);
-      await loadAll();
-    } catch (err: any) {
-      setImportError(
-        err?.message ?? "Не удалось завершить импорт транзакций."
-      );
-    } finally {
-      setIsImporting(false);
-    }
   };
 
   const statusFilter = useMemo(() => {
@@ -4369,8 +3971,6 @@ function TransactionsView({
     if (!hasMoreTxs || isLoadingMore || loading) return;
     loadTransactions({ cursor: txCursor, append: true });
   }, [hasMoreTxs, isLoadingMore, loading, loadTransactions, txCursor]);
-  const importInputRef = useRef<HTMLInputElement | null>(null);
-  const importPdfInputRef = useRef<HTMLInputElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const lastActiveElementRef = useRef<HTMLElement | null>(null);
 
@@ -4943,278 +4543,36 @@ function TransactionsView({
               }}
             />
             
-            {/* Modal for importing statements - shared between collapsed and expanded states */}
-            <FormModal
-              open={isImportDialogOpen}
-              onOpenChange={handleImportOpenChange}
-              title="Импорт выписки"
-              icon={<FileDown className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
-              formError={importError}
-              onSubmit={handleImportSubmit}
-              onCancel={() => handleImportOpenChange(false)}
-              submitLabel={isImporting ? "Импортируем…" : "Импортировать"}
-              loading={isImporting}
-              disabled={isImportFormDisabled || !isImportSupported}
-              size="medium"
-            >
-              <div className="grid gap-4">
-                <FormField label="Банк">
-                  <CounterpartySelector
-                    counterparties={importBankCounterparties}
-                    selectedIds={importBankId != null ? [importBankId] : []}
-                    onChange={(ids) => {
-                      setImportBankId(ids[0] ?? null);
-                      setImportItemId(null);
-                      setImportError(null);
-                    }}
-                    selectionMode="single"
-                    placeholder="Выберите банк"
-                    emptyMessage="Нет банков для импорта"
-                    noResultsMessage="Банк не найден"
-                    showChips={false}
-                    industries={industries}
-                    apiBase={API_BASE}
-                    ariaLabel="Банк"
-                  />
-                </FormField>
-
-                {isImportBankInProgress && (
-                  <>
-                    <FormField label="Файл .pdf">
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                          !isImportFormDisabled && importPdfInputRef.current?.click()
-                        }
-                        onKeyDown={(e) =>
-                          (e.key === "Enter" || e.key === " ") &&
-                          !isImportFormDisabled &&
-                          importPdfInputRef.current?.click()
-                        }
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (!isImportFormDisabled) setImportFileDragOver(true);
-                        }}
-                        onDragLeave={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setImportFileDragOver(false);
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setImportFileDragOver(false);
-                          if (isImportFormDisabled) return;
-                          const file = e.dataTransfer.files?.[0];
-                          if (file && file.name.toLowerCase().endsWith(".pdf")) {
-                            setImportPdfFile(file);
-                            setImportError(null);
-                          }
-                        }}
-                        className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed min-h-[140px] cursor-pointer transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{
-                          borderColor: importFileDragOver ? ACCENT : ACCENT2,
-                          backgroundColor: importFileDragOver
-                            ? "rgba(127, 92, 255, 0.12)"
-                            : "rgba(85, 68, 209, 0.08)",
-                        }}
-                      >
-                        <Upload
-                          className="w-10 h-10 shrink-0"
-                          style={{ color: ACCENT }}
-                        />
-                        {importPdfFile ? (
-                          <span className="px-4 text-center break-all" style={{ color: ACTIVE_TEXT_DARK }}>
-                            {importPdfFile.name}
-                          </span>
-                        ) : (
-                          <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                            Нажмите для выбора или перетащите файл
-                          </span>
-                        )}
-                      </div>
-                      <input
-                        ref={importPdfInputRef}
-                        type="file"
-                        accept=".pdf"
-                        className="hidden"
-                        disabled={isImportFormDisabled}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] ?? null;
-                          setImportPdfFile(file);
-                          setImportError(null);
-                        }}
-                      />
-                    </FormField>
-
-                    <FormField label={importAccountFieldLabel}>
-                      <ItemSelector
-                        items={importBankAccountItems}
-                        selectedIds={importItemId ? [importItemId] : []}
-                        onChange={(ids) => {
-                          setImportItemId(ids[0] ?? null);
-                          setImportError(null);
-                        }}
-                        selectionMode="single"
-                        placeholder="Выберите счет"
-                        getItemTypeLabel={getItemTypeLabel}
-                        getItemKind={resolveItemEffectiveKind}
-                        getCounterpartyForItemId={getCounterpartyForItemId}
-                        apiBase={API_BASE}
-                        getBankLogoUrl={itemBankLogoUrl}
-                        getBankName={itemBankName}
-                        getItemBalance={getItemDisplayBalanceCents}
-                        itemCounts={itemTxCounts}
-                        disabled={isImportFormDisabled}
-                        ariaLabel={importAccountFieldLabel}
-                      />
-                    </FormField>
-
-                    <label
-                      className="flex cursor-pointer items-center gap-2"
-                      style={{ color: ACTIVE_TEXT_DARK }}
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-5 w-5 accent-violet-600"
-                        disabled={isImportFormDisabled}
-                        checked={importConfirmed}
-                        onChange={(e) => setImportConfirmed(e.target.checked)}
-                      />
-                      <span className="text-sm">
-                        Импортировать транзакции сразу в статусе "Подтвержденная"
-                      </span>
-                      <Tooltip
-                        content="Транзакции из выписки по умолчанию импортируются в статусе «Не подтверждено», чтобы вы могли их легче отфильтровать и скорректировать, при необходимости. Если Вы хотите импортировать их сразу в статусе «Подтвержденная» — отметьте этот чекбокс."
-                        side="top"
-                      >
-                        <Info className="h-4 w-4 shrink-0 cursor-help" style={{ color: PLACEHOLDER_COLOR_DARK }} aria-label="Подсказка" />
-                      </Tooltip>
-                    </label>
-                  </>
+            {/* Unified Import: source selection then step-by-step modal */}
+            <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
+              <DialogContent
+                showCloseButton={true}
+                title="Импорт"
+                className={cn(
+                  "w-full max-w-[calc(100%-2rem)] sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl h-[920px] max-h-[min(920px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
+                  "bg-black border-0 rounded-[9px]"
                 )}
+              >
+                <ImportHistoryModalContent
+                  selectedSource={importSource}
+                  onSelectSource={setImportSource}
+                  onLater={() => handleImportOpenChange(false)}
+                  onStartImport={() => {
+                    if (importSource) {
+                      handleImportOpenChange(false);
+                      setImportOperationsModalOpen(true);
+                    }
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
 
-                {isImportBankReady && (
-                  <>
-                    <FormField label="Файл .xlsx">
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                          !isImportFormDisabled && importInputRef.current?.click()
-                        }
-                        onKeyDown={(e) =>
-                          (e.key === "Enter" || e.key === " ") &&
-                          !isImportFormDisabled &&
-                          importInputRef.current?.click()
-                        }
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (!isImportFormDisabled) setImportFileDragOver(true);
-                        }}
-                        onDragLeave={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setImportFileDragOver(false);
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setImportFileDragOver(false);
-                          if (isImportFormDisabled) return;
-                          const file = e.dataTransfer.files?.[0];
-                          if (file && file.name.toLowerCase().endsWith(".xlsx")) {
-                            setImportFile(file);
-                            setImportError(null);
-                          }
-                        }}
-                        className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed min-h-[140px] cursor-pointer transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{
-                          borderColor: importFileDragOver ? ACCENT : ACCENT2,
-                          backgroundColor: importFileDragOver
-                            ? "rgba(127, 92, 255, 0.12)"
-                            : "rgba(85, 68, 209, 0.08)",
-                        }}
-                      >
-                        <Upload
-                          className="w-10 h-10 shrink-0"
-                          style={{ color: ACCENT }}
-                        />
-                        {importFile ? (
-                          <span className="px-4 text-center break-all" style={{ color: ACTIVE_TEXT_DARK }}>
-                            {importFile.name}
-                          </span>
-                        ) : (
-                          <span style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                            Нажмите для выбора или перетащите файл
-                          </span>
-                        )}
-                      </div>
-                      <input
-                        ref={importInputRef}
-                        type="file"
-                        accept=".xlsx"
-                        className="hidden"
-                        disabled={isImportFormDisabled}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] ?? null;
-                          setImportFile(file);
-                          setImportError(null);
-                        }}
-                      />
-                    </FormField>
-
-                    <FormField label={importAccountFieldLabel}>
-                      <ItemSelector
-                        items={importBankAccountItems}
-                        selectedIds={importItemId ? [importItemId] : []}
-                        onChange={(ids) => {
-                          setImportItemId(ids[0] ?? null);
-                          setImportError(null);
-                        }}
-                        selectionMode="single"
-                        placeholder="Выберите счет"
-                        getItemTypeLabel={getItemTypeLabel}
-                        getItemKind={resolveItemEffectiveKind}
-                        getCounterpartyForItemId={getCounterpartyForItemId}
-                        apiBase={API_BASE}
-                        getBankLogoUrl={itemBankLogoUrl}
-                        getBankName={itemBankName}
-                        getItemBalance={getItemDisplayBalanceCents}
-                        itemCounts={itemTxCounts}
-                        disabled={isImportFormDisabled}
-                        ariaLabel={importAccountFieldLabel}
-                      />
-                    </FormField>
-
-                    <label
-                      className="flex cursor-pointer items-center gap-2"
-                      style={{ color: ACTIVE_TEXT_DARK }}
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-5 w-5 accent-violet-600"
-                        disabled={isImportFormDisabled}
-                        checked={importConfirmed}
-                        onChange={(e) => setImportConfirmed(e.target.checked)}
-                      />
-                      <span className="text-sm">
-                        Импортировать транзакции сразу в статусе "Подтвержденная"
-                      </span>
-                      <Tooltip
-                        content="Транзакции из выписки по умолчанию импортируются в статусе «Не подтверждено», чтобы вы могли их легче отфильтровать и скорректировать, при необходимости. Если Вы хотите импортировать их сразу в статусе «Подтвержденная» — отметьте этот чекбокс."
-                        side="top"
-                      >
-                        <Info className="h-4 w-4 shrink-0 cursor-help" style={{ color: PLACEHOLDER_COLOR_DARK }} aria-label="Подсказка" />
-                      </Tooltip>
-                    </label>
-                  </>
-                )}
-              </div>
-            </FormModal>
+            <ImportAccountsOperationsModal
+              open={importOperationsModalOpen}
+              onOpenChange={setImportOperationsModalOpen}
+              importSource={importSource ?? undefined}
+              onFinish={loadAll}
+            />
             
             {/* Dialog for creating/editing transactions. Когда открыта модалка актива — modal={false}, чтобы фокус и ввод шли в модалку актива. */}
             <FormModal
@@ -5852,7 +5210,7 @@ function TransactionsView({
                           getBankName={itemBankName}
                           getItemBalance={getItemDisplayBalanceCents}
                           itemCounts={itemTxCounts}
-                          disabled={isImportFormDisabled}
+                          disabled={false}
                         />
                       </FormField>
                       <FormField label="Куда">
@@ -5907,7 +5265,7 @@ function TransactionsView({
                         getBankName={itemBankName}
                         getItemBalance={getItemDisplayBalanceCents}
                         itemCounts={itemTxCounts}
-                        disabled={isImportFormDisabled}
+                        disabled={false}
                       />
                     </FormField>
                     )}
@@ -6293,7 +5651,7 @@ function TransactionsView({
                         getBankName={itemBankName}
                         getItemBalance={getItemDisplayBalanceCents}
                         itemCounts={itemTxCounts}
-                        disabled={isImportFormDisabled}
+                        disabled={false}
                         ariaLabel="Связанный актив"
                       />
                     </FormField>
@@ -6541,7 +5899,7 @@ function TransactionsView({
                 onClick={() => handleImportOpenChange(true)}
               >
                 <FileDown className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                <span style={{ color: "white", opacity: 0.85 }}>Импортировать выписку</span>
+                <span style={{ color: "white", opacity: 0.85 }}>Импорт</span>
               </Button>
             </div>
             <div className="space-y-4">

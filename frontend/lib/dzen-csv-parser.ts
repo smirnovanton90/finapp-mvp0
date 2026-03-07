@@ -69,6 +69,10 @@ export type DzenParsedData = {
 /** Имя счёта «Долги» в выгрузке Дзен-мани — такой счёт не импортируется, операции с ним обрабатываются отдельно */
 export const DZEN_DEBTS_ACCOUNT_NAME = "Долги";
 
+/** Категории по умолчанию при импорте, если категория не определена (пустая). */
+export const IMPORT_DEFAULT_CATEGORY_EXPENSE = "Прочие расходы / Прочие расходы";
+export const IMPORT_DEFAULT_CATEGORY_INCOME = "Прочие доходы / Прочие доходы";
+
 export function isDzenDebtsAccount(account: { name: string }): boolean {
   return (account.name ?? "").trim() === DZEN_DEBTS_ACCOUNT_NAME;
 }
@@ -220,10 +224,16 @@ export function parseDzenCSV(text: string): DzenParsedData {
       }
     }
     // Категорию и контрагента по переводам не выводим на шагах маппинга
+    const effectiveCategory =
+      type === "transfer"
+        ? categoryName
+        : isFilled(categoryName)
+          ? categoryName
+          : type === "expense"
+            ? IMPORT_DEFAULT_CATEGORY_EXPENSE
+            : IMPORT_DEFAULT_CATEGORY_INCOME;
     if (type !== "transfer") {
-      if (isFilled(categoryName)) {
-        categoriesSet.add(categoryName);
-      }
+      categoriesSet.add(effectiveCategory);
       if (isFilled(payee)) {
         counterpartiesSet.add(payee);
       }
@@ -232,7 +242,7 @@ export function parseDzenCSV(text: string): DzenParsedData {
     transactions.push({
       date,
       time: timeStr,
-      categoryName,
+      categoryName: effectiveCategory,
       counterparty: payee,
       comment,
       outcomeAccountName,

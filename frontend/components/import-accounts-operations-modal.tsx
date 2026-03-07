@@ -28,6 +28,13 @@ import {
 } from "@/lib/dzen-csv-parser";
 import { parseCoinKeeperCSVFile } from "@/lib/coinkeeper-csv-parser";
 import {
+  parseTBankXlsxFile,
+  parseSberPdfFile,
+  parseAlfaPdfFile,
+} from "@/lib/import";
+import { parseExportCsv } from "@/lib/data-export-import";
+import { parsedExportToDzenParsedData } from "@/lib/prostofin-to-dzen";
+import {
   ImportAccountCard,
   getInitialAccountCardState,
   type ImportAccountCardState,
@@ -70,8 +77,15 @@ import {
   findMatchingItemId,
 } from "@/lib/import-match-helpers";
 
-/** Источники, для которых открывается пошаговый импорт (без «файла» резервной копии) */
-type ServiceImportSourceKey = "dzen" | "coinkeeper" | "own";
+/** Источники, для которых открывается пошаговый импорт */
+type ServiceImportSourceKey =
+  | "dzen"
+  | "coinkeeper"
+  | "own"
+  | "tbank"
+  | "sber"
+  | "alfa"
+  | "file";
 
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
@@ -95,6 +109,26 @@ const STEP1_CONTENT: Record<
     description:
       "Если Вы ранее вели учет самостоятельно, например, в Excel или Google Sheets, то мы поможем Вам без труда импортировать их в ПРОСТОФИН, воспользовавшись несложной инструкцией",
     instructionLabel: "Инструкция по импорту собственной выписки",
+  },
+  tbank: {
+    title: "Т-Банк",
+    description: "Загрузите выписку по счёту или карте в формате .xlsx",
+    instructionLabel: "",
+  },
+  sber: {
+    title: "Сбербанк",
+    description: "Загрузите выписку по счёту или карте в формате .pdf",
+    instructionLabel: "",
+  },
+  alfa: {
+    title: "Альфа-Банк",
+    description: "Загрузите выписку по счёту или карте в формате .pdf",
+    instructionLabel: "",
+  },
+  file: {
+    title: "Данные ПРОСТОФИН",
+    description: "Загрузите ранее экспортированный файл .csv для переноса данных",
+    instructionLabel: "",
   },
 };
 
@@ -200,7 +234,15 @@ export function ImportAccountsOperationsModal({
     step === stepAccounts || step === stepCategories || step === stepCounterparties;
 
   const acceptedTypes =
-    importSource === "own" ? ".csv,.xlsx,.xls" : ".csv";
+    importSource === "own"
+      ? ".csv,.xlsx,.xls"
+      : importSource === "tbank"
+        ? ".xlsx"
+        : importSource === "sber" || importSource === "alfa"
+          ? ".pdf"
+          : importSource === "file"
+            ? ".csv"
+            : ".csv";
 
   const handleFileSelect = (file: File | null) => {
     setSelectedFile(file);
@@ -209,9 +251,14 @@ export function ImportAccountsOperationsModal({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Парсинг файла при выборе (для Дзен и CoinKeeper) — чтобы показать параметры выписки на шаге 1
+  // Парсинг файла при выборе — чтобы показать параметры выписки на шаге 1
   React.useEffect(() => {
-    if ((importSource !== "dzen" && importSource !== "coinkeeper") || !selectedFile) {
+    const parseableSources = ["dzen", "coinkeeper", "tbank", "sber", "alfa", "file"];
+    if (
+      !selectedFile ||
+      !importSource ||
+      !parseableSources.includes(importSource)
+    ) {
       setParsedData(null);
       setParseError(null);
       return;
@@ -219,8 +266,52 @@ export function ImportAccountsOperationsModal({
     let cancelled = false;
     setIsParsing(true);
     setParseError(null);
+
+    if (importSource === "file") {
+      selectedFile
+        .text()
+        .then((csvText) => {
+          if (cancelled) return;
+          try {
+            const parsed = parseExportCsv(csvText);
+            const dzenData = parsedExportToDzenParsedData(parsed);
+            if (dzenData.transactions.length === 0) {
+              setParseError("В файле не найдено транзакций.");
+              return;
+            }
+            setParsedData(dzenData);
+            setParseError(null);
+          } catch (err) {
+            setParseError(
+              err instanceof Error ? err.message : "Не удалось распознать файл экспорта."
+            );
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setParseError(
+              err instanceof Error ? err.message : "Не удалось прочитать файл."
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setIsParsing(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const parseFile =
-      importSource === "coinkeeper" ? parseCoinKeeperCSVFile : parseDzenCSVFile;
+      importSource === "coinkeeper"
+        ? parseCoinKeeperCSVFile
+        : importSource === "tbank"
+          ? parseTBankXlsxFile
+          : importSource === "sber"
+            ? parseSberPdfFile
+            : importSource === "alfa"
+              ? parseAlfaPdfFile
+              : parseDzenCSVFile;
     parseFile(selectedFile)
       .then((data) => {
         if (!cancelled) setParsedData(data);
@@ -478,6 +569,15 @@ export function ImportAccountsOperationsModal({
     return map;
   }, [parsedData, accountCardStates, importSource]);
 
+  const getCounterpartyForItemId = React.useCallback(
+    (id: number) => {
+      const item = items.find((i) => i.id === id);
+      if (!item?.counterparty_id) return null;
+      return counterparties.find((c) => c.id === item.counterparty_id) ?? null;
+    },
+    [items, counterparties]
+  );
+
   const ownMappingPreview = React.useMemo((): DzenParsedData | null => {
     if (importSource !== "own" || !parsedFileData) return null;
     const validation = validateColumnMapping(parsedFileData.headers, columnMapping);
@@ -494,7 +594,14 @@ export function ImportAccountsOperationsModal({
   }, [importSource, parsedFileData, columnMapping]);
 
   const handleNext = async () => {
-    if (step === 1 && (importSource === "dzen" || importSource === "coinkeeper")) {
+    const step1CsvOrBank =
+      importSource === "dzen" ||
+      importSource === "coinkeeper" ||
+      importSource === "tbank" ||
+      importSource === "sber" ||
+      importSource === "alfa" ||
+      importSource === "file";
+    if (step === 1 && step1CsvOrBank) {
       if (!selectedFile) {
         setParseError("Выберите файл для импорта.");
         return;
@@ -611,7 +718,15 @@ export function ImportAccountsOperationsModal({
     }
 
     // Финальный шаг: выполнить импорт
-    if (step === stepConfirm && parsedData && (importSource === "dzen" || importSource === "coinkeeper" || importSource === "own")) {
+    const confirmWithDzenExecutor =
+      importSource === "dzen" ||
+      importSource === "coinkeeper" ||
+      importSource === "own" ||
+      importSource === "tbank" ||
+      importSource === "sber" ||
+      importSource === "alfa" ||
+      importSource === "file";
+    if (step === stepConfirm && parsedData && confirmWithDzenExecutor) {
       setStep5Error(null);
       // Проверка: дата транзакции не может быть раньше даты начала действия связанного актива/обязательства
       for (const [key, state] of accountCardStates) {
@@ -993,8 +1108,14 @@ export function ImportAccountsOperationsModal({
                       </p>
                     </div>
                   )}
-                  {/* Параметры выписки или ошибка — для Дзен и CoinKeeper после выбора файла */}
-                  {(importSource === "dzen" || importSource === "coinkeeper") && selectedFile && (
+                  {/* Параметры выписки или ошибка — для источников с парсингом на шаге 1 (Дзен, CoinKeeper, банки, ПРОСТОФИН) */}
+                  {(importSource === "dzen" ||
+                    importSource === "coinkeeper" ||
+                    importSource === "tbank" ||
+                    importSource === "sber" ||
+                    importSource === "alfa" ||
+                    importSource === "file") &&
+                    selectedFile && (
                     <div className="flex flex-col gap-4">
                       <p
                         className="text-base"
@@ -1506,6 +1627,7 @@ export function ImportAccountsOperationsModal({
                         }}
                         validationError={accountValidationErrors.get(key) ?? null}
                         validationWarning={accountValidationWarnings.get(key) ?? null}
+                        getCounterpartyForItemId={getCounterpartyForItemId}
                       />
                     );
                   })}

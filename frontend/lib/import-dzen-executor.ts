@@ -23,6 +23,8 @@ import {
   type DzenParsedTransaction,
   isDzenDebtsAccount,
   getTransactionDateTimeSortKey,
+  IMPORT_DEFAULT_CATEGORY_EXPENSE,
+  IMPORT_DEFAULT_CATEGORY_INCOME,
 } from "@/lib/dzen-csv-parser";
 import type { ImportAccountCardState } from "@/components/import-account-card";
 import type { ImportCategoryCardState } from "@/components/import-category-card";
@@ -449,14 +451,19 @@ export async function executeImportDzen(
       if (primaryItemId == null || amountCents <= 0) continue;
 
       const hasCategoryName = (tx.categoryName ?? "").trim().length > 0;
+      const resolvedById = hasCategoryName ? categoryNameToId.get(tx.categoryName) ?? null : null;
       const categoryId =
-        hasCategoryName
-          ? categoryNameToId.get(tx.categoryName) ?? null
-          : tx.type === "income"
+        resolvedById != null
+          ? resolvedById
+          : tx.categoryName === IMPORT_DEFAULT_CATEGORY_INCOME
             ? otherIncomeCategoryId
-            : tx.type === "expense"
+            : tx.categoryName === IMPORT_DEFAULT_CATEGORY_EXPENSE
               ? otherExpenseCategoryId
-              : null;
+              : tx.type === "income"
+                ? otherIncomeCategoryId
+                : tx.type === "expense"
+                  ? otherExpenseCategoryId
+                  : null;
       const counterpartyId = tx.counterparty
         ? (counterpartyNameToId.get(tx.counterparty) ?? null)
         : null;

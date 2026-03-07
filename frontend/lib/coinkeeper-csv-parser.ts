@@ -10,6 +10,10 @@ import type {
   DzenParsedTransaction,
   DzenTransactionType,
 } from "@/lib/dzen-csv-parser";
+import {
+  IMPORT_DEFAULT_CATEGORY_EXPENSE,
+  IMPORT_DEFAULT_CATEGORY_INCOME,
+} from "@/lib/dzen-csv-parser";
 
 /** Парсит строку CSV с учётом кавычек и escaped-кавычек */
 function parseCSVLine(line: string): string[] {
@@ -247,14 +251,22 @@ export function parseCoinKeeperCSV(text: string): DzenParsedData {
         accountsMap.set(key, { name: incomeAccountName, currency });
       }
     }
-    if (type !== "transfer" && isFilled(categoryName)) {
-      categoriesSet.add(categoryName);
+    const effectiveCategory =
+      type !== "transfer"
+        ? (isFilled(categoryName)
+            ? categoryName
+            : type === "expense"
+              ? IMPORT_DEFAULT_CATEGORY_EXPENSE
+              : IMPORT_DEFAULT_CATEGORY_INCOME)
+        : categoryName;
+    if (type !== "transfer") {
+      categoriesSet.add(effectiveCategory);
     }
 
     transactions.push({
       date: row.date,
       time: "00:00:00",
-      categoryName,
+      categoryName: effectiveCategory,
       counterparty: "",
       comment: row.note,
       outcomeAccountName,

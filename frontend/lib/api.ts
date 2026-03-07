@@ -335,11 +335,11 @@ export type CategoryNode = {
   id: number;
   name: string;
   scope: CategoryScope;
-  icon_name: string | null;
-  parent_id: number | null;
-  owner_user_id: number | null;
-  enabled: boolean;
-  archived_at: string | null;
+  icon_name?: string | null;
+  parent_id?: number | null;
+  owner_user_id?: number | null;
+  enabled?: boolean;
+  archived_at?: string | null;
   photo_url?: string | null;
   photo_updated_at?: string | null;
   children?: CategoryNode[];

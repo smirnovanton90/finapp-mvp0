@@ -1035,7 +1035,15 @@ def reset_all_user_data(
     db.query(Item).filter(Item.user_id == user.id).delete(synchronize_session=False)
     # 8. User's counterparties (owner_user_id = user.id)
     db.query(Counterparty).filter(Counterparty.owner_user_id == user.id).delete(synchronize_session=False)
-    # 9. User's categories (owner_user_id = user.id)
+    # 9. User's categories (owner_user_id = user.id): сначала обнуляем parent_id у пользовательских категорий,
+    #    чтобы не нарушать FK при удалении (дочерние удаляются перед родителями)
+    user_category_ids = [r[0] for r in db.query(Category.id).filter(Category.owner_user_id == user.id).all()]
+    if user_category_ids:
+        db.query(Category).filter(
+            Category.owner_user_id == user.id,
+            Category.parent_id.isnot(None),
+            Category.parent_id.in_(user_category_ids),
+        ).update({Category.parent_id: None}, synchronize_session=False)
     db.query(Category).filter(Category.owner_user_id == user.id).delete(synchronize_session=False)
     # 10. Telegram link codes
     db.query(TelegramLinkCode).filter(TelegramLinkCode.user_id == user.id).delete(synchronize_session=False)

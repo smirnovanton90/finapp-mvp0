@@ -287,6 +287,8 @@ export function ImportAccountCard({
                   selectionMode="single"
                   placeholder="Начните вводить название"
                   getItemTypeLabel={getItemTypeLabel}
+                  getCounterpartyForItemId={getCounterpartyForItemId}
+                  apiBase={apiBase}
                 />
               </div>
             </div>
@@ -447,8 +449,10 @@ export function ImportAccountCard({
           )}
         </div>
 
-        {/* Показатели сальдо по выписке */}
-        {balanceStats && (balanceStats.earliestDate != null || balanceStats.latestDate != null) && (
+        {/* Показатели сальдо по выписке — только для нового счёта; при привязке к существующему не показываем */}
+        {!state.linkEnabled &&
+          balanceStats &&
+          (balanceStats.earliestDate != null || balanceStats.latestDate != null) && (
           <div className="flex flex-col gap-1 min-w-0 pt-3" style={{ fontSize: 13, color: ACTIVE_TEXT_DARK }}>
             {balanceStats.latestDate != null && balanceStats.balanceAtLatestDate != null && (
               <div className="flex flex-row gap-2">

@@ -2272,6 +2272,7 @@ function TransactionsView({
     () => items.filter((item) => !item.archived_at && !item.closed_at),
     [items]
   );
+  const itemsForSelector = useMemo(() => items, [items]);
   const banksById = useMemo(
     () => new Map(banks.map((bank) => [bank.id, bank])),
     [banks]
@@ -2296,12 +2297,12 @@ function TransactionsView({
     []
   );
   const assetItems = useMemo(
-    () => activeItems.filter((item) => resolveItemEffectiveKind(item) === "ASSET"),
-    [activeItems, resolveItemEffectiveKind]
+    () => itemsForSelector.filter((item) => resolveItemEffectiveKind(item) === "ASSET"),
+    [itemsForSelector, resolveItemEffectiveKind]
   );
   const liabilityItems = useMemo(
-    () => activeItems.filter((item) => resolveItemEffectiveKind(item) === "LIABILITY"),
-    [activeItems, resolveItemEffectiveKind]
+    () => itemsForSelector.filter((item) => resolveItemEffectiveKind(item) === "LIABILITY"),
+    [itemsForSelector, resolveItemEffectiveKind]
   );
   const currencyOptions = useMemo(() => {
     const values = new Set<string>();
@@ -2419,15 +2420,15 @@ function TransactionsView({
   const isPlannedTransaction = formTransactionType === "PLANNED";
   const showCounterpartySelect = isTransfer || isLoanRepayment;
   const primarySelectItemsForDebts = useMemo(
-    () => activeItems.filter((it) => it.type_code !== "counterparty_settlements"),
-    [activeItems]
+    () => itemsForSelector.filter((it) => it.type_code !== "counterparty_settlements"),
+    [itemsForSelector]
   );
   const primarySelectItems = isLoanRepayment
     ? assetItems
     : isDebts
       ? primarySelectItemsForDebts
-      : activeItems;
-  const counterpartySelectItems = isLoanRepayment ? liabilityItems : activeItems;
+      : itemsForSelector;
+  const counterpartySelectItems = isLoanRepayment ? liabilityItems : itemsForSelector;
   const primaryCurrencyCode = primaryItemId
     ? getEffectiveItemMeta(primaryItemId)?.currencyCode ?? null
     : null;
@@ -4251,7 +4252,7 @@ function TransactionsView({
           >
               <div className="space-y-3">
                 <ItemSelector
-                  items={activeItems}
+                  items={itemsForSelector}
                   selectedIds={Array.from(selectedItemIds)}
                   onChange={(ids) => setSelectedItemIds(new Set(ids))}
                   selectionMode="multi"
@@ -4278,7 +4279,7 @@ function TransactionsView({
           >
               <div className="space-y-3">
                 <ItemSelector
-                  items={activeItems}
+                  items={itemsForSelector}
                   selectedIds={Array.from(selectedRelatedItemIds)}
                   onChange={(ids) => setSelectedRelatedItemIds(new Set(ids))}
                   selectionMode="multi"
@@ -5635,7 +5636,7 @@ function TransactionsView({
 
                     <FormField label="Связанный актив">
                       <ItemSelector
-                        items={activeItems}
+                        items={itemsForSelector}
                         selectedIds={relatedItemId ? [relatedItemId] : []}
                         onChange={(ids) => {
                           const next = ids[0] ?? null;

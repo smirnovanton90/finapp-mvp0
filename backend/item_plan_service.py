@@ -545,7 +545,8 @@ def _create_interest_chain(
         monthly_rule=monthly_rule,
         interval_days=None,
         weekly_day=None,
-        asset_link_type=None,
+        asset_link_type="ASSET_INCOME",
+        comment="Выплата процентов по вкладу" if item.type_code == "deposit" else None,
     )
 
 
@@ -1117,6 +1118,7 @@ def _create_chain_with_transactions(
     interval_days: int | None,
     weekly_day: int | None,
     asset_link_type: str | None = None,
+    comment: str | None = None,
 ) -> None:
     if len(schedule_dates) != len(amounts):
         raise HTTPException(status_code=400, detail="Schedule length mismatch")
@@ -1174,7 +1176,7 @@ def _create_chain_with_transactions(
                 transaction_type="PLANNED",
                 status="CONFIRMED",
                 category_id=category_id,
-                comment=None,
+                comment=comment,
                 related_item_id=chain.related_item_id,
                 asset_link_type=asset_link_type,
             )

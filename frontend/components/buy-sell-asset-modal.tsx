@@ -70,7 +70,7 @@ export function BuySellAssetModal({
   const [categories, setCategories] = useState<CategoryNode[] | null>(null);
 
   const selectableItems = React.useMemo(
-    () => items.filter((item) => item.id !== asset.id && !item.archived_at && !item.closed_at),
+    () => items.filter((item) => item.id !== asset.id),
     [items, asset.id]
   );
 

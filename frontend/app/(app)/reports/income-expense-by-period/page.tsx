@@ -1307,6 +1307,7 @@ export default function IncomeExpenseDynamicsPage() {
     () => items.filter((item) => !item.archived_at && !item.closed_at),
     [items]
   );
+  const itemsForSelector = useMemo(() => items, [items]);
   const categoryLookup = useMemo(
     () => buildCategoryLookup(categoryNodes),
     [categoryNodes]
@@ -2347,7 +2348,7 @@ export default function IncomeExpenseDynamicsPage() {
               showReset={selectedItemIds.size > 0}
             >
               <ItemSelector
-                items={activeItems}
+                items={itemsForSelector}
                 selectedIds={Array.from(selectedItemIds)}
                 onChange={(ids) => {
                   setSelectedItemIds(new Set(ids));

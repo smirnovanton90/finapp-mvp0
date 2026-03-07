@@ -2461,7 +2461,7 @@ export function AddEditItemFormModal({
                           <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
                         </Tooltip>
                       </div>
-                      <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
+                      <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                     </div>
                   )}
                 </div>
@@ -2489,7 +2489,7 @@ export function AddEditItemFormModal({
                                 <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
                               </Tooltip>
                             </div>
-                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
+                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                           </div>
                         )}
                       </div>
@@ -2655,7 +2655,7 @@ export function AddEditItemFormModal({
                                 <span className="text-muted-foreground"><Info className="h-4 w-4" /></span>
                               </Tooltip>
                             </div>
-                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode && !it.archived_at && !it.closed_at)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
+                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && it.currency_code === currencyCode)} selectedIds={openingCounterpartyId ? [Number(openingCounterpartyId)] : []} onChange={(ids) => setOpeningCounterpartyId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не выбирать" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                           </div>
                         )}
                       </div>
@@ -3021,7 +3021,7 @@ export function AddEditItemFormModal({
                       {!interestToSameAccount && (
                         <div className="min-w-0">
                           <FormField label="Куда зачисляются проценты" required={showInterestFields && !interestToSameAccount}>
-                            <ItemSelector items={items.filter((it) => it.kind === "ASSET" && !it.archived_at && !it.closed_at)} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                            <ItemSelector items={items.filter((it) => it.kind === "ASSET")} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
                           </FormField>
                         </div>
                       )}
@@ -3052,7 +3052,7 @@ export function AddEditItemFormModal({
                       <SelectField label="Тип погашения" value={repaymentType} onValueChange={(v) => setRepaymentType(v as RepaymentType)} options={[{ value: "ANNUITY", label: "Аннуитет" }, { value: "DIFFERENTIATED", label: "Дифференцированный" }]} placeholder="Не выбрано" required={isCreditLiabilityWithPlan} />
                       <div className="min-w-0">
                         <FormField label="Откуда погашается" required={isCreditLiabilityWithPlan}>
-                          <ItemSelector items={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code) && !it.archived_at && !it.closed_at)} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => setRepaymentAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
+                          <ItemSelector items={items.filter((it) => REPAYMENT_ACCOUNT_TYPE_CODES.includes(it.type_code))} selectedIds={repaymentAccountId ? [Number(repaymentAccountId)] : []} onChange={(ids) => setRepaymentAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                         </FormField>
                       </div>
                       <TextField label="Процентная ставка" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} placeholder="Например: 8,5" required={isCreditLiabilityWithPlan} />
@@ -3211,7 +3211,7 @@ export function AddEditItemFormModal({
                   {!isCreditCard && (
                     <div className="grid gap-2">
                       <Label style={{ color: ACTIVE_TEXT_DARK }}>Привязать к счету</Label>
-                      <ItemSelector items={items.filter((it) => (it.type_code === "bank_account" || it.type_code === "savings_account") && !it.archived_at && !it.closed_at)} selectedIds={cardAccountId ? [Number(cardAccountId)] : []} onChange={(ids) => setCardAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не привязывать" getItemTypeLabel={(it) => (it.name || "") + (it.account_last7 ? ` ***${it.account_last7}` : "")} />
+                      <ItemSelector items={items.filter((it) => it.type_code === "bank_account" || it.type_code === "savings_account")} selectedIds={cardAccountId ? [Number(cardAccountId)] : []} onChange={(ids) => setCardAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не привязывать" getItemTypeLabel={(it) => (it.name || "") + (it.account_last7 ? ` ***${it.account_last7}` : "")} />
                     </div>
                   )}
                 </>

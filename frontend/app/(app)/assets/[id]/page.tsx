@@ -1128,7 +1128,7 @@ export default function AssetDetailPage() {
     return () => observer.disconnect();
   }, [costChartContainerReady, costHistoryOpen]);
 
-  const costChartPadding = useMemo(() => ({ top: 24, right: 0, bottom: 44, left: 0 }), []);
+  const costChartPadding = useMemo(() => ({ top: 24, right: 120, bottom: 44, left: 0 }), []);
   const costChartGeometry = useMemo(() => {
     if (costChartDisplaySeries.length === 0) return null;
     const width = costChartSize.width;
@@ -1148,6 +1148,8 @@ export default function AssetDetailPage() {
     const valueToRatio = (v: number) => (v - chartMin) / (chartMax - chartMin || 1);
     const zeroRatio = Math.max(0, Math.min(1, valueToRatio(0)));
     const baselineY = padding.top + innerHeight - innerHeight * zeroRatio;
+    const averageValue = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+    const averageLineY = padding.top + innerHeight - innerHeight * Math.max(0, Math.min(1, valueToRatio(averageValue)));
     const points: ChartPoint[] = costChartDisplaySeries.map((p, i) => {
       const progress = costChartDisplaySeries.length <= 1 ? 0 : i / (costChartDisplaySeries.length - 1);
       const x = padding.left + innerWidth * progress;
@@ -1194,6 +1196,8 @@ export default function AssetDetailPage() {
       areaPathPositiveSegments,
       linePathNegativeSegments,
       areaPathNegativeSegments,
+      averageValue,
+      averageLineY,
     };
   }, [costChartDisplaySeries, costChartSize, costChartPadding]);
 
@@ -2284,6 +2288,7 @@ export default function AssetDetailPage() {
                                   />
                                 ))}
                                 <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.baselineY} y2={costChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1} strokeDasharray="4 4" strokeOpacity={0.7} />
+                                <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.averageLineY} y2={costChartGeometry.averageLineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1.5} strokeDasharray="6 4" strokeOpacity={0.9} />
                                 {costChartHoverPoint && (
                                   <>
                                     <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
@@ -2294,6 +2299,22 @@ export default function AssetDetailPage() {
                                   <text key={idx} x={mark.x} y={costChartGeometry.height - 12} textAnchor={idx === 0 ? "start" : idx === costChartGeometry.dayMarks.length - 1 ? "end" : "middle"} fontSize={14} fill={ACTIVE_TEXT_DARK}>{mark.label}</text>
                                 ))}
                               </svg>
+                              <div
+                                className="absolute right-0 pointer-events-none flex items-center gap-2 rounded-md px-2 py-1 text-sm tabular-nums shrink-0"
+                                style={{
+                                  top: `${(costChartGeometry.averageLineY / costChartGeometry.height) * 100}%`,
+                                  transform: "translateY(-50%)",
+                                  backgroundColor: MODAL_BG,
+                                  color: ACTIVE_TEXT_DARK,
+                                }}
+                                aria-label="Средняя величина по дням"
+                              >
+                                <AmountWithCurrency
+                                  valueCents={Math.round(costChartGeometry.averageValue * 100)}
+                                  currencyCode={costChartCurrency === "RUB" ? "RUB" : item.currency_code ?? "RUB"}
+                                  amountStyle={{ color: ACTIVE_TEXT_DARK }}
+                                />
+                              </div>
                               </div>
                             </>
                             );

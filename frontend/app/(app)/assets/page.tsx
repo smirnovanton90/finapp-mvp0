@@ -3099,7 +3099,7 @@ export default function Page() {
         initialCreateOptions={initialCreateOptions}
         initialCreateDefaults={initialCreateDefaults}
         askConfirm={askConfirm}
-        items={activeItems}
+        items={items}
       />
 
 
@@ -3620,7 +3620,7 @@ export default function Page() {
             if (!open) setBuySellAsset(null);
           }}
           asset={buySellAsset}
-          items={activeItems}
+          items={items}
           assetCurrencyToRubRateCents={
             buySellAsset.currency_code && buySellAsset.currency_code !== "RUB"
               ? (rateByCode[buySellAsset.currency_code] != null

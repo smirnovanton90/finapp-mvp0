@@ -189,7 +189,6 @@ export function AddEditItemFormModal({
   const [depositEndDate, setDepositEndDate] = useState("");
   const [interestRate, setInterestRate] = useState("");
   const [interestPayoutOrder, setInterestPayoutOrder] = useState("");
-  const [interestCapitalization, setInterestCapitalization] = useState("");
   const [interestPayoutAccountId, setInterestPayoutAccountId] = useState("");
   /** Для вклада/накопительного: true = проценты на тот же счёт (по умолчанию), false = выбор счёта «Куда зачисляются проценты». */
   const [interestToSameAccount, setInterestToSameAccount] = useState(true);
@@ -344,7 +343,6 @@ export function AddEditItemFormModal({
       }
       setInterestRate(editingItem.interest_rate != null ? String(editingItem.interest_rate).replace(".", ",") : "");
       setInterestPayoutOrder(editingItem.interest_payout_order ?? "");
-      setInterestCapitalization(editingItem.interest_capitalization == null ? "" : editingItem.interest_capitalization ? "true" : "false");
       setInterestPayoutAccountId(editingItem.interest_payout_account_id ? String(editingItem.interest_payout_account_id) : "");
       setInterestToSameAccount(!editingItem.interest_payout_account_id);
       const ps = editingItem.plan_settings;
@@ -918,7 +916,7 @@ export function AddEditItemFormModal({
         depositTermDays: depositTermDays ? Number(depositTermDays) : null,
         interestRate: interestRate ? interestRate.trim() : null,
         interestPayoutOrder: interestPayoutOrder || null,
-        interestCapitalization: interestCapitalization || null,
+        interestCapitalization: interestToSameAccount ? "true" : "false",
         interestPayoutAccountId: interestPayoutAccountId
           ? Number(interestPayoutAccountId)
           : null,
@@ -994,7 +992,6 @@ export function AddEditItemFormModal({
     setDepositEndDate("");
     setInterestRate("");
     setInterestPayoutOrder("");
-    setInterestCapitalization("");
     setInterestPayoutAccountId("");
     setInterestToSameAccount(true);
     setPlanEnabled(false);
@@ -3021,14 +3018,11 @@ export function AddEditItemFormModal({
                       {!interestToSameAccount && (
                         <div className="min-w-0">
                           <FormField label="Куда зачисляются проценты" required={showInterestFields && !interestToSameAccount}>
-                            <ItemSelector items={items.filter((it) => it.kind === "ASSET")} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} />
+                            <ItemSelector items={items.filter((it) => it.kind === "ASSET")} selectedIds={interestPayoutAccountId ? [Number(interestPayoutAccountId)] : []} onChange={(ids) => setInterestPayoutAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Выберите счет" getItemTypeLabel={(it) => (it.name || "") + " " + (it.currency_code || "")} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} />
                           </FormField>
                         </div>
                       )}
                     </div>
-                    {interestPayoutOrder === "MONTHLY" && (
-                      <SelectField label="Капитализация" value={interestCapitalization} onValueChange={setInterestCapitalization} options={[{ value: "true", label: "Да" }, { value: "false", label: "Нет" }]} />
-                    )}
                   </>
                 )}
                 {showInterestPlanSettings && (
@@ -3042,7 +3036,7 @@ export function AddEditItemFormModal({
                       </div>
                     )}
                     {interestPayoutOrder === "MONTHLY" && (
-                      <SelectField label="Первая дата выплаты процентов" value={firstPayoutRule} onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)} options={[{ value: "MONTH_END", label: "Последний день месяца" }, { value: "SAME_DAY", label: "Тот же день, что и дата появления" }]} placeholder="Выберите" required={planEnabled} />
+                      <SelectField label="Первая дата выплаты процентов" value={firstPayoutRule} onValueChange={(v) => setFirstPayoutRule(v as FirstPayoutRule)} options={[{ value: "MONTH_END", label: "Последний день месяца" }, { value: "OPEN_DATE", label: "Тот же день, что и дата появления" }]} placeholder="Выберите" required={planEnabled} />
                     )}
                   </>
                 )}

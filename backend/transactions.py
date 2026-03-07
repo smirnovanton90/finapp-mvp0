@@ -786,16 +786,17 @@ def update_transaction(
 
     old_counter = None
     if tx.direction == "TRANSFER":
-        if not tx.counterparty_item_id:
+        if not tx.counterparty_item_id and tx.transaction_type != "PLANNED":
             raise HTTPException(status_code=400, detail="Broken transfer transaction")
-        old_counter = (
-            db.query(Item)
-            .filter(Item.id == tx.counterparty_item_id, Item.user_id == user.id)
-            .with_for_update()
-            .first()
-        )
-        if not old_counter:
-            raise HTTPException(status_code=400, detail="Counterparty item not found")
+        if tx.counterparty_item_id:
+            old_counter = (
+                db.query(Item)
+                .filter(Item.id == tx.counterparty_item_id, Item.user_id == user.id)
+                .with_for_update()
+                .first()
+            )
+            if not old_counter:
+                raise HTTPException(status_code=400, detail="Counterparty item not found")
     old_primary_is_moex = is_moex_item(old_primary)
     old_counter_is_moex = is_moex_item(old_counter) if old_counter else False
 
@@ -848,40 +849,43 @@ def update_transaction(
     new_counter_is_moex = False
 
     if data.direction == "TRANSFER":
-        if not data.counterparty_item_id:
+        if not data.counterparty_item_id and tx.transaction_type != "PLANNED":
             raise HTTPException(
                 status_code=400,
                 detail="counterparty_item_id is required for TRANSFER",
             )
 
-        new_counter_side = _resolve_effective_side(
-            db, user, data.counterparty_item_id, True, "counterparty"
-        )
-        new_counter = new_counter_side.effective_item
-        new_counter_is_moex = is_moex_item(new_counter)
-        if new_counter_is_moex and data.counterparty_quantity_lots is None:
-            raise HTTPException(
-                status_code=400,
-                detail="counterparty_quantity_lots is required for MOEX items",
+        if data.counterparty_item_id:
+            new_counter_side = _resolve_effective_side(
+                db, user, data.counterparty_item_id, True, "counterparty"
             )
-        if not new_counter_is_moex and data.counterparty_quantity_lots is not None:
-            raise HTTPException(
-                status_code=400,
-                detail="counterparty_quantity_lots is only allowed for MOEX items",
-            )
+            new_counter = new_counter_side.effective_item
+            new_counter_is_moex = is_moex_item(new_counter)
+            if new_counter_is_moex and data.counterparty_quantity_lots is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="counterparty_quantity_lots is required for MOEX items",
+                )
+            if not new_counter_is_moex and data.counterparty_quantity_lots is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="counterparty_quantity_lots is only allowed for MOEX items",
+                )
 
-        if new_counter_side.selected_item.id == new_primary_side.selected_item.id:
-            raise HTTPException(status_code=400, detail="Transfer items must be different")
-        if new_counter.id == new_primary.id:
-            raise HTTPException(status_code=400, detail="Transfer items must be different")
+            if new_counter_side.selected_item.id == new_primary_side.selected_item.id:
+                raise HTTPException(status_code=400, detail="Transfer items must be different")
+            if new_counter.id == new_primary.id:
+                raise HTTPException(status_code=400, detail="Transfer items must be different")
 
-        if new_tx_date < new_counter_side.start_date:
-            raise HTTPException(
-                status_code=400,
-                detail="Transaction date cannot be earlier than the counterparty start date.",
-            )
+            if new_tx_date < new_counter_side.start_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Transaction date cannot be earlier than the counterparty start date.",
+                )
+        else:
+            new_counter_is_moex = False
 
-        if not new_primary_is_moex and not new_counter_is_moex:
+        if not new_primary_is_moex and not new_counter_is_moex and new_counter is not None:
             if new_primary.currency_code != new_counter.currency_code:
                 if data.amount_counterparty is None:
                     raise HTTPException(
@@ -1063,10 +1067,16 @@ def update_transaction(
     tx.primary_card_item_id = (
         new_primary_side.card_item.id if new_primary_side.card_item else None
     )
-    tx.counterparty_item_id = new_counter.id if data.direction == "TRANSFER" else None
+    tx.counterparty_item_id = (
+        (new_counter.id if new_counter else None) if data.direction == "TRANSFER" else None
+    )
     tx.counterparty_card_item_id = (
-        new_counter_side.card_item.id
-        if data.direction == "TRANSFER" and new_counter_side and new_counter_side.card_item
+        (
+            new_counter_side.card_item.id
+            if new_counter_side and new_counter_side.card_item
+            else None
+        )
+        if data.direction == "TRANSFER"
         else None
     )
     tx.counterparty_id = data.counterparty_id
@@ -1111,16 +1121,17 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
 
     counter = None
     if tx.direction == "TRANSFER":
-        if not tx.counterparty_item_id:
+        if not tx.counterparty_item_id and tx.transaction_type != "PLANNED":
             raise HTTPException(status_code=400, detail="Broken transfer transaction")
-        counter = (
-            db.query(Item)
-            .filter(Item.id == tx.counterparty_item_id, Item.user_id == user.id)
-            .with_for_update()
-            .first()
-        )
-        if not counter:
-            raise HTTPException(status_code=400, detail="Counterparty item not found")
+        if tx.counterparty_item_id:
+            counter = (
+                db.query(Item)
+                .filter(Item.id == tx.counterparty_item_id, Item.user_id == user.id)
+                .with_for_update()
+                .first()
+            )
+            if not counter:
+                raise HTTPException(status_code=400, detail="Counterparty item not found")
     primary_is_moex = is_moex_item(primary)
     counter_is_moex = is_moex_item(counter) if counter else False
     primary_is_crypto = is_crypto_item(primary)

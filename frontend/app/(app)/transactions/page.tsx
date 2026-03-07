@@ -3334,12 +3334,6 @@ function TransactionsView({
         return "Количество лотов можно указывать только для MOEX инструментов.";
       }
 
-      if (changes.hasDateChanged && tx.transaction_type === "PLANNED") {
-        if (nextDate < today) {
-          return "Плановая транзакция не может быть создана ранее текущего дня.";
-        }
-      }
-
       if (changes.hasDateChanged || changes.hasPrimaryItemChanged) {
         const primaryMeta = getEffectiveItemMeta(resolvedPrimaryItemId);
         if (primaryMeta?.minDate && nextDate < primaryMeta.minDate) {
@@ -4878,7 +4872,7 @@ function TransactionsView({
                         );
                         return;
                       }
-                      if (isPlannedTransaction) {
+                      if (isPlannedTransaction && !(isEditMode && editingTx)) {
                         const today = new Date().toISOString().slice(0, 10);
                         if (date < today) {
                           setFormError(
@@ -5009,7 +5003,7 @@ function TransactionsView({
                         }
                         counterpartyCents = counterCents;
                       }
-                      if (isPlannedTransaction) {
+                      if (isPlannedTransaction && !(isEditMode && editingTx)) {
                         const today = new Date().toISOString().slice(0, 10);
                         if (date < today) {
                           setFormError(

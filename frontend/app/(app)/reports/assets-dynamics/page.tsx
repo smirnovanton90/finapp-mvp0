@@ -449,8 +449,8 @@ function buildDeltasByDate(
   txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
-    const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey <= todayKey && !isRealized) return;
+    // В отчёте учитываем только плановые нереализованные транзакции
+    if (tx.transaction_type === "ACTUAL" || tx.status === "REALIZED") return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -520,8 +520,8 @@ function buildLotDeltasByDate(
   txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
-    const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey <= todayKey && !isRealized) return;
+    // В отчёте учитываем только плановые нереализованные транзакции
+    if (tx.transaction_type === "ACTUAL" || tx.status === "REALIZED") return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -582,8 +582,8 @@ function buildUnitsDeltasByDate(
   txs.forEach((tx) => {
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
-    const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey <= todayKey && !isRealized) return;
+    // В отчёте учитываем только плановые нереализованные транзакции
+    if (tx.transaction_type === "ACTUAL" || tx.status === "REALIZED") return;
 
     const primaryCandidates = [
       tx.primary_item_id,
@@ -2735,6 +2735,7 @@ export default function AssetsDynamicsPage() {
                                     ? (() => {
                                         const isMarketOrCryptoItem = isMoexItem(item) || isCryptoItem(item);
                                         const included = transactions.filter((tx) => {
+                                          if (tx.transaction_type === "ACTUAL" || tx.status === "REALIZED") return false;
                                           const d = toTxDateKey(tx.transaction_date);
                                           if (d <= dateStart || d > dateEnd) return false;
                                           const delta = getTxDeltaForItem(tx, item.id, item.kind, item.currency_code);

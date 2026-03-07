@@ -230,6 +230,13 @@ function getCell(row: (string | number | boolean | Date)[], index: number): stri
   return String(v).trim();
 }
 
+/** Значение ячейки как строка без интерпретации числа как даты Excel (для категории, контрагента, комментария). */
+function getCellAsText(row: (string | number | boolean | Date)[], index: number): string {
+  const v = row[index];
+  if (v == null) return "";
+  return String(v).trim();
+}
+
 export async function readCSVToRows(file: File): Promise<{ headers: string[]; rows: string[][] }> {
   const text = await file.text();
   const normalized = text.replace(/^\uFEFF/, "");
@@ -285,6 +292,14 @@ export function buildDzenParsedDataFromMapping(
   const getCol = (row: (string | number | boolean | Date)[], role: OwnColumnRole): string => {
     for (let i = 0; i < headers.length; i++) {
       if (mapping.get(i) === role) return getCell(row, i);
+    }
+    return "";
+  };
+
+  /** Значение столбца как текст (без интерпретации числа как даты Excel) — для категории, контрагента, комментария. */
+  const getColAsText = (row: (string | number | boolean | Date)[], role: OwnColumnRole): string => {
+    for (let i = 0; i < headers.length; i++) {
+      if (mapping.get(i) === role) return getCellAsText(row, i);
     }
     return "";
   };
@@ -363,23 +378,20 @@ export function buildDzenParsedDataFromMapping(
     }
 
     const categoryName =
-      getCol(row, "category") ||
-      getCol(row, "category_l1") ||
-      getCol(row, "category_l2") ||
-      getCol(row, "category_l3");
-    const counterparty = getCol(row, "counterparty");
-    // Категорию и контрагента по переводам не выводим на шагах маппинга
-    if (type !== "transfer") {
-      if (isFilled(categoryName)) categoriesSet.add(categoryName.trim());
-      if (isFilled(counterparty)) counterpartiesSet.add(counterparty.trim());
-    }
+      getColAsText(row, "category") ||
+      getColAsText(row, "category_l1") ||
+      getColAsText(row, "category_l2") ||
+      getColAsText(row, "category_l3");
+    const counterparty = getColAsText(row, "counterparty");
+    if (isFilled(categoryName)) categoriesSet.add(categoryName.trim());
+    if (isFilled(counterparty)) counterpartiesSet.add(counterparty.trim());
 
     transactions.push({
       date,
       time: timeStr,
       categoryName: categoryName.trim(),
       counterparty: counterparty.trim(),
-      comment: getCol(row, "comment").trim(),
+      comment: getColAsText(row, "comment").trim(),
       outcomeAccountName: outAcc,
       outcome: type === "expense" || type === "transfer" ? amountCents : null,
       outcomeCurrency: currency,

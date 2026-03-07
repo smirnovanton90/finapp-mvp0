@@ -419,7 +419,13 @@ def create_opening_transactions(
             )
 
         closing_date = _resolve_closing_date(item, deposit_end_date, plan_settings)
-        if closing_date:
+        # Для вклада при включённом плане плановых транзакций закрытие создаётся в item_plan_service — не дублируем
+        plan_closing = (
+            item.type_code == "deposit"
+            and plan_settings
+            and getattr(plan_settings, "enabled", False)
+        )
+        if closing_date and not plan_closing:
             _create_transfer(
                 db=db,
                 user=user,

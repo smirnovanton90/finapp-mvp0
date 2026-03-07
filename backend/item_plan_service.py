@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from category_service import resolve_category_or_400
+from item_opening_service import _build_item_comment
 from market import fetch_bond_coupons_list, fetch_dividends_list
 from models import Category, Item, ItemPlanSettings, Transaction, TransactionChain, User
 from russian_workdays import get_next_workday
@@ -155,6 +156,8 @@ def delete_auto_chains(
     item_id: int,
     keep_realized: bool = True,
 ) -> None:
+    now = datetime.now(timezone.utc)
+
     chains = (
         db.query(TransactionChain)
         .filter(
@@ -165,26 +168,37 @@ def delete_auto_chains(
         )
         .all()
     )
-    if not chains:
-        return
+    if chains:
+        for chain in chains:
+            chain.deleted_at = now
+        chain_ids = [chain.id for chain in chains]
+        tx_query = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user.id,
+                Transaction.chain_id.in_(chain_ids),
+                Transaction.transaction_type == "PLANNED",
+                Transaction.deleted_at.is_(None),
+            )
+        )
+        if keep_realized:
+            tx_query = tx_query.filter(Transaction.status != "REALIZED")
+        tx_query.update({Transaction.deleted_at: now}, synchronize_session=False)
 
-    now = datetime.now(timezone.utc)
-    for chain in chains:
-        chain.deleted_at = now
-
-    chain_ids = [chain.id for chain in chains]
-    tx_query = (
+    standalone = (
         db.query(Transaction)
         .filter(
             Transaction.user_id == user.id,
-            Transaction.chain_id.in_(chain_ids),
+            Transaction.related_item_id == item_id,
+            Transaction.source.in_(["AUTO_ITEM", "AUTO_ITEM_CLOSING"]),
+            Transaction.chain_id.is_(None),
             Transaction.transaction_type == "PLANNED",
             Transaction.deleted_at.is_(None),
         )
     )
     if keep_realized:
-        tx_query = tx_query.filter(Transaction.status != "REALIZED")
-    tx_query.update({Transaction.deleted_at: now}, synchronize_session=False)
+        standalone = standalone.filter(Transaction.status != "REALIZED")
+    standalone.update({Transaction.deleted_at: now}, synchronize_session=False)
 
 
 def rebuild_item_chains(
@@ -548,6 +562,59 @@ def _create_interest_chain(
         asset_link_type="ASSET_INCOME",
         comment="Выплата процентов по вкладу" if item.type_code == "deposit" else None,
     )
+
+    if item.type_code == "deposit" and item.deposit_end_date is not None:
+        _create_deposit_closing_transaction(
+            db=db,
+            user=user,
+            item=item,
+            end_date=schedule_dates[-1],
+            interest_amounts=amounts_rounded,
+        )
+
+
+def _create_deposit_closing_transaction(
+    db: Session,
+    user: User,
+    item: Item,
+    end_date: date,
+    interest_amounts: list[int],
+) -> None:
+    """Одна плановая транзакция закрытия вклада на дату окончания (без цепочки). Сумма = тело вклада + все плановые проценты при капитализации. Счёт перевода — счёт, с которого открывался вклад."""
+    closing_amount = item.initial_value_rub or 0
+    if item.interest_capitalization and interest_amounts:
+        closing_amount += sum(interest_amounts)
+
+    counterparty_item_id = None
+    counterparty_card_item_id = None
+    if item.opening_counterparty_item_id is not None:
+        side = _resolve_item_for_plan(
+            db, user, item.opening_counterparty_item_id, "opening_counterparty"
+        )
+        counterparty_item_id = side.effective_item.id
+        counterparty_card_item_id = side.card_item.id if side.card_item else None
+
+    tx = Transaction(
+        user_id=user.id,
+        chain_id=None,
+        transaction_date=datetime.combine(end_date, datetime.min.time()),
+        primary_item_id=item.id,
+        primary_card_item_id=None,
+        counterparty_item_id=counterparty_item_id,
+        counterparty_card_item_id=counterparty_card_item_id,
+        counterparty_id=item.counterparty_id,
+        amount_rub=closing_amount,
+        amount_counterparty=closing_amount,
+        direction="TRANSFER",
+        transaction_type="PLANNED",
+        status="CONFIRMED",
+        category_id=None,
+        comment=_build_item_comment(item, "CLOSE"),
+        related_item_id=item.id,
+        asset_link_type=None,
+        source="AUTO_ITEM_CLOSING",
+    )
+    db.add(tx)
 
 
 def _create_bond_coupon_chain(

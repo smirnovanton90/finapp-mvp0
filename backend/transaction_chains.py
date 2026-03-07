@@ -172,7 +172,13 @@ def list_transaction_chains(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    query = db.query(TransactionChain).filter(TransactionChain.user_id == user.id)
+    query = (
+        db.query(TransactionChain)
+        .filter(
+            TransactionChain.user_id == user.id,
+            TransactionChain.deleted_at.is_(None),
+        )
+    )
     if linked_item_id is not None:
         query = query.filter(TransactionChain.related_item_id == linked_item_id)
     return query.order_by(TransactionChain.created_at.desc(), TransactionChain.id.desc()).all()

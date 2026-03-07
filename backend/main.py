@@ -2044,7 +2044,9 @@ def update_item(
     new_signature = plan_signature(item, settings)
 
     if is_plan_enabled:
-        if old_signature != new_signature:
+        # Пересобираем цепочки при изменении подписи плана; также при первом включении плана
+        # (old_signature != new_signature), чтобы цепочки создались и при повторном сохранении после прошлой ошибки.
+        if old_signature != new_signature or not was_plan_enabled:
             rebuild_item_chains(db, user, item, settings)
     elif was_plan_enabled:
         delete_auto_chains(db, user, item.id, keep_realized=True)

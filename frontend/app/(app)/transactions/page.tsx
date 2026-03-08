@@ -283,8 +283,8 @@ function formatRub(valueInCents: number) {
 
 function formatRate(value: number) {
   return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
@@ -1599,28 +1599,43 @@ function TransactionCardRow({
 
         {/* Контейнер 4: 3D иконка категории или 3D стрелка перевода */}
         <div
-          className="flex items-center justify-center"
+          className="flex flex-col items-center justify-center"
           style={{
             width: 90,
-            height: 90,
+            minHeight: 90,
             padding: 0,
           }}
         >
           {isTransfer ? (
-            <CardIcon
-              src={transferIcon3dPath}
-              alt=""
-              size={90}
-              shadow
-              fallbackIcon={ArrowRight}
-              fallbackIconColor={ACCENT2}
-              imgRef={(el) => setImageRef(1, el)}
-              onLoad={() => handleImageLoad(1)}
-              onError={() => {
-                handleImageError(1);
-                setTransferIconFormat(null);
-              }}
-            />
+            <>
+              {conversionRate !== null && foreignCurrency && (
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 400,
+                    color: subtleTextColor,
+                    marginBottom: 2,
+                    textAlign: "center",
+                  }}
+                >
+                  {formatRate(conversionRate)} RUB/{foreignCurrency}
+                </div>
+              )}
+              <CardIcon
+                src={transferIcon3dPath}
+                alt=""
+                size={90}
+                shadow
+                fallbackIcon={ArrowRight}
+                fallbackIconColor={ACCENT2}
+                imgRef={(el) => setImageRef(1, el)}
+                onLoad={() => handleImageLoad(1)}
+                onError={() => {
+                  handleImageError(1);
+                  setTransferIconFormat(null);
+                }}
+              />
+            </>
           ) : categoryImageSrc && !categoryShowFallbackIcon ? (
             <CardIcon
               src={categoryImageSrc}
@@ -1707,18 +1722,6 @@ function TransactionCardRow({
                       handleImageError(2);
                     }}
                   />
-                </div>
-              )}
-              {conversionRate !== null && foreignCurrency && (
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 10,
-                    fontWeight: 400,
-                    color: subtleTextColor,
-                  }}
-                >
-                  {formatRate(conversionRate)} / {foreignCurrency}
                 </div>
               )}
             </>

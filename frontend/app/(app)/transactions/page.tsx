@@ -5336,6 +5336,18 @@ function TransactionsView({
                           setFormError("Выберите категорию из списка.");
                           return;
                         }
+                        // API ожидает amount_rub = сумма в рублях, amount_counterparty = сумма в другой валюте (не по позициям).
+                        let payloadAmount = cents;
+                        let payloadAmountCounterparty: number | null = isTransfer ? counterpartyCents : null;
+                        if (isTransfer && isCrossCurrencyTransfer && primaryCurrencyCode && counterpartyCurrencyCode) {
+                          if (primaryCurrencyCode === "RUB") {
+                            payloadAmount = cents;
+                            payloadAmountCounterparty = counterpartyCents;
+                          } else {
+                            payloadAmount = counterpartyCents ?? cents;
+                            payloadAmountCounterparty = cents;
+                          }
+                        }
                         const payload = {
                           transaction_date: transactionDate,
                           primary_item_id: primaryItemId,
@@ -5343,8 +5355,8 @@ function TransactionsView({
                             ? counterpartyItemId
                             : null,
                           counterparty_id: counterpartyId ?? null,
-                          amount: cents,
-                          amount_counterparty: isTransfer ? counterpartyCents : null,
+                          amount: payloadAmount,
+                          amount_counterparty: payloadAmountCounterparty,
                           primary_quantity_lots:
                             primaryIsMoex
                               ? primaryLotsValue

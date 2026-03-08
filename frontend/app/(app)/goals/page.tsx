@@ -625,6 +625,7 @@ export default function GoalsPage() {
 
         <TextField
           label="Сумма цели"
+          currencyCode="RUB"
           value={amountStr}
           onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
           onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}

@@ -11,8 +11,6 @@ import {
   type ItemMarketValueOut,
 } from "@/lib/api";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
-import { CurrencyChip } from "@/components/currency-chip";
-import { PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 
 function getTodayDateKey(): string {
   const now = new Date();
@@ -157,21 +155,14 @@ export function EditMarketValueModal({
         max={dateMax}
         required
       />
-      <div className="grid gap-2">
-        <label className="text-sm font-medium" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-          Рыночная стоимость
-        </label>
-        <div className="flex items-center gap-2">
-          <CurrencyChip code={currencyCode} className="shrink-0" />
-          <TextField
-            value={amountStr}
-            onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-            onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))}
-            placeholder="0,00"
-            className="flex-1"
-          />
-        </div>
-      </div>
+      <TextField
+        label="Рыночная стоимость"
+        currencyCode={currencyCode}
+        value={amountStr}
+        onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+        onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))}
+        placeholder="0,00"
+      />
     </FormModal>
   );
 }

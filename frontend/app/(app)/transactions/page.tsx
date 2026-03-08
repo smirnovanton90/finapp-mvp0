@@ -5657,11 +5657,8 @@ function TransactionsView({
                     {isLoanRepayment ? (
                       <>
                         <TextField
-                          label={
-                            primaryCurrencyCode
-                              ? `Общая сумма платежа (${primaryCurrencyCode})`
-                              : "Общая сумма платежа"
-                          }
+                          label="Общая сумма платежа"
+                          currencyCode={primaryCurrencyCode ?? undefined}
                           value={loanTotalStr}
                           onChange={(e) =>
                             setLoanTotalStr(formatRubInput(e.target.value))
@@ -5674,11 +5671,8 @@ function TransactionsView({
                         />
                         <div className="grid gap-2">
                           <TextField
-                            label={
-                              primaryCurrencyCode
-                                ? `Сумма в погашение процентов (${primaryCurrencyCode})`
-                                : "Сумма в погашение процентов"
-                            }
+                            label="Сумма в погашение процентов"
+                            currencyCode={primaryCurrencyCode ?? undefined}
                             value={loanInterestStr}
                             onChange={(e) =>
                               setLoanInterestStr(formatRubInput(e.target.value))
@@ -5698,11 +5692,8 @@ function TransactionsView({
                       <>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <TextField
-                            label={
-                              primaryCurrencyCode
-                                ? `Полная сумма (${primaryCurrencyCode})`
-                                : "Полная сумма"
-                            }
+                            label="Полная сумма"
+                            currencyCode={primaryCurrencyCode ?? undefined}
                             value={amountStr}
                             onChange={(e) =>
                               setAmountStr(formatRubInput(e.target.value))
@@ -5714,11 +5705,8 @@ function TransactionsView({
                             placeholder="Например: 1 234,56"
                           />
                           <TextField
-                            label={
-                              primaryCurrencyCode
-                                ? `Часть суммы в долг (${primaryCurrencyCode})`
-                                : "Часть суммы в долг"
-                            }
+                            label="Часть суммы в долг"
+                            currencyCode={primaryCurrencyCode ?? undefined}
                             value={debtSplitAmountStr}
                             onChange={(e) =>
                               setDebtSplitAmountStr(formatRubInput(e.target.value))
@@ -5751,7 +5739,8 @@ function TransactionsView({
                     ) : isTransfer && isCrossCurrencyTransfer ? (
                       <>
                         <TextField
-                          label={`Сумма списания (${primaryCurrencyCode ?? "-"})`}
+                          label="Сумма списания"
+                          currencyCode={primaryCurrencyCode ?? undefined}
                           value={amountStr}
                           onChange={(e) =>
                             setAmountStr(formatRubInput(e.target.value))
@@ -5763,7 +5752,8 @@ function TransactionsView({
                           placeholder="Например: 1 234,56"
                         />
                         <TextField
-                          label={`Сумма поступления (${counterpartyCurrencyCode ?? "-"})`}
+                          label="Сумма поступления"
+                          currencyCode={counterpartyCurrencyCode ?? undefined}
                           value={amountCounterpartyStr}
                           onChange={(e) =>
                             setAmountCounterpartyStr(formatRubInput(e.target.value))
@@ -5780,11 +5770,7 @@ function TransactionsView({
                     ) : (
                       <div className="grid gap-2">
                         <div className="flex items-center justify-between">
-                          <Label>
-                            {primaryCurrencyCode
-                              ? `Сумма (${primaryCurrencyCode})`
-                              : "Сумма"}
-                          </Label>
+                          <Label>Сумма</Label>
                           {isTransfer && primaryItemId && (
                             <button
                               type="button"
@@ -5797,6 +5783,7 @@ function TransactionsView({
                         </div>
                         <TextField
                           label=""
+                          currencyCode={primaryCurrencyCode ?? undefined}
                           value={amountStr}
                           onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                           onBlur={() =>
@@ -6097,6 +6084,7 @@ function TransactionsView({
                                       <div className="grid gap-3">
                                         <TextField
                                           label=""
+                                          currencyCode={partsCurrencyCode ?? undefined}
                                           value={part.amountStr}
                                           onChange={(e) => {
                                             const next = [...splitParts];
@@ -6235,11 +6223,8 @@ function TransactionsView({
                   />
                 </FormField>
                 <TextField
-                  label={
-                    primaryCurrencyCode
-                      ? `Общая сумма платежа (${primaryCurrencyCode})`
-                      : "Общая сумма платежа"
-                  }
+                  label="Общая сумма платежа"
+                  currencyCode={primaryCurrencyCode ?? undefined}
                   value={loanTotalStr}
                   onChange={(e) => setLoanTotalStr(formatRubInput(e.target.value))}
                   onBlur={() => setLoanTotalStr((prev) => normalizeRubOnBlur(prev))}
@@ -6248,11 +6233,8 @@ function TransactionsView({
                 />
                 <div className="grid gap-2">
                   <TextField
-                    label={
-                      primaryCurrencyCode
-                        ? `Сумма в погашение процентов (${primaryCurrencyCode})`
-                        : "Сумма в погашение процентов"
-                    }
+                    label="Сумма в погашение процентов"
+                    currencyCode={primaryCurrencyCode ?? undefined}
                     value={loanInterestStr}
                     onChange={(e) => setLoanInterestStr(formatRubInput(e.target.value))}
                     onBlur={() => setLoanInterestStr((prev) => normalizeRubOnBlur(prev))}

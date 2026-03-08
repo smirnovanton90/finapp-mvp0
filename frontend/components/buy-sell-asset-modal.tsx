@@ -341,21 +341,23 @@ export function BuySellAssetModal({
         />
 
         <TextField
-          label={`Цена (${assetCurrency})`}
+          label="Цена"
+          currencyCode={assetCurrency}
           value={priceStr}
           onChange={(e) => setPriceStr(formatRubInput(e.target.value))}
           onBlur={() => setPriceStr((prev) => normalizeRubOnBlur(prev))}
           inputMode="decimal"
-          placeholder={isRub ? "Например: 1 234,56" : `Например: 1 234,56 ${assetCurrency}`}
+          placeholder={isRub ? "Например: 1 234,56" : "Например: 1 234,56"}
         />
 
         <TextField
-          label={`Сумма комиссии, ${assetCurrency}`}
+          label="Сумма комиссии"
+          currencyCode={assetCurrency}
           value={commissionStr}
           onChange={(e) => setCommissionStr(formatRubInput(e.target.value))}
           onBlur={() => setCommissionStr((prev) => normalizeRubOnBlur(prev))}
           inputMode="decimal"
-          placeholder={isRub ? "Например: 1 234,56" : `Например: 1 234,56 ${assetCurrency}`}
+          placeholder={isRub ? "Например: 1 234,56" : "Например: 1 234,56"}
         />
 
         <FormField

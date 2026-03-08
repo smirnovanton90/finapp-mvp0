@@ -20,6 +20,7 @@ import {
   PLACEHOLDER_COLOR_DARK,
 } from "@/lib/colors";
 import { cn } from "@/lib/utils";
+import { CurrencyChip } from "@/components/currency-chip";
 
 interface FormFieldProps {
   label?: string;
@@ -66,7 +67,14 @@ interface TextFieldProps extends Omit<React.ComponentProps<"input">, "prefix"> {
   required?: boolean;
   error?: string;
   prefix?: React.ReactNode;
+  /** Код валюты: слева от поля показывается чип валюты, из label валюту не добавлять. */
+  currencyCode?: string | null;
 }
+
+/** Классы для префикса-чипа валюты внутри поля (чип слева, затем ввод). */
+const CURRENCY_PREFIX_LEFT = "left-3";
+const CURRENCY_PREFIX_PL = "pl-14";
+const CURRENCY_PREFIX_CONTAINER = "flex items-center shrink-0 pointer-events-none";
 
 export function TextField({ 
   label, 
@@ -74,15 +82,26 @@ export function TextField({
   required, 
   error, 
   prefix,
+  currencyCode,
   className,
   ...props 
 }: TextFieldProps) {
+  const effectivePrefix = currencyCode ? <CurrencyChip code={currencyCode} className="shrink-0" /> : prefix;
+  const prefixProps = currencyCode
+    ? {
+        prefix: effectivePrefix,
+        prefixLeftClass: CURRENCY_PREFIX_LEFT,
+        prefixPlClass: CURRENCY_PREFIX_PL,
+        prefixContainerClass: CURRENCY_PREFIX_CONTAINER,
+      }
+    : effectivePrefix ? { prefix: effectivePrefix } : {};
+
   return (
     <FormField label={label ?? ""} labelHint={labelHint} required={required} error={error}>
       <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
         <AuthInput
           {...props}
-          prefix={prefix}
+          {...prefixProps}
           className={className}
         />
       </div>

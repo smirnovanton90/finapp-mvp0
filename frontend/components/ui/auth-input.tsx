@@ -9,13 +9,17 @@ import { ACCENT2, ACCENT_FILL_LIGHT, ACCENT_FILL_MEDIUM, PLACEHOLDER_COLOR_DARK,
 interface AuthInputProps extends Omit<React.ComponentProps<"input">, "prefix"> {
   icon?: "user" | "lock";
   gradientDirection?: "left-to-right" | "right-to-left";
-  /** Optional left adornment (e.g. icon, logo). When set, inner container gets pl-11. */
+  /** Optional left adornment (e.g. icon, chip). When set, inner container gets pl-11 or custom prefixPlClass. */
   prefix?: React.ReactNode;
   /** Override prefix icon position (e.g. "left-2"). Default "left-4". */
   prefixLeftClass?: string;
-  /** Override inner container padding-left when prefix (e.g. "pl-12"). Default "pl-11". */
+  /** Override inner container padding-left when prefix (e.g. "pl-14" for currency chip). Default "pl-11". */
   prefixPlClass?: string;
+  /** Override prefix wrapper class. Default "flex h-6 w-6 items-center justify-center shrink-0 pointer-events-none". Use e.g. "flex items-center shrink-0 pointer-events-none" for wider prefix (chip). */
+  prefixContainerClass?: string;
 }
+
+const DEFAULT_PREFIX_CONTAINER_CLASS = "flex h-6 w-6 items-center justify-center shrink-0 pointer-events-none";
 
 function AuthInput({ 
   className, 
@@ -24,6 +28,7 @@ function AuthInput({
   prefix,
   prefixLeftClass = "left-4",
   prefixPlClass = "pl-11",
+  prefixContainerClass = DEFAULT_PREFIX_CONTAINER_CLASS,
   ...props 
 }: AuthInputProps) {
   const { theme } = useTheme();
@@ -129,7 +134,7 @@ function AuthInput({
         {/* Inner container */}
         <div className={cn("relative flex items-center rounded-lg px-4 h-10 z-10", prefix && prefixPlClass)}>
           {prefix && (
-            <div className={cn("absolute flex h-6 w-6 items-center justify-center shrink-0 pointer-events-none", prefixLeftClass)}>
+            <div className={cn("absolute", prefixContainerClass, prefixLeftClass)}>
               {prefix}
             </div>
           )}

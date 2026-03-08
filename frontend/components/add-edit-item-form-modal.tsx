@@ -2436,18 +2436,18 @@ export function AddEditItemFormModal({
                   {!hideInitialAmountField && primaryValueKind === "MARKET" && !isMoexType && !isCryptoType && (
                     isCostOneRowType ? (
                       <>
-                        <TextField label="Рыночная стоимость (в валюте актива)" value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
-                        <TextField label="Стоимость приобретения" value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                        <TextField label="Рыночная стоимость" currencyCode={currencyCode} value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                        <TextField label="Стоимость приобретения" currencyCode={currencyCode} value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                       </>
                     ) : (
                       <div className="grid gap-2">
-                        <TextField label="Рыночная стоимость (в валюте актива)" value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
-                        <TextField label="Стоимость приобретения" value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                        <TextField label="Рыночная стоимость" currencyCode={currencyCode} value={marketValueStr} onChange={(e) => setMarketValueStr(formatRubInput(e.target.value))} onBlur={(e) => setMarketValueStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                        <TextField label="Стоимость приобретения" currencyCode={currencyCode} value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                       </div>
                     )
                   )}
                   {!hideInitialAmountField && !(primaryValueKind === "MARKET" && !isMoexType && !isCryptoType) && !(isCryptoType && primaryValueKind === "MARKET") && (
-                    <TextField label={primaryValueKind === "BALANCE" ? "Баланс на дату появления" : primaryValueKind === "MARKET" ? "Рыночная стоимость на дату появления" : primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Стоимость приобретения" : "Сумма на дату появления"} value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                    <TextField label={primaryValueKind === "BALANCE" ? "Баланс на дату появления" : primaryValueKind === "MARKET" ? "Рыночная стоимость на дату появления" : primaryValueKind === "ACQUISITION" || primaryValueKind === "INVESTED" ? "Стоимость приобретения" : "Сумма на дату появления"} currencyCode={currencyCode} value={amountStr} onChange={(e) => setAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                   )}
                   {/* Колонка 3/4: Источник средств — не показываем здесь для MOEX, он в левой колонке блока рыночных активов */}
                   {showOpeningCounterparty && !(showInstrumentBlock && (isMoexType || isCryptoType)) && (
@@ -2471,12 +2471,12 @@ export function AddEditItemFormModal({
                       <div className="flex flex-col gap-4 min-w-0">
                         <TextField label="Количество лотов" value={positionLots} onChange={(e) => setPositionLots(e.target.value)} inputMode="decimal" placeholder="Например: 10" />
                         {resolvedHistoryStatus === "NEW" ? (
-                          <TextField label="Цена покупки (за 1 шт.)" value={moexPurchasePrice} onChange={(e) => { userDidEditMoexPriceRef.current = true; setMoexPurchasePrice(formatRubInput(e.target.value)); }} onBlur={(e) => setMoexPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={moexDatePrices[openDate]?.price_cents != null ? formatCentsForInput(moexDatePrices[openDate]!.price_cents) : "По умолчанию — рыночная цена на дату"} />
+                          <TextField label="Цена покупки (за 1 шт.)" currencyCode={currencyCode} value={moexPurchasePrice} onChange={(e) => { userDidEditMoexPriceRef.current = true; setMoexPurchasePrice(formatRubInput(e.target.value)); }} onBlur={(e) => setMoexPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={moexDatePrices[openDate]?.price_cents != null ? formatCentsForInput(moexDatePrices[openDate]!.price_cents) : "По умолчанию — рыночная цена на дату"} />
                         ) : (
-                          <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 123,45" />
+                          <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас" currencyCode={currencyCode} value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 123,45" />
                         )}
                         {commissionAllowed && (
-                          <TextField label="Сумма комиссии" value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                          <TextField label="Сумма комиссии" currencyCode={currencyCode} value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                         )}
                         {showOpeningCounterparty && (
                           <div className="grid gap-2">
@@ -2637,12 +2637,12 @@ export function AddEditItemFormModal({
                       <div className="flex flex-col gap-4 min-w-0">
                         <TextField label="Количество" value={quantityUnitsStr} onChange={(e) => setQuantityUnitsStr(e.target.value)} inputMode="decimal" placeholder="Например: 0.5" />
                         {resolvedHistoryStatus === "NEW" ? (
-                          <TextField label="Цена (за 1 ед., USD)" value={cryptoPurchasePrice} onChange={(e) => { userDidEditCryptoPriceRef.current = true; setCryptoPurchasePrice(formatRubInput(e.target.value)); }} onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={cryptoPriceOnOpenDate?.price_usd_cents != null ? formatCentsForInput(cryptoPriceOnOpenDate.price_usd_cents) : marketPrice?.price_usd_cents != null ? formatCentsForInput(marketPrice.price_usd_cents) : "По умолчанию — рыночная цена"} />
+                          <TextField label="Цена (за 1 ед.)" currencyCode="USD" value={cryptoPurchasePrice} onChange={(e) => { userDidEditCryptoPriceRef.current = true; setCryptoPurchasePrice(formatRubInput(e.target.value)); }} onBlur={(e) => setCryptoPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={cryptoPriceOnOpenDate?.price_usd_cents != null ? formatCentsForInput(cryptoPriceOnOpenDate.price_usd_cents) : marketPrice?.price_usd_cents != null ? formatCentsForInput(marketPrice.price_usd_cents) : "По умолчанию — рыночная цена"} />
                         ) : (
-                          <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас (USD)" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 83,32" />
+                          <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас" currencyCode="USD" value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 83,32" />
                         )}
                         {commissionAllowed && (
-                          <TextField label="Сумма комиссии" value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />
+                          <TextField label="Сумма комиссии" currencyCode="USD" value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />
                         )}
                         {showOpeningCounterparty && (
                           <div className="grid gap-2">
@@ -3143,7 +3143,7 @@ export function AddEditItemFormModal({
                     {requiresLoanPaymentInput && (
                       <>
                         <SelectField label="Тип суммы погашения" value={paymentAmountKind} onValueChange={(v) => setPaymentAmountKind(v as PaymentAmountKind)} options={[{ value: "FIXED", label: "Фиксированная сумма" }, { value: "PERCENT", label: "Процент от остатка" }]} placeholder="Выберите" required={planEnabled} />
-                        <TextField label="Сумма погашения" value={paymentAmountStr} onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setPaymentAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" required={planEnabled} />
+                        <TextField label="Сумма погашения" currencyCode={currencyCode} value={paymentAmountStr} onChange={(e) => setPaymentAmountStr(formatRubInput(e.target.value))} onBlur={(e) => setPaymentAmountStr(normalizeRubOnBlur(e.target.value))} placeholder="0" required={planEnabled} />
                       </>
                     )}
                     {loanSchedulePreview && loanSchedulePreview.length > 0 && (

@@ -1731,7 +1731,8 @@ export default function FinancialPlanningPage() {
               {isTransfer && isCrossCurrencyTransfer ? (
                 <>
                   <TextField
-                    label={`Сумма списания (${primaryCurrency ?? "-"})`}
+                    label="Сумма списания"
+                    currencyCode={primaryCurrency ?? undefined}
                     value={amountStr}
                     onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                     onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
@@ -1739,7 +1740,8 @@ export default function FinancialPlanningPage() {
                     placeholder="Например: 1 234,56"
                   />
                   <TextField
-                    label={`Сумма поступления (${counterpartyCurrency ?? "-"})`}
+                    label="Сумма поступления"
+                    currencyCode={counterpartyCurrency ?? undefined}
                     value={amountCounterpartyStr}
                     onChange={(e) =>
                       setAmountCounterpartyStr(formatRubInput(e.target.value))
@@ -1753,7 +1755,8 @@ export default function FinancialPlanningPage() {
                 </>
               ) : (
                 <TextField
-                  label={primaryCurrency ? `Сумма (${primaryCurrency})` : "Сумма"}
+                  label="Сумма"
+                  currencyCode={primaryCurrency ?? undefined}
                   value={amountStr}
                   onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                   onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}

@@ -1250,17 +1250,21 @@ function TransactionCardRow({
   const isCounterpartySettlement = getItemTypeCode(counterpartyDisplayId) === "counterparty_settlements";
   const isDebtTransfer = isTransfer && tx.amount_counterparty != null && (isPrimarySettlement || isCounterpartySettlement);
   const bothSettlements = isPrimarySettlement && isCounterpartySettlement;
-  // Перевод между двумя долгами: в API суммы по позициям (primary → amount_rub, counterparty → amount_counterparty).
-  // Долг↔счёт: привязка по валюте (RUB — amount_rub, иначе — amount_counterparty).
+  const txPrimaryIsSettlement = getItemTypeCode(tx.primary_item_id) === "counterparty_settlements";
+  const amountForDisplayItem = (itemId: number) => {
+    const isSettlement = getItemTypeCode(itemId) === "counterparty_settlements";
+    if (isSettlement) return tx.amount_counterparty ?? tx.amount;
+    return itemId === tx.primary_item_id ? tx.amount : (txPrimaryIsSettlement ? tx.amount : (tx.amount_counterparty ?? tx.amount));
+  };
   const primaryAmountCentsRaw = isDebtTransfer
     ? bothSettlements
       ? tx.amount
-      : (primaryCurrency === "RUB" ? tx.amount : (tx.amount_counterparty ?? tx.amount))
+      : amountForDisplayItem(primaryDisplayId)
     : tx.amount;
   const counterpartyAmountCentsRaw = isDebtTransfer
     ? bothSettlements
       ? (tx.amount_counterparty ?? tx.amount)
-      : (counterpartyCurrency === "RUB" ? tx.amount : (tx.amount_counterparty ?? tx.amount))
+      : amountForDisplayItem(counterpartyDisplayId)
     : (tx.amount_counterparty ?? tx.amount);
   const amountValue = formatAmount(primaryAmountCentsRaw);
   const counterpartyAmountValue = formatAmount(counterpartyAmountCentsRaw);
@@ -3129,12 +3133,31 @@ function TransactionsView({
     setDialogMode("edit");
     setDate(getDateKey(tx.transaction_date));
     setFormTransactionType(tx.transaction_type);
-    setAmountStr(formatCentsForInput(tx.amount));
-    setAmountCounterpartyStr(
-      tx.direction === "TRANSFER" && tx.amount_counterparty != null
-        ? formatCentsForInput(tx.amount_counterparty)
-        : ""
-    );
+    // Суммы в форме всегда по отображаемым сторонам: Откуда = первый селектор, Куда = второй.
+    const displayPrimaryId = getDisplayPrimaryItemId(tx);
+    const displayCounterpartyId = getDisplayCounterpartyItemId(tx);
+    if (
+      tx.direction === "TRANSFER" &&
+      tx.amount_counterparty != null &&
+      (itemsById.get(tx.primary_item_id)?.type_code === "counterparty_settlements" ||
+        itemsById.get(tx.counterparty_item_id ?? 0)?.type_code === "counterparty_settlements")
+    ) {
+      const amountForItem = (itemId: number) => {
+        const isSettlement = itemsById.get(itemId)?.type_code === "counterparty_settlements";
+        const primaryIsSettlement = itemsById.get(tx.primary_item_id)?.type_code === "counterparty_settlements";
+        if (isSettlement) return tx.amount_counterparty ?? tx.amount;
+        return itemId === tx.primary_item_id ? tx.amount : (primaryIsSettlement ? tx.amount : (tx.amount_counterparty ?? tx.amount));
+      };
+      setAmountStr(formatCentsForInput(amountForItem(displayPrimaryId)));
+      setAmountCounterpartyStr(formatCentsForInput(amountForItem(displayCounterpartyId)));
+    } else {
+      setAmountStr(formatCentsForInput(tx.amount));
+      setAmountCounterpartyStr(
+        tx.direction === "TRANSFER" && tx.amount_counterparty != null
+          ? formatCentsForInput(tx.amount_counterparty)
+          : ""
+      );
+    }
     setPrimaryQuantityLots(
       tx.primary_quantity_lots != null ? String(tx.primary_quantity_lots) : ""
     );
@@ -3636,7 +3659,8 @@ function TransactionsView({
             counterpartyCurrency &&
             primaryCurrency !== counterpartyCurrency;
 
-          const nextAmountCounterparty =
+          let nextAmount = changes.hasAmountChanged ? (amountCents as number) : tx.amount;
+          let nextAmountCounterparty: number | null =
             nextDirection !== "TRANSFER"
               ? null
               : isCrossCurrencyTransfer
@@ -3644,6 +3668,18 @@ function TransactionsView({
                   ? counterpartyCents
                   : tx.amount_counterparty ?? null
                 : null;
+          const primaryIsSettlementBulk = (resolvedPrimaryItemId != null) && itemsById.get(resolvedPrimaryItemId)?.type_code === "counterparty_settlements";
+          const counterpartyIsSettlementBulk = (nextCounterpartyItemId != null) && itemsById.get(nextCounterpartyItemId)?.type_code === "counterparty_settlements";
+          const oneSideDebtBulk = primaryIsSettlementBulk !== counterpartyIsSettlementBulk;
+          if (nextDirection === "TRANSFER" && oneSideDebtBulk && nextAmountCounterparty != null) {
+            if (primaryIsSettlementBulk) {
+              nextAmount = nextAmountCounterparty;
+              nextAmountCounterparty = changes.hasAmountChanged ? (amountCents as number) : tx.amount;
+            } else {
+              nextAmount = changes.hasAmountChanged ? (amountCents as number) : tx.amount;
+              nextAmountCounterparty = counterpartyCents ?? nextAmountCounterparty;
+            }
+          }
 
           const primaryMoex = resolvedPrimaryItemId
             ? isMoexItem(itemsById.get(resolvedPrimaryItemId))
@@ -3678,9 +3714,7 @@ function TransactionsView({
             primary_item_id: resolvedPrimaryItemId ?? basePrimaryItemId,
             counterparty_item_id: nextCounterpartyItemId,
             counterparty_id: nextCounterpartyId ?? null,
-            amount: changes.hasAmountChanged
-              ? (amountCents as number)
-              : tx.amount,
+            amount: nextAmount,
             amount_counterparty: nextAmountCounterparty,
             primary_quantity_lots: primaryMoex ? nextPrimaryLots : nextPrimaryLots,
             counterparty_quantity_lots: counterpartyMoex ? nextCounterpartyLots : null,
@@ -4121,6 +4155,12 @@ function TransactionsView({
       const dateA = getDateKey(a.transaction_date);
       const dateB = getDateKey(b.transaction_date);
       if (dateB !== dateA) return dateB.localeCompare(dateA);
+      const txDateA = a.transaction_date ?? "";
+      const txDateB = b.transaction_date ?? "";
+      if (txDateB !== txDateA) return txDateB.localeCompare(txDateA);
+      const createdA = a.created_at ?? "";
+      const createdB = b.created_at ?? "";
+      if (createdA !== createdB) return createdB.localeCompare(createdA);
       const groupA = a.parent_transaction_id ?? a.id;
       const groupB = b.parent_transaction_id ?? b.id;
       if (groupA !== groupB) return groupA - groupB;
@@ -5336,16 +5376,21 @@ function TransactionsView({
                           setFormError("Выберите категорию из списка.");
                           return;
                         }
-                        // API ожидает amount_rub = сумма в рублях, amount_counterparty = сумма в другой валюте (не по позициям).
+                        // Логика по типу перевода (в API поля amount/amount_counterparty — по факту суммы в любых валютах, не только RUB):
+                        // — Перевод с долгом (одна сторона — settlement): amount_rub = сумма по счёту, amount_counterparty = сумма по долгу.
+                        // — Перевод без долгов: по позициям (primary → amount, counterparty → amount_counterparty).
+                        const primaryIsSettlementPayload = isTransfer && (primaryItemId != null) && itemsById.get(primaryItemId)?.type_code === "counterparty_settlements";
+                        const counterpartyIsSettlementPayload = isTransfer && (counterpartyItemId != null) && itemsById.get(counterpartyItemId)?.type_code === "counterparty_settlements";
+                        const oneSideDebtTransfer = primaryIsSettlementPayload !== counterpartyIsSettlementPayload;
                         let payloadAmount = cents;
                         let payloadAmountCounterparty: number | null = isTransfer ? counterpartyCents : null;
-                        if (isTransfer && isCrossCurrencyTransfer && primaryCurrencyCode && counterpartyCurrencyCode) {
-                          if (primaryCurrencyCode === "RUB") {
+                        if (isTransfer && oneSideDebtTransfer && counterpartyCents != null) {
+                          if (primaryIsSettlementPayload) {
+                            payloadAmount = counterpartyCents;
+                            payloadAmountCounterparty = cents;
+                          } else {
                             payloadAmount = cents;
                             payloadAmountCounterparty = counterpartyCents;
-                          } else {
-                            payloadAmount = counterpartyCents ?? cents;
-                            payloadAmountCounterparty = cents;
                           }
                         }
                         const payload = {

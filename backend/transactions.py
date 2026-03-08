@@ -94,18 +94,31 @@ def _resolve_effective_side(
         start_date=start_date,
     )
 
-def _parse_cursor(value: str) -> tuple[datetime, int]:
-    parts = value.split("|", 1)
-    if len(parts) != 2:
+def _parse_cursor(value: str) -> tuple[datetime, datetime | None, int]:
+    """Returns (transaction_date, created_at or None, id). Old format 'date|id' supported for backward compatibility."""
+    parts = value.split("|")
+    if len(parts) == 2:
+        try:
+            cursor_dt = datetime.fromisoformat(parts[0])
+            cursor_id = int(parts[1])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid cursor value") from exc
+        if cursor_dt.tzinfo is not None:
+            cursor_dt = cursor_dt.replace(tzinfo=None)
+        return cursor_dt, None, cursor_id
+    if len(parts) != 3:
         raise HTTPException(status_code=400, detail="Invalid cursor format")
     try:
         cursor_dt = datetime.fromisoformat(parts[0])
-        cursor_id = int(parts[1])
+        cursor_created_at = datetime.fromisoformat(parts[1])
+        cursor_id = int(parts[2])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid cursor value") from exc
     if cursor_dt.tzinfo is not None:
         cursor_dt = cursor_dt.replace(tzinfo=None)
-    return cursor_dt, cursor_id
+    if cursor_created_at.tzinfo is not None:
+        cursor_created_at = cursor_created_at.replace(tzinfo=None)
+    return cursor_dt, cursor_created_at, cursor_id
 
 def transfer_delta(kind: str, is_primary: bool, amount: int) -> int:
     if kind == "LIABILITY":
@@ -230,7 +243,11 @@ def list_transactions(
         .filter(Transaction.user_id == user.id)
         .filter(Transaction.deleted_at.is_(None))
         .options(selectinload(Transaction.chain))
-        .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        .order_by(
+            Transaction.transaction_date.desc(),
+            Transaction.created_at.desc(),
+            Transaction.id.desc(),
+        )
         .all()
     )
 
@@ -320,20 +337,42 @@ def list_transactions_page(
         if max_amount is not None:
             stmt = stmt.where(abs_amount <= max_amount)
     if cursor:
-        cursor_dt, cursor_id = _parse_cursor(cursor)
-        stmt = stmt.where(
-            or_(
-                Transaction.transaction_date < cursor_dt,
-                and_(
-                    Transaction.transaction_date == cursor_dt,
-                    Transaction.id < cursor_id,
-                ),
+        cursor_dt, cursor_created_at, cursor_id = _parse_cursor(cursor)
+        if cursor_created_at is not None:
+            # next page = rows after last in order (transaction_date desc, created_at desc, id desc)
+            stmt = stmt.where(
+                or_(
+                    Transaction.transaction_date < cursor_dt,
+                    and_(
+                        Transaction.transaction_date == cursor_dt,
+                        Transaction.created_at < cursor_created_at,
+                    ),
+                    and_(
+                        Transaction.transaction_date == cursor_dt,
+                        Transaction.created_at == cursor_created_at,
+                        Transaction.id < cursor_id,
+                    ),
+                )
             )
-        )
+        else:
+            # backward compatibility: old cursor format "date|id"
+            stmt = stmt.where(
+                or_(
+                    Transaction.transaction_date < cursor_dt,
+                    and_(
+                        Transaction.transaction_date == cursor_dt,
+                        Transaction.id < cursor_id,
+                    ),
+                )
+            )
 
     stmt = (
         stmt.options(selectinload(Transaction.chain))
-        .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        .order_by(
+            Transaction.transaction_date.desc(),
+            Transaction.created_at.desc(),
+            Transaction.id.desc(),
+        )
         .limit(limit + 1)
     )
     rows = list(db.execute(stmt).scalars())
@@ -343,7 +382,7 @@ def list_transactions_page(
     next_cursor = None
     if rows:
         last = rows[-1]
-        next_cursor = f"{last.transaction_date.isoformat()}|{last.id}"
+        next_cursor = f"{last.transaction_date.isoformat()}|{last.created_at.isoformat()}|{last.id}"
 
     return TransactionPageOut(items=rows, next_cursor=next_cursor, has_more=has_more)
 
@@ -358,7 +397,11 @@ def list_deleted_transactions(
         .filter(Transaction.user_id == user.id)
         .filter(Transaction.deleted_at.isnot(None))
         .options(selectinload(Transaction.chain))
-        .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        .order_by(
+            Transaction.transaction_date.desc(),
+            Transaction.created_at.desc(),
+            Transaction.id.desc(),
+        )
         .all()
     )
 
@@ -1427,7 +1470,11 @@ def purge_card_transactions(db: Session, user: User, card_item_id: int) -> int:
                 Transaction.counterparty_card_item_id == card_item_id,
             )
         )
-        .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        .order_by(
+            Transaction.transaction_date.desc(),
+            Transaction.created_at.desc(),
+            Transaction.id.desc(),
+        )
         .with_for_update()
         .all()
     )

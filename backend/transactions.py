@@ -25,6 +25,7 @@ from datetime import date, datetime, time, timezone
 
 from counterparty_settlements import (
     ensure_counterparty_settlements_item,
+    create_counterparty_settlements_item,
     update_settlements_item_closed_status,
     COUNTERPARTY_SETTLEMENTS_TYPE,
 )
@@ -396,18 +397,44 @@ def create_debts_transaction(
             detail="Операция «Долги» не поддерживается для MOEX инструментов.",
         )
 
+    has_item_id = data.counterparty_settlements_item_id is not None
+    has_new_name = data.new_settlement_name is not None and (data.new_settlement_name or "").strip()
+    if has_item_id and has_new_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Укажите либо существующий долг (counterparty_settlements_item_id), либо название нового (new_settlement_name), но не оба.",
+        )
+    if not has_item_id and not has_new_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Укажите существующий долг по контрагенту или создайте новый (название).",
+        )
+
     tx_date = data.transaction_date.date()
     accounting_start = user.accounting_start_date
     open_date = max(accounting_start, tx_date) if accounting_start else tx_date
 
-    settlements_item = ensure_counterparty_settlements_item(
-        db=db,
-        user=user,
-        counterparty_id=data.counterparty_id,
-        currency_code=primary_item.currency_code,
-        open_date=open_date,
-        accounting_start_date=accounting_start,
-    )
+    if has_item_id:
+        settlements_item = _load_item(db, user, data.counterparty_settlements_item_id, True, "counterparty_settlements")
+        if (
+            settlements_item.type_code != COUNTERPARTY_SETTLEMENTS_TYPE
+            or settlements_item.counterparty_id != data.counterparty_id
+            or settlements_item.archived_at is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Выбранный элемент не является активом взаиморасчётов по этому контрагенту или архивован.",
+            )
+    else:
+        settlements_item = create_counterparty_settlements_item(
+            db=db,
+            user=user,
+            counterparty_id=data.counterparty_id,
+            currency_code=primary_item.currency_code,
+            open_date=open_date,
+            accounting_start_date=accounting_start,
+            name=(data.new_settlement_name or "").strip(),
+        )
 
     if data.debt_direction == "I_PAID":
         primary_item_id = primary_item.id
@@ -426,7 +453,7 @@ def create_debts_transaction(
         counterparty_item_id=counterparty_item_id,
         counterparty_id=tx_counterparty_id,
         amount_rub=data.amount_rub,
-        amount_counterparty=None,
+        amount_counterparty=data.amount_counterparty,
         primary_quantity_lots=None,
         counterparty_quantity_lots=None,
         direction="TRANSFER",
@@ -459,18 +486,44 @@ def create_they_paid_for_me_transaction(
     resolve_counterparty(db, user, data.who_paid_counterparty_id)
     resolve_counterparty(db, user, data.where_paid_counterparty_id)
 
+    has_item_id = data.counterparty_settlements_item_id is not None
+    has_new_name = data.new_settlement_name is not None and (data.new_settlement_name or "").strip()
+    if has_item_id and has_new_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Укажите либо существующий долг (counterparty_settlements_item_id), либо название нового (new_settlement_name), но не оба.",
+        )
+    if not has_item_id and not has_new_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Укажите существующий долг по контрагенту «Кто платит» или создайте новый (название).",
+        )
+
     accounting_start = user.accounting_start_date
     tx_date = data.transaction_date.date() if data.transaction_date else date.today()
     open_date = max(accounting_start, tx_date)
 
-    settlements_item = ensure_counterparty_settlements_item(
-        db=db,
-        user=user,
-        counterparty_id=data.who_paid_counterparty_id,
-        currency_code="RUB",
-        open_date=open_date,
-        accounting_start_date=accounting_start,
-    )
+    if has_item_id:
+        settlements_item = _load_item(db, user, data.counterparty_settlements_item_id, True, "counterparty_settlements")
+        if (
+            settlements_item.type_code != COUNTERPARTY_SETTLEMENTS_TYPE
+            or settlements_item.counterparty_id != data.who_paid_counterparty_id
+            or settlements_item.archived_at is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Выбранный элемент не является активом взаиморасчётов по контрагенту «Кто платит» или архивован.",
+            )
+    else:
+        settlements_item = create_counterparty_settlements_item(
+            db=db,
+            user=user,
+            counterparty_id=data.who_paid_counterparty_id,
+            currency_code="RUB",
+            open_date=open_date,
+            accounting_start_date=accounting_start,
+            name=(data.new_settlement_name or "").strip(),
+        )
 
     category_id = data.category_id
     if category_id is None:
@@ -539,10 +592,13 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
 
     tx_date = data.transaction_date.date()
     if tx_date < primary_side.start_date:
-        raise HTTPException(
-            status_code=400,
-            detail="Дата транзакции не может быть раньше даты начала действия актива/обязательства.",
-        )
+        if primary_side.selected_item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+            primary_side.selected_item.open_date = tx_date
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Дата транзакции не может быть раньше даты начала действия актива/обязательства.",
+            )
 
     resolve_counterparty(db, user, data.counterparty_id)
 
@@ -614,10 +670,13 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
             raise HTTPException(status_code=400, detail="Transfer items must be different")
 
         if tx_date < counter_side.start_date:
-            raise HTTPException(
-                status_code=400,
-                detail="Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства.",
-            )
+            if counter_side.selected_item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+                counter_side.selected_item.open_date = tx_date
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства.",
+                )
 
         if not primary_is_moex and not counter_is_moex:
             if primary.currency_code != counter.currency_code:
@@ -732,11 +791,22 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         elif data.direction == "TRANSFER":
             if not counter:
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
+            primary_is_settlement = primary.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+            counter_is_settlement = counter.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+            if primary_is_settlement and not counter_is_settlement:
+                amt_primary = amount_counterparty if amount_counterparty is not None else amt
+                amt_counter = amt
+            elif counter_is_settlement and not primary_is_settlement:
+                amt_primary = amt
+                amt_counter = amount_counterparty if amount_counterparty is not None else amt
+            else:
+                amt_primary = amt
+                amt_counter = amount_counterparty or amt
             if primary_is_moex:
                 _apply_position_delta(primary, -(data.primary_quantity_lots or 0), data.transaction_date)
             elif primary_is_crypto and data.primary_quantity_units is not None:
                 _apply_quantity_units_delta(primary, -(data.primary_quantity_units or 0), data.transaction_date)
-            primary_delta = transfer_delta(primary.kind, True, amt)
+            primary_delta = transfer_delta(primary.kind, True, amt_primary)
             primary_next = primary.current_value_rub + primary_delta
             if primary_next < get_min_balance(primary):
                 raise HTTPException(
@@ -747,8 +817,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
 
             if counter_is_moex:
                 _apply_position_delta(counter, data.counterparty_quantity_lots or 0, data.transaction_date)
-            amt_counterparty = amount_counterparty or amt
-            counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
+            counter_delta = transfer_delta(counter.kind, False, amt_counter)
             counter_next = counter.current_value_rub + counter_delta
             if counter_next < get_min_balance(counter):
                 raise HTTPException(
@@ -854,10 +923,13 @@ def update_transaction(
 
     new_tx_date = data.transaction_date.date()
     if new_tx_date < new_primary_side.start_date:
-        raise HTTPException(
-            status_code=400,
-            detail="Transaction date cannot be earlier than the item's start date.",
-        )
+        if new_primary_side.selected_item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+            new_primary_side.selected_item.open_date = new_tx_date
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Transaction date cannot be earlier than the item's start date.",
+            )
 
     resolve_counterparty(db, user, data.counterparty_id)
 
@@ -899,10 +971,13 @@ def update_transaction(
                 raise HTTPException(status_code=400, detail="Transfer items must be different")
 
             if new_tx_date < new_counter_side.start_date:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Transaction date cannot be earlier than the counterparty start date.",
-                )
+                if new_counter_side.selected_item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+                    new_counter_side.selected_item.open_date = new_tx_date
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Transaction date cannot be earlier than the counterparty start date.",
+                    )
         else:
             new_counter_is_moex = False
 
@@ -983,15 +1058,27 @@ def update_transaction(
         elif tx.direction == "TRANSFER":
             if not old_counter:
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
+            # Revert: subtract what was applied (same swap as create/rollback)
+            old_primary_is_settlement = old_primary.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+            old_counter_is_settlement = old_counter.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+            if old_primary_is_settlement and not old_counter_is_settlement:
+                old_amt_primary = old_counter_amt
+                old_amt_counter = old_amt
+            elif old_counter_is_settlement and not old_primary_is_settlement:
+                old_amt_primary = old_amt
+                old_amt_counter = old_counter_amt
+            else:
+                old_amt_primary = old_amt
+                old_amt_counter = old_counter_amt
             if old_primary_is_moex:
                 add_lot_delta(old_primary.id, tx.primary_quantity_lots or 0)
             elif old_primary_is_crypto and tx.primary_quantity_units is not None:
                 add_units_delta(old_primary.id, float(tx.primary_quantity_units or 0))
-            old_primary_delta = transfer_delta(old_primary.kind, True, old_amt)
+            old_primary_delta = transfer_delta(old_primary.kind, True, old_amt_primary)
             add_delta(old_primary.id, -old_primary_delta)
             if old_counter_is_moex:
                 add_lot_delta(old_counter.id, -(tx.counterparty_quantity_lots or 0))
-            old_counter_delta = transfer_delta(old_counter.kind, False, old_counter_amt)
+            old_counter_delta = transfer_delta(old_counter.kind, False, old_amt_counter)
             add_delta(old_counter.id, -old_counter_delta)
 
     if data.transaction_type == "ACTUAL":
@@ -1017,15 +1104,26 @@ def update_transaction(
         elif data.direction == "TRANSFER":
             if not new_counter:
                 raise HTTPException(status_code=400, detail="Counterparty item not found")
+            new_primary_is_settlement = new_primary.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+            new_counter_is_settlement = new_counter.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+            if new_primary_is_settlement and not new_counter_is_settlement:
+                new_amt_primary = amount_counterparty if amount_counterparty is not None else new_amt
+                new_amt_counter = new_amt
+            elif new_counter_is_settlement and not new_primary_is_settlement:
+                new_amt_primary = new_amt
+                new_amt_counter = amount_counterparty if amount_counterparty is not None else new_amt
+            else:
+                new_amt_primary = new_amt
+                new_amt_counter = new_counter_amt
             if new_primary_is_moex:
                 add_lot_delta(new_primary.id, -(data.primary_quantity_lots or 0))
             elif new_primary_is_crypto and data.primary_quantity_units is not None:
                 add_units_delta(new_primary.id, -float(data.primary_quantity_units or 0))
-            new_primary_delta = transfer_delta(new_primary.kind, True, new_amt)
+            new_primary_delta = transfer_delta(new_primary.kind, True, new_amt_primary)
             add_delta(new_primary.id, new_primary_delta)
             if new_counter_is_moex:
                 add_lot_delta(new_counter.id, data.counterparty_quantity_lots or 0)
-            new_counter_delta = transfer_delta(new_counter.kind, False, new_counter_amt)
+            new_counter_delta = transfer_delta(new_counter.kind, False, new_amt_counter)
             add_delta(new_counter.id, new_counter_delta)
 
     items_by_id = {
@@ -1174,16 +1272,29 @@ def _rollback_transaction_balance(db: Session, user: User, tx: Transaction) -> N
         else:
             primary.current_value_rub += amt
     elif tx.direction == "TRANSFER" and counter:
+        primary_is_settlement = primary.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+        counter_is_settlement = counter.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+        if primary_is_settlement and not counter_is_settlement:
+            amt_primary = amt_counterparty
+            amt_counter = amt
+        elif counter_is_settlement and not primary_is_settlement:
+            amt_primary = amt
+            amt_counter = amt_counterparty
+        else:
+            amt_primary = amt
+            amt_counter = amt_counterparty
         if primary_is_moex:
             _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
         elif primary_is_crypto and tx.primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
-        primary_delta = -transfer_delta(primary.kind, True, amt)
-        primary.current_value_rub += primary_delta
+        else:
+            primary_delta = -transfer_delta(primary.kind, True, amt_primary)
+            primary.current_value_rub += primary_delta
         if counter_is_moex:
             _apply_position_delta(counter, -(tx.counterparty_quantity_lots or 0), tx.transaction_date)
-        counter_delta = -transfer_delta(counter.kind, False, amt_counterparty)
-        counter.current_value_rub += counter_delta
+        else:
+            counter_delta = -transfer_delta(counter.kind, False, amt_counter)
+            counter.current_value_rub += counter_delta
 
     if tx.related_item_id:
         related_item = db.query(Item).filter(Item.id == tx.related_item_id, Item.user_id == user.id).with_for_update().first()
@@ -1254,16 +1365,29 @@ def _apply_transaction_balance(db: Session, user: User, tx: Transaction) -> None
                 )
             primary.current_value_rub = next_balance
     elif tx.direction == "TRANSFER" and counter:
+        primary_is_settlement = primary.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+        counter_is_settlement = counter.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
+        if primary_is_settlement and not counter_is_settlement:
+            amt_primary = amt_counterparty
+            amt_counter = amt
+        elif counter_is_settlement and not primary_is_settlement:
+            amt_primary = amt
+            amt_counter = amt_counterparty
+        else:
+            amt_primary = amt
+            amt_counter = amt_counterparty
         if primary_is_moex:
             _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx.transaction_date)
         elif primary_is_crypto and tx.primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
-        primary_delta = transfer_delta(primary.kind, True, amt)
-        primary.current_value_rub += primary_delta
+        else:
+            primary_delta = transfer_delta(primary.kind, True, amt_primary)
+            primary.current_value_rub += primary_delta
         if counter_is_moex:
             _apply_position_delta(counter, tx.counterparty_quantity_lots or 0, tx.transaction_date)
-        counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
-        counter.current_value_rub += counter_delta
+        else:
+            counter_delta = transfer_delta(counter.kind, False, amt_counter)
+            counter.current_value_rub += counter_delta
 
     if tx.related_item_id:
         related_item = db.query(Item).filter(Item.id == tx.related_item_id, Item.user_id == user.id).with_for_update().first()

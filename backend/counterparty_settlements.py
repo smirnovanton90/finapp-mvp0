@@ -57,6 +57,41 @@ def ensure_counterparty_settlements_item(
     return item
 
 
+def create_counterparty_settlements_item(
+    db: Session,
+    user: User,
+    counterparty_id: int,
+    currency_code: str,
+    open_date: date,
+    accounting_start_date: date,
+    name: str,
+) -> Item:
+    """Create a new «Взаиморасчёты» item for (user, counterparty) with the given name.
+    Use this when the user explicitly creates a new debt; does not return existing items."""
+    from fastapi import HTTPException
+
+    counterparty = db.get(Counterparty, counterparty_id)
+    if not counterparty or (counterparty.owner_user_id and counterparty.owner_user_id != user.id):
+        raise HTTPException(status_code=400, detail="Invalid counterparty_id")
+
+    item = Item(
+        user_id=user.id,
+        kind="ASSET",
+        type_code=COUNTERPARTY_SETTLEMENTS_TYPE,
+        name=name.strip() or (counterparty.name or "Контрагент"),
+        currency_code=currency_code,
+        counterparty_id=counterparty_id,
+        open_date=open_date,
+        initial_value_rub=0,
+        current_value_rub=0,
+        start_date=accounting_start_date,
+        history_status="NEW",
+    )
+    db.add(item)
+    db.flush()
+    return item
+
+
 def update_settlements_item_closed_status(db: Session, item: Item) -> None:
     """If item is counterparty_settlements: set closed_at when balance is 0, clear when non-zero."""
     if item.type_code != COUNTERPARTY_SETTLEMENTS_TYPE:

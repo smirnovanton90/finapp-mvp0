@@ -1,19 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import {
   fetchCounterparties,
   fetchItems,
   fetchTransactions,
+  fetchFxRatesBatch,
   API_BASE,
   CounterpartyOut,
   ItemOut,
   TransactionOut,
+  type FxRateOut,
 } from "@/lib/api";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { formatAmount } from "@/lib/item-utils";
 import { CounterpartySelector } from "@/components/counterparty-selector";
+import { CurrencyChip } from "@/components/currency-chip";
 import { AuthInput } from "@/components/ui/auth-input";
 import { Label } from "@/components/ui/label";
 import { PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, MODAL_BG, RED, GREEN } from "@/lib/colors";
@@ -21,6 +24,8 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableHead,
+  TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -38,6 +43,19 @@ function formatSignedAmount(valueInCents: number) {
   const abs = Math.abs(valueInCents);
   const formatted = formatAmount(abs);
   return valueInCents >= 0 ? `+ ${formatted}` : `− ${formatted}`;
+}
+
+/** Конвертация рублей (копейки) в валюту по курсу и форматирование со знаком. */
+function formatSignedAmountInCurrency(rubCents: number, rateRubPerUnit: number): string {
+  if (rateRubPerUnit <= 0) return "—";
+  const amountInCurrency = rubCents / 100 / rateRubPerUnit;
+  const abs = Math.abs(amountInCurrency);
+  const formatted = new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(abs);
+  const withSign = amountInCurrency >= 0 ? `+ ${formatted}` : `− ${formatted}`;
+  return withSign;
 }
 
 function balanceStatusLabel(amountCents: number): string {
@@ -68,6 +86,16 @@ function getRelativeDateKey(daysOffset: number) {
   return `${y}-${m}-${day}`;
 }
 
+type ItemBreakdownRow = {
+  itemId: number;
+  name: string;
+  currencyCode: string;
+  openingBalance: number;
+  periodNet: number;
+  closingBalance: number;
+  sourceType: SourceType;
+};
+
 type ReportRow =
   | {
       type: "transaction";
@@ -75,6 +103,9 @@ type ReportRow =
       comment: string;
       amountCents: number;
       sourceType: SourceType;
+      itemId?: number;
+      itemName?: string;
+      itemCurrency?: string;
     }
   | { type: "paid_to"; amountCents: number }
   | { type: "received_from"; amountCents: number };
@@ -89,6 +120,8 @@ type ReportData = {
   closingBalanceSettlements: number;
   closingBalanceLoanGiven: number;
   closingBalanceLoanReceived: number;
+  /** Разбивка по каждому элементу (взаиморасчёты, займы выданные, займы полученные) с учётом валюты. */
+  itemsBreakdown: ItemBreakdownRow[];
 };
 
 /**
@@ -204,9 +237,37 @@ function buildReportData(
     return { settlements, loanGiven, loanReceived };
   };
 
+  const txDeltaByItemId = (tx: TransactionOut): Map<number, number> => {
+    const out = new Map<number, number>();
+    const pid = tx.primary_item_id ?? tx.primary_card_item_id;
+    const cid = tx.counterparty_item_id ?? tx.counterparty_card_item_id;
+    if (pid != null && allItemIds.has(pid)) {
+      const d = transactionDeltaForSide(tx, pid, itemsById, true);
+      out.set(pid, (out.get(pid) ?? 0) + d);
+    }
+    if (cid != null && allItemIds.has(cid)) {
+      const d = transactionDeltaForSide(tx, cid, itemsById, false);
+      out.set(cid, (out.get(cid) ?? 0) + d);
+    }
+    return out;
+  };
+
+  const getSourceTypeForItemId = (itemId: number): SourceType => {
+    if (settlementIds.has(itemId)) return "settlements";
+    if (loanGivenIds.has(itemId)) return "loan_given";
+    if (loanReceivedIds.has(itemId)) return "loan_received";
+    return "settlements";
+  };
+
   const beforeStart = relevantTxs.filter((tx) => {
     const key = toDateKey(tx.transaction_date);
     return key && key < rangeStartKey;
+  });
+  const openingByItemId = new Map<number, number>();
+  beforeStart.forEach((tx) => {
+    txDeltaByItemId(tx).forEach((d, itemId) => {
+      openingByItemId.set(itemId, (openingByItemId.get(itemId) ?? 0) + d);
+    });
   });
   let openingBalanceSettlements = 0;
   let openingBalanceLoanGiven = 0;
@@ -227,6 +288,7 @@ function buildReportData(
     })
     .sort((a, b) => toDateKey(a.transaction_date).localeCompare(toDateKey(b.transaction_date)));
 
+  const periodNetByItemId = new Map<number, number>();
   let periodNet = 0;
   let periodNetSettlements = 0;
   let periodNetLoanGiven = 0;
@@ -236,6 +298,10 @@ function buildReportData(
   const transactionRows: ReportRow[] = periodTxs.map((tx) => {
     const delta = txDelta(tx);
     const by = txDeltaBySource(tx);
+    const byItem = txDeltaByItemId(tx);
+    byItem.forEach((d, itemId) => {
+      periodNetByItemId.set(itemId, (periodNetByItemId.get(itemId) ?? 0) + d);
+    });
     periodNet += delta;
     periodNetSettlements += by.settlements;
     periodNetLoanGiven += by.loanGiven;
@@ -254,12 +320,17 @@ function buildReportData(
         : null;
     const sourceType: SourceType =
       primarySource ?? counterpartySource ?? "settlements";
+    const itemId = (pid != null && allItemIds.has(pid) ? pid : cid ?? null) as number | undefined;
+    const item = itemId != null ? itemsById.get(itemId) : undefined;
     return {
       type: "transaction",
       dateKey: toDateKey(tx.transaction_date),
       comment: tx.comment?.trim() ?? "",
       amountCents: delta,
       sourceType,
+      itemId: itemId ?? undefined,
+      itemName: item?.name,
+      itemCurrency: item?.currency_code,
     };
   });
 
@@ -268,6 +339,26 @@ function buildReportData(
   const closingBalanceLoanReceived = openingBalanceLoanReceived + periodNetLoanReceived;
   const closingBalance =
     closingBalanceSettlements + closingBalanceLoanGiven + closingBalanceLoanReceived;
+
+  const allDebtItems = [
+    ...settlementItems.map((i) => ({ item: i, sourceType: "settlements" as const })),
+    ...loanGivenItems.map((i) => ({ item: i, sourceType: "loan_given" as const })),
+    ...loanReceivedItems.map((i) => ({ item: i, sourceType: "loan_received" as const })),
+  ];
+  const itemsBreakdown: ItemBreakdownRow[] = allDebtItems.map(({ item, sourceType }) => {
+    const opening = openingByItemId.get(item.id) ?? 0;
+    const periodNet = periodNetByItemId.get(item.id) ?? 0;
+    const closing = opening + periodNet;
+    return {
+      itemId: item.id,
+      name: item.name ?? "",
+      currencyCode: item.currency_code ?? "RUB",
+      openingBalance: opening,
+      periodNet,
+      closingBalance: closing,
+      sourceType,
+    };
+  });
 
   const rows: ReportRow[] = [
     ...transactionRows,
@@ -284,6 +375,7 @@ function buildReportData(
     closingBalanceSettlements,
     closingBalanceLoanGiven,
     closingBalanceLoanReceived,
+    itemsBreakdown,
   };
 }
 
@@ -297,6 +389,7 @@ export default function CounterpartySettlementsPage() {
   const [rangeEnd, setRangeEnd] = useState(() => getRelativeDateKey(0));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
 
   useEffect(() => {
     if (!session) return;
@@ -364,6 +457,42 @@ export default function CounterpartySettlementsPage() {
       items
     );
   }, [selectedId, rangeStartKey, rangeEndResolved, transactions, items]);
+
+  const reportDateKeys = useMemo(() => {
+    if (!reportData) return [];
+    const keys = new Set<string>();
+    keys.add(rangeStartKey);
+    keys.add(rangeEndResolved);
+    reportData.rows.forEach((r) => {
+      if (r.type === "transaction" && r.dateKey) keys.add(r.dateKey);
+    });
+    return Array.from(keys);
+  }, [reportData, rangeStartKey, rangeEndResolved]);
+
+  useEffect(() => {
+    if (reportDateKeys.length === 0) return;
+    let cancelled = false;
+    fetchFxRatesBatch(reportDateKeys)
+      .then((rates) => {
+        if (!cancelled) setFxRatesByDate(rates ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setFxRatesByDate({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reportDateKeys.join(",")]);
+
+  const getRateForDate = useCallback(
+    (dateKey: string, currencyCode: string): number | null => {
+      const rates = fxRatesByDate[dateKey];
+      if (!rates) return null;
+      const r = rates.find((x) => x.char_code === currencyCode);
+      return r?.rate ?? null;
+    },
+    [fxRatesByDate]
+  );
 
   const hasReport = reportData != null;
   const hasNoDebtItems = selectedId != null && debtItemsForSelected.length === 0 && !loading;
@@ -489,7 +618,7 @@ export default function CounterpartySettlementsPage() {
                           </span>
                         </div>
                         <span
-                          className="text-base font-medium"
+                          className="text-base font-medium inline-flex items-center gap-1.5"
                           style={{
                             color:
                               reportData.openingBalance > 0
@@ -499,13 +628,15 @@ export default function CounterpartySettlementsPage() {
                                   : undefined,
                           }}
                         >
+                          <CurrencyChip code="RUB" className="shrink-0" />
                           {formatSignedAmount(reportData.openingBalance)}
                         </span>
                       </div>
                       <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center">
                           <span>{SOURCE_LABELS.settlements}</span>
                           <span
+                            className="inline-flex items-center gap-1.5"
                             style={{
                               color:
                                 reportData.openingBalanceSettlements > 0
@@ -515,12 +646,14 @@ export default function CounterpartySettlementsPage() {
                                     : undefined,
                             }}
                           >
+                            <CurrencyChip code="RUB" className="shrink-0" />
                             {formatSignedAmount(reportData.openingBalanceSettlements)}
                           </span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center">
                           <span>{SOURCE_LABELS.loan_given}</span>
                           <span
+                            className="inline-flex items-center gap-1.5"
                             style={{
                               color:
                                 reportData.openingBalanceLoanGiven > 0
@@ -530,12 +663,14 @@ export default function CounterpartySettlementsPage() {
                                     : undefined,
                             }}
                           >
+                            <CurrencyChip code="RUB" className="shrink-0" />
                             {formatSignedAmount(reportData.openingBalanceLoanGiven)}
                           </span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center">
                           <span>{SOURCE_LABELS.loan_received}</span>
                           <span
+                            className="inline-flex items-center gap-1.5"
                             style={{
                               color:
                                 reportData.openingBalanceLoanReceived > 0
@@ -545,9 +680,36 @@ export default function CounterpartySettlementsPage() {
                                     : undefined,
                             }}
                           >
+                            <CurrencyChip code="RUB" className="shrink-0" />
                             {formatSignedAmount(reportData.openingBalanceLoanReceived)}
                           </span>
                         </div>
+                        {reportData.itemsBreakdown.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-border/50 flex flex-col gap-0.5">
+                            <span className="text-xs font-medium text-muted-foreground">По элементам (входящее сальдо)</span>
+                            {reportData.itemsBreakdown.map((row) => (
+                              <div key={row.itemId} className="flex justify-between items-center text-xs">
+                                <span className="truncate" title={row.name}>
+                                  {row.name} ({row.currencyCode})
+                                </span>
+                                <span
+                                  className="inline-flex items-center gap-1.5"
+                                  style={{
+                                    color:
+                                      row.openingBalance > 0
+                                        ? GREEN
+                                        : row.openingBalance < 0
+                                          ? RED
+                                          : undefined,
+                                  }}
+                                >
+                                  <CurrencyChip code={row.currencyCode || "RUB"} className="shrink-0" />
+                                  {formatSignedAmount(row.openingBalance)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -559,6 +721,16 @@ export default function CounterpartySettlementsPage() {
                     <div className="px-0 pt-6 pb-6">
                       <div className="overflow-x-auto">
                         <Table className="min-w-full table-fixed">
+                          <TableHeader>
+                            <TableRow className="border-border/70">
+                              <TableHead className="pl-8 w-24">Дата</TableHead>
+                              <TableHead className="w-40 text-center">Источник</TableHead>
+                              <TableHead className="max-w-[140px]">Долг / элемент</TableHead>
+                              <TableHead>Комментарий</TableHead>
+                              <TableHead className="text-right">Сумма в валюте</TableHead>
+                              <TableHead className="pr-8 text-right">Сумма (RUB)</TableHead>
+                            </TableRow>
+                          </TableHeader>
                           <TableBody>
                             {reportData.rows
                               .filter((row): row is ReportRow & { type: "transaction" } => row.type === "transaction")
@@ -576,17 +748,62 @@ export default function CounterpartySettlementsPage() {
                                     <TableCell className="w-40 min-w-0 text-center text-muted-foreground whitespace-normal break-words">
                                       {SOURCE_LABELS[row.sourceType]}
                                     </TableCell>
+                                    <TableCell className="min-w-0 max-w-[140px] text-muted-foreground text-sm">
+                                      {row.itemName != null
+                                        ? `${row.itemName}${row.itemCurrency ? ` (${row.itemCurrency})` : ""}`
+                                        : "—"}
+                                    </TableCell>
                                     <TableCell className="text-muted-foreground">
                                       {row.comment}
                                     </TableCell>
+                                    <TableCell className="text-right whitespace-nowrap">
+                                      {row.itemCurrency &&
+                                      row.itemCurrency !== "RUB" ? (
+                                        (() => {
+                                          const rate = getRateForDate(
+                                            row.dateKey,
+                                            row.itemCurrency
+                                          );
+                                          return rate != null ? (
+                                            <span
+                                              className="inline-flex items-center gap-1.5"
+                                              style={{
+                                                color:
+                                                  isPos
+                                                    ? GREEN
+                                                    : isNeg
+                                                      ? RED
+                                                      : undefined,
+                                              }}
+                                            >
+                                              <CurrencyChip
+                                                code={row.itemCurrency}
+                                                className="shrink-0"
+                                              />
+                                              {formatSignedAmountInCurrency(
+                                                row.amountCents,
+                                                rate
+                                              )}
+                                            </span>
+                                          ) : (
+                                            "—"
+                                          );
+                                        })()
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </TableCell>
                                     <TableCell
-                                      className="pr-8 text-right"
+                                      className="pr-8 text-right whitespace-nowrap"
                                       style={{
                                         color:
                                           isPos ? GREEN : isNeg ? RED : undefined,
                                       }}
                                     >
-                                      {formatSignedAmount(row.amountCents)}
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <CurrencyChip code="RUB" className="shrink-0" />
+                                        {formatSignedAmount(row.amountCents)}
+                                      </span>
                                     </TableCell>
                                   </TableRow>
                                 );
@@ -613,7 +830,7 @@ export default function CounterpartySettlementsPage() {
                                   className="border-b border-border/70 font-medium"
                                 >
                                   <TableCell
-                                    colSpan={3}
+                                    colSpan={5}
                                     className="pl-8 text-base font-medium"
                                     style={{ color: RED }}
                                   >
@@ -625,9 +842,12 @@ export default function CounterpartySettlementsPage() {
                                       color: row.amountCents > 0 ? RED : undefined,
                                     }}
                                   >
-                                    {row.amountCents > 0
-                                      ? formatSignedAmount(-row.amountCents)
-                                      : "0.00"}
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <CurrencyChip code="RUB" className="shrink-0" />
+                                      {row.amountCents > 0
+                                        ? formatSignedAmount(-row.amountCents)
+                                        : "0.00"}
+                                    </span>
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -638,13 +858,13 @@ export default function CounterpartySettlementsPage() {
                                   key="paid_to"
                                   className="border-b border-border/70 font-medium"
                                 >
-<TableCell
-                                  colSpan={3}
-                                  className="pl-8 text-base font-medium"
-                                  style={{ color: GREEN }}
-                                >
-                                  Вы заплатили
-                                </TableCell>
+                                  <TableCell
+                                    colSpan={5}
+                                    className="pl-8 text-base font-medium"
+                                    style={{ color: GREEN }}
+                                  >
+                                    Вы заплатили
+                                  </TableCell>
                                   <TableCell
                                     className="pr-8 text-right text-base font-medium"
                                     style={{
@@ -652,9 +872,12 @@ export default function CounterpartySettlementsPage() {
                                         row.amountCents > 0 ? GREEN : undefined,
                                     }}
                                   >
-                                    {row.amountCents > 0
-                                      ? formatSignedAmount(row.amountCents)
-                                      : "0.00"}
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <CurrencyChip code="RUB" className="shrink-0" />
+                                      {row.amountCents > 0
+                                        ? formatSignedAmount(row.amountCents)
+                                        : "0.00"}
+                                    </span>
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -689,7 +912,7 @@ export default function CounterpartySettlementsPage() {
                           </span>
                         </div>
                         <span
-                          className="text-base font-semibold"
+                          className="text-base font-semibold inline-flex items-center gap-1.5"
                           style={{
                             color:
                               reportData.closingBalance > 0
@@ -699,13 +922,15 @@ export default function CounterpartySettlementsPage() {
                                   : undefined,
                           }}
                         >
+                          <CurrencyChip code="RUB" className="shrink-0" />
                           {formatSignedAmount(reportData.closingBalance)}
                         </span>
                       </div>
                       <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center">
                           <span>{SOURCE_LABELS.settlements}</span>
                           <span
+                            className="inline-flex items-center gap-1.5"
                             style={{
                               color:
                                 reportData.closingBalanceSettlements > 0
@@ -715,12 +940,14 @@ export default function CounterpartySettlementsPage() {
                                     : undefined,
                             }}
                           >
+                            <CurrencyChip code="RUB" className="shrink-0" />
                             {formatSignedAmount(reportData.closingBalanceSettlements)}
                           </span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center">
                           <span>{SOURCE_LABELS.loan_given}</span>
                           <span
+                            className="inline-flex items-center gap-1.5"
                             style={{
                               color:
                                 reportData.closingBalanceLoanGiven > 0
@@ -730,12 +957,14 @@ export default function CounterpartySettlementsPage() {
                                     : undefined,
                             }}
                           >
+                            <CurrencyChip code="RUB" className="shrink-0" />
                             {formatSignedAmount(reportData.closingBalanceLoanGiven)}
                           </span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between items-center">
                           <span>{SOURCE_LABELS.loan_received}</span>
                           <span
+                            className="inline-flex items-center gap-1.5"
                             style={{
                               color:
                                 reportData.closingBalanceLoanReceived > 0
@@ -745,9 +974,36 @@ export default function CounterpartySettlementsPage() {
                                     : undefined,
                             }}
                           >
+                            <CurrencyChip code="RUB" className="shrink-0" />
                             {formatSignedAmount(reportData.closingBalanceLoanReceived)}
                           </span>
                         </div>
+                        {reportData.itemsBreakdown.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-border/50 flex flex-col gap-0.5">
+                            <span className="text-xs font-medium text-muted-foreground">По элементам (исходящее сальдо)</span>
+                            {reportData.itemsBreakdown.map((row) => (
+                              <div key={row.itemId} className="flex justify-between items-center text-xs">
+                                <span className="truncate" title={row.name}>
+                                  {row.name} ({row.currencyCode})
+                                </span>
+                                <span
+                                  className="inline-flex items-center gap-1.5"
+                                  style={{
+                                    color:
+                                      row.closingBalance > 0
+                                        ? GREEN
+                                        : row.closingBalance < 0
+                                          ? RED
+                                          : undefined,
+                                  }}
+                                >
+                                  <CurrencyChip code={row.currencyCode || "RUB"} className="shrink-0" />
+                                  {formatSignedAmount(row.closingBalance)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

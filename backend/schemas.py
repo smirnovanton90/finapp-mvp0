@@ -590,7 +590,8 @@ DebtDirection = Literal["I_PAID", "THEY_PAID"]
 
 
 class TransactionDebtsCreate(BaseModel):
-    """Payload for creating a «Долги» (debts) transaction — transfer to/from Взаиморасчёты."""
+    """Payload for creating a «Долги» (debts) transaction — transfer to/from Взаиморасчёты.
+    Exactly one of counterparty_settlements_item_id or new_settlement_name (non-empty) is required."""
 
     debt_direction: DebtDirection
     counterparty_id: int  # Used for Взаиморасчёты (settlements item)
@@ -598,14 +599,18 @@ class TransactionDebtsCreate(BaseModel):
     primary_item_id: int = Field(..., description="User-selected asset/liability (source or target)")
     transaction_date: datetime
     amount_rub: int = Field(..., ge=1)
+    amount_counterparty: int | None = Field(default=None, ge=0)
     transaction_type: TransactionType = "ACTUAL"
     comment: str | None = None
     status: TransactionStatus | None = None
     parent_transaction_id: int | None = None
+    counterparty_settlements_item_id: int | None = None  # Existing settlement item; use this OR new_settlement_name
+    new_settlement_name: str | None = None  # Create new settlement item with this name; use this OR counterparty_settlements_item_id
 
 
 class TransactionTheyPaidForMeCreate(BaseModel):
-    """Payload for «Кто-то заплатил за меня» — expense from Взаиморасчёты (who paid) with counterparty (where paid)."""
+    """Payload for «Кто-то заплатил за меня» — expense from Взаиморасчёты (who paid) with counterparty (where paid).
+    Exactly one of counterparty_settlements_item_id or new_settlement_name (non-empty) is required for who_paid."""
 
     who_paid_counterparty_id: int
     where_paid_counterparty_id: int
@@ -613,6 +618,8 @@ class TransactionTheyPaidForMeCreate(BaseModel):
     transaction_date: datetime | None = None
     category_id: int | None = None
     comment: str | None = None
+    counterparty_settlements_item_id: int | None = None  # Existing settlement item (who paid); use this OR new_settlement_name
+    new_settlement_name: str | None = None  # Create new settlement item with this name; use this OR counterparty_settlements_item_id
 
 
 class TransactionOut(TransactionBase):

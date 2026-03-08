@@ -1173,6 +1173,7 @@ function TransactionCardRow({
   counterparty,
   itemName,
   itemCurrencyCode,
+  getItemTypeCode,
   primaryItemCounterparty,
   counterpartyItemCounterparty,
   apiBase,
@@ -1200,6 +1201,7 @@ function TransactionCardRow({
   counterparty: CounterpartyOut | null;
   itemName: (id: number | null | undefined) => string;
   itemCurrencyCode: (id: number | null | undefined) => string;
+  getItemTypeCode: (id: number | null | undefined) => string | null | undefined;
   primaryItemCounterparty: CounterpartyOut | null;
   counterpartyItemCounterparty: CounterpartyOut | null;
   apiBase: string;
@@ -1240,15 +1242,31 @@ function TransactionCardRow({
   const primaryDisplayId = tx.primary_card_item_id ?? tx.primary_item_id;
   const counterpartyDisplayId =
     tx.counterparty_card_item_id ?? tx.counterparty_item_id;
+  const primaryCurrency = itemCurrencyCode(primaryDisplayId);
+  const counterpartyCurrency = itemCurrencyCode(counterpartyDisplayId);
 
-  const amountValue = formatAmount(tx.amount);
-  const counterpartyAmountValue = formatAmount(tx.amount_counterparty ?? tx.amount);
-  const currencyCode = itemCurrencyCode(primaryDisplayId);
+  const isPrimarySettlement = getItemTypeCode(primaryDisplayId) === "counterparty_settlements";
+  const isCounterpartySettlement = getItemTypeCode(counterpartyDisplayId) === "counterparty_settlements";
+  const isDebtTransfer = isTransfer && tx.amount_counterparty != null && (isPrimarySettlement || isCounterpartySettlement);
+  const bothSettlements = isPrimarySettlement && isCounterpartySettlement;
+  // Перевод между двумя долгами: в API суммы по позициям (primary → amount_rub, counterparty → amount_counterparty).
+  // Долг↔счёт: привязка по валюте (RUB — amount_rub, иначе — amount_counterparty).
+  const primaryAmountCentsRaw = isDebtTransfer
+    ? bothSettlements
+      ? tx.amount
+      : (primaryCurrency === "RUB" ? tx.amount : (tx.amount_counterparty ?? tx.amount))
+    : tx.amount;
+  const counterpartyAmountCentsRaw = isDebtTransfer
+    ? bothSettlements
+      ? (tx.amount_counterparty ?? tx.amount)
+      : (counterpartyCurrency === "RUB" ? tx.amount : (tx.amount_counterparty ?? tx.amount))
+    : (tx.amount_counterparty ?? tx.amount);
+  const amountValue = formatAmount(primaryAmountCentsRaw);
+  const counterpartyAmountValue = formatAmount(counterpartyAmountCentsRaw);
+  const currencyCode = primaryCurrency;
   const rubEquivalent = getRubEquivalentCents(tx, currencyCode);
   const showRubEquivalent =
     !isTransfer && currencyCode && currencyCode !== "RUB" && rubEquivalent !== null;
-  const primaryCurrency = itemCurrencyCode(primaryDisplayId);
-  const counterpartyCurrency = itemCurrencyCode(counterpartyDisplayId);
   const {
     currentSrc: primaryBankLogo,
     onError: primaryBankLogoOnError,
@@ -1268,8 +1286,8 @@ function TransactionCardRow({
       ? (counterpartyItemCounterparty.entity_type === "PERSON" ? User : Building2)
       : undefined;
   const counterpartyBankName = itemBankName(counterpartyDisplayId);
-  const primaryAmountCents = tx.amount;
-  const counterpartyAmountCents = tx.amount_counterparty ?? tx.amount;
+  const primaryAmountCents = primaryAmountCentsRaw;
+  const counterpartyAmountCents = counterpartyAmountCentsRaw;
   const isCrossWithRub =
     isTransfer &&
     ((primaryCurrency === "RUB" &&
@@ -2137,10 +2155,14 @@ function TransactionsView({
   const [debtPayForCounterpartyId, setDebtPayForCounterpartyId] = useState<number | null>(null);
   const [debtSplitAmountStr, setDebtSplitAmountStr] = useState("");
   const [wherePaidCounterpartyId, setWherePaidCounterpartyId] = useState<number | null>(null);
+  const [debtSettlementMode, setDebtSettlementMode] = useState<"existing" | "new">("existing");
+  const [debtSettlementItemId, setDebtSettlementItemId] = useState<number | null>(null);
+  const [debtSettlementNewName, setDebtSettlementNewName] = useState("");
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
   const [counterpartyItemId, setCounterpartyItemId] = useState<number | null>(null);
   const [counterpartyId, setCounterpartyId] = useState<number | null>(null);
   const [amountStr, setAmountStr] = useState("");
+  const [debtAmountStr, setDebtAmountStr] = useState("");
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
   const [primaryQuantityLots, setPrimaryQuantityLots] = useState("");
   const [counterpartyQuantityLots, setCounterpartyQuantityLots] = useState("");
@@ -2509,9 +2531,35 @@ function TransactionsView({
       ? primarySelectItemsForDebts
       : itemsForSelector;
   const counterpartySelectItems = isLoanRepayment ? liabilityItems : itemsForSelector;
+  const currentDebtCounterpartyId = isDebts
+    ? debtDirection === "I_PAID_FOR_SOMEONE"
+      ? debtPayForCounterpartyId
+      : counterpartyId
+    : null;
+  const settlementItemsForDebtCounterparty = useMemo(() => {
+    if (currentDebtCounterpartyId == null) return [];
+    return itemsForSelector.filter(
+      (it) =>
+        it.type_code === "counterparty_settlements" &&
+        it.counterparty_id === currentDebtCounterpartyId &&
+        it.archived_at == null
+    );
+  }, [itemsForSelector, currentDebtCounterpartyId]);
   const primaryCurrencyCode = primaryItemId
     ? getEffectiveItemMeta(primaryItemId)?.currencyCode ?? null
     : null;
+  const debtCurrencyCode =
+    isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID")
+      ? debtSettlementMode === "existing" && debtSettlementItemId != null
+        ? itemsById.get(debtSettlementItemId)?.currency_code ?? primaryCurrencyCode ?? null
+        : primaryCurrencyCode
+      : null;
+  const isDebtCrossCurrency =
+    isDebts &&
+    (debtDirection === "I_PAID" || debtDirection === "THEY_PAID") &&
+    primaryCurrencyCode != null &&
+    debtCurrencyCode != null &&
+    primaryCurrencyCode !== debtCurrencyCode;
   const counterpartyCurrencyCode = counterpartyItemId
     ? getEffectiveItemMeta(counterpartyItemId)?.currencyCode ?? null
     : null;
@@ -2670,6 +2718,7 @@ function TransactionsView({
     setCounterpartyItemId(null);
     setCounterpartyId(null);
     setAmountStr("");
+    setDebtAmountStr("");
     setAmountCounterpartyStr("");
     setPrimaryQuantityLots("");
     setCounterpartyQuantityLots("");
@@ -2682,6 +2731,9 @@ function TransactionsView({
     setRelatedItemId(null);
     setAssetLinkType(null);
     setReceiptMessage(null);
+    setDebtSettlementMode("existing");
+    setDebtSettlementItemId(null);
+    setDebtSettlementNewName("");
   };
 
   const closeDialog = () => {
@@ -3072,35 +3124,13 @@ function TransactionsView({
     setRelatedItemId(tx.related_item_id ?? null);
     setAssetLinkType(tx.asset_link_type ?? null);
 
-    const primaryItem = itemsById.get(tx.primary_item_id);
-    const counterpartyItem = tx.counterparty_item_id
-      ? itemsById.get(tx.counterparty_item_id)
-      : null;
-    const isDebtsTx =
-      tx.direction === "TRANSFER" &&
-      (primaryItem?.type_code === "counterparty_settlements" ||
-        counterpartyItem?.type_code === "counterparty_settlements");
-
-    if (isDebtsTx) {
-      setFormMode("DEBTS");
-      setDebtDirection(
-        primaryItem?.type_code === "counterparty_settlements" ? "THEY_PAID" : "I_PAID"
-      );
-      setDirection("TRANSFER");
-      const assetItemId =
-        primaryItem?.type_code === "counterparty_settlements"
-          ? getDisplayCounterpartyItemId(tx)
-          : getDisplayPrimaryItemId(tx);
-      setPrimaryItemId(assetItemId);
-      setCounterpartyItemId(null);
-      setCounterpartyId(tx.counterparty_id);
-    } else {
-      setFormMode("STANDARD");
-      setDirection(tx.direction);
-      setPrimaryItemId(getDisplayPrimaryItemId(tx));
-      setCounterpartyItemId(getDisplayCounterpartyItemId(tx));
-      setCounterpartyId(tx.counterparty_id);
-    }
+    // При редактировании всегда открываем стандартную форму (доход/расход/перевод),
+    // в т.ч. для транзакций, созданных через тип «Долги».
+    setFormMode("STANDARD");
+    setDirection(tx.direction);
+    setPrimaryItemId(getDisplayPrimaryItemId(tx));
+    setCounterpartyItemId(getDisplayCounterpartyItemId(tx));
+    setCounterpartyId(tx.counterparty_id);
   };
 
   const openCreateFromDialog = (
@@ -3977,6 +4007,10 @@ function TransactionsView({
       const dateKey = getDateKey(tx.transaction_date);
       if (dateKey) dates.add(dateKey);
     });
+    if (isDialogOpen && date) {
+      const dateKey = getDateKey(date);
+      if (dateKey) dates.add(dateKey);
+    }
 
     const missingDates = Array.from(dates).filter(
       (date) => !fxRatesByDate[date]
@@ -4003,7 +4037,7 @@ function TransactionsView({
     return () => {
       cancelled = true;
     };
-  }, [txs, fxRatesByDate]);
+  }, [txs, fxRatesByDate, isDialogOpen, date]);
 
   useEffect(() => {
     setSelectedTxIds((prev) => {
@@ -4910,6 +4944,16 @@ function TransactionsView({
                         setFormError("Кто платит и Где платит должны различаться.");
                         return;
                       }
+                      const theyPaidHasExisting = debtSettlementMode === "existing" && debtSettlementItemId != null;
+                      const theyPaidHasNew = debtSettlementMode === "new" && debtSettlementNewName.trim() !== "";
+                      if (!theyPaidHasExisting && !theyPaidHasNew) {
+                        setFormError(
+                          debtSettlementMode === "existing"
+                            ? "Выберите существующий долг по контрагенту «Кто платит» или укажите название нового."
+                            : "Укажите название нового долга."
+                        );
+                        return;
+                      }
                       const theyPaidCents = parseRubToCents(amountStr);
                       if (!Number.isFinite(theyPaidCents) || theyPaidCents <= 0) {
                         setFormError("Введите сумму в формате 1234,56 (больше нуля).");
@@ -4928,14 +4972,20 @@ function TransactionsView({
                         if (isEditMode && editingTx) {
                           await deleteTransaction(editingTx.id);
                         }
-                        await createTheyPaidForMeTransaction({
+                        const theyPaidPayload: Parameters<typeof createTheyPaidForMeTransaction>[0] = {
                           who_paid_counterparty_id: counterpartyId,
                           where_paid_counterparty_id: wherePaidCounterpartyId,
                           amount: theyPaidCents,
                           transaction_date: transactionDate,
                           category_id: theyPaidCategoryId,
                           comment: comment || null,
-                        });
+                        };
+                        if (debtSettlementMode === "existing" && debtSettlementItemId != null) {
+                          theyPaidPayload.counterparty_settlements_item_id = debtSettlementItemId;
+                        } else {
+                          theyPaidPayload.new_settlement_name = debtSettlementNewName.trim();
+                        }
+                        await createTheyPaidForMeTransaction(theyPaidPayload);
                         closeDialog();
                         await loadAll();
                       } catch (err: unknown) {
@@ -4957,6 +5007,16 @@ function TransactionsView({
                       }
                       if (!debtPayForCounterpartyId) {
                         setFormError("Выберите, за кого платите.");
+                        return;
+                      }
+                      const payForHasExisting = debtSettlementMode === "existing" && debtSettlementItemId != null;
+                      const payForHasNew = debtSettlementMode === "new" && debtSettlementNewName.trim() !== "";
+                      if (!payForHasExisting && !payForHasNew) {
+                        setFormError(
+                          debtSettlementMode === "existing"
+                            ? "Выберите существующий долг по контрагенту «За кого платите» или укажите название нового."
+                            : "Укажите название нового долга."
+                        );
                         return;
                       }
                       const fullCents = parseRubToCents(amountStr);
@@ -5011,7 +5071,7 @@ function TransactionsView({
                           });
                         }
                         if (splitCents > 0) {
-                          await createDebtsTransaction({
+                          const payForPayload: Parameters<typeof createDebtsTransaction>[0] = {
                             debt_direction: "I_PAID",
                             counterparty_id: debtPayForCounterpartyId,
                             transaction_counterparty_id: counterpartyId,
@@ -5020,7 +5080,13 @@ function TransactionsView({
                             amount: splitCents,
                             transaction_type: formTransactionType,
                             comment: comment || null,
-                          });
+                          };
+                          if (debtSettlementMode === "existing" && debtSettlementItemId != null) {
+                            payForPayload.counterparty_settlements_item_id = debtSettlementItemId;
+                          } else {
+                            payForPayload.new_settlement_name = debtSettlementNewName.trim();
+                          }
+                          await createDebtsTransaction(payForPayload);
                         }
                         closeDialog();
                         await loadAll();
@@ -5041,10 +5107,29 @@ function TransactionsView({
                         setFormError("Выберите актив или обязательство.");
                         return;
                       }
+                      const hasExisting = debtSettlementMode === "existing" && debtSettlementItemId != null;
+                      const hasNew = debtSettlementMode === "new" && debtSettlementNewName.trim() !== "";
+                      if (!hasExisting && !hasNew) {
+                        setFormError(
+                          debtSettlementMode === "existing"
+                            ? "Выберите существующий долг по контрагенту или переключитесь на «Новый долг» и укажите название."
+                            : "Укажите название нового долга."
+                        );
+                        return;
+                      }
                       const debtCents = parseRubToCents(amountStr);
                       if (!Number.isFinite(debtCents) || debtCents <= 0) {
                         setFormError("Введите сумму в формате 1234,56 (больше нуля).");
                         return;
+                      }
+                      let debtCounterpartyCents: number | null = null;
+                      if (isDebtCrossCurrency) {
+                        const parsed = parseRubToCents(debtAmountStr);
+                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                          setFormError("Введите изменение суммы долга в валюте долга (больше нуля).");
+                          return;
+                        }
+                        debtCounterpartyCents = parsed;
                       }
                       const primaryMeta = getEffectiveItemMeta(primaryItemId);
                       if (primaryMeta?.minDate && date < primaryMeta.minDate) {
@@ -5070,7 +5155,7 @@ function TransactionsView({
                         if (isEditMode && editingTx) {
                           await deleteTransaction(editingTx.id);
                         }
-                        await createDebtsTransaction({
+                        const createPayload: Parameters<typeof createDebtsTransaction>[0] = {
                           debt_direction: debtDirection,
                           counterparty_id: counterpartyId,
                           primary_item_id: primaryItemId,
@@ -5079,7 +5164,16 @@ function TransactionsView({
                           transaction_type: formTransactionType,
                           comment: comment || null,
                           parent_transaction_id: editingTx?.parent_transaction_id ?? undefined,
-                        });
+                        };
+                        if (debtCounterpartyCents != null) {
+                          createPayload.amount_counterparty = debtCounterpartyCents;
+                        }
+                        if (debtSettlementMode === "existing" && debtSettlementItemId != null) {
+                          createPayload.counterparty_settlements_item_id = debtSettlementItemId;
+                        } else {
+                          createPayload.new_settlement_name = debtSettlementNewName.trim();
+                        }
+                        await createDebtsTransaction(createPayload);
                         closeDialog();
                         await loadAll();
                       } catch (err: unknown) {
@@ -5369,7 +5463,7 @@ function TransactionsView({
                       </FormField>
                     )}
 
-                    {isEditMode && !isBulkEdit && (
+                    {!isEditMode && !isBulkEdit && (
                       <FormField label="Вид транзакции">
                         <SegmentedSelector
                           options={[
@@ -5381,9 +5475,9 @@ function TransactionsView({
                           onChange={(v) => {
                             setFormMode(v as TransactionFormMode);
                             if (v === "DEBTS") setDebtDirection("I_PAID");
-                            if (v === "STANDARD") setDirection(editingTx?.direction ?? "EXPENSE");
-                            if (v === "LOAN_REPAYMENT" && editingTx) {
-                              setLoanTotalStr(formatCentsForInput(editingTx.amount));
+                            if (v === "STANDARD") setDirection("EXPENSE");
+                            if (v === "LOAN_REPAYMENT") {
+                              setLoanTotalStr("");
                               setLoanInterestStr("");
                             }
                           }}
@@ -5562,7 +5656,12 @@ function TransactionsView({
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={debtPayForCounterpartyId ? [debtPayForCounterpartyId] : []}
-                            onChange={(ids) => setDebtPayForCounterpartyId(ids[0] ?? null)}
+                            onChange={(ids) => {
+                              setDebtPayForCounterpartyId(ids[0] ?? null);
+                              setDebtSettlementMode("existing");
+                              setDebtSettlementItemId(null);
+                              setDebtSettlementNewName("");
+                            }}
                             selectionMode="single"
                             placeholder="Начните вводить название"
                             industries={industries}
@@ -5621,7 +5720,14 @@ function TransactionsView({
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={counterpartyId ? [counterpartyId] : []}
-                            onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                            onChange={(ids) => {
+                              setCounterpartyId(ids[0] ?? null);
+                              if (isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID" || debtDirection === "THEY_PAID_FOR_ME")) {
+                                setDebtSettlementMode("existing");
+                                setDebtSettlementItemId(null);
+                                setDebtSettlementNewName("");
+                              }
+                            }}
                             selectionMode="single"
                             placeholder="Начните вводить название"
                             industries={industries}
@@ -5652,6 +5758,53 @@ function TransactionsView({
                           )}
                         </FormField>
                       </>
+                    )}
+
+                    {isDebts && currentDebtCounterpartyId != null && (
+                      <FormField label="Долг по контрагенту">
+                        <div className="grid gap-4">
+                          <SegmentedSelector
+                            options={[
+                              { value: "existing", label: "Существующий долг", colorScheme: "purple" },
+                              { value: "new", label: "Новый долг", colorScheme: "green" },
+                            ]}
+                            value={debtSettlementMode}
+                            onChange={(v) => {
+                              setDebtSettlementMode(v as "existing" | "new");
+                              if (v === "existing") {
+                                setDebtSettlementItemId(null);
+                                setDebtSettlementNewName("");
+                              } else {
+                                setDebtSettlementItemId(null);
+                              }
+                            }}
+                          />
+                          {debtSettlementMode === "existing" ? (
+                            <ItemSelector
+                              items={settlementItemsForDebtCounterparty}
+                              selectedIds={debtSettlementItemId ? [debtSettlementItemId] : []}
+                              onChange={(ids) => setDebtSettlementItemId(ids[0] ?? null)}
+                              selectionMode="single"
+                              placeholder="Выберите долг"
+                              getItemTypeLabel={(it) => `${it.name ?? ""} (${it.currency_code ?? ""})`}
+                              getItemKind={resolveItemEffectiveKind}
+                              getCounterpartyForItemId={getCounterpartyForItemId}
+                              apiBase={API_BASE}
+                              getBankLogoUrl={itemBankLogoUrl}
+                              getBankName={itemBankName}
+                              getItemBalance={getItemDisplayBalanceCents}
+                              itemCounts={itemTxCounts}
+                            />
+                          ) : (
+                            <TextField
+                              label="Название"
+                              value={debtSettlementNewName}
+                              onChange={(e) => setDebtSettlementNewName(e.target.value)}
+                              placeholder="Например: Займ на ремонт"
+                            />
+                          )}
+                        </div>
+                      </FormField>
                     )}
 
                     {isLoanRepayment ? (
@@ -5792,6 +5945,22 @@ function TransactionsView({
                           inputMode="decimal"
                           placeholder="Например: 1 234,56"
                         />
+                        {isDebtCrossCurrency && (
+                          <div className="grid gap-2">
+                            <Label>Изменение суммы долга</Label>
+                            <TextField
+                              label=""
+                              currencyCode={debtCurrencyCode ?? undefined}
+                              value={debtAmountStr}
+                              onChange={(e) => setDebtAmountStr(formatRubInput(e.target.value))}
+                              onBlur={() =>
+                                setDebtAmountStr((prev) => normalizeRubOnBlur(prev))
+                              }
+                              inputMode="decimal"
+                              placeholder="Например: 1 234,56"
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
                     {!isBulkEdit &&
@@ -6444,6 +6613,7 @@ function TransactionsView({
                     counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
                     itemName={itemName}
                     itemCurrencyCode={itemCurrencyCode}
+                    getItemTypeCode={(id) => itemsById.get(id)?.type_code}
                     primaryItemCounterparty={getItemCounterparty(tx.primary_card_item_id ?? tx.primary_item_id)}
                     counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
                     apiBase={API_BASE}

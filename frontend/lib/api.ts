@@ -582,13 +582,19 @@ export type TransactionDebtsCreate = {
   transaction_counterparty_id?: number | null;
   primary_item_id: number;
   transaction_date: string;
-  /** Сумма в копейках/центах в валюте. */
+  /** Сумма в копейках (рубли) — валюта платежа/счёта. */
   amount: number;
+  /** Сумма в копейках/центах в валюте долга (для перекрёстной валюты). */
+  amount_counterparty?: number | null;
   transaction_type?: TransactionType;
   comment?: string | null;
   status?: TransactionStatus | null;
   /** При создании дочерней части разделённой транзакции — id родительской. */
   parent_transaction_id?: number | null;
+  /** Существующий элемент взаиморасчётов по контрагенту. Указать либо его, либо new_settlement_name. */
+  counterparty_settlements_item_id?: number | null;
+  /** Название нового долга (создать элемент). Указать либо его, либо counterparty_settlements_item_id. */
+  new_settlement_name?: string | null;
 };
 
 export type TransactionTheyPaidForMeCreate = {
@@ -599,6 +605,10 @@ export type TransactionTheyPaidForMeCreate = {
   transaction_date?: string | null;
   category_id?: number | null;
   comment?: string | null;
+  /** Существующий элемент взаиморасчётов по контрагенту «Кто платит». Указать либо его, либо new_settlement_name. */
+  counterparty_settlements_item_id?: number | null;
+  /** Название нового долга. Указать либо его, либо counterparty_settlements_item_id. */
+  new_settlement_name?: string | null;
 };
 
 export const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -1473,8 +1483,8 @@ export async function createTransaction(
 export async function createDebtsTransaction(
   payload: TransactionDebtsCreate
 ): Promise<TransactionOut> {
-  const { amount, ...rest } = payload;
-  const body = { ...rest, amount_rub: amount };
+  const { amount, amount_counterparty, ...rest } = payload;
+  const body = { ...rest, amount_rub: amount, amount_counterparty: amount_counterparty ?? undefined };
   const res = await authFetch(`${API_BASE}/transactions/debts`, {
     method: "POST",
     body: JSON.stringify(body),

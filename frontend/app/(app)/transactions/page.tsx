@@ -65,6 +65,7 @@ import {
   Plus,
   QrCode,
   Receipt,
+  RefreshCw,
   Shield,
   ShoppingCart,
   SlidersHorizontal,
@@ -2521,16 +2522,40 @@ function TransactionsView({
   const isActualTransaction = formTransactionType === "ACTUAL";
   const isPlannedTransaction = formTransactionType === "PLANNED";
   const showCounterpartySelect = isTransfer || isLoanRepayment;
-  const primarySelectItemsForDebts = useMemo(
-    () => itemsForSelector.filter((it) => it.type_code !== "counterparty_settlements"),
+  /** Для взаимозачёта: долги в активах (вам должны, баланс > 0) — Откуда; долги в обязательствах (вы должны, баланс < 0) — Куда. */
+  const settlementItemsAsset = useMemo(
+    () =>
+      itemsForSelector.filter(
+        (it) =>
+          it.type_code === "counterparty_settlements" &&
+          (it.current_value_rub ?? 0) > 0 &&
+          it.archived_at == null
+      ),
+    [itemsForSelector]
+  );
+  const settlementItemsLiability = useMemo(
+    () =>
+      itemsForSelector.filter(
+        (it) =>
+          it.type_code === "counterparty_settlements" &&
+          (it.current_value_rub ?? 0) < 0 &&
+          it.archived_at == null
+      ),
     [itemsForSelector]
   );
   const primarySelectItems = isLoanRepayment
     ? assetItems
     : isDebts
-      ? primarySelectItemsForDebts
+      ? debtDirection === "DEBT_OFFSET"
+        ? settlementItemsAsset
+        : itemsForSelector
       : itemsForSelector;
-  const counterpartySelectItems = isLoanRepayment ? liabilityItems : itemsForSelector;
+  const counterpartySelectItems =
+    isLoanRepayment
+      ? liabilityItems
+      : isDebts && debtDirection === "DEBT_OFFSET"
+        ? settlementItemsLiability
+        : itemsForSelector;
   const currentDebtCounterpartyId = isDebts
     ? debtDirection === "I_PAID_FOR_SOMEONE"
       ? debtPayForCounterpartyId
@@ -2564,7 +2589,11 @@ function TransactionsView({
     ? getEffectiveItemMeta(counterpartyItemId)?.currencyCode ?? null
     : null;
   const isCrossCurrencyTransfer =
-    isTransfer &&
+    (isTransfer ||
+      (isDebts &&
+        debtDirection === "DEBT_OFFSET" &&
+        primaryItemId != null &&
+        counterpartyItemId != null)) &&
     primaryCurrencyCode &&
     counterpartyCurrencyCode &&
     primaryCurrencyCode !== counterpartyCurrencyCode;
@@ -5486,22 +5515,67 @@ function TransactionsView({
                     )}
 
                     {isDebts ? (
-                      <FormField label="Направление">
-                        <SegmentedSelector
-                          optionsByRows={[
-                            [
-                              { value: "I_PAID", label: "Вы дали в долг / заплатили по долгу", colorScheme: "green" },
-                              { value: "THEY_PAID", label: "Вам дали в долг / заплатили по долгу", colorScheme: "red" },
-                            ],
-                            [
-                              { value: "I_PAID_FOR_SOMEONE", label: "Вы заплатили за кого-то", colorScheme: "green" },
-                              { value: "THEY_PAID_FOR_ME", label: "Кто-то заплатил за вас", colorScheme: "red" },
-                            ],
-                          ]}
-                          value={debtDirection}
-                          onChange={(v) => setDebtDirection(v as DebtDirection)}
-                        />
-                      </FormField>
+                      <SelectField
+                        label="Направление"
+                        value={debtDirection}
+                        onValueChange={(v) => {
+                          setDebtDirection(v as DebtDirection);
+                          if (v === "DEBT_OFFSET") {
+                            setDirection("TRANSFER");
+                            setPrimaryItemId(null);
+                            setCounterpartyItemId(null);
+                            setCounterpartyId(null);
+                          }
+                        }}
+                        placeholder="Выберите направление"
+                        options={[
+                          {
+                            value: "I_PAID",
+                            label: (
+                              <span className="inline-flex items-center gap-2 whitespace-nowrap leading-none [&_svg]:shrink-0 [&_svg]:block [&_svg]:text-current">
+                                <ArrowRight className="size-4" />
+                                Вы дали в долг / заплатили по долгу
+                              </span>
+                            ),
+                          },
+                          {
+                            value: "I_PAID_FOR_SOMEONE",
+                            label: (
+                              <span className="inline-flex items-center gap-2 whitespace-nowrap leading-none [&_svg]:shrink-0 [&_svg]:block [&_svg]:text-current">
+                                <ArrowRight className="size-4" />
+                                Вы заплатили за кого-то
+                              </span>
+                            ),
+                          },
+                          {
+                            value: "THEY_PAID",
+                            label: (
+                              <span className="inline-flex items-center gap-2 whitespace-nowrap leading-none [&_svg]:shrink-0 [&_svg]:block [&_svg]:text-current">
+                                <ArrowLeft className="size-4" />
+                                Вам дали в долг / заплатили по долгу
+                              </span>
+                            ),
+                          },
+                          {
+                            value: "THEY_PAID_FOR_ME",
+                            label: (
+                              <span className="inline-flex items-center gap-2 whitespace-nowrap leading-none [&_svg]:shrink-0 [&_svg]:block [&_svg]:text-current">
+                                <ArrowLeft className="size-4" />
+                                Кто-то заплатил за вас
+                              </span>
+                            ),
+                          },
+                          {
+                            value: "DEBT_OFFSET",
+                            label: (
+                              <span className="inline-flex items-center gap-2 whitespace-nowrap leading-none [&_svg]:shrink-0 [&_svg]:block [&_svg]:text-current">
+                                <RefreshCw className="size-4" />
+                                Взаимозачет долгов
+                              </span>
+                            ),
+                          },
+                        ]}
+                      />
                     ) : isLoanRepayment ? null : (
                     <FormField label="Характер транзакции">
                       <SegmentedSelector
@@ -5522,12 +5596,12 @@ function TransactionsView({
                     )}
 
                     <DateField
-                      label={direction === "INCOME" || direction === "EXPENSE" || direction === "TRANSFER" || (isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID" || debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME")) ? "Дата" : "Дата транзакции"}
+                      label={direction === "INCOME" || direction === "EXPENSE" || direction === "TRANSFER" || (isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID" || debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME" || debtDirection === "DEBT_OFFSET")) ? "Дата" : "Дата транзакции"}
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                     />
 
-                    {direction === "TRANSFER" ? (
+                    {(direction === "TRANSFER" || (isDebts && debtDirection === "DEBT_OFFSET")) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <FormField label="Откуда">
                         <ItemSelector
@@ -5578,9 +5652,9 @@ function TransactionsView({
                           ? "Актив, с которого производится погашение"
                           : isDebts
                             ? debtDirection === "I_PAID" || debtDirection === "I_PAID_FOR_SOMEONE"
-                              ? "Откуда платите"
+                              ? "Откуда заплатили"
                               : debtDirection === "THEY_PAID"
-                                ? "Куда платят"
+                                ? "Куда заплатили"
                                 : "Актив / обязательство"
                             : "Актив / обязательство"
                       }
@@ -5705,7 +5779,7 @@ function TransactionsView({
                         </FormField>
                       </div>
                     )}
-                    {(!isTransfer || isDebts) && !(isDebts && (debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME")) && (
+                    {(!isTransfer || isDebts) && !(isDebts && (debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME" || debtDirection === "DEBT_OFFSET")) && (
                       <>
                         <FormField
                           label={
@@ -5760,7 +5834,7 @@ function TransactionsView({
                       </>
                     )}
 
-                    {isDebts && currentDebtCounterpartyId != null && (
+                    {isDebts && debtDirection !== "DEBT_OFFSET" && currentDebtCounterpartyId != null && (
                       <FormField label="Долг по контрагенту">
                         <div className="grid gap-4">
                           <SegmentedSelector
@@ -5890,7 +5964,7 @@ function TransactionsView({
                         </FormField>
                       </>
                     ) : isTransfer && isCrossCurrencyTransfer ? (
-                      <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <TextField
                           label="Сумма списания"
                           currencyCode={primaryCurrencyCode ?? undefined}
@@ -5919,7 +5993,7 @@ function TransactionsView({
                           inputMode="decimal"
                           placeholder="Например: 1 234,56"
                         />
-                      </>
+                      </div>
                     ) : (
                       <div className="grid gap-2">
                         <div className="flex items-center justify-between">
@@ -6028,6 +6102,7 @@ function TransactionsView({
                       </FormField>
                     ) : null}
 
+                    {!(direction === "TRANSFER" || (isDebts && debtDirection === "DEBT_OFFSET")) && (
                     <FormField label="Связанный актив">
                       <ItemSelector
                         items={itemsForSelector}
@@ -6051,6 +6126,7 @@ function TransactionsView({
                         ariaLabel="Связанный актив"
                       />
                     </FormField>
+                    )}
 
                     {direction !== "TRANSFER" && relatedItemId != null && (
                       <FormField label="Тип привязки к активу">

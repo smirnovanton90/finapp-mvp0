@@ -574,7 +574,8 @@ export type DebtDirection =
   | "I_PAID"
   | "THEY_PAID"
   | "I_PAID_FOR_SOMEONE"
-  | "THEY_PAID_FOR_ME";
+  | "THEY_PAID_FOR_ME"
+  | "DEBT_OFFSET";
 
 export type TransactionDebtsCreate = {
   debt_direction: "I_PAID" | "THEY_PAID";

@@ -1465,7 +1465,7 @@ function TransactionCardRow({
         >
           <input
             type="checkbox"
-            className="h-4 w-4 accent-violet-600"
+            className="h-5 w-5 accent-violet-600"
             checked={isSelected}
             onChange={(e) => onToggleSelection(tx.id, e.target.checked)}
             disabled={checkboxDisabled}

@@ -2,7 +2,6 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ACCENT_FILL_LIGHT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
 
 type IconButtonProps = React.ComponentProps<typeof Button>;
 
@@ -15,13 +14,6 @@ export function IconButton({
   children,
   ...rest
 }: IconButtonProps & { appearance?: "default" | "inactive" }) {
-  const mergedStyle = {
-    // Базовый цвет подложки; при ховере — светлее
-    "--icon-button-bg": ACCENT_FILL_MEDIUM,
-    "--icon-button-bg-hover": ACCENT_FILL_LIGHT,
-    ...(style as React.CSSProperties),
-  } as React.CSSProperties;
-
   return (
     <Button
       {...rest}
@@ -30,17 +22,17 @@ export function IconButton({
       className={cn(
         // 32x32 прямоугольник со скруглением 9px
         "h-8 w-8 shrink-0 rounded-[9px]",
-        // Подложка и hover — только для активного варианта
+        // Подложка и hover как у полей ввода: при ховере светлее (input/30 → input/50 в dark, прозрачный → input/20 в light)
         appearance === "inactive"
           ? null
-          : "bg-[var(--icon-button-bg)] hover:bg-[var(--icon-button-bg-hover)]",
+          : "bg-transparent shadow-xs hover:bg-input/20 dark:bg-input/30 dark:hover:bg-input/50",
         // Цвет иконки по умолчанию
         "text-[rgba(197,191,241,0.6)]",
         // Иконка 16x16 по умолчанию, если не переопределена size- классом
         "[&_svg:not([class*='size-'])]:size-4",
         className
       )}
-      style={mergedStyle}
+      style={style}
     >
       {children}
     </Button>

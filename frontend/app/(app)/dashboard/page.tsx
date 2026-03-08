@@ -419,6 +419,7 @@ function buildCategoryBreakdown(
     resolveTopLevelLabel(categoryId, categoryLookup);
 
   txs.forEach((tx) => {
+    if (tx.is_split_parent) return;
     if (tx.direction !== direction) return;
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
@@ -465,6 +466,7 @@ function buildCategoryTotalsByLabel(
     resolveTopLevelLabel(categoryId, categoryLookup);
 
   txs.forEach((tx) => {
+    if (tx.is_split_parent) return;
     if (tx.direction !== direction) return;
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
@@ -487,6 +489,7 @@ function buildCategoryMonthlyTotals(
   const totals = new Map<string, Map<string, number>>();
 
   txs.forEach((tx) => {
+    if (tx.is_split_parent) return;
     if (tx.direction !== direction) return;
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
@@ -612,6 +615,7 @@ function buildDeltasByDate(
   };
 
   txs.forEach((tx) => {
+    if (tx.is_split_parent) return;
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     if (tx.source === "AUTO_ITEM_OPENING" || tx.source === "AUTO_ITEM_CLOSING") {
@@ -762,6 +766,7 @@ export default function DashboardPage() {
       let amount = 0;
       if (range) {
         txs.forEach((tx) => {
+          if (tx.is_split_parent) return;
           if (tx.direction !== direction) return;
           if (!isRealizedTransaction(tx)) return;
           if (!tx.category_id || !categoryIds.has(tx.category_id)) return;

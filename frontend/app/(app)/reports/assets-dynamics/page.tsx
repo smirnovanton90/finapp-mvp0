@@ -447,6 +447,7 @@ function buildDeltasByDate(
   };
 
   txs.forEach((tx) => {
+    if (tx.is_split_parent) return;
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     // В отчёте учитываем только плановые нереализованные транзакции
@@ -518,6 +519,7 @@ function buildLotDeltasByDate(
   };
 
   txs.forEach((tx) => {
+    if (tx.is_split_parent) return;
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     // В отчёте учитываем только плановые нереализованные транзакции
@@ -580,6 +582,7 @@ function buildUnitsDeltasByDate(
   };
 
   txs.forEach((tx) => {
+    if (tx.is_split_parent) return;
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     // В отчёте учитываем только плановые нереализованные транзакции
@@ -2735,6 +2738,7 @@ export default function AssetsDynamicsPage() {
                                     ? (() => {
                                         const isMarketOrCryptoItem = isMoexItem(item) || isCryptoItem(item);
                                         const included = transactions.filter((tx) => {
+                                          if (tx.is_split_parent) return false;
                                           if (tx.transaction_type === "ACTUAL" || tx.status === "REALIZED") return false;
                                           const d = toTxDateKey(tx.transaction_date);
                                           if (d <= dateStart || d > dateEnd) return false;

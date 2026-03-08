@@ -366,6 +366,7 @@ export default function AssetsProfitabilityPage() {
 
     const itemIds = new Set(effectiveItems.map((item) => item.id));
     const relevantTxs = transactions.filter((tx) => {
+      if (tx.is_split_parent) return false;
       const relatedId = tx.related_item_id ?? null;
       if (!relatedId || !itemIds.has(relatedId)) return false;
       const key = toDateKey(tx.transaction_date);

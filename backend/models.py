@@ -646,6 +646,18 @@ class Transaction(Base):
 
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    parent_transaction_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("transactions.id"), nullable=True
+    )
+    parent_transaction: Mapped[Optional["Transaction"]] = relationship(
+        foreign_keys=[parent_transaction_id], remote_side="Transaction.id"
+    )
+    child_transactions: Mapped[list["Transaction"]] = relationship(
+        foreign_keys=[parent_transaction_id], back_populates="parent_transaction"
+    )
+
+    is_split_parent: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
     @property
     def chain_name(self) -> str | None:
         return self.chain.name if self.chain else None

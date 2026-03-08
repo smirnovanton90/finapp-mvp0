@@ -219,7 +219,8 @@ function buildCategoryMatrix(
   categoryById: Map<number, CategoryNode>,
   monthKeysOverride?: string[]
 ): CategoryMatrix {
-  const rows = buildCategoryRows(txs, categoryById);
+  const filteredTxs = txs.filter((tx) => tx.is_split_parent !== true);
+  const rows = buildCategoryRows(filteredTxs, categoryById);
   const totals = new Map<number, Record<string, number>>();
   rows.forEach((row) => totals.set(row.id, {}));
 
@@ -233,7 +234,7 @@ function buildCategoryMatrix(
     rowTotals[monthKey] = (rowTotals[monthKey] ?? 0) + value;
   };
 
-  txs.forEach((tx) => {
+  filteredTxs.forEach((tx) => {
     const categoryId = tx.category_id;
     if (!categoryId) return;
     const trail = resolveTrail(categoryId);

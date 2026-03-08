@@ -175,7 +175,9 @@ function buildCategoryBreakdownByPeriod(
   ratesByDate: Record<string, FxRateOut[]>,
   categoryById: Map<number, CategoryNode>
 ): { rows: CategoryRow[]; totals: Map<number, Record<string, number>> } {
-  const filteredTxs = txs.filter((tx) => tx.direction === direction);
+  const filteredTxs = txs.filter(
+    (tx) => tx.direction === direction && tx.is_split_parent !== true
+  );
   const rows = buildCategoryRows(filteredTxs, categoryById);
   const totals = new Map<number, Record<string, number>>();
   rows.forEach((row) => {
@@ -1661,6 +1663,7 @@ export default function IncomeExpenseDynamicsPage() {
     const map = new Map<string, number>();
     chartPeriodPoints.forEach((p) => map.set(p.periodKey, 0));
     chartTxList.forEach((tx) => {
+      if (tx.is_split_parent) return;
       if (tx.direction !== "INCOME") return;
       if (showForecast && tx.transaction_type !== "ACTUAL") return;
       const dateKey = toTxDateKey(tx.transaction_date);
@@ -1677,6 +1680,7 @@ export default function IncomeExpenseDynamicsPage() {
     const map = new Map<string, number>();
     chartPeriodPoints.forEach((p) => map.set(p.periodKey, 0));
     chartTxList.forEach((tx) => {
+      if (tx.is_split_parent) return;
       if (tx.direction !== "EXPENSE") return;
       if (showForecast && tx.transaction_type !== "ACTUAL") return;
       const dateKey = toTxDateKey(tx.transaction_date);
@@ -1694,6 +1698,7 @@ export default function IncomeExpenseDynamicsPage() {
     const map = new Map<string, number>();
     chartPeriodPoints.forEach((p) => map.set(p.periodKey, 0));
     chartTxList.forEach((tx) => {
+      if (tx.is_split_parent) return;
       if (tx.direction !== "INCOME") return;
       const dateKey = toTxDateKey(tx.transaction_date);
       if (!dateKey) return;
@@ -1710,6 +1715,7 @@ export default function IncomeExpenseDynamicsPage() {
     const map = new Map<string, number>();
     chartPeriodPoints.forEach((p) => map.set(p.periodKey, 0));
     chartTxList.forEach((tx) => {
+      if (tx.is_split_parent) return;
       if (tx.direction !== "EXPENSE") return;
       const dateKey = toTxDateKey(tx.transaction_date);
       if (!dateKey) return;

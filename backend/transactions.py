@@ -14,6 +14,8 @@ from schemas import (
     TransactionOut,
     TransactionStatusUpdate,
     TransactionPageOut,
+    TransactionSplitCreate,
+    TransactionSplitOut,
     TransactionDirection,
     TransactionStatus,
     TransactionType,
@@ -432,6 +434,7 @@ def create_debts_transaction(
         category_id=None,
         comment=data.comment,
         status=data.status,
+        parent_transaction_id=data.parent_transaction_id,
     )
     return _create_transaction_impl(db, user, payload)
 
@@ -513,6 +516,23 @@ def create_they_paid_for_me_transaction(
 
 
 def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -> Transaction:
+    if data.parent_transaction_id is not None:
+        parent = (
+            db.query(Transaction)
+            .filter(
+                Transaction.id == data.parent_transaction_id,
+                Transaction.user_id == user.id,
+                Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(True),
+            )
+            .first()
+        )
+        if not parent:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid parent_transaction_id: parent must exist, belong to user, not be deleted, and be a split parent.",
+            )
+
     primary_side = _resolve_effective_side(db, user, data.primary_item_id, True, "primary")
     primary = primary_side.effective_item
     primary_is_moex = is_moex_item(primary)
@@ -681,6 +701,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         comment=data.comment,
         related_item_id=data.related_item_id,
         asset_link_type=data.asset_link_type,
+        parent_transaction_id=data.parent_transaction_id,
     )
 
     if data.transaction_type == "ACTUAL":
@@ -1096,6 +1117,8 @@ def update_transaction(
     tx.comment = data.comment
     tx.related_item_id = data.related_item_id
     tx.asset_link_type = data.asset_link_type
+    if data.parent_transaction_id is not None:
+        tx.parent_transaction_id = data.parent_transaction_id
 
     for item in items_by_id.values():
         if item and item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
@@ -1106,10 +1129,10 @@ def update_transaction(
     return tx
 
 
-def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> None:
-    if tx.deleted_at is not None:
+def _rollback_transaction_balance(db: Session, user: User, tx: Transaction) -> None:
+    """Reverse the balance impact of an ACTUAL transaction (without setting deleted_at)."""
+    if tx.transaction_type != "ACTUAL":
         return
-
     primary = (
         db.query(Item)
         .filter(Item.id == tx.primary_item_id, Item.user_id == user.id)
@@ -1118,77 +1141,153 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
     )
     if not primary:
         raise HTTPException(status_code=400, detail="Primary item not found")
-
     counter = None
-    if tx.direction == "TRANSFER":
-        if not tx.counterparty_item_id and tx.transaction_type != "PLANNED":
-            raise HTTPException(status_code=400, detail="Broken transfer transaction")
-        if tx.counterparty_item_id:
-            counter = (
-                db.query(Item)
-                .filter(Item.id == tx.counterparty_item_id, Item.user_id == user.id)
-                .with_for_update()
-                .first()
-            )
-            if not counter:
-                raise HTTPException(status_code=400, detail="Counterparty item not found")
+    if tx.direction == "TRANSFER" and tx.counterparty_item_id:
+        counter = (
+            db.query(Item)
+            .filter(Item.id == tx.counterparty_item_id, Item.user_id == user.id)
+            .with_for_update()
+            .first()
+        )
+        if not counter:
+            raise HTTPException(status_code=400, detail="Counterparty item not found")
     primary_is_moex = is_moex_item(primary)
     counter_is_moex = is_moex_item(counter) if counter else False
     primary_is_crypto = is_crypto_item(primary)
     counter_is_crypto = is_crypto_item(counter) if counter else False
 
-    if tx.transaction_type == "ACTUAL":
-        amt = tx.amount_rub
-        amt_counterparty = tx.amount_counterparty or amt
+    amt = tx.amount_rub
+    amt_counterparty = tx.amount_counterparty or amt
 
-        if tx.direction == "INCOME":
-            if primary_is_moex:
-                _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx.transaction_date)
-            elif primary_is_crypto and tx.primary_quantity_units is not None:
-                _apply_quantity_units_delta(primary, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
-            else:
-                next_balance = primary.current_value_rub - amt
-                if next_balance < get_min_balance(primary):
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Cannot delete: would make balance negative. Delete later transactions first.",
-                    )
-                primary.current_value_rub = next_balance
-        elif tx.direction == "EXPENSE":
-            if primary_is_moex:
-                _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
-            elif primary_is_crypto and tx.primary_quantity_units is not None:
-                _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
-            else:
-                primary.current_value_rub += amt
-        elif tx.direction == "TRANSFER":
-            if primary_is_moex:
-                _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
-            elif primary_is_crypto and tx.primary_quantity_units is not None:
-                _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
-            primary_delta = -transfer_delta(primary.kind, True, amt)
-            if primary.current_value_rub + primary_delta < get_min_balance(primary):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Cannot delete: would make balance negative. Delete later transactions first.",
-                )
-            primary.current_value_rub += primary_delta
+    if tx.direction == "INCOME":
+        if primary_is_moex:
+            _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx.transaction_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
+        else:
+            primary.current_value_rub -= amt
+    elif tx.direction == "EXPENSE":
+        if primary_is_moex:
+            _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
+        else:
+            primary.current_value_rub += amt
+    elif tx.direction == "TRANSFER" and counter:
+        if primary_is_moex:
+            _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
+        primary_delta = -transfer_delta(primary.kind, True, amt)
+        primary.current_value_rub += primary_delta
+        if counter_is_moex:
+            _apply_position_delta(counter, -(tx.counterparty_quantity_lots or 0), tx.transaction_date)
+        counter_delta = -transfer_delta(counter.kind, False, amt_counterparty)
+        counter.current_value_rub += counter_delta
 
-            if counter_is_moex:
-                _apply_position_delta(counter, -(tx.counterparty_quantity_lots or 0), tx.transaction_date)
-            counter_delta = -transfer_delta(counter.kind, False, amt_counterparty)
-            if counter.current_value_rub + counter_delta < get_min_balance(counter):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Cannot delete: would make counterparty balance negative. Delete later transactions first.",
-                )
-            counter.current_value_rub += counter_delta
-
-    tx.deleted_at = datetime.now(timezone.utc)
+    if tx.related_item_id:
+        related_item = db.query(Item).filter(Item.id == tx.related_item_id, Item.user_id == user.id).with_for_update().first()
+        if related_item and tx.primary_quantity_lots is not None and is_moex_item(related_item):
+            if tx.direction == "EXPENSE":
+                _apply_position_delta(related_item, -(tx.primary_quantity_lots or 0), tx.transaction_date)
+            elif tx.direction == "INCOME":
+                _apply_position_delta(related_item, tx.primary_quantity_lots or 0, tx.transaction_date)
+        if related_item and tx.primary_quantity_units is not None and is_crypto_item(related_item):
+            if tx.direction == "EXPENSE":
+                _apply_quantity_units_delta(related_item, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
+            elif tx.direction == "INCOME":
+                _apply_quantity_units_delta(related_item, float(tx.primary_quantity_units or 0), tx.transaction_date)
 
     update_settlements_item_closed_status(db, primary)
     if counter:
         update_settlements_item_closed_status(db, counter)
+
+
+def _apply_transaction_balance(db: Session, user: User, tx: Transaction) -> None:
+    """Apply the balance impact of an ACTUAL transaction (tx already has all fields set)."""
+    if tx.transaction_type != "ACTUAL":
+        return
+    primary = (
+        db.query(Item)
+        .filter(Item.id == tx.primary_item_id, Item.user_id == user.id)
+        .with_for_update()
+        .first()
+    )
+    if not primary:
+        raise HTTPException(status_code=400, detail="Primary item not found")
+    counter = None
+    if tx.direction == "TRANSFER" and tx.counterparty_item_id:
+        counter = (
+            db.query(Item)
+            .filter(Item.id == tx.counterparty_item_id, Item.user_id == user.id)
+            .with_for_update()
+            .first()
+        )
+        if not counter:
+            raise HTTPException(status_code=400, detail="Counterparty item not found")
+    primary_is_moex = is_moex_item(primary)
+    counter_is_moex = is_moex_item(counter) if counter else False
+    primary_is_crypto = is_crypto_item(primary)
+    counter_is_crypto = is_crypto_item(counter) if counter else False
+
+    amt = tx.amount_rub
+    amt_counterparty = tx.amount_counterparty or amt
+
+    if tx.direction == "INCOME":
+        if primary_is_moex:
+            _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
+        else:
+            primary.current_value_rub += amt
+    elif tx.direction == "EXPENSE":
+        if primary_is_moex:
+            _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx.transaction_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, -float(tx.primary_quantity_units or 0), tx.transaction_date)
+        else:
+            next_balance = primary.current_value_rub - amt
+            if next_balance < get_min_balance(primary):
+                raise HTTPException(
+                    status_code=400,
+                    detail=balance_violation_detail(primary, amt, tx.transaction_date),
+                )
+            primary.current_value_rub = next_balance
+    elif tx.direction == "TRANSFER" and counter:
+        if primary_is_moex:
+            _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx.transaction_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
+        primary_delta = transfer_delta(primary.kind, True, amt)
+        primary.current_value_rub += primary_delta
+        if counter_is_moex:
+            _apply_position_delta(counter, tx.counterparty_quantity_lots or 0, tx.transaction_date)
+        counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
+        counter.current_value_rub += counter_delta
+
+    if tx.related_item_id:
+        related_item = db.query(Item).filter(Item.id == tx.related_item_id, Item.user_id == user.id).with_for_update().first()
+        if related_item and tx.primary_quantity_lots is not None and is_moex_item(related_item):
+            if tx.direction == "EXPENSE":
+                _apply_position_delta(related_item, tx.primary_quantity_lots or 0, tx.transaction_date)
+            elif tx.direction == "INCOME":
+                _apply_position_delta(related_item, -(tx.primary_quantity_lots or 0), tx.transaction_date)
+        if related_item and tx.primary_quantity_units is not None and is_crypto_item(related_item):
+            if tx.direction == "EXPENSE":
+                _apply_quantity_units_delta(related_item, float(tx.primary_quantity_units or 0), tx.transaction_date)
+            elif tx.direction == "INCOME":
+                _apply_quantity_units_delta(related_item, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
+
+    update_settlements_item_closed_status(db, primary)
+    if counter:
+        update_settlements_item_closed_status(db, counter)
+
+
+def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> None:
+    if tx.deleted_at is not None:
+        return
+    _rollback_transaction_balance(db, user, tx)
+    tx.deleted_at = datetime.now(timezone.utc)
 
 
 def purge_card_transactions(db: Session, user: User, card_item_id: int) -> int:
@@ -1237,6 +1336,167 @@ def update_transaction_status(
         db.refresh(tx)
     return tx
 
+@router.post("/{tx_id}/split", response_model=TransactionSplitOut)
+def split_transaction(
+    tx_id: int,
+    data: TransactionSplitCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    tx = (
+        db.query(Transaction)
+        .filter(Transaction.id == tx_id, Transaction.user_id == user.id)
+        .with_for_update()
+        .first()
+    )
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if tx.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot split deleted transaction")
+    if tx.transaction_type != "ACTUAL":
+        raise HTTPException(status_code=400, detail="Can only split ACTUAL transactions")
+    if tx.parent_transaction_id is not None:
+        raise HTTPException(status_code=400, detail="Cannot split a transaction that is already a part")
+
+    parts_sum = sum(p.amount_rub for p in data.parts)
+    if parts_sum > tx.amount_rub:
+        raise HTTPException(
+            status_code=400,
+            detail="Sum of parts must not exceed the transaction amount",
+        )
+    if not data.parts:
+        raise HTTPException(status_code=400, detail="At least one part is required")
+
+    _rollback_transaction_balance(db, user, tx)
+    tx.is_split_parent = True
+
+    parts_out = []
+    for part_data in data.parts:
+        category = resolve_category_or_none(db, user, part_data.category_id)
+        if part_data.category_id is not None and category is None:
+            raise HTTPException(status_code=400, detail=f"Invalid category_id {part_data.category_id}")
+        if category is None and tx.direction in ("INCOME", "EXPENSE"):
+            scope_filter = "INCOME" if tx.direction == "INCOME" else "EXPENSE"
+            default_cat = (
+                db.query(Category)
+                .filter(
+                    Category.archived_at.is_(None),
+                    or_(Category.owner_user_id.is_(None), Category.owner_user_id == user.id),
+                    or_(Category.scope == scope_filter, Category.scope == "BOTH"),
+                )
+                .first()
+            )
+            category = default_cat
+        cat_id = category.id if category else None
+
+        amount_counterparty_part = None
+        if tx.direction == "TRANSFER" and tx.amount_counterparty is not None and tx.amount_rub:
+            amount_counterparty_part = int(round(tx.amount_counterparty * part_data.amount_rub / tx.amount_rub))
+
+        part_lots = None
+        part_counterparty_lots = None
+        part_units = None
+        part_counterparty_units = None
+        if tx.amount_rub:
+            if tx.primary_quantity_lots is not None:
+                part_lots = int(round(tx.primary_quantity_lots * part_data.amount_rub / tx.amount_rub))
+            if tx.counterparty_quantity_lots is not None:
+                part_counterparty_lots = int(round(tx.counterparty_quantity_lots * part_data.amount_rub / tx.amount_rub))
+            if tx.primary_quantity_units is not None:
+                part_units = round(float(tx.primary_quantity_units) * part_data.amount_rub / tx.amount_rub, 10)
+            if tx.counterparty_quantity_units is not None:
+                part_counterparty_units = round(float(tx.counterparty_quantity_units) * part_data.amount_rub / tx.amount_rub, 10)
+
+        part_tx = Transaction(
+            user_id=user.id,
+            transaction_date=tx.transaction_date,
+            primary_item_id=tx.primary_item_id,
+            primary_card_item_id=tx.primary_card_item_id,
+            counterparty_item_id=tx.counterparty_item_id,
+            counterparty_card_item_id=tx.counterparty_card_item_id,
+            counterparty_id=tx.counterparty_id,
+            amount_rub=part_data.amount_rub,
+            amount_counterparty=amount_counterparty_part if tx.direction == "TRANSFER" else None,
+            primary_quantity_lots=part_lots,
+            counterparty_quantity_lots=part_counterparty_lots,
+            primary_quantity_units=part_units,
+            counterparty_quantity_units=part_counterparty_units,
+            direction=tx.direction,
+            transaction_type=tx.transaction_type,
+            status=tx.status,
+            category_id=cat_id,
+            comment=tx.comment,
+            related_item_id=tx.related_item_id,
+            asset_link_type=tx.asset_link_type,
+            parent_transaction_id=tx.id,
+        )
+        db.add(part_tx)
+        db.flush()
+        _apply_transaction_balance(db, user, part_tx)
+        db.refresh(part_tx)
+        parts_out.append(part_tx)
+
+    db.commit()
+    db.refresh(tx)
+    return TransactionSplitOut(parent=tx, parts=parts_out)
+
+
+def _do_unsplit(db: Session, user: User, parent: Transaction) -> None:
+    """Unsplit: rollback all parts, soft-delete them, set parent.is_split_parent=False, apply parent balance."""
+    children = (
+        db.query(Transaction)
+        .filter(
+            Transaction.parent_transaction_id == parent.id,
+            Transaction.user_id == user.id,
+            Transaction.deleted_at.is_(None),
+        )
+        .with_for_update()
+        .all()
+    )
+    for child in children:
+        _rollback_transaction_balance(db, user, child)
+        child.deleted_at = datetime.now(timezone.utc)
+    parent.is_split_parent = False
+    _apply_transaction_balance(db, user, parent)
+
+
+@router.post("/{tx_id}/unsplit", response_model=TransactionOut)
+def unsplit_transaction(
+    tx_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    parent = (
+        db.query(Transaction)
+        .filter(Transaction.id == tx_id, Transaction.user_id == user.id)
+        .with_for_update()
+        .first()
+    )
+    if not parent:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if parent.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot unsplit deleted transaction")
+    if not parent.is_split_parent:
+        raise HTTPException(status_code=400, detail="Transaction is not a split parent")
+
+    children = (
+        db.query(Transaction)
+        .filter(
+            Transaction.parent_transaction_id == parent.id,
+            Transaction.deleted_at.is_(None),
+        )
+        .limit(1)
+        .all()
+    )
+    if not children:
+        raise HTTPException(status_code=400, detail="No non-deleted parts to unsplit")
+
+    _do_unsplit(db, user, parent)
+    db.commit()
+    db.refresh(parent)
+    return parent
+
+
 @router.delete("/{tx_id}")
 def delete_transaction(
     tx_id: int,
@@ -1255,7 +1515,45 @@ def delete_transaction(
     if tx.deleted_at is not None:
         return {"ok": True}
 
-    _apply_transaction_soft_delete(db, user, tx)
-
+    if tx.is_split_parent:
+        children = (
+            db.query(Transaction)
+            .filter(
+                Transaction.parent_transaction_id == tx.id,
+                Transaction.user_id == user.id,
+                Transaction.deleted_at.is_(None),
+            )
+            .with_for_update()
+            .all()
+        )
+        for child in children:
+            _apply_transaction_soft_delete(db, user, child)
+        tx.deleted_at = datetime.now(timezone.utc)
+    else:
+        parent_id = tx.parent_transaction_id
+        _apply_transaction_soft_delete(db, user, tx)
+    parent_id = tx.parent_transaction_id
     db.commit()
+
+    if parent_id is not None:
+        remaining_parts = (
+            db.query(Transaction)
+            .filter(
+                Transaction.parent_transaction_id == parent_id,
+                Transaction.user_id == user.id,
+                Transaction.deleted_at.is_(None),
+            )
+            .count()
+        )
+        if remaining_parts == 0:
+            parent = (
+                db.query(Transaction)
+                .filter(Transaction.id == parent_id, Transaction.user_id == user.id)
+                .with_for_update()
+                .first()
+            )
+            if parent and parent.is_split_parent:
+                _do_unsplit(db, user, parent)
+                db.commit()
+
     return {"ok": True}

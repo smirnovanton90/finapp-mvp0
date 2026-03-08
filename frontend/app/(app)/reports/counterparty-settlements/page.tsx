@@ -168,7 +168,9 @@ function buildReportData(
   };
   const isRealized = (tx: TransactionOut) =>
     tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-  const relevantTxs = transactions.filter((tx) => isRelevantTx(tx) && isRealized(tx));
+  const relevantTxs = transactions.filter(
+    (tx) => !tx.is_split_parent && isRelevantTx(tx) && isRealized(tx)
+  );
 
   const txDelta = (tx: TransactionOut): number => {
     let delta = 0;

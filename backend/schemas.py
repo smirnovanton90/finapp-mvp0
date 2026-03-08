@@ -559,6 +559,7 @@ class TransactionBase(BaseModel):
 
 class TransactionCreate(TransactionBase):
     status: TransactionStatus | None = None
+    parent_transaction_id: int | None = None
 
     @model_validator(mode="after")
     def validate_asset_link_input(self) -> "TransactionCreate":
@@ -600,6 +601,7 @@ class TransactionDebtsCreate(BaseModel):
     transaction_type: TransactionType = "ACTUAL"
     comment: str | None = None
     status: TransactionStatus | None = None
+    parent_transaction_id: int | None = None
 
 
 class TransactionTheyPaidForMeCreate(BaseModel):
@@ -624,6 +626,8 @@ class TransactionOut(TransactionBase):
     deleted_at: datetime | None = None
     related_item_id: int | None = None
     source: str | None = None
+    parent_transaction_id: int | None = None
+    is_split_parent: bool = False
 
     class Config:
         from_attributes = True
@@ -635,6 +639,20 @@ class TransactionPageOut(BaseModel):
 
 class TransactionStatusUpdate(BaseModel):
     status: TransactionStatus
+
+
+class TransactionSplitPartCreate(BaseModel):
+    amount_rub: int = Field(..., ge=0)
+    category_id: int | None = None
+
+
+class TransactionSplitCreate(BaseModel):
+    parts: list[TransactionSplitPartCreate] = Field(..., min_length=1)
+
+
+class TransactionSplitOut(BaseModel):
+    parent: TransactionOut
+    parts: list[TransactionOut]
 
 
 class TransactionChainCreate(BaseModel):

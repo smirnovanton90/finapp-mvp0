@@ -1159,6 +1159,7 @@ def list_items(
                 Transaction.asset_link_type == "ASSET_INVESTMENT",
                 Transaction.transaction_type == "ACTUAL",
                 Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(False),
             )
         )
         inv_txs = inv_q.all()
@@ -1251,6 +1252,7 @@ def get_item(
             Transaction.asset_link_type == "ASSET_PURCHASE",
             Transaction.transaction_type == "ACTUAL",
             Transaction.deleted_at.is_(None),
+            Transaction.is_split_parent.is_(False),
         )
         .scalar()
         or 0
@@ -1263,6 +1265,7 @@ def get_item(
             Transaction.asset_link_type == "ASSET_INVESTMENT",
             Transaction.transaction_type == "ACTUAL",
             Transaction.deleted_at.is_(None),
+            Transaction.is_split_parent.is_(False),
         )
         .scalar()
         or 0
@@ -2367,6 +2370,7 @@ def _compute_acquisition_cost_basis(
                 Transaction.asset_link_type == "ASSET_PURCHASE",
                 Transaction.transaction_type == "ACTUAL",
                 Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(False),
             )
         )
         if up_to_date is not None:
@@ -2406,6 +2410,7 @@ def _compute_acquisition_cost_basis(
                 Transaction.asset_link_type == "ASSET_PURCHASE",
                 Transaction.transaction_type == "ACTUAL",
                 Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(False),
             )
         )
         if up_to_date is not None:
@@ -2447,6 +2452,7 @@ def _compute_acquisition_cost_basis(
             Transaction.asset_link_type.in_(["ASSET_PURCHASE", "ASSET_SALE"]),
             Transaction.transaction_type == "ACTUAL",
             Transaction.deleted_at.is_(None),
+            Transaction.is_split_parent.is_(False),
         )
     )
     if is_moex_item(item):
@@ -2519,6 +2525,7 @@ def get_item_costs(
             Transaction.asset_link_type == "ASSET_INVESTMENT",
             Transaction.transaction_type == "ACTUAL",
             Transaction.deleted_at.is_(None),
+            Transaction.is_split_parent.is_(False),
         )
     )
     inv_txs = inv_q.all()
@@ -2622,6 +2629,7 @@ def get_item_costs(
                 Transaction.asset_link_type == asset_link_type,
                 Transaction.transaction_type == "ACTUAL",
                 Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(False),
             )
         )
         txs = q.all()
@@ -2688,6 +2696,7 @@ def _build_item_cost_history(
             Transaction.user_id == user_id,
             Transaction.transaction_type == "ACTUAL",
             Transaction.deleted_at.is_(None),
+            Transaction.is_split_parent.is_(False),
             or_(
                 Transaction.primary_item_id == item_id,
                 Transaction.counterparty_item_id == item_id,
@@ -2777,6 +2786,7 @@ def _build_item_cost_history(
                 Transaction.primary_quantity_lots.isnot(None),
                 Transaction.transaction_type == "ACTUAL",
                 Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(False),
             )
             .order_by(Transaction.transaction_date.asc())
             .all()
@@ -2802,6 +2812,7 @@ def _build_item_cost_history(
                 Transaction.primary_quantity_units.isnot(None),
                 Transaction.transaction_type == "ACTUAL",
                 Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(False),
             )
             .order_by(Transaction.transaction_date.asc())
             .all()
@@ -2873,6 +2884,7 @@ def _build_item_cost_history(
                 Transaction.asset_link_type == "ASSET_INVESTMENT",
                 Transaction.transaction_type == "ACTUAL",
                 Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(False),
             )
         )
         inv_txs = inv_txs.filter(Transaction.transaction_date <= d).all()

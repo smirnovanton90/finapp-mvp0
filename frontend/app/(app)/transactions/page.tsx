@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -32,7 +33,9 @@ import {
   ACCENT2,
   MODAL_BG,
 } from "@/lib/colors";
+import { PINK_GRADIENT } from "@/lib/gradients";
 import {
+  AlertCircle,
   ArrowRight,
   ArrowLeft,
   ArrowLeftRight,
@@ -43,6 +46,7 @@ import {
   Calendar,
   ChevronDown,
   ChevronLeft,
+  ChevronUp,
   CheckCircle2,
   CircleDashed,
   Coins,
@@ -68,6 +72,7 @@ import {
   Trophy,
   Trash2,
   Truck,
+  Undo2,
   Upload,
   User,
   Users,
@@ -96,10 +101,12 @@ import { AssetItemIcon } from "@/components/asset-item-icon";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
+import { CurrencyChip } from "@/components/currency-chip";
 import { ChainSelector } from "@/components/chain-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { FilterSection } from "@/components/filter-panel";
 import { FormModal } from "@/components/form-modal";
+import { Switch } from "@/components/ui/switch";
 import { TextField, DateField, FormField, SelectField } from "@/components/ui/form-field";
 import {
   Dialog,
@@ -141,6 +148,8 @@ import {
   fetchTransactionsPage,
   fetchTransactionChains,
   recognizeReceipt,
+  splitTransaction,
+  unsplitTransaction,
   BankOut,
   CounterpartyOut,
   CounterpartyIndustryOut,
@@ -155,6 +164,8 @@ import {
   updateTransactionStatus,
   API_BASE,
   AssetLinkType,
+  TransactionSplitCreate,
+  TransactionSplitPartCreate,
 } from "@/lib/api";
 import {
   formatRubInput,
@@ -314,6 +325,24 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Для разделителей между днями: текущий год — "8 марта", иначе "10 октября 2027". */
+function formatDateSectionHeader(dateKey: string): string {
+  if (!dateKey) return "";
+  const date = new Date(dateKey + "T12:00:00");
+  if (Number.isNaN(date.getTime())) return dateKey;
+  const currentYear = new Date().getFullYear();
+  const year = date.getFullYear();
+  if (year === currentYear) {
+    return date.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  }
+  const withYear = date.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  return withYear.replace(/\s*г\.?\s*$/i, "");
 }
 
 const IMPORT_HEADERS = [
@@ -1163,6 +1192,9 @@ function TransactionCardRow({
   onReady,
   relatedItem,
   relatedItemCounterparty,
+  onUnsplit,
+  onAddChild,
+  childrenSumCents,
 }: {
   tx: TransactionCard;
   counterparty: CounterpartyOut | null;
@@ -1189,6 +1221,9 @@ function TransactionCardRow({
   onReady?: () => void;
   relatedItem: ItemOut | null;
   relatedItemCounterparty: CounterpartyOut | null;
+  onUnsplit?: (tx: TransactionCard) => void;
+  onAddChild?: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
+  childrenSumCents?: number | null;
 }) {
   const isTransfer = tx.direction === "TRANSFER";
   const isExpense = tx.direction === "EXPENSE";
@@ -1196,6 +1231,12 @@ function TransactionCardRow({
   const isPlanned = tx.transaction_type === "PLANNED";
   const isConfirmed = tx.status === "CONFIRMED";
   const isRealized = tx.status === "REALIZED";
+  const isSplitParent = tx.is_split_parent === true;
+  const isChild = tx.parent_transaction_id != null;
+  const hasSumMismatch =
+    isSplitParent &&
+    childrenSumCents != null &&
+    childrenSumCents !== tx.amount;
   const primaryDisplayId = tx.primary_card_item_id ?? tx.primary_item_id;
   const counterpartyDisplayId =
     tx.counterparty_card_item_id ?? tx.counterparty_item_id;
@@ -1298,6 +1339,7 @@ function TransactionCardRow({
   // Цвет суммы: доход — GREEN, расход — RED; перевод: уменьшение — RED, увеличение — GREEN
   const leftAmountColor =
     tx.isDeleted ? textColor : isTransfer ? RED : isIncome ? GREEN : RED;
+  const amountDisplayColor = hasSumMismatch ? RED : leftAmountColor;
   const rightAmountColor = tx.isDeleted ? textColor : isTransfer ? GREEN : textColor;
 
   const actionTextClass = tx.isDeleted ? "text-slate-400" : "text-slate-100";
@@ -1378,7 +1420,7 @@ function TransactionCardRow({
 
   return (
     <div
-      className="flex items-stretch overflow-hidden rounded-lg"
+      className={cn("flex items-stretch overflow-hidden rounded-lg", isChild && "ml-4 border-l-2 border-slate-600/50")}
       style={{
         width: 900,
         boxSizing: "border-box",
@@ -1468,13 +1510,19 @@ function TransactionCardRow({
           style={{ width: 150, padding: 0 }}
         >
           <div
+            className="flex items-center justify-center gap-1.5"
             style={{
               fontSize: 24,
               fontWeight: 500,
-              color: leftAmountColor,
+              color: amountDisplayColor,
               textAlign: "center",
             }}
           >
+            {hasSumMismatch && (
+              <Tooltip content="Сумма частей не совпадает с суммой транзакции">
+                <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Расхождение сумм" />
+              </Tooltip>
+            )}
             {isTransfer ? (
               <>-{amountValue}</>
             ) : (
@@ -1858,6 +1906,23 @@ function TransactionCardRow({
               </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              {isSplitParent && onUnsplit && (
+                <>
+                  <DropdownMenuItem onSelect={() => onUnsplit(tx)}>
+                    <Undo2 className="h-4 w-4" />
+                    Отменить разделение
+                  </DropdownMenuItem>
+                  {onAddChild && (
+                    <DropdownMenuItem
+                      onSelect={(event) => onAddChild(tx, event.currentTarget as HTMLElement)}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Добавить дочернюю
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem
                 onSelect={(event) => {
                   onCreateFrom(tx, event.currentTarget as HTMLElement);
@@ -1989,6 +2054,21 @@ function TransactionsView({
   );
   const [isBulkEditConfirmOpen, setIsBulkEditConfirmOpen] = useState(false);
   const [isBulkEditing, setIsBulkEditing] = useState(false);
+  const [splitParts, setSplitParts] = useState<{ amountStr: string; categoryId: number | null }[]>([]);
+  const splitPartsSumCents = useMemo(
+    () =>
+      splitParts.reduce(
+        (s, p) => s + Math.max(0, parseRubToCents(normalizeRubOnBlur(p.amountStr)) ?? 0),
+        0
+      ),
+    [splitParts]
+  );
+  const [unsplitConfirmTxId, setUnsplitConfirmTxId] = useState<number | null>(null);
+  const [unsplitLoading, setUnsplitLoading] = useState(false);
+  const [splitSectionOpen, setSplitSectionOpen] = useState(false);
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [addChildParentTx, setAddChildParentTx] = useState<TransactionCard | null>(null);
+  const [addChildReturnToParentEdit, setAddChildReturnToParentEdit] = useState(false);
   const [showActive, setShowActive] = useState(initialShowActive);
   const [showDeleted, setShowDeleted] = useState(initialShowDeleted);
   const [showConfirmed, setShowConfirmed] = useState(true);
@@ -2608,12 +2688,17 @@ function TransactionsView({
     setDialogMode(null);
     setEditingTx(null);
     setRealizeSource(null);
+    setAddChildParentTx(null);
+    setAddChildReturnToParentEdit(false);
     setFormError(null);
     setBulkEditIds(null);
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setIsBulkEditing(false);
     setReceiptMessage(null);
+    setSplitEnabled(false);
+    setSplitParts([]);
+    setSplitSectionOpen(false);
   };
 
   const openCreateDialog = (initialMode?: TransactionFormMode) => {
@@ -3041,6 +3126,60 @@ function TransactionsView({
     );
     setCounterpartyId(tx.counterparty_id);
     setAmountStr(formatCentsForInput(tx.amount));
+    setAmountCounterpartyStr(
+      tx.direction === "TRANSFER" && tx.amount_counterparty != null
+        ? formatCentsForInput(tx.amount_counterparty)
+        : ""
+    );
+    setPrimaryQuantityLots(
+      tx.primary_quantity_lots != null ? String(tx.primary_quantity_lots) : ""
+    );
+    setCounterpartyQuantityLots(
+      tx.direction === "TRANSFER" && tx.counterparty_quantity_lots != null
+        ? String(tx.counterparty_quantity_lots)
+        : ""
+    );
+    setPrimaryQuantityUnitsStr(
+      tx.primary_quantity_units != null ? String(tx.primary_quantity_units) : ""
+    );
+    setCounterpartyQuantityUnitsStr(
+      tx.direction === "TRANSFER" && tx.counterparty_quantity_units != null
+        ? String(tx.counterparty_quantity_units)
+        : ""
+    );
+    applyCategorySelectionById(tx.category_id);
+    setComment(tx.comment ?? "");
+    setRelatedItemId(tx.related_item_id ?? null);
+    setAssetLinkType(tx.asset_link_type ?? null);
+  };
+
+  const openAddChildDialog = (
+    tx: TransactionCard,
+    trigger?: HTMLElement | null
+  ) => {
+    lastActiveElementRef.current =
+      trigger ?? (document.activeElement as HTMLElement | null);
+    setFormError(null);
+    setAddChildReturnToParentEdit(editingTx != null && editingTx.id === tx.id);
+    setEditingTx(null);
+    setRealizeSource(null);
+    setAddChildParentTx(tx);
+    setFormMode("STANDARD");
+    setBulkEditIds(null);
+    setBulkEditBaseline(null);
+    setIsBulkEditConfirmOpen(false);
+    setDialogMode("create");
+    setDate(getDateKey(tx.transaction_date));
+    setDirection(tx.direction);
+    setFormTransactionType(tx.transaction_type);
+    setPrimaryItemId(getDisplayPrimaryItemId(tx));
+    setCounterpartyItemId(
+      tx.direction === "TRANSFER" ? getDisplayCounterpartyItemId(tx) : null
+    );
+    setCounterpartyId(tx.counterparty_id);
+    const childrenSum = childrenSumByParentId.get(tx.id) ?? 0;
+    const remainder = Math.max(0, tx.amount - childrenSum);
+    setAmountStr(formatCentsForInput(remainder));
     setAmountCounterpartyStr(
       tx.direction === "TRANSFER" && tx.amount_counterparty != null
         ? formatCentsForInput(tx.amount_counterparty)
@@ -3910,7 +4049,41 @@ function TransactionsView({
       });
   }, [txs, chainIdFilter, chainPresetFilter]);
 
-  const sortedTxs = useMemo(() => filteredTxs, [filteredTxs]);
+  const sortedTxs = useMemo(() => {
+    const list = [...filteredTxs];
+    list.sort((a, b) => {
+      const dateA = getDateKey(a.transaction_date);
+      const dateB = getDateKey(b.transaction_date);
+      if (dateB !== dateA) return dateB.localeCompare(dateA);
+      const groupA = a.parent_transaction_id ?? a.id;
+      const groupB = b.parent_transaction_id ?? b.id;
+      if (groupA !== groupB) return groupA - groupB;
+      const parentFirstA = a.is_split_parent ? 0 : 1;
+      const parentFirstB = b.is_split_parent ? 0 : 1;
+      if (parentFirstA !== parentFirstB) return parentFirstA - parentFirstB;
+      return a.id - b.id;
+    });
+    return list;
+  }, [filteredTxs]);
+  const childrenSumByParentId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const tx of sortedTxs) {
+      if (tx.parent_transaction_id != null && !tx.isDeleted) {
+        const prev = map.get(tx.parent_transaction_id) ?? 0;
+        map.set(tx.parent_transaction_id, prev + tx.amount);
+      }
+    }
+    return map;
+  }, [sortedTxs]);
+  const editFormChildParts = useMemo(() => {
+    if (!editingTx?.is_split_parent) return [];
+    return sortedTxs
+      .filter(
+        (tx) =>
+          tx.parent_transaction_id === editingTx.id && !(tx as TransactionCard).isDeleted
+      )
+      .sort((a, b) => a.id - b.id);
+  }, [sortedTxs, editingTx?.id, editingTx?.is_split_parent]);
   const selectableIds = useMemo(
     () => sortedTxs.filter((tx) => !tx.isDeleted).map((tx) => tx.id),
     [sortedTxs]
@@ -4056,6 +4229,14 @@ function TransactionsView({
 
   const deleteCount = deleteIds?.length ?? 0;
   const isBulkDelete = deleteCount > 1;
+  const hasSplitParentInDelete = (deleteIds ?? []).some(
+    (id) => sortedTxs.find((t) => t.id === id)?.is_split_parent === true
+  );
+  const deleteConfirmDescription = hasSplitParentInDelete
+    ? isBulkDelete
+      ? "Выбранные транзакции и все части разделённых транзакций будут перемещены в список удалённых."
+      : "Транзакция и все её части будут перемещены в список удалённых."
+    : "Транзакции будут перемещены в список удаленных.";
   const isIncomeSelected = selectedDirections.has("INCOME");
   const isExpenseSelected = selectedDirections.has("EXPENSE");
   const isTransferSelected = selectedDirections.has("TRANSFER");
@@ -4897,6 +5078,7 @@ function TransactionsView({
                           amount: debtCents,
                           transaction_type: formTransactionType,
                           comment: comment || null,
+                          parent_transaction_id: editingTx?.parent_transaction_id ?? undefined,
                         });
                         closeDialog();
                         await loadAll();
@@ -5063,12 +5245,69 @@ function TransactionsView({
                           comment: comment || null,
                           related_item_id: relatedItemId ?? null,
                           asset_link_type: assetLinkType ?? null,
+                          parent_transaction_id:
+                            !isEditMode && addChildParentTx
+                              ? addChildParentTx.id
+                              : isEditMode && editingTx?.parent_transaction_id != null
+                                ? editingTx.parent_transaction_id
+                                : undefined,
                         };
 
+                        const doSplitOnSubmit = splitEnabled && !isTransfer && !isBulkEdit && formMode === "STANDARD" && !isDebts && !isLoanRepayment && (!isEditMode || (editingTx && !editingTx.is_split_parent));
+                        if (doSplitOnSubmit) {
+                          const totalCents = isEditMode && editingTx ? editingTx.amount : cents;
+                          const partCents = (p: { amountStr: string; categoryId: number | null }) =>
+                            Math.max(0, parseRubToCents(normalizeRubOnBlur(p.amountStr)) ?? 0);
+                          const filledSum = splitParts.reduce((s, p) => s + partCents(p), 0);
+                          if (filledSum !== totalCents) {
+                            setFormError("Сумма частей должна совпадать с суммой транзакции.");
+                            return;
+                          }
+                          const hasNonZero = splitParts.some((p) => partCents(p) > 0);
+                          if (!hasNonZero) {
+                            setFormError("Добавьте хотя бы одну часть с ненулевой суммой.");
+                            return;
+                          }
+                          const partsForApi: TransactionSplitPartCreate[] = splitParts
+                            .map((p) => ({ amount_rub: partCents(p), category_id: p.categoryId ?? undefined }))
+                            .filter((p) => p.amount_rub > 0);
+                          let remainder = totalCents - filledSum;
+                          if (remainder > 0) partsForApi.push({ amount_rub: remainder, category_id: undefined });
+                          try {
+                            if (!isEditMode) {
+                              const created = await createTransaction(payload);
+                              await splitTransaction(created.id, { parts: partsForApi });
+                            } else {
+                              await splitTransaction(editingTx!.id, { parts: partsForApi });
+                            }
+                            closeDialog();
+                            await loadAll();
+                          } catch (e: unknown) {
+                            setFormError((e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : "Не удалось разделить транзакцию."));
+                          }
+                          return;
+                        }
+
                         if (isEditMode && editingTx) {
+                          if (editingTx.is_split_parent && editFormChildParts.length > 0) {
+                            const childrenSumCents = editFormChildParts.reduce((s, p) => s + p.amount, 0);
+                            if (childrenSumCents !== editingTx.amount) {
+                              setFormError("Сумма частей должна совпадать с суммой транзакции.");
+                              return;
+                            }
+                          }
                           await updateTransaction(editingTx.id, payload);
                         } else {
                           await createTransaction(payload);
+                          const parentToReturnTo = addChildParentTx;
+                          const returnToParentEdit = addChildReturnToParentEdit;
+                          setAddChildParentTx(null);
+                          setAddChildReturnToParentEdit(false);
+                          if (parentToReturnTo && returnToParentEdit) {
+                            openEditDialog(parentToReturnTo as TransactionCard);
+                            await loadAll();
+                            return;
+                          }
                         }
 
                         if (!isEditMode && realizeSource) {
@@ -5099,7 +5338,12 @@ function TransactionsView({
                       : "Добавить"
                   }
                   loading={loading}
-                  disabled={isBulkEditing}
+                  disabled={
+                    isBulkEditing ||
+                    (editingTx?.is_split_parent === true &&
+                      editFormChildParts.length > 0 &&
+                      editFormChildParts.reduce((s, p) => s + p.amount, 0) !== editingTx.amount)
+                  }
                   size="medium"
                   onCloseAutoFocus={(event) => {
                     const lastActive = lastActiveElementRef.current;
@@ -5683,6 +5927,244 @@ function TransactionsView({
                       onChange={(e) => setComment(e.target.value)}
                       placeholder="Например: с коллегами"
                     />
+
+                    {!isBulkEdit && formMode === "STANDARD" && !isDebts && !isLoanRepayment && !addChildParentTx && (
+                      <div>
+                        {(() => {
+                          const isSplitParent = editingTx?.is_split_parent === true;
+                          const formCents = parseRubToCents(normalizeRubOnBlur(amountStr));
+                          const hasValidAmount = Number.isFinite(formCents) && (formCents ?? 0) > 0;
+                          const hasCategory = direction === "TRANSFER" || !!resolveCategoryId(cat1, cat2, cat3);
+                          const canEnableSplit = direction !== "TRANSFER" && !!date && !!primaryItemId && hasValidAmount && hasCategory;
+                          const splitToggleDisabled = !isSplitParent && !canEnableSplit;
+                          return (
+                        <div
+                          className="flex w-full items-center justify-between gap-2 py-1 cursor-pointer hover:opacity-90"
+                          onClick={() => setSplitSectionOpen((v) => !v)}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <IconButton
+                              type="button"
+                              aria-label={splitSectionOpen ? "Свернуть" : "Развернуть"}
+                              onClick={(e) => { e.stopPropagation(); setSplitSectionOpen((v) => !v); }}
+                            >
+                              {splitSectionOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            </IconButton>
+                            <span className="text-sm font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+                              Разделение транзакции
+                            </span>
+                          </div>
+                          <span onClick={(e) => e.stopPropagation()}>
+                            <Switch
+                              checked={(editingTx?.is_split_parent === true) || splitEnabled}
+                              disabled={splitToggleDisabled}
+                              onCheckedChange={(checked) => {
+                                if (!checked) {
+                                  if (editingTx?.is_split_parent === true) setUnsplitConfirmTxId(editingTx.id);
+                                  else setSplitEnabled(false);
+                                } else {
+                                  setSplitEnabled(true);
+                                  setSplitSectionOpen(true);
+                                  const totalCents = editingTx
+                                    ? editingTx.amount
+                                    : (parseRubToCents(normalizeRubOnBlur(amountStr)) ?? 0);
+                                  if (totalCents > 0) {
+                                    const parentCat = editingTx?.category_id ?? resolveCategoryId(cat1, cat2, cat3);
+                                    setSplitParts([{ amountStr: formatCentsForInput(totalCents), categoryId: parentCat ?? null }]);
+                                  }
+                                }
+                              }}
+                              aria-label="Включить или отключить разделение транзакции"
+                            />
+                          </span>
+                        </div>
+                          );
+                        })()}
+                        {splitSectionOpen && (() => {
+                          const isSplitParent = editingTx?.is_split_parent === true;
+                          const formTotalCents =
+                            isEditMode && editingTx
+                              ? editingTx.amount
+                              : (parseRubToCents(normalizeRubOnBlur(amountStr)) ?? 0);
+                          const primaryItemIdForParts = editingTx ? editingTx.primary_item_id : primaryItemId;
+                          const partsCurrencyCode =
+                            (primaryItemIdForParts ? itemsById.get(primaryItemIdForParts)?.currency_code : null) ?? "RUB";
+
+                          if (isSplitParent && editFormChildParts.length > 0) {
+                            const sumPartsCents = editFormChildParts.reduce((s, p) => s + p.amount, 0);
+                            const totalCents = editingTx!.amount;
+                            const ratio = totalCents > 0 ? Math.min(sumPartsCents / totalCents, 1) : 0;
+                            const isExactMatch = totalCents > 0 && sumPartsCents === totalCents;
+                            const barColor = isExactMatch ? GREEN : RED;
+                            return (
+                              <div className="space-y-3 pt-2">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium flex items-baseline gap-2">
+                                      <CurrencyChip code={partsCurrencyCode} />
+                                      <span style={{ color: barColor }}>{formatCentsForInput(sumPartsCents)}</span>
+                                      <span style={{ color: ACTIVE_TEXT_DARK }}>/</span>
+                                      <CurrencyChip code={partsCurrencyCode} />
+                                      <span style={{ color: ACTIVE_TEXT_DARK }}>{formatCentsForInput(totalCents)}</span>
+                                    </span>
+                                  </div>
+                                  <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                                    <div className="h-full rounded-full transition-[width]" style={{ width: `${ratio * 100}%`, backgroundColor: barColor }} />
+                                  </div>
+                                </div>
+                                <div className="space-y-3">
+                                  {editFormChildParts.map((part) => (
+                                    <div key={part.id} className="rounded-lg border p-3 flex items-center justify-between gap-2" style={{ borderColor: "rgba(148, 163, 184, 0.4)" }}>
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-sm font-medium flex items-center gap-2 flex-wrap" style={{ color: ACTIVE_TEXT_DARK }}>
+                                          <CurrencyChip code={partsCurrencyCode} />
+                                          {formatRub(part.amount)}
+                                        </span>
+                                        {part.direction === "TRANSFER" ? (
+                                          <span className="text-sm flex items-center gap-1.5 min-w-0 truncate" style={{ color: ACTIVE_TEXT_DARK }}>
+                                            <ArrowLeftRight className="h-4 w-4 shrink-0" style={{ color: ACTIVE_TEXT_DARK }} aria-hidden />
+                                            <span className="truncate">Перевод</span>
+                                          </span>
+                                        ) : part.category_id != null ? (() => {
+                                          const lines = getCategoryLines(part.category_id);
+                                          const existing = lines.filter((s) => s && s !== CATEGORY_PLACEHOLDER);
+                                          const lowest = existing.length > 0 ? existing[existing.length - 1] : null;
+                                          if (!lowest) return null;
+                                          const PartCategoryIcon = resolveCategoryIcon(part.category_id);
+                                          return (
+                                            <span className="text-sm flex items-center gap-1.5 min-w-0 truncate" style={{ color: ACTIVE_TEXT_DARK }}>
+                                              <PartCategoryIcon className="h-4 w-4 shrink-0" style={{ color: ACTIVE_TEXT_DARK }} aria-hidden />
+                                              <span className="truncate">{lowest}</span>
+                                            </span>
+                                          );
+                                        })() : null}
+                                      </div>
+                                      <Tooltip content="Удалить дочернюю транзакцию">
+                                        <IconButton type="button" aria-label="Удалить дочернюю транзакцию" style={{ color: RED }} onClick={() => openDeleteDialog([part.id])}>
+                                          <Trash2 className="h-4 w-4" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    </div>
+                                  ))}
+                                  <div className="w-full">
+                                    <Tooltip content="Добавить дочернюю" className="block w-full">
+                                      <IconButton type="button" aria-label="Добавить дочернюю" className="!w-full" onClick={() => editingTx && openAddChildDialog(editingTx as TransactionCard)}>
+                                        <Plus className="h-4 w-4" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          if (splitEnabled && direction !== "TRANSFER") {
+                            const sumPartsCents = splitParts.reduce((s, p) => s + Math.max(0, parseRubToCents(normalizeRubOnBlur(p.amountStr)) ?? 0), 0);
+                            const totalCents = formTotalCents;
+                            const ratio = totalCents > 0 ? Math.min(sumPartsCents / totalCents, 1) : 0;
+                            const isExactMatch = totalCents > 0 && sumPartsCents === totalCents;
+                            const barColor = isExactMatch ? GREEN : RED;
+                            const parentCat = editingTx?.category_id ?? resolveCategoryId(cat1, cat2, cat3);
+                            return (
+                              <div className="space-y-3 pt-2">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium flex items-baseline gap-2">
+                                      <CurrencyChip code={partsCurrencyCode} />
+                                      <span style={{ color: barColor }}>{formatCentsForInput(sumPartsCents)}</span>
+                                      <span style={{ color: ACTIVE_TEXT_DARK }}>/</span>
+                                      <CurrencyChip code={partsCurrencyCode} />
+                                      <span style={{ color: ACTIVE_TEXT_DARK }}>{formatCentsForInput(totalCents)}</span>
+                                    </span>
+                                  </div>
+                                  <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                                    <div className="h-full rounded-full transition-[width]" style={{ width: `${ratio * 100}%`, backgroundColor: barColor }} />
+                                  </div>
+                                </div>
+                                <div className="space-y-3">
+                                  {splitParts.map((part, idx) => (
+                                    <div key={idx} className="rounded-lg border p-3 space-y-3" style={{ borderColor: "rgba(148, 163, 184, 0.4)" }}>
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-sm font-medium" style={{ color: ACTIVE_TEXT_DARK }}>Часть {idx + 1}</span>
+                                        {splitParts.length > 1 && (
+                                          <Tooltip content="Удалить часть">
+                                            <IconButton type="button" aria-label="Удалить часть" style={{ color: RED }} onClick={() => setSplitParts(splitParts.filter((_, i) => i !== idx))}>
+                                              <Trash2 className="h-4 w-4" />
+                                            </IconButton>
+                                          </Tooltip>
+                                        )}
+                                      </div>
+                                      <div className="grid gap-3">
+                                        <TextField
+                                          label=""
+                                          value={part.amountStr}
+                                          onChange={(e) => {
+                                            const next = [...splitParts];
+                                            next[idx] = { ...next[idx], amountStr: formatRubInput(e.target.value) };
+                                            if (next.length > 1 && idx < next.length - 1) {
+                                              const partC = (p: { amountStr: string }) => Math.max(0, parseRubToCents(normalizeRubOnBlur(p.amountStr)) ?? 0);
+                                              const sumOthers = next.slice(0, -1).reduce((s, p) => s + partC(p), 0);
+                                              const remainder = Math.max(0, formTotalCents - sumOthers);
+                                              next[next.length - 1] = { ...next[next.length - 1], amountStr: formatCentsForInput(remainder) };
+                                            }
+                                            setSplitParts(next);
+                                          }}
+                                          onBlur={() => {
+                                            const next = [...splitParts];
+                                            next[idx] = { ...next[idx], amountStr: normalizeRubOnBlur(part.amountStr) };
+                                            if (next.length > 1 && idx < next.length - 1) {
+                                              const partC = (p: { amountStr: string }) => Math.max(0, parseRubToCents(normalizeRubOnBlur(p.amountStr)) ?? 0);
+                                              const sumOthers = next.slice(0, -1).reduce((s, p) => s + partC(p), 0);
+                                              const remainder = Math.max(0, formTotalCents - sumOthers);
+                                              next[next.length - 1] = { ...next[next.length - 1], amountStr: formatCentsForInput(remainder) };
+                                            }
+                                            setSplitParts(next);
+                                          }}
+                                          inputMode="decimal"
+                                          placeholder="Сумма"
+                                        />
+                                        <CategorySelector
+                                          categoryNodes={categoryNodes}
+                                          direction={direction}
+                                          selectedPath={part.categoryId != null ? (() => { const [l1, l2, l3] = getCategoryParts(part.categoryId!); return { l1: l1 ?? "", l2: l2 ?? "", l3: l3 ?? "" }; })() : null}
+                                          onChange={(path) => {
+                                            const next = [...splitParts];
+                                            const id = path ? resolveCategoryId(path.l1, path.l2, path.l3) : null;
+                                            next[idx] = { ...next[idx], categoryId: id ?? null };
+                                            setSplitParts(next);
+                                          }}
+                                          placeholder="Категория"
+                                          buildPaths={buildCategoryPaths}
+                                        />
+                                      </div>
+                                    </div>
+                                  ))}
+                                  <div className="w-full">
+                                    <Tooltip content="Добавить часть" className="block w-full">
+                                      <IconButton
+                                        type="button"
+                                        aria-label="Добавить часть"
+                                        className="!w-full"
+                                        onClick={() => {
+                                          const pc = (p: { amountStr: string }) => Math.max(0, parseRubToCents(normalizeRubOnBlur(p.amountStr)) ?? 0);
+                                          const filledSum = splitParts.reduce((s, p) => s + pc(p), 0);
+                                          const remainder = Math.max(0, formTotalCents - filledSum);
+                                          setSplitParts([...splitParts, { amountStr: formatCentsForInput(remainder), categoryId: parentCat ?? null }]);
+                                        }}
+                                      >
+                                        <Plus className="h-4 w-4" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return null;
+                        })()}
+                      </div>
+                    )}
                   </div>
                 </FormModal>
 
@@ -5957,10 +6439,26 @@ function TransactionsView({
                   transition: "opacity 0.3s ease-in-out",
                 }}
               >
-                {sortedTxs.map((tx) => (
-                  <TransactionCardRow
-                    key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
-                    tx={tx}
+                {(() => {
+                  let lastDateKey = "";
+                  return sortedTxs.map((tx) => {
+                    const dateKey = getDateKey(tx.transaction_date);
+                    const showDate = Boolean(dateKey && dateKey !== lastDateKey);
+                    if (showDate) lastDateKey = dateKey;
+                    return (
+                      <Fragment
+                        key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
+                      >
+                        {showDate && (
+                          <div
+                            className="text-2xl font-medium pt-1 pb-0.5 first:pt-0"
+                            style={{ color: ACTIVE_TEXT_DARK }}
+                          >
+                            {formatDateSectionHeader(dateKey)}
+                          </div>
+                        )}
+                        <TransactionCardRow
+                          tx={tx}
                     counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
                     itemName={itemName}
                     itemCurrencyCode={itemCurrencyCode}
@@ -5991,8 +6489,14 @@ function TransactionsView({
                     }}
                     relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
                     relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
+                    onUnsplit={(t) => setUnsplitConfirmTxId(t.id)}
+                    onAddChild={openAddChildDialog}
+                    childrenSumCents={tx.is_split_parent ? (childrenSumByParentId.get(tx.id) ?? null) : undefined}
                   />
-                ))}
+                      </Fragment>
+                    );
+                  });
+                })()}
               </div>
             )}
             {hasMoreTxs && (
@@ -6046,12 +6550,42 @@ function TransactionsView({
       />
 
       <ConfirmModal
+        open={unsplitConfirmTxId != null}
+        onOpenChange={(open) => {
+          if (!open) setUnsplitConfirmTxId(null);
+        }}
+        title="Отменить разделение?"
+        description="Части будут удалены, транзакция снова будет учитываться одной суммой."
+        confirmLabel="Отменить разделение"
+        variant="primary"
+        loading={unsplitLoading}
+        onConfirm={async () => {
+          if (unsplitConfirmTxId == null) return;
+          setUnsplitLoading(true);
+          try {
+            const updated = await unsplitTransaction(unsplitConfirmTxId);
+            setUnsplitConfirmTxId(null);
+            if (editingTx?.id === unsplitConfirmTxId) {
+              setEditingTx(updated);
+            }
+            await loadAll();
+          } catch (e: unknown) {
+            setError(e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : "Не удалось отменить разделение.");
+            setUnsplitConfirmTxId(null);
+            throw e;
+          } finally {
+            setUnsplitLoading(false);
+          }
+        }}
+      />
+
+      <ConfirmModal
         open={deleteCount > 0}
         onOpenChange={(open) => {
           if (!open) setDeleteIds(null);
         }}
         title={isBulkDelete ? "Удалить выбранные транзакции?" : "Удалить транзакцию?"}
-        description="Транзакции будут перемещены в список удаленных."
+        description={deleteConfirmDescription}
         confirmLabel="Удалить"
         variant="destructive"
         loading={isDeleting}

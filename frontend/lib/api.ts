@@ -397,6 +397,8 @@ export type TransactionOut = {
   related_item_id?: number | null;
   asset_link_type?: AssetLinkType | null;
   source?: TransactionSource | null;
+  parent_transaction_id: number | null;
+  is_split_parent: boolean;
 };
 
 export type UserMeOut = {
@@ -551,6 +553,21 @@ export type TransactionCreate = {
   comment?: string | null;
   related_item_id?: number | null;
   asset_link_type?: AssetLinkType | null;
+  parent_transaction_id?: number | null;
+};
+
+export type TransactionSplitPartCreate = {
+  amount_rub: number;
+  category_id?: number | null;
+};
+
+export type TransactionSplitCreate = {
+  parts: TransactionSplitPartCreate[];
+};
+
+export type TransactionSplitOut = {
+  parent: TransactionOut;
+  parts: TransactionOut[];
 };
 
 export type DebtDirection =
@@ -570,6 +587,8 @@ export type TransactionDebtsCreate = {
   transaction_type?: TransactionType;
   comment?: string | null;
   status?: TransactionStatus | null;
+  /** При создании дочерней части разделённой транзакции — id родительской. */
+  parent_transaction_id?: number | null;
 };
 
 export type TransactionTheyPaidForMeCreate = {
@@ -1238,7 +1257,12 @@ function mapItemCostHistoryPointFromApi(raw: unknown): ItemCostHistoryPoint {
 /** Маппинг транзакции: amount_rub → amount (сумма в валюте primary-счёта, копейки/центы). */
 function mapTransactionFromApi(raw: unknown): TransactionOut {
   const r = raw as Record<string, unknown>;
-  return { ...r, amount: (r.amount ?? r.amount_rub) as number } as TransactionOut;
+  return {
+    ...r,
+    amount: (r.amount ?? r.amount_rub) as number,
+    parent_transaction_id: (r.parent_transaction_id ?? null) as number | null,
+    is_split_parent: Boolean(r.is_split_parent),
+  } as TransactionOut;
 }
 
 function mapReceiptRecognizeFromApi(raw: unknown): ReceiptRecognizeOut {
@@ -1404,11 +1428,39 @@ export async function fetchDeletedTransactions(): Promise<TransactionOut[]> {
   return raw.map(mapTransactionFromApi);
 }
 
+export async function splitTransaction(
+  txId: number,
+  payload: TransactionSplitCreate
+): Promise<TransactionSplitOut> {
+  const res = await authFetch(`${API_BASE}/transactions/${txId}/split`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const raw = await res.json() as { parent: unknown; parts: unknown[] };
+  return {
+    parent: mapTransactionFromApi(raw.parent),
+    parts: (raw.parts ?? []).map(mapTransactionFromApi),
+  };
+}
+
+export async function unsplitTransaction(txId: number): Promise<TransactionOut> {
+  const res = await authFetch(`${API_BASE}/transactions/${txId}/unsplit`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const raw = await res.json();
+  return mapTransactionFromApi(raw);
+}
+
 export async function createTransaction(
   payload: TransactionCreate
 ): Promise<TransactionOut> {
   const { amount, ...rest } = payload;
-  const body = { ...rest, amount_rub: amount };
+  const body: Record<string, unknown> = { ...rest, amount_rub: amount };
+  if (payload.parent_transaction_id != null) {
+    body.parent_transaction_id = payload.parent_transaction_id;
+  }
   const res = await authFetch(`${API_BASE}/transactions`, {
     method: "POST",
     body: JSON.stringify(body),

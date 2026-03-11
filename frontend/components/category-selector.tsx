@@ -200,6 +200,7 @@ export function CategorySelector({
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement | null>(null);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
   const [dropdownStyle, setDropdownStyle] = useState<CSSProperties | null>(null);
   const portalContainer = useSelectorDropdownPortalContainer();
 
@@ -395,7 +396,18 @@ export function CategorySelector({
             }
             setOpen(true);
           }}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onBlur={(e) => {
+            const container = dropdownRef.current;
+            const related = e.relatedTarget as Node | null;
+            if (related && container?.contains(related)) return;
+            setTimeout(() => {
+              setOpen((prev) => {
+                if (!prev) return prev;
+                if (container && document.activeElement && container.contains(document.activeElement)) return prev;
+                return false;
+              });
+            }, 250);
+          }}
           onKeyDown={(event) => {
             if (
               event.key === "Enter" &&
@@ -411,9 +423,11 @@ export function CategorySelector({
         {open &&
           createPortal(
             <div
+              ref={dropdownRef}
               data-selector-dropdown
               className="selector-dropdown fixed z-[9999] mt-1 w-full overflow-auto overscroll-contain rounded-lg shadow-lg"
               style={resolvedDropdownStyle}
+              onPointerDown={(e) => e.stopPropagation()}
             >
             {/* Gradient border wrapper */}
             <div className="relative rounded-lg">
@@ -444,6 +458,10 @@ export function CategorySelector({
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = "transparent";
                     }}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      clearSelection();
+                    }}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       clearSelection();
@@ -462,6 +480,11 @@ export function CategorySelector({
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      onAddCategory();
+                      setOpen(false);
                     }}
                     onMouseDown={(event) => {
                       event.preventDefault();
@@ -520,6 +543,11 @@ export function CategorySelector({
                           if (!isSelected) {
                             e.currentTarget.style.backgroundColor = "transparent";
                           }
+                        }}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          applySelection(path);
                         }}
                         onMouseDown={(event) => {
                           event.preventDefault();

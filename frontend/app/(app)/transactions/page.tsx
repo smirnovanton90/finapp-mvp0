@@ -2837,7 +2837,7 @@ function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     resetForm();
-    if (initialMode) setFormMode(initialMode);
+    setFormMode(initialMode ?? "STANDARD");
     if (initialMode === "DEBTS") setDebtDirection("I_PAID");
     setDialogMode("create");
   };
@@ -5064,10 +5064,11 @@ function TransactionsView({
               onFinish={loadAll}
             />
             
-            {/* Dialog for creating/editing transactions. Когда открыта модалка актива — modal={false}, чтобы фокус и ввод шли в модалку актива. */}
+            {/* Dialog for creating/editing transactions. На мобильной — полноэкранное окно, на десктопе — модалка. */}
             <FormModal
               open={isDialogOpen}
-              modal
+              modal={isDesktop}
+              variant={isDesktop ? "modal" : "fullscreen"}
               onOpenChange={(open) => {
                 if (open) {
                   if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
@@ -5760,7 +5761,7 @@ function TransactionsView({
                       </FormField>
                     )}
 
-                    {!isEditMode && !isBulkEdit && (
+                    {isDesktop && !isEditMode && !isBulkEdit && (
                       <FormField label="Вид транзакции">
                         <SegmentedSelector
                           options={[
@@ -6447,7 +6448,7 @@ function TransactionsView({
                       placeholder="Например: с коллегами"
                     />
 
-                    {!isBulkEdit && formMode === "STANDARD" && !isDebts && !isLoanRepayment && !addChildParentTx && (
+                    {(!isBulkEdit && formMode === "STANDARD" && !isDebts && !isLoanRepayment && !addChildParentTx) || (!isDesktop && !isBulkEdit && !addChildParentTx) ? (
                       <div>
                         {(() => {
                           const isSplitParent = editingTx?.is_split_parent === true;
@@ -6456,16 +6457,17 @@ function TransactionsView({
                           const hasCategory = direction === "TRANSFER" || !!resolveCategoryId(cat1, cat2, cat3);
                           const canEnableSplit = direction !== "TRANSFER" && !!date && !!primaryItemId && hasValidAmount && hasCategory;
                           const splitToggleDisabled = !isSplitParent && !canEnableSplit;
+                          const splitSectionVisible = formMode === "STANDARD" && !isDebts && !isLoanRepayment;
                           return (
                         <div
                           className="flex w-full items-center justify-between gap-2 py-1 cursor-pointer hover:opacity-90"
-                          onClick={() => setSplitSectionOpen((v) => !v)}
+                          onClick={() => splitSectionVisible && setSplitSectionOpen((v) => !v)}
                         >
                           <div className="flex items-center gap-2 min-w-0">
                             <IconButton
                               type="button"
                               aria-label={splitSectionOpen ? "Свернуть" : "Развернуть"}
-                              onClick={(e) => { e.stopPropagation(); setSplitSectionOpen((v) => !v); }}
+                              onClick={(e) => { e.stopPropagation(); splitSectionVisible && setSplitSectionOpen((v) => !v); }}
                             >
                               {splitSectionOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                             </IconButton>
@@ -6476,7 +6478,7 @@ function TransactionsView({
                           <span onClick={(e) => e.stopPropagation()}>
                             <Switch
                               checked={(editingTx?.is_split_parent === true) || splitEnabled}
-                              disabled={splitToggleDisabled}
+                              disabled={splitToggleDisabled || !splitSectionVisible}
                               onCheckedChange={(checked) => {
                                 if (!checked) {
                                   if (editingTx?.is_split_parent === true) setUnsplitConfirmTxId(editingTx.id);
@@ -6683,19 +6685,20 @@ function TransactionsView({
                           return null;
                         })()}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </FormModal>
 
-            {/* Модалка «Погашение кредитов» — отдельно от доходов/расходов/переводов */}
+            {/* Модалка «Погашение кредитов» — отдельно от доходов/расходов/переводов. На мобильной — полноэкранное окно. */}
             <FormModal
               open={isLoanRepaymentModalOpen}
+              variant={isDesktop ? "modal" : "fullscreen"}
               onOpenChange={(open) => {
                 if (!open) closeLoanRepaymentModal();
                 else setIsLoanRepaymentModalOpen(true);
               }}
               title="Погашение кредитов"
-              icon={<GraduationCap className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+              icon={isDesktop ? <GraduationCap className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} /> : undefined}
               formError={formError}
               onSubmit={handleLoanRepaymentSubmit}
               onCancel={closeLoanRepaymentModal}

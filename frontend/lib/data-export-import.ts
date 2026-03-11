@@ -1238,6 +1238,7 @@ export async function runImport(
       const assetLinkType = assetLinkTypeRaw
         ? (assetLinkTypeRaw as TransactionCreate["asset_link_type"])
         : undefined;
+      const direction = (str(row.direction) || "EXPENSE") as TransactionDirection;
       const payload: TransactionCreate = {
         transaction_date: str(row.transaction_date) || new Date().toISOString().slice(0, 10),
         primary_item_id: itemIdMap.get(primaryItemId)!,
@@ -1246,24 +1247,30 @@ export async function runImport(
             ? itemIdMap.get(counterpartyItemId)!
             : null,
         counterparty_id:
-          counterpartyId != null && counterpartyIdMap.has(counterpartyId)
-            ? counterpartyIdMap.get(counterpartyId)!
-            : null,
+          direction === "TRANSFER"
+            ? null
+            : counterpartyId != null && counterpartyIdMap.has(counterpartyId)
+              ? counterpartyIdMap.get(counterpartyId)!
+              : null,
         amount: num(row.amount) ?? 0,
         amount_counterparty: num(row.amount_counterparty) ?? null,
         primary_quantity_lots: num(row.primary_quantity_lots) ?? null,
         counterparty_quantity_lots: num(row.counterparty_quantity_lots) ?? null,
         primary_quantity_units: num(row.primary_quantity_units) ?? null,
         counterparty_quantity_units: num(row.counterparty_quantity_units) ?? null,
-        direction: (str(row.direction) || "EXPENSE") as TransactionDirection,
+        direction,
         transaction_type: (str(row.transaction_type) || "ACTUAL") as TransactionType,
         status: "UNCONFIRMED",
         category_id:
           categoryId != null && categoryIdMap.has(categoryId) ? categoryIdMap.get(categoryId)! : null,
         comment: str(row.comment) || null,
-        related_item_id: resolvedRelatedItemId,
+        related_item_id: direction === "TRANSFER" ? null : resolvedRelatedItemId,
         asset_link_type:
-          assetLinkType && resolvedRelatedItemId != null ? assetLinkType : undefined,
+          direction === "TRANSFER"
+            ? undefined
+            : assetLinkType && resolvedRelatedItemId != null
+              ? assetLinkType
+              : undefined,
       };
       await createTransaction(payload);
       counts.transactions += 1;

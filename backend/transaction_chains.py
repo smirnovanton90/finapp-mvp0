@@ -308,7 +308,7 @@ def create_transaction_chain(
                 counterparty_card_item_id=(
                     counter_side.card_item.id if counter_side and counter_side.card_item else None
                 ),
-                counterparty_id=data.counterparty_id,
+                counterparty_id=None if data.direction == "TRANSFER" else data.counterparty_id,
                 amount_primary_minor=data.amount_primary_minor,
                 amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
                 direction=data.direction,
@@ -316,7 +316,7 @@ def create_transaction_chain(
                 status="CONFIRMED",
                 category_id=category.id if category else None,
                 comment=data.comment,
-                related_item_id=chain.related_item_id,
+                related_item_id=None if data.direction == "TRANSFER" else chain.related_item_id,
             )
         )
 

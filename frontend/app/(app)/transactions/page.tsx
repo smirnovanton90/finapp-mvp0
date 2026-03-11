@@ -1451,9 +1451,11 @@ function TransactionCardRow({
 
   return (
     <div
-      className={cn("flex items-stretch overflow-hidden rounded-lg", isChild && "ml-4 border-l-2 border-slate-600/50")}
+      className={cn(
+        "flex items-stretch overflow-hidden rounded-lg w-[900px] @[1400px]:w-full",
+        isChild && "ml-4 border-l-2 border-slate-600/50"
+      )}
       style={{
-        width: 900,
         boxSizing: "border-box",
         backgroundColor: outerBackgroundColor,
         ...outerBorderStyle,
@@ -1463,7 +1465,7 @@ function TransactionCardRow({
     >
       {/* Контейнер 1 — подсветка: заливка GREEN_TRANSACTION / RED / ACCENT2 */}
       <div
-        className="flex items-center justify-center"
+        className="flex items-center justify-center shrink-0"
         style={{
           width: 10,
           padding: 0,
@@ -1477,11 +1479,10 @@ function TransactionCardRow({
         }}
       />
 
-      {/* Контейнер 2 — контент */}
+      {/* Контейнер 2 — контент: фиксированная ширина в узком режиме, во всю ширину в широком */}
       <div
-        className="flex items-stretch"
+        className="flex items-stretch w-[890px] @[1400px]:w-full @[1400px]:flex-1 @[1400px]:min-w-0"
         style={{
-          width: 890,
           paddingTop: 4,
           paddingBottom: 4,
           paddingLeft: 0,
@@ -1538,7 +1539,7 @@ function TransactionCardRow({
         {/* Контейнер 3: сумма, актив/обязательство и иконка банка */}
         <div
           className="flex flex-col items-center justify-center"
-          style={{ width: 150, padding: 0 }}
+          style={{ width: 200, padding: 0 }}
         >
           <div
             className="flex items-center justify-center gap-1.5"
@@ -1613,7 +1614,7 @@ function TransactionCardRow({
         <div
           className="flex flex-col items-center justify-center"
           style={{
-            width: 90,
+            width: 100,
             minHeight: 90,
             padding: 0,
           }}
@@ -1683,9 +1684,9 @@ function TransactionCardRow({
 
         {/* Контейнер 5: категории (доход/расход) или корреспондирующий актив (перевод) */}
         <div
-          className="flex flex-col justify-center"
+          className="flex flex-col items-center justify-center shrink-0 overflow-hidden min-w-0"
           style={{
-            width: 200,
+            width: 260,
             paddingTop: 0,
             paddingBottom: 0,
             paddingLeft: 12,
@@ -1695,6 +1696,7 @@ function TransactionCardRow({
           {isTransfer ? (
             <>
               <div
+                className="truncate"
                 style={{
                   fontSize: 24,
                   fontWeight: 500,
@@ -1705,6 +1707,7 @@ function TransactionCardRow({
                 +{counterpartyAmountValue}
               </div>
               <div
+                className="truncate"
                 style={{
                   marginTop: 4,
                   fontSize: 14,
@@ -1737,153 +1740,175 @@ function TransactionCardRow({
                 </div>
               )}
             </>
-          ) : (
-            <>
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 400,
-                  color: ACTIVE_TEXT_DARK,
-                }}
-              >
-                {categoryLines[0]}
-              </div>
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 10,
-                  fontWeight: 400,
-                  color: ACTIVE_TEXT_DARK,
-                }}
-              >
-                {categoryLines[1]}
-              </div>
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 10,
-                  fontWeight: 400,
-                  color: ACTIVE_TEXT_DARK,
-                }}
-              >
-                {categoryLines[2]}
-              </div>
-            </>
-          )}
+          ) : (() => {
+              const t0 = categoryLines[0]?.trim();
+              const t1 = categoryLines[1]?.trim();
+              const t2 = categoryLines[2]?.trim();
+              const visible = [
+                t0 && t0 !== "-" ? t0 : null,
+                t1 && t1 !== "-" ? t1 : null,
+                t2 && t2 !== "-" ? t2 : null,
+              ];
+              const lastIndex = visible[2] ? 2 : visible[1] ? 1 : visible[0] ? 0 : -1;
+              if (lastIndex < 0) return null;
+              return (
+                <>
+                  {visible[0] && (
+                    <div
+                      className="truncate w-full text-center"
+                      style={{
+                        fontSize: lastIndex === 0 ? 14 : 10,
+                        fontWeight: 400,
+                        color: lastIndex === 0 ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,
+                      }}
+                    >
+                      {visible[0]}
+                    </div>
+                  )}
+                  {visible[1] && (
+                    <div
+                      className="truncate w-full text-center"
+                      style={{
+                        marginTop: visible[0] ? 4 : 0,
+                        fontSize: lastIndex === 1 ? 14 : 10,
+                        fontWeight: 400,
+                        color: lastIndex === 1 ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,
+                      }}
+                    >
+                      {visible[1]}
+                    </div>
+                  )}
+                  {visible[2] && (
+                    <div
+                      className="truncate w-full text-center"
+                      style={{
+                        marginTop: visible[0] || visible[1] ? 4 : 0,
+                        fontSize: 14,
+                        fontWeight: 400,
+                        color: ACTIVE_TEXT_DARK,
+                      }}
+                    >
+                      {visible[2]}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
         </div>
 
-        {/* Контейнер 6: контрагент и комментарий (вертикально) */}
+        {/* Контейнер 6: на широком экране — два блока фиксированной ширины (остаток от 1350px делим пополам: 269px + 269px, gap 16) */}
         <div
-          className="flex flex-col justify-center"
+          className="flex flex-col justify-center w-[200px] shrink-0 overflow-hidden min-w-0 @[1400px]:flex-row @[1400px]:w-[554px] @[1400px]:shrink-0 @[1400px]:justify-end @[1400px]:gap-4"
           style={{
-            width: 200,
             paddingTop: 0,
             paddingBottom: 0,
             paddingLeft: 12,
             paddingRight: 0,
           }}
         >
-          {counterpartyName && (
-            <div
-              className="flex items-center gap-2"
-              style={{ marginBottom: 4 }}
-            >
-              <CardIcon
-                src={counterpartyLogoUrl ?? null}
-                alt=""
-                size={20}
-                shadow={false}
-                fallbackIcon={CounterpartyFallbackIcon}
-                fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
-                imgRef={(el) => setImageRef(3, el)}
-                onLoad={() => handleImageLoad(3)}
-                onError={() => {
-                  counterpartyLogoOnError();
-                  handleImageError(3);
-                }}
-              />
+          {/* 1. Контрагент и под ним связанный актив — фикс. 269px */}
+          <div className="flex flex-col justify-center min-w-0 @[1400px]:w-[269px] @[1400px]:shrink-0 @[1400px]:overflow-hidden">
+            {counterpartyName && (
+              <div className="flex items-start gap-2 min-w-0" style={{ marginBottom: 4 }}>
+                <CardIcon
+                  src={counterpartyLogoUrl ?? null}
+                  alt=""
+                  size={20}
+                  shadow={false}
+                  fallbackIcon={CounterpartyFallbackIcon}
+                  fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                  imgRef={(el) => setImageRef(3, el)}
+                  onLoad={() => handleImageLoad(3)}
+                  onError={() => {
+                    counterpartyLogoOnError();
+                    handleImageError(3);
+                  }}
+                />
+                <div
+                  className="min-w-0 break-words"
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 400,
+                    color: ACTIVE_TEXT_DARK,
+                  }}
+                >
+                  {counterpartyName}
+                </div>
+              </div>
+            )}
+            {relatedItem && (
+              <div className="flex items-start gap-2 min-w-0" style={{ marginBottom: 4 }}>
+                <AssetItemIcon
+                  item={relatedItem}
+                  counterparty={relatedItemCounterparty}
+                  apiBase={apiBase}
+                  size={20}
+                  shadow={false}
+                  fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                  alt=""
+                />
+                <div
+                  className="min-w-0 break-words"
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 400,
+                    color: ACTIVE_TEXT_DARK,
+                  }}
+                >
+                  {relatedItem.name}
+                </div>
+              </div>
+            )}
+            {chainLabel && (
               <div
+                className="break-words"
                 style={{
-                  fontSize: 14,
+                  marginTop: 4,
+                  fontSize: 10,
                   fontWeight: 400,
-                  color: ACTIVE_TEXT_DARK,
+                  color: subtleTextColor,
                 }}
               >
-                {counterpartyName}
+                Цепочка: {chainLabel}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {relatedItem && (
-            <div
-              className="flex items-center gap-2"
-              style={{ marginBottom: 4 }}
-            >
-              <AssetItemIcon
-                item={relatedItem}
-                counterparty={relatedItemCounterparty}
-                apiBase={apiBase}
-                size={20}
-                shadow={false}
-                fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
-                alt=""
-              />
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 400,
-                  color: ACTIVE_TEXT_DARK,
-                }}
-              >
-                {relatedItem.name}
+          {/* 2. Комментарий — фикс. 269px */}
+          <div className="flex flex-col justify-center min-w-0 @[1400px]:w-[269px] @[1400px]:shrink-0 @[1400px]:overflow-hidden">
+            {commentText && commentText !== "-" && (
+              <div className="flex items-start gap-2 min-w-0">
+                <MessageSquare
+                  style={{
+                    width: 20,
+                    height: 20,
+                    color: PLACEHOLDER_COLOR_DARK,
+                    flexShrink: 0,
+                  }}
+                />
+                <div
+                  className="min-w-0 break-words"
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 400,
+                    color: PLACEHOLDER_COLOR_DARK,
+                  }}
+                >
+                  {commentText}
+                </div>
               </div>
-            </div>
-          )}
-
-          {commentText && commentText !== "-" && (
-            <div className="flex items-center gap-2">
-              <MessageSquare
-                style={{
-                  width: 20,
-                  height: 20,
-                  color: PLACEHOLDER_COLOR_DARK,
-                  flexShrink: 0,
-                }}
-              />
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 400,
-                  color: PLACEHOLDER_COLOR_DARK,
-                }}
-              >
-                {commentText}
-              </div>
-            </div>
-          )}
-
-          {chainLabel && (
-            <div
-              style={{
-                marginTop: 4,
-                fontSize: 10,
-                fontWeight: 400,
-                color: subtleTextColor,
-              }}
-            >
-              Цепочка: {chainLabel}
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Контейнер 7: действия и иконки справа */}
         <div
-          className="flex items-center justify-end gap-2"
+          className="flex items-center justify-end gap-2 shrink-0 @[1400px]:shrink @[1400px]:min-w-[100px]"
           style={{
             flex: 1,
             paddingTop: 0,
             paddingBottom: 0,
-            paddingLeft: 0,
+            paddingLeft: 12,
             paddingRight: 12,
           }}
         >
@@ -5541,7 +5566,7 @@ function TransactionsView({
                           counterparty_item_id: isTransfer
                             ? counterpartyItemId
                             : null,
-                          counterparty_id: counterpartyId ?? null,
+                          counterparty_id: isTransfer ? null : (counterpartyId ?? null),
                           amount: payloadAmount,
                           amount_counterparty: payloadAmountCounterparty,
                           primary_quantity_lots:
@@ -5568,8 +5593,8 @@ function TransactionsView({
                           transaction_type: payloadTransactionType,
                           category_id: resolvedCategoryId,
                           comment: comment || null,
-                          related_item_id: relatedItemId ?? null,
-                          asset_link_type: assetLinkType ?? null,
+                          related_item_id: isTransfer ? null : (relatedItemId ?? null),
+                          asset_link_type: isTransfer ? null : (assetLinkType ?? null),
                           parent_transaction_id:
                             !isEditMode && addChildParentTx
                               ? addChildParentTx.id

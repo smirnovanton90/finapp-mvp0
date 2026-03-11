@@ -613,6 +613,10 @@ class TransactionBase(BaseModel):
         if self.direction == "TRANSFER":
             if self.category_id is not None:
                 raise ValueError("category_id is not allowed for TRANSFER")
+            if self.counterparty_id is not None:
+                raise ValueError("counterparty_id is not allowed for TRANSFER")
+            if self.related_item_id is not None:
+                raise ValueError("related_item_id is not allowed for TRANSFER")
         return self
 
     # No asset_link_type vs direction validation here: used for response (TransactionOut)
@@ -760,6 +764,10 @@ class TransactionChainCreate(BaseModel):
         if self.direction == "TRANSFER":
             if self.category_id is not None:
                 raise ValueError("category_id is not allowed for TRANSFER")
+            if self.counterparty_id is not None:
+                raise ValueError("counterparty_id is not allowed for TRANSFER")
+            if self.related_item_id is not None:
+                raise ValueError("related_item_id is not allowed for TRANSFER")
         else:
             if self.category_id is None:
                 raise ValueError("category_id is required for INCOME/EXPENSE")

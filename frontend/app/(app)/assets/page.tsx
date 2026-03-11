@@ -13,6 +13,8 @@ import {
   CreditCard,
   Home,
   Landmark,
+  LayoutGrid,
+  List,
   MoreVertical,
   Package,
   Pencil,
@@ -647,7 +649,20 @@ export default function Page() {
   const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
   const [isTypeCodeFilterOpen, setIsTypeCodeFilterOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  /** Вид карточек: grid — колонки карточек, list — полная ширина, блоки по горизонтали. Восстанавливается из localStorage. */
+  const [cardsViewMode, setCardsViewMode] = useState<"grid" | "list">("grid");
+
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window === "undefined") return;
+    const saved = localStorage.getItem("assets-cards-view");
+    if (saved === "list" || saved === "grid") setCardsViewMode(saved);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted || typeof window === "undefined") return;
+    localStorage.setItem("assets-cards-view", cardsViewMode);
+  }, [mounted, cardsViewMode]);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ItemOut | null>(null);
@@ -3474,7 +3489,7 @@ export default function Page() {
 
       <div className="flex-1 min-w-0">
         <div className={CONTENT_WIDTH_CLASS} style={{ paddingTop: "30px" }}>
-          <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <Button
               className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
               style={{ backgroundColor: ACCENT }}
@@ -3483,6 +3498,36 @@ export default function Page() {
               <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
               <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
             </Button>
+            <div className="flex items-center rounded-[9px] border border-border overflow-hidden">
+              <Tooltip content="Карточки">
+                <button
+                  type="button"
+                  aria-label="Вид карточками"
+                  className={cn(
+                    "p-2 transition-colors",
+                    cardsViewMode !== "grid" && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
+                  )}
+                  style={cardsViewMode === "grid" ? { backgroundColor: ACCENT, color: "white" } : undefined}
+                  onClick={() => setCardsViewMode("grid")}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </button>
+              </Tooltip>
+              <Tooltip content="Список">
+                <button
+                  type="button"
+                  aria-label="Вид списком"
+                  className={cn(
+                    "p-2 transition-colors",
+                    cardsViewMode !== "list" && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
+                  )}
+                  style={cardsViewMode === "list" ? { backgroundColor: ACCENT, color: "white" } : undefined}
+                  onClick={() => setCardsViewMode("list")}
+                >
+                  <List className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            </div>
           </div>
             {loading ? (
               <div className="flex items-center justify-center py-16" style={{ color: PLACEHOLDER_COLOR_DARK }}>
@@ -3512,17 +3557,50 @@ export default function Page() {
                             backgroundClip: "text",
                           }}
                         >
-                          {formatRub(totalRubCents)}
+                          {section.kind === "LIABILITY"
+                            ? totalRubCents < 0
+                              ? formatRub(totalRubCents)
+                              : `-${formatRub(totalRubCents)}`
+                            : formatRub(totalRubCents)}
                         </span>
                       </div>
-                      <div className="columns-1 md:columns-2 @[1400px]:columns-3 gap-4">
+                      <div
+                        className={
+                          cardsViewMode === "list"
+                            ? "flex flex-col gap-4"
+                            : "columns-1 md:columns-2 @[1400px]:columns-3 gap-4"
+                        }
+                      >
                         {items.map((item) => {
                           const rate = rateByCode[item.currency_code];
                           const rubEquivalent = getPrimaryValueRubCents(item);
                           const counterparty = item.counterparty_id
                             ? counterpartiesById.get(item.counterparty_id) ?? null
                             : null;
-                          return (
+                          return cardsViewMode === "list" ? (
+                            <AssetCard
+                              key={item.id}
+                              item={item}
+                              layout="row"
+                              accountingStartDate={accountingStartDate}
+                              rate={rate}
+                              rubEquivalent={rubEquivalent}
+                              primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
+                              counterparty={counterparty}
+                              moexMarketPrice={
+                                MOEX_TYPE_CODES.includes(item.type_code)
+                                  ? moexMarketPrices.get(item.id) ?? null
+                                  : null
+                              }
+                              onEdit={(item) => openEditModal(item)}
+                              onDelete={(item) => onArchive(item)}
+                              onArchive={(item) => onArchive(item)}
+                              onClose={(item) => onClose(item)}
+                              onBuySell={(item) => setBuySellAsset(item)}
+                              getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                              onNavigate={(it) => router.push(`/assets/${it.id}`)}
+                            />
+                          ) : (
                             <div
                               key={item.id}
                               style={{

@@ -686,6 +686,16 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
     counter_is_moex = False
 
     if data.direction == "TRANSFER":
+        if data.counterparty_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="counterparty_id is not allowed for TRANSFER",
+            )
+        if data.related_item_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="related_item_id is not allowed for TRANSFER",
+            )
         if not data.counterparty_item_id:
             raise HTTPException(
                 status_code=400,
@@ -788,7 +798,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         counterparty_card_item_id=(
             counter_side.card_item.id if counter_side and counter_side.card_item else None
         ),
-        counterparty_id=data.counterparty_id,
+        counterparty_id=None if data.direction == "TRANSFER" else data.counterparty_id,
         amount_primary_minor=data.amount_primary_minor,
         amount_counterparty=amount_counterparty,
         primary_quantity_lots=data.primary_quantity_lots,
@@ -802,7 +812,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         status=status_value,
         category_id=category.id if category else None,
         comment=data.comment,
-        related_item_id=data.related_item_id,
+        related_item_id=None if data.direction == "TRANSFER" else data.related_item_id,
         asset_link_type=data.asset_link_type,
         parent_transaction_id=data.parent_transaction_id,
         is_split_parent=data.is_split_parent,
@@ -995,6 +1005,16 @@ def update_transaction(
     new_counter_is_moex = False
 
     if data.direction == "TRANSFER":
+        if data.counterparty_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="counterparty_id is not allowed for TRANSFER",
+            )
+        if data.related_item_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="related_item_id is not allowed for TRANSFER",
+            )
         if not data.counterparty_item_id and tx.transaction_type != "PLANNED":
             raise HTTPException(
                 status_code=400,
@@ -1255,7 +1275,7 @@ def update_transaction(
         if data.direction == "TRANSFER"
         else None
     )
-    tx.counterparty_id = data.counterparty_id
+    tx.counterparty_id = None if data.direction == "TRANSFER" else data.counterparty_id
     tx.amount_primary_minor = data.amount_primary_minor
     tx.amount_counterparty = amount_counterparty if data.direction == "TRANSFER" else None
     if data.primary_quantity_lots is not None or tx.asset_link_type not in ("ASSET_PURCHASE", "ASSET_SALE"):
@@ -1270,7 +1290,7 @@ def update_transaction(
         tx.status = data.status
     tx.category_id = category.id if category else None
     tx.comment = data.comment
-    tx.related_item_id = data.related_item_id
+    tx.related_item_id = None if data.direction == "TRANSFER" else data.related_item_id
     tx.asset_link_type = data.asset_link_type
     if data.parent_transaction_id is not None:
         tx.parent_transaction_id = data.parent_transaction_id

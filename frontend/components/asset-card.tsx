@@ -89,6 +89,8 @@ function getMoexUnitPriceCents(
 
 interface AssetCardProps {
   item: ItemOut;
+  /** card — компактная карточка в сетке; row — на всю ширину, блоки по горизонтали */
+  layout?: "card" | "row";
   accountingStartDate: string | null;
   rate?: number | null;
   rubEquivalent?: number | null;
@@ -140,6 +142,7 @@ const REPAYMENT_TYPE_LABELS: Record<string, string> = {
 
 export function AssetCard({
   item,
+  layout = "card",
   accountingStartDate,
   rate,
   rubEquivalent,
@@ -245,6 +248,235 @@ export function AssetCard({
   const cardBg = isDeleted ? BACKGROUND_DT : MODAL_BG;
   const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
   const badgeColor = isDeleted ? PLACEHOLDER_COLOR_DARK : undefined;
+
+  const menuDropdown = item.type_code !== "counterparty_settlements" && (
+    <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (!open) {
+            menuJustClosedRef.current = true;
+            setTimeout(() => {
+              menuJustClosedRef.current = false;
+            }, 150);
+          }
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <div onClick={(e) => e.stopPropagation()}>
+            <IconButton aria-label="Открыть меню действий">
+              <MoreVertical />
+            </IconButton>
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-56"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {onEdit && !isArchived && !isClosed && (
+            <DropdownMenuItem onClick={() => onEdit(item)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Редактировать
+            </DropdownMenuItem>
+          )}
+          {onBuySell && item.instrument_id && !isArchived && !isClosed && (
+            <DropdownMenuItem onClick={() => onBuySell(item)}>
+              <TrendingUp className="mr-2 h-4 w-4" />
+              Купить/продать актив
+            </DropdownMenuItem>
+          )}
+          {onClose && !isArchived && !isClosed && (
+            <DropdownMenuItem onClick={() => onClose(item)}>
+              <Archive className="mr-2 h-4 w-4" />
+              Закрыть
+            </DropdownMenuItem>
+          )}
+          {onArchive && !isArchived && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => onArchive(item)}>
+                <Archive className="mr-2 h-4 w-4" />
+                Архивировать
+              </DropdownMenuItem>
+            </>
+          )}
+          {onDelete && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => onDelete(item)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Удалить
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+
+  if (layout === "row") {
+    return (
+      <div
+        className="relative rounded-lg overflow-hidden w-full"
+        style={{
+          backgroundColor: cardBg,
+          opacity: isCardReady ? 1 : 0,
+          transition: "opacity 0.2s ease-in-out",
+        }}
+      >
+        <div
+          className="absolute left-0 top-0 bottom-0 w-[7px] rounded-l-md"
+          style={{ backgroundColor: stripeColor }}
+        />
+        <div
+          className={`flex flex-row items-center gap-4 py-3 pr-3 pl-5 ${onNavigate ? "cursor-pointer" : ""}`}
+          onClick={() => {
+            if (menuJustClosedRef.current) return;
+            onNavigate?.(item);
+          }}
+          role={onNavigate ? "button" : undefined}
+        >
+          <div className="w-14 h-14 flex items-center justify-center shrink-0">
+            {hasPhoto ? (
+              <CardIcon
+                src={hasPhoto}
+                alt={item.name}
+                size={56}
+                shadow
+                objectFit="cover"
+                imgRef={(el) => setImageRef(0, el)}
+                onLoad={() => handleImageLoad(0)}
+                onError={() => handleImageError(0)}
+              />
+            ) : icon3dPath ? (
+              <CardIcon
+                src={icon3dPath}
+                alt=""
+                fallbackIcon={TypeIcon ?? undefined}
+                size={56}
+                shadow
+                objectFit="contain"
+                fallbackIconColor={ACCENT}
+                imgRef={(el) => setImageRef(0, el)}
+                onLoad={() => handleImageLoad(0)}
+                onError={() => {
+                  setIconFormat(null);
+                  handleImageError(0);
+                }}
+              />
+            ) : TypeIcon ? (
+              <CardIcon
+                src={null}
+                alt=""
+                fallbackIcon={TypeIcon}
+                size={56}
+                shadow
+                fallbackIconColor={ACCENT}
+              />
+            ) : null}
+          </div>
+          <div className="flex flex-col min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                {typeLabel}
+              </span>
+              {currencyCode && (
+                <CurrencyChip
+                  code={currencyCode}
+                  style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined}
+                />
+              )}
+            </div>
+            <h3 className="text-2xl font-medium truncate" style={{ color: textColor }}>
+              {item.name}
+            </h3>
+            {counterparty && CounterpartyFallbackIcon && (
+              <div className="flex items-center gap-2">
+                <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">
+                  <CardIcon
+                    src={counterpartyCurrentSrc && !showCounterpartyIcon ? counterpartyCurrentSrc : null}
+                    alt={buildCounterpartyDisplayName(counterparty)}
+                    fallbackIcon={CounterpartyFallbackIcon}
+                    size={20}
+                    shadow={false}
+                    objectFit="contain"
+                    fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                    imgRef={(el) => setImageRef(1, el)}
+                    onLoad={() => handleImageLoad(1)}
+                    onError={() => {
+                      counterpartyOnError();
+                      handleImageError(1);
+                    }}
+                  />
+                </div>
+                <span className="text-sm font-normal truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                  {buildCounterpartyDisplayName(counterparty)}
+                </span>
+              </div>
+            )}
+          </div>
+          {/* Стоимость: как на странице актива [id] — сначала рубли, под ними сумма в валюте (для валютных), один стиль text-2xl font-medium. Отрицательные сальдо — с минусом и предупреждением как в режиме «Карточки». */}
+          <div className="flex flex-col items-end shrink-0 text-right min-w-0 gap-0.5">
+            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+              <CurrencyChip code="RUB" />
+              {hasNegativeBalance && !(currencyCode && currencyCode !== "RUB") && (
+                <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Отрицательное сальдо" />
+              )}
+              <span
+                className="text-2xl font-medium tabular-nums"
+                style={{
+                  background: isDeleted ? undefined : PINK_GRADIENT_CONST,
+                  WebkitBackgroundClip: isDeleted ? undefined : "text",
+                  WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
+                  backgroundClip: isDeleted ? undefined : "text",
+                }}
+              >
+                {rubEquivalent != null
+                  ? isAsset
+                    ? hasNegativeBalance
+                      ? `-${formatAmount(Math.abs(rubEquivalent))}`
+                      : formatAmount(rubEquivalent)
+                    : `-${formatAmount(Math.abs(rubEquivalent))}`
+                  : "-"}
+              </span>
+            </div>
+            {currencyCode && currencyCode !== "RUB" && (
+              <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                <CurrencyChip
+                  code={currencyCode}
+                  className={badgeColor ? "" : undefined}
+                  style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined}
+                />
+                {hasNegativeBalance && (
+                  <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Отрицательное сальдо" />
+                )}
+                <span
+                  className="text-2xl font-medium tabular-nums"
+                  style={{
+                    background: isDeleted ? undefined : PINK_GRADIENT_CONST,
+                    WebkitBackgroundClip: isDeleted ? undefined : "text",
+                    WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
+                    backgroundClip: isDeleted ? undefined : "text",
+                  }}
+                >
+                  {isAsset
+                    ? hasNegativeBalance
+                      ? `-${formatAmount(Math.abs(displayBalanceCents))}`
+                      : formatAmount(displayBalanceCents)
+                    : `-${formatAmount(Math.abs(displayBalanceCents))}`}
+                </span>
+              </div>
+            )}
+          </div>
+          {menuDropdown}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -363,75 +595,7 @@ export function AssetCard({
             )}
           </div>
 
-          {/* Кнопка меню — отдельный блок после картинки и информации (скрыта для Взаиморасчётов) */}
-          {item.type_code !== "counterparty_settlements" && (
-          <div className="shrink-0">
-            <DropdownMenu
-              onOpenChange={(open) => {
-                if (!open) {
-                  menuJustClosedRef.current = true;
-                  setTimeout(() => {
-                    menuJustClosedRef.current = false;
-                  }, 150);
-                }
-              }}
-            >
-              <DropdownMenuTrigger asChild>
-                <div onClick={(e) => e.stopPropagation()}>
-                  <IconButton aria-label="Открыть меню действий">
-                    <MoreVertical />
-                  </IconButton>
-                </div>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="w-56"
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                {onEdit && !isArchived && !isClosed && (
-                  <DropdownMenuItem onClick={() => onEdit(item)}>
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Редактировать
-                  </DropdownMenuItem>
-                )}
-                {onBuySell && item.instrument_id && !isArchived && !isClosed && (
-                  <DropdownMenuItem onClick={() => onBuySell(item)}>
-                    <TrendingUp className="mr-2 h-4 w-4" />
-                    Купить/продать актив
-                  </DropdownMenuItem>
-                )}
-                {onClose && !isArchived && !isClosed && (
-                  <DropdownMenuItem onClick={() => onClose(item)}>
-                    <Archive className="mr-2 h-4 w-4" />
-                    Закрыть
-                  </DropdownMenuItem>
-                )}
-                {onArchive && !isArchived && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => onArchive(item)}>
-                      <Archive className="mr-2 h-4 w-4" />
-                      Архивировать
-                    </DropdownMenuItem>
-                  </>
-                )}
-                {onDelete && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onClick={() => onDelete(item)}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Удалить
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          )}
+          {menuDropdown}
         </div>
 
         {/* Deposit details */}

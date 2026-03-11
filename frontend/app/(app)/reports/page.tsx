@@ -165,7 +165,7 @@ function ReportCard({
 export default function ReportsPage() {
   return (
     <main className="min-h-screen px-4 sm:px-8 py-8 flex flex-col items-center">
-      <div className="w-full max-w-[900px] space-y-6">
+      <div className="w-full space-y-6">
         <section className="flex flex-col gap-6">
           <ReportCard
             href="/reports/assets-dynamics"
@@ -174,10 +174,10 @@ export default function ReportsPage() {
             imageSrc="/reports/assets-dynamics.png"
           />
           <ReportCard
-            href="/reports/income-expense-dynamics"
-            title="Доходы и расходы по категориям"
-            description="Таблица фактических доходов и расходов по категориям с помесячной разбивкой"
-            imageSrc="/reports/income-expense-dynamics.png"
+            href="/reports/income-expense-by-period"
+            title="Доходы/расходы по периодам"
+            description="Динамика доходов и расходов за выбранный период с детализацией по категориям, контрагентам и счетам"
+            imageSrc="/reports/income-expense-by-period.png"
           />
           <ReportCard
             href="/reports/counterparty-settlements"

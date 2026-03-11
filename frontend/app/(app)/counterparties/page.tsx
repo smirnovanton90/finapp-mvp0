@@ -992,7 +992,7 @@ export default function CounterpartiesPage() {
             ) : (
               <>
                 <div
-                  className="columns-1 md:columns-2 xl:columns-3 gap-4"
+                  className="columns-1 md:columns-2 @[1400px]:columns-3 gap-4"
                   style={{
                     opacity: contentVisible ? 1 : 0,
                     transition: "opacity 0.3s ease-in-out",

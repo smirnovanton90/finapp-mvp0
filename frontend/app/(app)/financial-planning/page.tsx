@@ -52,6 +52,7 @@ import { FilterSection } from "@/components/filter-panel";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { IconButton } from "@/components/ui/icon-button";
 import { useSidebar } from "@/components/ui/sidebar-context";
+import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { AuthInput } from "@/components/ui/auth-input";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -1553,7 +1554,7 @@ export default function FinancialPlanningPage() {
       })()}
 
         <div className="flex-1 min-w-0 pt-[30px]">
-          <div className="w-[900px] mx-auto">
+          <div className={CONTENT_WIDTH_CLASS}>
             <FormModal
               open={isDialogOpen}
               modal

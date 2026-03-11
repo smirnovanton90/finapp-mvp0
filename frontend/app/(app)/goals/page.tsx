@@ -46,6 +46,7 @@ import { useSidebar } from "@/components/ui/sidebar-context";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
+import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, ACCENT } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 
@@ -837,7 +838,7 @@ export default function GoalsPage() {
       })()}
 
       <div className="flex-1 min-w-0">
-        <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto pt-[30px]">
+        <div className={`${CONTENT_WIDTH_CLASS} pt-[30px]`}>
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <Button
               className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"

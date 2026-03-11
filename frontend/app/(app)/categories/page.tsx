@@ -25,6 +25,7 @@ import { AuthInput } from "@/components/ui/auth-input";
 import { IconButton } from "@/components/ui/icon-button";
 import { CategoryNode, CategoryScope, buildCategoryLookup, getCategoryPhotoUrl } from "@/lib/categories";
 import { CATEGORY_ICON_OPTIONS } from "@/lib/category-icons";
+import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { cn } from "@/lib/utils";
 import {
   API_BASE,
@@ -1161,7 +1162,7 @@ export default function CategoriesPage() {
         )}
 
       <div className="flex-1 min-w-0 pt-[30px]">
-        <div className="w-full max-w-[900px] mx-auto px-4">
+        <div className={cn(CONTENT_WIDTH_CLASS, "px-4")}>
           <div className="flex flex-wrap gap-2 mb-4">
             <Button
               className="rounded-[9px] border-0 flex items-center justify-center gap-2 transition-colors hover:opacity-90 text-sm font-normal"

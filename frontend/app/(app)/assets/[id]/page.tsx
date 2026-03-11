@@ -68,6 +68,7 @@ import {
   TransactionOut,
   FxRateOut,
 } from "@/lib/api";
+import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
 import { formatAmount, getItemPhotoUrl, getItemPrimaryValueCents, getEffectiveItemKind } from "@/lib/item-utils";
@@ -1994,7 +1995,7 @@ export default function AssetDetailPage() {
 
   if (loading && !item) {
     return (
-      <main className="min-h-screen px-8 py-8 w-full max-w-6xl mx-auto box-border">
+      <main className={`min-h-screen px-8 py-8 box-border ${CONTENT_WIDTH_CLASS}`}>
         <div className="w-full" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</div>
       </main>
     );
@@ -2002,7 +2003,7 @@ export default function AssetDetailPage() {
 
   if (error && !item) {
     return (
-      <main className="min-h-screen px-8 py-8 w-full max-w-6xl mx-auto box-border">
+      <main className={`min-h-screen px-8 py-8 box-border ${CONTENT_WIDTH_CLASS}`}>
         <div className="w-full">
           <p className="text-red-600">{error}</p>
           <Button variant="outline" className="mt-4" asChild>
@@ -2015,7 +2016,7 @@ export default function AssetDetailPage() {
 
   if (!item) {
     return (
-      <main className="min-h-screen px-8 py-8 w-full max-w-6xl mx-auto box-border">
+      <main className={`min-h-screen px-8 py-8 box-border ${CONTENT_WIDTH_CLASS}`}>
         <div className="w-full">
           <p style={{ color: PLACEHOLDER_COLOR_DARK }}>Актив не найден.</p>
           <Button variant="outline" className="mt-4" asChild>
@@ -2041,7 +2042,7 @@ export default function AssetDetailPage() {
       : "";
 
   return (
-    <main className="min-h-screen px-8 py-8 w-full max-w-6xl mx-auto box-border">
+    <main className={`min-h-screen px-8 py-8 box-border ${CONTENT_WIDTH_CLASS}`}>
       <div className="flex w-full flex-col gap-6">
         <div className="flex flex-wrap items-center gap-2 -ml-2">
           <Button variant="ghost" size="sm" asChild>

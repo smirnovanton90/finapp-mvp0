@@ -50,6 +50,7 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { CollapsibleFormSection } from "@/components/ui/collapsible-form-section";
 import { TextField, DateField, SelectField, FormField } from "@/components/ui/form-field";
+import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
 import { cn } from "@/lib/utils";
@@ -3472,7 +3473,7 @@ export default function Page() {
       })()}
 
       <div className="flex-1 min-w-0">
-        <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto" style={{ paddingTop: "30px" }}>
+        <div className={CONTENT_WIDTH_CLASS} style={{ paddingTop: "30px" }}>
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <Button
               className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
@@ -3514,7 +3515,7 @@ export default function Page() {
                           {formatRub(totalRubCents)}
                         </span>
                       </div>
-                      <div className="columns-1 md:columns-2 xl:columns-3 gap-4">
+                      <div className="columns-1 md:columns-2 @[1400px]:columns-3 gap-4">
                         {items.map((item) => {
                           const rate = rateByCode[item.currency_code];
                           const rubEquivalent = getPrimaryValueRubCents(item);

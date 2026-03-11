@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
+import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -136,7 +137,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <Sidebar />
           <div
             className={cn(
-              "flex-1 transition-all duration-300",
+              "flex-1 transition-all duration-300 @container",
               !isSpecialPage && "min-h-screen flex items-center",
               !isDesktop && "pt-14 px-4"
             )}
@@ -148,7 +149,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             ) : (
               <div className="w-full h-full flex items-center">
-                <div className="w-full max-w-[900px] xl:max-w-[1350px] mx-auto">
+                <div className={CONTENT_WIDTH_CLASS}>
                   {children}
                 </div>
               </div>

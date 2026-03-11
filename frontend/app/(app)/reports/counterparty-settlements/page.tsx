@@ -499,7 +499,7 @@ export default function CounterpartySettlementsPage() {
 
   return (
     <main className="min-h-screen px-4 sm:px-8 py-8">
-      <div className="mx-auto flex w-full max-w-[900px] flex-col gap-6">
+      <div className="mx-auto flex w-full flex-col gap-6">
         <div className="flex flex-col gap-4">
           <div className="space-y-1.5 w-full">
             <Label>Контрагент</Label>

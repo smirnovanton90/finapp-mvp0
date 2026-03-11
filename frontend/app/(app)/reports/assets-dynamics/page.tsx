@@ -2134,7 +2134,7 @@ export default function AssetsDynamicsPage() {
 
   return (
     <main className="min-h-screen px-8 py-8">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+      <div className="mx-auto flex w-full flex-col gap-6">
         {error && <div className="text-sm text-red-600">{error}</div>}
 
         <div className="space-y-4">

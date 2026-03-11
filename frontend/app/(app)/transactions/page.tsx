@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar-context";
+import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { cn } from "@/lib/utils";
 import {
   ACCENT,
@@ -6755,7 +6756,7 @@ function TransactionsView({
             </FormModal>
 
         <div className="flex-1 min-w-0 pt-[30px]">
-          <div className="w-[900px] mx-auto">
+          <div className={CONTENT_WIDTH_CLASS}>
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <Dialog
                 open={isDialogOpen}

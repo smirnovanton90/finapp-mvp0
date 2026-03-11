@@ -2823,12 +2823,16 @@ def _checkpoint_to_out(
 ) -> BalanceCheckpointOut:
     computed = _compute_balance_cents_at(db, row.user_id, item, row.checkpoint_at)
     status: str = "OK" if computed == row.stated_balance_cents else "MISMATCH"
+    source = (row.source or "MANUAL").upper()
+    if source not in ("MANUAL", "IMPORTED"):
+        source = "MANUAL"
     return BalanceCheckpointOut(
         id=row.id,
         checkpoint_at=row.checkpoint_at,
         stated_balance_cents=row.stated_balance_cents,
         computed_balance_cents=computed,
         status=status,
+        source=source,
     )
 
 
@@ -3278,11 +3282,15 @@ def create_balance_checkpoint(
     primary = (item.primary_value_kind or "BALANCE").upper()
     if primary != "BALANCE":
         raise HTTPException(status_code=400, detail="Balance checkpoints only for balance-type items")
+    source = (payload.source or "MANUAL").upper()
+    if source not in ("MANUAL", "IMPORTED"):
+        source = "MANUAL"
     row = ItemBalanceCheckpoint(
         user_id=user.id,
         item_id=item_id,
         checkpoint_at=payload.checkpoint_at,
         stated_balance_cents=payload.stated_balance_cents,
+        source=source,
     )
     db.add(row)
     db.commit()
@@ -3308,6 +3316,8 @@ def update_balance_checkpoint(
         row.checkpoint_at = payload.checkpoint_at
     if payload.stated_balance_cents is not None:
         row.stated_balance_cents = payload.stated_balance_cents
+    if payload.source is not None:
+        row.source = payload.source.upper()
     db.commit()
     db.refresh(row)
     return _checkpoint_to_out(row, item, db)

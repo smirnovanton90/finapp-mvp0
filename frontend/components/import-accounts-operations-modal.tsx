@@ -10,6 +10,11 @@ import {
 } from "@/components/ui/dialog";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { ItemSelector } from "@/components/item-selector";
+import { FormField } from "@/components/ui/form-field";
+import { AuthInput } from "@/components/ui/auth-input";
+import { TextField } from "@/components/ui/form-field";
 import {
   ACTIVE_TEXT_DARK,
   ACCENT,
@@ -58,13 +63,17 @@ import {
   fetchCategories,
   fetchCounterparties,
   fetchCounterpartyIndustries,
+  createBalanceCheckpoint,
   API_BASE,
 } from "@/lib/api";
+import { parseRubToCents, formatRubInput, normalizeRubOnBlur, formatCentsForInput } from "@/lib/format-rub";
+import { formatTimeInput } from "@/lib/format-time";
 import { validateStep2, getAccountValidationError, getAccountValidationWarning } from "@/lib/import-step2-validation";
 import { validateStep3 } from "@/lib/import-step3-validation";
 import { validateStep4 } from "@/lib/import-step4-validation";
 import { executeImportDzen, getStatementAccountingStartDate, getStatementLastTransactionDate, getEarliestStatementTransactionDate } from "@/lib/import-dzen-executor";
 import { getTypeOptionsForKind, normalizeDisplayTypeCode } from "@/lib/item-type-options";
+import { getItemTypeLabel } from "@/lib/item-types";
 import {
   readFileToHeadersAndRows,
   applyMappingToDzenParsedData,
@@ -148,6 +157,15 @@ const STEPS_DZEN = [
   { key: 5, label: "Подтверждение" },
 ] as const;
 
+const STEPS_BANK = [
+  { key: 1, label: "Выбор файла" },
+  { key: 2, label: "Счета" },
+  { key: 3, label: "Категории" },
+  { key: 4, label: "Контрагенты" },
+  { key: 5, label: "КТ" },
+  { key: 6, label: "Подтверждение" },
+] as const;
+
 const STEPS_OWN = [
   { key: 1, label: "Выбор файла" },
   { key: 2, label: "Определение данных" },
@@ -219,27 +237,42 @@ export function ImportAccountsOperationsModal({
     rows: (string | number | boolean | Date)[][];
   } | null>(null);
   const [step2MappingError, setStep2MappingError] = React.useState<string | null>(null);
+  const [stepCheckpointError, setStepCheckpointError] = React.useState<string | null>(null);
   const [isReadingFile, setIsReadingFile] = React.useState(false);
+  type CheckpointBlockState = {
+    createCheckpoint: boolean;
+    selectedItemId: number | null;
+    dateKey: string;
+    timeStr: string;
+    amountStr: string;
+  };
+  const [checkpointStepState, setCheckpointStepState] = React.useState<Map<string, CheckpointBlockState>>(new Map());
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const contentScrollRef = React.useRef<HTMLDivElement>(null);
   const accountsStepAutoLinkApplied = React.useRef(false);
   const categoriesStepAutoLinkApplied = React.useRef(false);
   const counterpartiesStepAutoLinkApplied = React.useRef(false);
 
-  const STEPS = importSource === "own" ? STEPS_OWN : STEPS_DZEN;
+  const isBankImport =
+    importSource === "tbank" ||
+    importSource === "sber" ||
+    importSource === "alfa" ||
+    importSource === "ozon";
+  const STEPS = isBankImport ? STEPS_BANK : importSource === "own" ? STEPS_OWN : STEPS_DZEN;
 
   React.useEffect(() => {
     if (contentScrollRef.current) contentScrollRef.current.scrollTop = 0;
   }, [step]);
-  const stepLineWidth = importSource === "own" ? 100 : 130;
+  const stepLineWidth = importSource === "own" ? 100 : isBankImport ? 100 : 130;
   const stepAccounts = importSource === "own" ? 3 : 2;
   const stepCategories = importSource === "own" ? 4 : 3;
   const stepCounterparties = importSource === "own" ? 5 : 4;
-  const stepConfirm = importSource === "own" ? 6 : 5;
+  const stepCheckpoint = isBankImport ? 5 : 0;
+  const stepConfirm = isBankImport ? 6 : importSource === "own" ? 6 : 5;
   const isLastStep = step === stepConfirm;
   /** На шагах с активами, категориями и контрагентами степпер прокручивается вместе с контентом */
   const stepperScrollsWithContent =
-    step === stepAccounts || step === stepCategories || step === stepCounterparties;
+    step === stepAccounts || step === stepCategories || step === stepCounterparties || step === stepCheckpoint;
 
   const acceptedTypes =
     importSource === "own"
@@ -358,11 +391,13 @@ export function ImportAccountsOperationsModal({
       setStep4Error(null);
       setStep5Error(null);
       setStep2MappingError(null);
+      setStepCheckpointError(null);
       setColumnMapping({});
       setParsedFileData(null);
       setAccountCardStates(new Map());
       setCategoryCardStates(new Map());
       setCounterpartyCardStates(new Map());
+      setCheckpointStepState(new Map());
       setConfirmCloseOpen(false);
       accountsStepAutoLinkApplied.current = false;
       categoriesStepAutoLinkApplied.current = false;
@@ -424,6 +459,43 @@ export function ImportAccountsOperationsModal({
       setCounterpartyCardStates(next);
     }
   }, [parsedData?.counterparties]);
+
+  React.useEffect(() => {
+    if (
+      !isBankImport ||
+      !parsedData?.accounts?.length ||
+      step < stepCheckpoint
+    ) return;
+    setCheckpointStepState((prev) => {
+      const candidates = parsedData.balanceCheckpointCandidates ?? [];
+      const candidateByKey = new Map(candidates.map((c) => [c.accountKey, c]));
+      const accountsToShow = parsedData.accounts;
+      const next = new Map(prev);
+      for (const acc of accountsToShow) {
+        const key = `${acc.name}|${acc.currency}`;
+        if (next.has(key)) continue;
+        const candidate = candidateByKey.get(key);
+        const state = accountCardStates.get(key);
+        const linkedItemId = state?.linkEnabled && state?.linkedItemId != null ? state.linkedItemId : null;
+        next.set(key, {
+          createCheckpoint: !!candidate,
+          selectedItemId: linkedItemId,
+          dateKey: candidate?.dateKey ?? "",
+          timeStr: candidate?.time?.slice(0, 5) ?? "23:59",
+          amountStr: candidate != null ? formatCentsForInput(candidate.balanceCents) : "",
+        });
+      }
+      return next;
+    });
+  }, [
+    isBankImport,
+    step,
+    stepCheckpoint,
+    parsedData?.accounts,
+    parsedData?.balanceCheckpointCandidates,
+    importSource,
+    accountCardStates,
+  ]);
 
   React.useEffect(() => {
     if (step !== stepAccounts) {
@@ -723,6 +795,26 @@ export function ImportAccountsOperationsModal({
       }
     }
 
+    if (step === stepCheckpoint && isBankImport) {
+      setStepCheckpointError(null);
+      for (const [, block] of checkpointStepState) {
+        if (!block.createCheckpoint) continue;
+        if (!block.selectedItemId) {
+          setStepCheckpointError("Выберите актив для контрольной точки.");
+          return;
+        }
+        if (!block.dateKey || block.dateKey.length < 10) {
+          setStepCheckpointError("Укажите дату контрольной точки.");
+          return;
+        }
+        const cents = parseRubToCents(normalizeRubOnBlur(block.amountStr));
+        if (cents == null || !Number.isFinite(cents)) {
+          setStepCheckpointError("Укажите корректную сумму контрольной точки.");
+          return;
+        }
+      }
+    }
+
     if (step < stepConfirm) {
       setStep((s) => (s + 1) as ImportStep);
       return;
@@ -776,6 +868,41 @@ export function ImportAccountsOperationsModal({
           counterpartyCardStates,
           categoryNodes: categories,
         });
+        if (result.success && isBankImport) {
+          const buildCheckpointAtIso = (dateStr: string, timeStr: string) => {
+            const [y, mo, day] = dateStr.split("-").map((x) => parseInt(x, 10));
+            const t = timeStr && /^\d{1,2}:\d{2}$/.test(timeStr.trim()) ? timeStr.trim() : "00:00";
+            const [h, m] = t.split(":").map((x) => parseInt(x, 10));
+            const localDate = new Date(
+              Number.isFinite(y) ? y : 0,
+              Number.isFinite(mo) ? mo - 1 : 0,
+              Number.isFinite(day) ? day : 1,
+              Number.isFinite(h) ? h : 0,
+              Number.isFinite(m) ? m : 0,
+              0,
+              0
+            );
+            return localDate.toISOString();
+          };
+          for (const [, block] of checkpointStepState) {
+            if (!block.createCheckpoint || !block.selectedItemId || !block.dateKey) continue;
+            const cents = parseRubToCents(normalizeRubOnBlur(block.amountStr));
+            if (cents == null || !Number.isFinite(cents)) continue;
+            try {
+              await createBalanceCheckpoint(block.selectedItemId, {
+                checkpoint_at: buildCheckpointAtIso(block.dateKey, block.timeStr),
+                stated_balance_cents: cents,
+                source: "IMPORTED",
+              });
+            } catch (cpErr) {
+              setStep5Error(
+                (cpErr instanceof Error ? cpErr.message : "Не удалось создать контрольную точку.") as string
+              );
+              setIsImporting(false);
+              return;
+            }
+          }
+        }
         if (result.success) {
           onFinish?.();
           onOpenChange(false);
@@ -804,6 +931,7 @@ export function ImportAccountsOperationsModal({
       setStep3Error(null);
       setStep4Error(null);
       setStep5Error(null);
+      setStepCheckpointError(null);
       setStep((s) => (s - 1) as ImportStep);
     }
   };
@@ -923,10 +1051,12 @@ export function ImportAccountsOperationsModal({
           onOpenChange(next);
         }
       }}
-      modal={false}
+      modal={true}
     >
       <DialogContent
         title="Импорт счетов и операций"
+        overlayClassName="z-[100] bg-black/60"
+        containerClassName="z-[100]"
         onInteractOutside={(e) => {
           const target = e.target as HTMLElement;
           if (
@@ -1767,6 +1897,155 @@ export function ImportAccountsOperationsModal({
                 Сначала загрузите файл на шаге 1.
               </p>
             )}
+            {step === stepCheckpoint && isBankImport && parsedData?.accounts?.length && (
+              <div className="flex flex-col gap-6">
+                {stepCheckpointError && (
+                  <p className="text-base shrink-0" style={{ color: "#FB4C4F" }}>
+                    {stepCheckpointError}
+                  </p>
+                )}
+                <p className="text-base" style={{ color: ACTIVE_TEXT_DARK }}>
+                  По данным выписки можно создать контрольную точку (сальдо на дату). При необходимости отредактируйте параметры или отключите создание.
+                </p>
+                {parsedData.accounts.map((acc) => {
+                  const accountKey = `${acc.name}|${acc.currency}`;
+                  const block = checkpointStepState.get(accountKey) ?? {
+                    createCheckpoint: false,
+                    selectedItemId: null,
+                    dateKey: "",
+                    timeStr: "23:59",
+                    amountStr: "",
+                  };
+                  const balanceItems = items.filter(
+                    (i) => (i.primary_value_kind ?? "BALANCE") === "BALANCE"
+                  );
+                  return (
+                    <div
+                      key={accountKey}
+                      className="rounded-lg p-6 flex flex-col gap-4"
+                      style={{ backgroundColor: BACKGROUND_DT }}
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+                          Счёт: {acc.name}
+                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                            Создать контрольную точку
+                          </span>
+                          <Switch
+                            checked={block.createCheckpoint}
+                            onCheckedChange={(checked) => {
+                              setCheckpointStepState((prev) => {
+                                const next = new Map(prev);
+                                const cur = next.get(accountKey) ?? block;
+                                next.set(accountKey, { ...cur, createCheckpoint: checked });
+                                return next;
+                              });
+                            }}
+                          />
+                        </div>
+                      </div>
+                      {block.createCheckpoint && (
+                        <div className="flex flex-row flex-wrap items-end gap-4">
+                          <div className="min-w-[200px] flex-1 max-w-md">
+                            <FormField label="Актив" required>
+                              <ItemSelector
+                                items={balanceItems}
+                                selectedIds={block.selectedItemId ? [block.selectedItemId] : []}
+                                onChange={(ids) => {
+                                  setCheckpointStepState((prev) => {
+                                    const next = new Map(prev);
+                                    const cur = next.get(accountKey) ?? block;
+                                    next.set(accountKey, { ...cur, selectedItemId: ids[0] ?? null });
+                                    return next;
+                                  });
+                                }}
+                                selectionMode="single"
+                                placeholder="Выберите актив"
+                                clearLabel="Не выбрано"
+                                getItemTypeLabel={getItemTypeLabel}
+                                getCounterpartyForItemId={getCounterpartyForItemId}
+                                apiBase={API_BASE}
+                                ariaLabel="Актив для контрольной точки"
+                              />
+                            </FormField>
+                          </div>
+                          <div className="flex items-end gap-2 shrink-0">
+                            <FormField label="Дата" required>
+                              <AuthInput
+                                type="date"
+                                value={block.dateKey}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setCheckpointStepState((prev) => {
+                                    const next = new Map(prev);
+                                    const cur = next.get(accountKey) ?? block;
+                                    next.set(accountKey, { ...cur, dateKey: v });
+                                    return next;
+                                  });
+                                }}
+                                className="w-[140px]"
+                              />
+                            </FormField>
+                            <FormField label="Время" required>
+                              <AuthInput
+                                type="text"
+                                inputMode="numeric"
+                                value={block.timeStr}
+                                onChange={(e) => {
+                                  const v = formatTimeInput(e.target.value);
+                                  setCheckpointStepState((prev) => {
+                                    const next = new Map(prev);
+                                    const cur = next.get(accountKey) ?? block;
+                                    next.set(accountKey, { ...cur, timeStr: v });
+                                    return next;
+                                  });
+                                }}
+                                placeholder="00:00"
+                                maxLength={5}
+                                className="w-[5.5rem]"
+                              />
+                            </FormField>
+                          </div>
+                          <div className="min-w-[120px] shrink-0">
+                            <TextField
+                              label="Сумма"
+                              currencyCode={acc.currency}
+                              value={block.amountStr}
+                              onChange={(e) => {
+                                setCheckpointStepState((prev) => {
+                                  const next = new Map(prev);
+                                  const cur = next.get(accountKey) ?? block;
+                                  next.set(accountKey, { ...cur, amountStr: formatRubInput(e.target.value) });
+                                  return next;
+                                });
+                              }}
+                              onBlur={(e) => {
+                                const v = e.target.value.trim() ? normalizeRubOnBlur(e.target.value) : e.target.value;
+                                setCheckpointStepState((prev) => {
+                                  const next = new Map(prev);
+                                  const cur = next.get(accountKey) ?? block;
+                                  next.set(accountKey, { ...cur, amountStr: v });
+                                  return next;
+                                });
+                              }}
+                              placeholder="0,00"
+                              required
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {step === stepCheckpoint && isBankImport && (!parsedData?.accounts?.length || !parsedData) && (
+              <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
+                Сначала загрузите файл и пройдите предыдущие шаги.
+              </p>
+            )}
             {step === stepConfirm && (
               <div className="flex flex-col gap-6">
                 {step5Error && (
@@ -2060,6 +2339,8 @@ export function ImportAccountsOperationsModal({
       confirmLabel="Закрыть"
       cancelLabel="Отмена"
       variant="primary"
+      overlayClassName="z-[110] bg-black/60"
+      containerClassName="z-[110]"
     />
     <CreateCategoryModal
       open={createCategoryOpen}

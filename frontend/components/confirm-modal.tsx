@@ -24,6 +24,10 @@ export interface ConfirmModalProps {
   variant?: "destructive" | "primary";
   /** Иконка слева от заголовка; по умолчанию Trash2 для destructive */
   icon?: React.ReactNode;
+  /** Класс оверлея (например z-[110] для отображения поверх другой модалки). */
+  overlayClassName?: string;
+  /** Класс контейнера (fixed inset-0). */
+  containerClassName?: string;
 }
 
 export function ConfirmModal({
@@ -37,6 +41,8 @@ export function ConfirmModal({
   loading = false,
   variant = "destructive",
   icon,
+  overlayClassName,
+  containerClassName,
 }: ConfirmModalProps) {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const busy = loading || isSubmitting;
@@ -62,6 +68,8 @@ export function ConfirmModal({
       <DialogContent
         className="sm:max-w-[600px] gap-4"
         style={{ backgroundColor: MODAL_BG }}
+        overlayClassName={overlayClassName}
+        containerClassName={containerClassName}
       >
         <div className="grid gap-4">
           <DialogHeader>

@@ -10,6 +10,7 @@ import type {
   DzenParsedData,
   DzenParsedAccount,
   DzenParsedTransaction,
+  BalanceCheckpointCandidate,
 } from "@/lib/dzen-csv-parser";
 import {
   IMPORT_DEFAULT_CATEGORY_EXPENSE,
@@ -121,6 +122,17 @@ export async function parseSberPdfFile(file: File): Promise<DzenParsedData> {
 
   const defaultCurrency = "RUB";
 
+  /** КТ строится по первой операции: дата из колонки «ДАТА ОПЕРАЦИИ (МСК)», сумма из «ОСТАТОК СРЕДСТВ В ВАЛЮТЕ СЧЕТА». */
+  let firstOperationCheckpointCandidate: { dateKey: string; time: string; accountKey: string } | null = null;
+  let balanceFromStatementCents: number | null = null;
+  /** Дата/время из блока «Дата формирования документа» — для КТ, если нет операций */
+  let statementDateCandidate: { dateKey: string; time: string } | null = null;
+
+  const SBER_DATE_REGEX = /\b(\d{2})\.(\d{2})\.(\d{4})\b/;
+  const SBER_TIME_REGEX = /\b(\d{2}):(\d{2})(?::(\d{2}))?\b/;
+  /** Число с запятой (остаток): 0,00 или 1 234,56 */
+  const SBER_BALANCE_AMOUNT_REGEX = /[+\-\u2212]?\d{1,3}(?:[ \u00A0]\d{3})*,\d{2}|\b\d+,\d{2}\b/g;
+
   for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
     const page = await pdf.getPage(pageIndex);
     const viewport = page.getViewport({ scale: 1 });
@@ -132,6 +144,44 @@ export async function parseSberPdfFile(file: File): Promise<DzenParsedData> {
       return typeof c.str === "string" && Array.isArray(c.transform);
     });
     const lines = buildPdfLines(items);
+
+    // Проход по полному тексту страницы: дата формирования и остаток могут быть на разных строках
+    const fullPageText = lines
+      .map((l) => normalizePdfText(l.items.map((i) => i.text).join(" ")))
+      .join("\n");
+    const fullPageLower = fullPageText.toLowerCase();
+
+    // Остаток из полного текста — только запасной вариант (без таблицы операций). Иначе берём из первой строки таблицы.
+    const hasOperationsTable = fullPageLower.includes("расшифровка операций") || fullPageLower.includes("дата операции");
+    if (
+      !balanceFromStatementCents &&
+      !hasOperationsTable &&
+      fullPageLower.includes("остаток средств") &&
+      fullPageLower.includes("валюте")
+    ) {
+      const idx = fullPageLower.indexOf("остаток средств");
+      const chunk = fullPageText.slice(idx, idx + 450);
+      const amountMatches = chunk.match(SBER_BALANCE_AMOUNT_REGEX);
+      if (amountMatches && amountMatches.length > 0) {
+        const lastAmount = amountMatches[amountMatches.length - 1]!.replace(/\s/g, "").replace(/\u00A0/g, "");
+        const meta = parsePdfAmount(lastAmount.startsWith("+") || lastAmount.startsWith("-") ? lastAmount : `+${lastAmount}`);
+        if (meta) balanceFromStatementCents = meta.amountCents;
+      }
+    }
+    if (!statementDateCandidate && fullPageLower.includes("дата формирования документа")) {
+      const idx = fullPageLower.indexOf("дата формирования документа");
+      const chunk = fullPageText.slice(idx, idx + 120);
+      const dateM = chunk.match(SBER_DATE_REGEX);
+      if (dateM) {
+        const [, d, m, y] = dateM;
+        if (d && m && y) {
+          const dateKey = `${y}-${m}-${d}`;
+          const timeM = chunk.match(SBER_TIME_REGEX);
+          const time = timeM ? (timeM[3] != null ? `${timeM[1]}:${timeM[2]}:${timeM[3]}` : `${timeM[1]}:${timeM[2]}:00`) : "00:00:00";
+          statementDateCandidate = { dateKey, time };
+        }
+      }
+    }
 
     let inOperations = false;
     let currentRow: {
@@ -181,14 +231,21 @@ export async function parseSberPdfFile(file: File): Promise<DzenParsedData> {
       }
       if (lineTextLower.startsWith("выписка по платежному счету")) continue;
       if (lineTextLower.startsWith("страница")) continue;
-      if (
-        lineTextLower.includes("дата обработки") ||
-        lineTextLower.includes("код авторизации") ||
-        lineTextLower.includes("сумма в валюте") ||
-        lineTextLower.includes("остаток средств")
-      ) {
+      if (lineTextLower.includes("дата обработки") || lineTextLower.includes("код авторизации")) continue;
+      if (lineTextLower.includes("остаток средств") && lineTextLower.includes("валюте")) {
+        const amountText = pickPdfAmountText(extractPdfAmountCandidates(line.items, viewport.width)) || (lineText.match(PDF_AMOUNT_REGEX) ?? [])[0];
+        let amountMeta = amountText ? parsePdfAmount(amountText) : null;
+        if (!amountMeta && lineText.match(SBER_BALANCE_AMOUNT_REGEX)) {
+          const m = lineText.match(SBER_BALANCE_AMOUNT_REGEX);
+          if (m && m.length > 0) {
+            const raw = m[m.length - 1]!.replace(/\s/g, "").replace(/\u00A0/g, "");
+            amountMeta = parsePdfAmount(raw.startsWith("+") || raw.startsWith("-") ? raw : `+${raw}`);
+          }
+        }
+        if (amountMeta) balanceFromStatementCents = amountMeta.amountCents;
         continue;
       }
+      if (lineTextLower.includes("сумма в валюте")) continue;
 
       const dateTimeMatch = lineText.match(PDF_DATE_TIME_REGEX);
       if (dateTimeMatch) {
@@ -227,6 +284,7 @@ export async function parseSberPdfFile(file: File): Promise<DzenParsedData> {
               .filter(Boolean)
               .join("\n");
             const { dateKey, time } = parseDateFromPdf(currentRow.dateTime);
+            const accountKey = `${accountName}|${defaultCurrency}`;
             rows.push({
               dateKey,
               time,
@@ -238,6 +296,21 @@ export async function parseSberPdfFile(file: File): Promise<DzenParsedData> {
               amountCents: amountMeta.amountCents,
               isIncome: amountMeta.isIncome,
             });
+            if (!firstOperationCheckpointCandidate) {
+              firstOperationCheckpointCandidate = { dateKey, time, accountKey };
+            }
+          }
+        }
+
+        // Сумма для КТ — из колонки «ОСТАТОК СРЕДСТВ В ВАЛЮТЕ СЧЁТА» первой строки таблицы (правое число в строке)
+        if (!firstOperationCheckpointCandidate) {
+          const balanceCandidates = extractPdfAmountCandidates(line.items, viewport.width);
+          if (balanceCandidates.length > 0) {
+            const rightmostText = balanceCandidates[balanceCandidates.length - 1]!.text;
+            const balanceMeta = parsePdfAmount(
+              rightmostText.startsWith("+") || rightmostText.startsWith("-") ? rightmostText : `+${rightmostText}`
+            );
+            if (balanceMeta) balanceFromStatementCents = balanceMeta.amountCents;
           }
         }
 
@@ -311,6 +384,7 @@ export async function parseSberPdfFile(file: File): Promise<DzenParsedData> {
           .filter(Boolean)
           .join("\n");
         const { dateKey, time } = parseDateFromPdf(currentRow.dateTime);
+        const accountKey = `${accountName}|${defaultCurrency}`;
         rows.push({
           dateKey,
           time,
@@ -322,6 +396,9 @@ export async function parseSberPdfFile(file: File): Promise<DzenParsedData> {
           amountCents: amountMeta.amountCents,
           isIncome: amountMeta.isIncome,
         });
+        if (!firstOperationCheckpointCandidate) {
+          firstOperationCheckpointCandidate = { dateKey, time, accountKey };
+        }
       }
     }
   }
@@ -370,10 +447,34 @@ export async function parseSberPdfFile(file: File): Promise<DzenParsedData> {
 
   transactions.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
 
+  let balanceCheckpointCandidates: BalanceCheckpointCandidate[] | undefined;
+  const checkpointSource = firstOperationCheckpointCandidate ?? (statementDateCandidate && balanceFromStatementCents != null
+    ? {
+        dateKey: statementDateCandidate.dateKey,
+        time: statementDateCandidate.time,
+        accountKey: accountsMap.size > 0
+          ? Array.from(accountsMap.keys())[0]!
+          : fileFallbackLast4
+            ? `****${fileFallbackLast4}|${defaultCurrency}`
+            : `Счёт|${defaultCurrency}`,
+      }
+    : null);
+  if (checkpointSource && balanceFromStatementCents != null) {
+    balanceCheckpointCandidates = [
+      {
+        accountKey: checkpointSource.accountKey,
+        balanceCents: balanceFromStatementCents,
+        dateKey: checkpointSource.dateKey,
+        time: checkpointSource.time,
+      },
+    ];
+  }
+
   return {
     accounts,
     categories,
     counterparties,
     transactions,
+    balanceCheckpointCandidates,
   };
 }

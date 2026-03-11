@@ -643,10 +643,10 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
 
   // BALANCE_CHECKPOINTS (контрольные точки по активам с балансовой стоимостью)
   lines.push(SECTION_BALANCE_CHECKPOINTS);
-  lines.push(csvRow(["item_id", "checkpoint_at", "stated_balance_cents"]));
+  lines.push(csvRow(["item_id", "checkpoint_at", "stated_balance_cents", "source"]));
   for (const cp of checkpointsWithItems) {
     lines.push(
-      csvRow([cp.item_id, cp.checkpoint_at, cp.stated_balance_cents])
+      csvRow([cp.item_id, cp.checkpoint_at, cp.stated_balance_cents, cp.source ?? "MANUAL"])
     );
   }
 
@@ -1297,10 +1297,12 @@ export async function runImport(
       const checkpointAt = str(row.checkpoint_at).trim();
       const statedCents = num(row.stated_balance_cents);
       if (oldItemId == null || !itemIdMap.has(oldItemId) || !checkpointAt || statedCents == null) continue;
+      const source = str(row.source).toUpperCase() === "IMPORTED" ? "IMPORTED" : "MANUAL";
       try {
         await createBalanceCheckpoint(itemIdMap.get(oldItemId)!, {
           checkpoint_at: checkpointAt,
           stated_balance_cents: statedCents,
+          source,
         });
         counts.balanceCheckpoints += 1;
       } catch {

@@ -147,6 +147,7 @@ export type ItemCostHistoryOut = {
 };
 
 export type CheckpointStatus = "OK" | "MISMATCH";
+export type CheckpointSource = "MANUAL" | "IMPORTED";
 
 export type BalanceCheckpointOut = {
   id: number;
@@ -154,16 +155,19 @@ export type BalanceCheckpointOut = {
   stated_balance_cents: number;
   computed_balance_cents: number;
   status: CheckpointStatus;
+  source: CheckpointSource;
 };
 
 export type BalanceCheckpointCreate = {
   checkpoint_at: string;
   stated_balance_cents: number;
+  source?: CheckpointSource | null;
 };
 
 export type BalanceCheckpointUpdate = {
   checkpoint_at?: string | null;
   stated_balance_cents?: number | null;
+  source?: CheckpointSource | null;
 };
 
 export type BalanceAtOut = {

@@ -12,6 +12,7 @@ import type {
   DzenParsedData,
   DzenParsedAccount,
   DzenParsedTransaction,
+  BalanceCheckpointCandidate,
 } from "@/lib/dzen-csv-parser";
 import {
   IMPORT_DEFAULT_CATEGORY_EXPENSE,
@@ -26,8 +27,12 @@ import {
 
 const OZON_DATE_REGEX = /\b(\d{2})\.(\d{2})\.(\d{4})\b/;
 const OZON_TIME_REGEX = /\b(\d{2}):(\d{2}):(\d{2})\b/;
+/** Время HH:mm (без секунд), например в «Дата и время формирования документа» */
+const OZON_TIME_SHORT_REGEX = /\b(\d{2}):(\d{2})\b(?!\d)/;
 /** Сумма только с явным знаком: перед числом обязательно «+» или «-», чтобы не путать с датой (25.02.2026). */
 const OZON_SIGNED_AMOUNT_REGEX = /[+\-\u2212]\s*\d+(?:[ \u00A0]\d{3})*[.,]\d{2}/g;
+/** Число с десятичной частью в конце строки (для «Исходящий остаток» может быть 0 или 0,00 без знака) */
+const OZON_BALANCE_NUMBER_REGEX = /\b(\d+(?:[ \u00A0]\d{3})*)([.,](\d{2}))?\s*$/;
 const OZON_ACCOUNT_REGEX = /лицевого\s+счёта\s*:?\s*№?\s*([\d\s]+)/i;
 const OZON_ACCOUNT_REGEX_ALT = /лицевого\s+счета\s*:?\s*№?\s*([\d\s]+)/i;
 const OZON_ACCOUNT_REGEX_NUM = /(?:номер\s+)?(?:лицевого\s+)?счет[ау]\s*:?\s*№?\s*([\d\s]{4,})/i;
@@ -66,9 +71,16 @@ function parseOzonDate(dateStr: string): { dateKey: string; time: string } {
   const [, d, month, y] = dateM;
   const dateKey = `${y}-${month}-${d}`;
   const timeM = dateStr.match(OZON_TIME_REGEX);
-  if (!timeM) return { dateKey, time: "00:00:00" };
-  const [, hh, mm, ss] = timeM;
-  return { dateKey, time: `${hh}:${mm}:${ss}` };
+  if (timeM) {
+    const [, hh, mm, ss] = timeM;
+    return { dateKey, time: `${hh}:${mm}:${ss}` };
+  }
+  const timeShortM = dateStr.match(OZON_TIME_SHORT_REGEX);
+  if (timeShortM) {
+    const [, hh, mm] = timeShortM;
+    return { dateKey, time: `${hh}:${mm}:00` };
+  }
+  return { dateKey, time: "00:00:00" };
 }
 
 /** Извлечь дату и время из строки (для блока операции). */
@@ -153,6 +165,11 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
   let headerAccountName = "Счёт";
   const defaultCurrency = "RUB";
 
+  let periodEndDateKey = "";
+  let documentDateKey = "";
+  let documentTime = "23:59:00";
+  let outgoingBalanceCents: number | null = null;
+
   const stopPhrases = [
     "озон банк",
     "справка о движении средств",
@@ -173,6 +190,76 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
     });
     const lines = buildPdfLines(items);
 
+    // Проход по полному тексту страницы: дата/время и остаток могут быть на разных строках
+    const fullPageText = lines
+      .map((l) => normalizePdfText(l.items.map((i) => i.text).join(" ")))
+      .join("\n");
+    const fullPageLower = fullPageText.toLowerCase();
+
+    if (!documentDateKey && fullPageLower.includes("дата и время формирования")) {
+      const docDateM = fullPageText.match(
+        /дата\s+и\s+время\s+формирования\s*(?:документа)?\s*[:\s]*[\s\S]*?(\d{2})\.(\d{2})\.(\d{4})[\s\S]*?(\d{1,2})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/i
+      );
+      if (docDateM) {
+        const [, d, m, y, hh, mm, ss] = docDateM;
+        if (d && m && y) {
+          documentDateKey = `${y}-${m}-${d}`;
+          documentTime = ss != null ? `${String(hh).padStart(2, "0")}:${mm}:${ss}` : `${String(hh).padStart(2, "0")}:${mm}:00`;
+        }
+      }
+      // Дата/время на разных строках: ищем дату и время по отдельности в блоке после заголовка
+      if (!documentDateKey || !documentTime) {
+        const idx = fullPageLower.indexOf("дата и время формирования");
+        const chunk = fullPageText.slice(idx, idx + 200);
+        if (!documentDateKey) {
+          const dateInChunk = chunk.match(OZON_DATE_REGEX);
+          if (dateInChunk) {
+            const [, d, m, y] = dateInChunk;
+            if (d && m && y) documentDateKey = `${y}-${m}-${d}`;
+          }
+        }
+        if (!documentTime) {
+          const timeFull = chunk.match(OZON_TIME_REGEX);
+          if (timeFull) {
+            const [, hh, mm, ss] = timeFull;
+            documentTime = `${hh}:${mm}:${ss}`;
+          } else {
+            const timeShort = chunk.match(OZON_TIME_SHORT_REGEX);
+            if (timeShort) {
+              const [, hh, mm] = timeShort;
+              documentTime = `${hh}:${mm}:00`;
+            }
+          }
+        }
+      }
+    }
+    if (!periodEndDateKey && fullPageLower.includes("период выписки")) {
+      const periodM = fullPageText.match(/по\s+(\d{2})\.(\d{2})\.(\d{4})\b/i);
+      if (periodM) {
+        const [, d, m, y] = periodM;
+        if (d && m && y) periodEndDateKey = `${y}-${m}-${d}`;
+      }
+      if (!periodEndDateKey) {
+        const allDates = fullPageText.match(/\d{2}\.\d{2}\.\d{4}/g);
+        if (allDates && allDates.length > 0) {
+          const last = allDates[allDates.length - 1]!;
+          const [dd, mm, yy] = last.split(".");
+          if (dd && mm && yy) periodEndDateKey = `${yy}-${mm}-${dd}`;
+        }
+      }
+    }
+    if (outgoingBalanceCents === null && fullPageLower.includes("исходящий остаток")) {
+      const idx = fullPageLower.indexOf("исходящий остаток");
+      const afterOutgoing = fullPageText.slice(idx + "исходящий остаток".length, idx + 450);
+      const amountM = afterOutgoing.match(/(\d+)([.,](\d{2}))?/g);
+      if (amountM && amountM.length > 0) {
+        const lastAmount = amountM[amountM.length - 1]!.replace(/\s/g, "");
+        const normalized = lastAmount.replace(",", ".");
+        const num = parseFloat(normalized);
+        if (Number.isFinite(num)) outgoingBalanceCents = Math.round(num * 100);
+      }
+    }
+
     let inOperations = false;
     let currentRow: {
       dateTime: string;
@@ -189,8 +276,9 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
         .filter(Boolean)
         .join(" ");
       if (isOpeningBalanceOrNonOperation(fullPurpose, amountMeta.amountCents)) return;
-      let { dateKey, time } = parseOzonDate(currentRow.dateTime);
+      const { dateKey, time: timeParsed } = parseOzonDate(currentRow.dateTime);
       if (!dateKey) return;
+      let time = timeParsed;
       let comment = normalizePdfText(fullPurpose);
       if (time === "00:00:00") {
         const extracted = extractTimeFromPurposeStart(comment);
@@ -229,6 +317,43 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
         if (acc) headerAccountName = acc;
       }
 
+      if (lineTextLower.includes("период выписки")) {
+        const periodEndM = lineText.match(/по\s+(\d{2})\.(\d{2})\.(\d{4})\b/i) ?? lineText.match(/(\d{2})\.(\d{2})\.(\d{4})\s*$/);
+        if (periodEndM) {
+          const [, d, m, y] = periodEndM;
+          if (d && m && y) periodEndDateKey = `${y}-${m}-${d}`;
+        } else {
+          const allDates = lineText.match(OZON_DATE_REGEX);
+          if (allDates && allDates.length > 0) {
+            const lastDate = allDates[allDates.length - 1]!;
+            const parts = lastDate.split(".");
+            if (parts.length === 3) periodEndDateKey = `${parts[2]}-${parts[1]}-${parts[0]}`;
+          }
+        }
+      }
+      if (lineTextLower.includes("дата и время формирования")) {
+        const dt = parseOzonDate(lineText);
+        if (dt.dateKey) {
+          documentDateKey = dt.dateKey;
+          documentTime = dt.time;
+        }
+      }
+      if (lineTextLower.includes("исходящий остаток")) {
+        let amountStr = getLastAmountStr(lineText);
+        if (!amountStr) {
+          const balanceM = lineText.match(OZON_BALANCE_NUMBER_REGEX);
+          if (balanceM) {
+            const numPart = (balanceM[1] ?? "").replace(/\s/g, "");
+            const decPart = balanceM[3] ?? "00";
+            amountStr = `+${numPart},${decPart}`;
+          }
+        }
+        const meta = amountStr ? parsePdfAmount(amountStr) : null;
+        if (meta) outgoingBalanceCents = meta.amountCents;
+        currentRow = null;
+        continue;
+      }
+
       const isTableHeader =
         lineTextLower.includes("дата операции") && lineTextLower.includes("документ");
       if (isTableHeader || lineTextLower.includes("сумма операции") && lineTextLower.includes("рубл")) {
@@ -245,7 +370,6 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
 
       const hasDate = OZON_DATE_REGEX.test(lineText);
       const amountStr = getLastAmountStr(lineText);
-      const amountMeta = amountStr ? parsePdfAmount(amountStr) : null;
 
       if (hasDate) {
         flushRow();
@@ -334,10 +458,28 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
     `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`)
   );
 
+  let balanceCheckpointCandidates: BalanceCheckpointCandidate[] | undefined;
+  if (outgoingBalanceCents != null) {
+    const dateKey = periodEndDateKey || documentDateKey;
+    if (dateKey) {
+      const time =
+        periodEndDateKey && documentDateKey === periodEndDateKey
+          ? documentTime
+          : periodEndDateKey
+            ? "23:59:00"
+            : documentTime;
+      const accountKey = `${headerAccountName}|${defaultCurrency}`;
+      balanceCheckpointCandidates = [
+        { accountKey, balanceCents: outgoingBalanceCents, dateKey, time },
+      ];
+    }
+  }
+
   return {
     accounts,
     categories,
     counterparties,
     transactions,
+    balanceCheckpointCandidates,
   };
 }

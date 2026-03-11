@@ -20,6 +20,9 @@ import {
   MessageSquare,
   ExternalLink,
   Target,
+  MapPin,
+  MapPinCheck,
+  MapPinX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -73,6 +76,7 @@ import {
   formatSize,
 } from "@/lib/asset-item-form-constants";
 import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
+import { formatTimeInput } from "@/lib/format-time";
 import { PINK_GRADIENT } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
@@ -490,6 +494,7 @@ export default function AssetDetailPage() {
         await updateBalanceCheckpoint(item.id, checkpointEditId, {
           checkpoint_at: at,
           stated_balance_cents: cents,
+          source: "MANUAL",
         });
       } else {
         await createBalanceCheckpoint(item.id, { checkpoint_at: at, stated_balance_cents: cents });
@@ -2501,12 +2506,19 @@ export default function AssetDetailPage() {
                                 {costHistoryOpen === "balance" && costChartCheckpointLines.map(({ dateKey, x, checkpoints: cps }) => {
                                   const hasMismatch = cps.some((c) => c.status === "MISMATCH");
                                   const strokeColor = hasMismatch ? RED : GREEN;
+                                  const iconSize = 24;
+                                  const iconY = Math.max(0, costChartGeometry.padding.top - iconSize);
                                   return (
                                     <g
                                       key={dateKey}
                                       onMouseEnter={() => setCheckpointChartHoverDate(dateKey)}
                                       onMouseLeave={() => setCheckpointChartHoverDate(null)}
                                     >
+                                      <foreignObject x={x - iconSize / 2} y={iconY} width={iconSize} height={iconSize} style={{ overflow: "visible" }}>
+                                        <div xmlns="http://www.w3.org/1999/xhtml" className="flex items-center justify-center" style={{ width: iconSize, height: iconSize, color: hasMismatch ? RED : GREEN }}>
+                                          {hasMismatch ? <MapPinX size={20} /> : <MapPinCheck size={20} />}
+                                        </div>
+                                      </foreignObject>
                                       <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={strokeColor} strokeWidth={2} strokeOpacity={0.9} />
                                       <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke="transparent" strokeWidth={16} style={{ cursor: "pointer" }} />
                                     </g>
@@ -2902,7 +2914,10 @@ export default function AssetDetailPage() {
           <div className="relative rounded-lg overflow-hidden border-0 outline-none mt-6" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
               <div className="flex items-center justify-between gap-4 mb-4">
-                <h3 className="text-2xl font-medium shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>Контрольные точки</h3>
+                <h3 className="text-2xl font-medium shrink-0 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+                <MapPin className="h-6 w-6 shrink-0" style={{ color: ACTIVE_TEXT_DARK }} aria-hidden />
+                Контрольные точки
+              </h3>
                 <Button
                   type="button"
                   className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
@@ -2924,6 +2939,7 @@ export default function AssetDetailPage() {
                         <th className="px-4 py-3 text-sm font-medium">Расчётное сальдо</th>
                         <th className="px-4 py-3 text-sm font-medium">Должно быть</th>
                         <th className="px-4 py-3 text-sm font-medium">Статус</th>
+                        <th className="px-4 py-3 text-sm font-medium">Источник</th>
                         <th className="px-6 py-3 text-sm font-medium text-right" aria-label="Действия" />
                       </tr>
                     </thead>
@@ -2949,6 +2965,17 @@ export default function AssetDetailPage() {
                                 }}
                               >
                                 {cp.status === "OK" ? "ОК" : "Расхождение"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              <span
+                                className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
+                                style={{
+                                  backgroundColor: "rgba(148, 163, 184, 0.2)",
+                                  color: PLACEHOLDER_COLOR_DARK,
+                                }}
+                              >
+                                {cp.source === "IMPORTED" ? "Импортированная" : "Ручная"}
                               </span>
                             </td>
                             <td className="px-6 py-2 text-sm text-right">
@@ -3298,7 +3325,7 @@ export default function AssetDetailPage() {
                       type="text"
                       inputMode="numeric"
                       value={checkpointTimeStr}
-                      onChange={(e) => setCheckpointTimeStr(e.target.value)}
+                      onChange={(e) => setCheckpointTimeStr(formatTimeInput(e.target.value))}
                       placeholder="00:00"
                       maxLength={5}
                       autoComplete="off"

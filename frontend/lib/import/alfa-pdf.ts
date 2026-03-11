@@ -10,6 +10,7 @@ import type {
   DzenParsedData,
   DzenParsedAccount,
   DzenParsedTransaction,
+  BalanceCheckpointCandidate,
 } from "@/lib/dzen-csv-parser";
 import {
   IMPORT_DEFAULT_CATEGORY_EXPENSE,
@@ -111,6 +112,9 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
   let headerAccountNumber = "";
   const defaultCurrency = "RUB";
 
+  let alfaOutgoingBalanceCents: number | null = null;
+  let alfaPeriodEndDateKey = "";
+
   for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
     const page = await pdf.getPage(pageIndex);
     const viewport = page.getViewport({ scale: 1 });
@@ -153,6 +157,18 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
       if (!inOperations && pageIndex === 1) {
         const acc = extractAccountFromLine(lineText);
         if (acc) headerAccountNumber = acc;
+        if (lineTextLower.includes("исходящий остаток")) {
+          const amountText = extractPdfRightAmountText(line.items, viewport.width) || (lineText.match(PDF_AMOUNT_REGEX) ?? [])[0];
+          const meta = amountText ? parsePdfAmount(amountText) : null;
+          if (meta) alfaOutgoingBalanceCents = meta.amountCents;
+        }
+        if (lineTextLower.includes("за период") && lineTextLower.includes("по")) {
+          const periodEndM = lineText.match(/по\s+(\d{2})\.(\d{2})\.(\d{4})\b/i) ?? lineText.match(/(\d{2})\.(\d{2})\.(\d{4})\s*$/);
+          if (periodEndM) {
+            const [, d, m, y] = periodEndM;
+            if (d && m && y) alfaPeriodEndDateKey = `${y}-${m}-${d}`;
+          }
+        }
       }
 
       const isHeaderLine =
@@ -400,10 +416,24 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
 
   transactions.sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
 
+  let balanceCheckpointCandidates: BalanceCheckpointCandidate[] | undefined;
+  if (alfaOutgoingBalanceCents != null && alfaPeriodEndDateKey) {
+    const accountKey = `${headerAccountNumber || "Счёт"}|${defaultCurrency}`;
+    balanceCheckpointCandidates = [
+      {
+        accountKey,
+        balanceCents: alfaOutgoingBalanceCents,
+        dateKey: alfaPeriodEndDateKey,
+        time: "23:59:00",
+      },
+    ];
+  }
+
   return {
     accounts,
     categories,
     counterparties,
     transactions,
+    balanceCheckpointCandidates,
   };
 }

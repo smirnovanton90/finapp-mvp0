@@ -308,5 +308,6 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
     categories,
     counterparties,
     transactions,
+    balanceCheckpointCandidates: [],
   };
 }

@@ -59,11 +59,21 @@ export function getTransactionDateTimeSortKey(tx: DzenParsedTransaction): string
   return `${tx.date}T${normalizeTime(tx.time)}`;
 }
 
+/** Кандидат КТ по выписке (accountKey = `${accountName}|${currency}`). */
+export type BalanceCheckpointCandidate = {
+  accountKey: string;
+  balanceCents: number;
+  dateKey: string;
+  time: string;
+};
+
 export type DzenParsedData = {
   accounts: DzenParsedAccount[];
   categories: DzenParsedCategory[];
   counterparties: DzenParsedCounterparty[];
   transactions: DzenParsedTransaction[];
+  /** Кандидаты КТ по счёту (банковские парсеры). */
+  balanceCheckpointCandidates?: BalanceCheckpointCandidate[];
 };
 
 /** Имя счёта «Долги» в выгрузке Дзен-мани — такой счёт не импортируется, операции с ним обрабатываются отдельно */

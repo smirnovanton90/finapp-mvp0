@@ -530,16 +530,19 @@ class ItemCostHistoryOut(BaseModel):
 
 
 CheckpointStatus = Literal["OK", "MISMATCH"]
+CheckpointSource = Literal["MANUAL", "IMPORTED"]
 
 
 class BalanceCheckpointCreate(BaseModel):
     checkpoint_at: datetime
     stated_balance_cents: int
+    source: CheckpointSource | None = None
 
 
 class BalanceCheckpointUpdate(BaseModel):
     checkpoint_at: datetime | None = None
     stated_balance_cents: int | None = None
+    source: CheckpointSource | None = None
 
 
 class BalanceCheckpointOut(BaseModel):
@@ -548,6 +551,7 @@ class BalanceCheckpointOut(BaseModel):
     stated_balance_cents: int
     computed_balance_cents: int
     status: CheckpointStatus
+    source: CheckpointSource
 
     class Config:
         from_attributes = True

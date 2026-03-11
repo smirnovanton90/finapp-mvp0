@@ -59,6 +59,8 @@ import {
   HeartPulse,
   Home,
   Landmark,
+  MapPinCheck,
+  MapPinX,
   MessageSquare,
   MoreVertical,
   Pencil,
@@ -176,6 +178,7 @@ import {
   parseRubToCents,
   formatCentsForInput,
 } from "@/lib/format-rub";
+import { formatTimeInput } from "@/lib/format-time";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
@@ -4271,7 +4274,7 @@ function TransactionsView({
         if (!byTime.has(timeKey)) byTime.set(timeKey, []);
         byTime.get(timeKey)!.push(cp);
       }
-      const timeKeys = Array.from(byTime.keys()).sort();
+      const timeKeys = Array.from(byTime.keys()).sort((a, b) => b.localeCompare(a));
       for (const timeKey of timeKeys) {
         rows.push({ type: "checkpoint_line", dateKey, timeKey, checkpoints: byTime.get(timeKey)! });
       }
@@ -5764,7 +5767,7 @@ function TransactionsView({
                             type="text"
                             inputMode="numeric"
                             value={time}
-                            onChange={(e) => setTime(e.target.value)}
+                            onChange={(e) => setTime(formatTimeInput(e.target.value))}
                             placeholder="00:00"
                             maxLength={5}
                             autoComplete="off"
@@ -6615,7 +6618,7 @@ function TransactionsView({
                         type="text"
                         inputMode="numeric"
                         value={time}
-                        onChange={(e) => setTime(e.target.value)}
+                        onChange={(e) => setTime(formatTimeInput(e.target.value))}
                         placeholder="00:00"
                         maxLength={5}
                         autoComplete="off"
@@ -6883,9 +6886,13 @@ function TransactionsView({
                             const currencyCode = item?.currency_code ?? "RUB";
                             const d = new Date(cp.checkpoint_at);
                             const dateTimeLabel = `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+                            const cpOk = cp.status === "OK";
                             return (
                               <div key={cp.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                                <span className="tabular-nums shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>{dateTimeLabel}</span>
+                                <span className="flex items-center gap-2 tabular-nums shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>
+                                  {cpOk ? <MapPinCheck className="h-6 w-6 shrink-0" style={{ color: GREEN }} aria-hidden /> : <MapPinX className="h-6 w-6 shrink-0" style={{ color: RED }} aria-hidden />}
+                                  {dateTimeLabel}
+                                </span>
                                 {item ? (
                                   <div className="flex items-center gap-2 shrink-0">
                                     <div className="h-8 w-8 shrink-0 rounded overflow-hidden flex items-center justify-center">
@@ -6911,6 +6918,15 @@ function TransactionsView({
                                 <span className="tabular-nums flex items-center gap-1.5">
                                   <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Должно быть:</span> <CurrencyChip code={currencyCode} />
                                   <span style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(cp.stated_balance_cents)}</span>
+                                </span>
+                                <span
+                                  className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium shrink-0"
+                                  style={{
+                                    backgroundColor: "rgba(148, 163, 184, 0.2)",
+                                    color: PLACEHOLDER_COLOR_DARK,
+                                  }}
+                                >
+                                  {cp.source === "IMPORTED" ? "Импортированная" : "Ручная"}
                                 </span>
                               </div>
                             );

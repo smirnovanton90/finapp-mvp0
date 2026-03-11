@@ -515,6 +515,8 @@ class ItemBalanceCheckpoint(Base):
     checkpoint_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     stated_balance_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     """Указанное пользователем сальдо в валюте актива (копейки/центы)."""
+    source: Mapped[str] = mapped_column(String(20), nullable=False, server_default="MANUAL")
+    """MANUAL или IMPORTED."""
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

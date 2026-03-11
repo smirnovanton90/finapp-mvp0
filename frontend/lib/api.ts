@@ -117,6 +117,8 @@ export type ItemCostsOut = {
   balance_rub: number;
   acquisition_rub: number;
   invested_rub: number;
+  /** Рыночная стоимость в валюте актива (копейки/центы), если приходит с API. */
+  market?: number | null;
   market_rub: number | null;
   market_value_rub?: number | null;
   income_rub: number;
@@ -1294,6 +1296,7 @@ function mapItemCostsFromApi(raw: unknown): ItemCostsOut {
     balance_rub: balanceRub,
     acquisition_rub: (r.acquisition_rub ?? r.acquisition) as number,
     invested_rub: (r.invested_rub ?? r.invested) as number,
+    market: r.market as number | null | undefined,
     market_rub: (r.market_rub ?? r.market) as number | null,
     market_value_rub: r.market_value_rub as number | null | undefined,
     income_rub: (r.income_rub ?? r.income) as number,

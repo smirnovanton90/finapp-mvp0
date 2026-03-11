@@ -855,8 +855,8 @@ export default function AssetDetailPage() {
           if (it.type_code === "crypto" && it.quantity_units != null) qtyEnd = it.quantity_units;
           else if (it.position_lots != null) qtyEnd = it.position_lots;
         } else {
-          // c.balance — в валюте актива (копейки/центы)
-          finalCurCents = c.balance ?? 0;
+          // c.balance_currency_cents — в валюте актива (копейки/центы)
+          finalCurCents = c.balance_currency_cents ?? 0;
           const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
           finalRubCents =
             currencyCode === "RUB"
@@ -2686,7 +2686,11 @@ export default function AssetDetailPage() {
                                       onMouseLeave={() => setCheckpointChartHoverDate(null)}
                                     >
                                       <foreignObject x={x - iconSize / 2} y={iconY} width={iconSize} height={iconSize} style={{ overflow: "visible" }}>
-                                        <div xmlns="http://www.w3.org/1999/xhtml" className="flex items-center justify-center" style={{ width: iconSize, height: iconSize, color: hasMismatch ? RED : GREEN }}>
+                                        <div
+                                          {...({ xmlns: "http://www.w3.org/1999/xhtml" } as Record<string, unknown>)}
+                                          className="flex items-center justify-center"
+                                          style={{ width: iconSize, height: iconSize, color: hasMismatch ? RED : GREEN }}
+                                        >
                                           {hasMismatch ? <MapPinX size={20} /> : <MapPinCheck size={20} />}
                                         </div>
                                       </foreignObject>

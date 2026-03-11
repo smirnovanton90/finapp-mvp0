@@ -1199,7 +1199,7 @@ function TransactionMobileTableRow({
   itemName: (id: number | null | undefined) => string;
   categoryLookup: ReturnType<typeof buildCategoryLookup>;
   getCategoryLines: (categoryId: number | null) => [string, string, string];
-  resolveCategoryIcon: (categoryId: number | null) => LucideIcon;
+  resolveCategoryIcon: (categoryId: number | null) => ComponentType<{ className?: string; strokeWidth?: number; style?: CSSProperties }>;
   itemsById: Map<number, ItemOut>;
   getItemCounterparty: (itemId: number | null | undefined) => CounterpartyOut | null;
   getCounterpartyForItemId: (itemId: number | null | undefined) => CounterpartyOut | null;
@@ -2740,7 +2740,7 @@ function TransactionsView({
     if (!cpId) return null;
     return counterpartiesById.get(cpId) ?? null;
   };
-  const getCounterpartyForItemId = (id: number) => getItemCounterparty(id) ?? null;
+  const getCounterpartyForItemId = (id: number | null | undefined) => getItemCounterparty(id) ?? null;
   const itemCounterpartyLogoUrl = (id: number | null | undefined) => {
     const cp = getItemCounterparty(id);
     if (!cp) return null;

@@ -42,6 +42,7 @@ import {
   ArrowLeftRight,
   Ban,
   BadgeCheck,
+  Banknote,
   Briefcase,
   Building2,
   Calendar,
@@ -60,6 +61,7 @@ import {
   HeartPulse,
   Home,
   Landmark,
+  Link2,
   MapPinCheck,
   MapPinX,
   MessageSquare,
@@ -73,6 +75,7 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   Sparkles,
+  Tag,
   Trophy,
   Trash2,
   Truck,
@@ -135,6 +138,7 @@ import {
 } from "@/components/ui/select";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { EmptyState } from "@/components/empty-state";
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { MobileAddTransactionSheet } from "@/components/mobile-add-transaction-sheet";
 import { CreateCategoryModal } from "@/components/create-category-modal";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
@@ -1176,6 +1180,266 @@ function parseReceiptQR(qrData: string): ParsedReceiptData | null {
   };
 }
 
+/** Строка таблицы транзакции для мобильной верстки: карточка — 1) сумма+категория (заливка как на десктопе), 2) актив и контрагент (для перевода: откуда/куда), 3) комментарий. */
+function TransactionMobileTableRow({
+  tx,
+  counterparty,
+  itemName,
+  categoryLookup,
+  getCategoryLines,
+  resolveCategoryIcon,
+  itemsById,
+  getItemCounterparty,
+  getCounterpartyForItemId,
+  apiBase,
+  onEdit,
+}: {
+  tx: TransactionCard;
+  counterparty: CounterpartyOut | null;
+  itemName: (id: number | null | undefined) => string;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  getCategoryLines: (categoryId: number | null) => [string, string, string];
+  resolveCategoryIcon: (categoryId: number | null) => LucideIcon;
+  itemsById: Map<number, ItemOut>;
+  getItemCounterparty: (itemId: number | null | undefined) => CounterpartyOut | null;
+  getCounterpartyForItemId: (itemId: number | null | undefined) => CounterpartyOut | null;
+  apiBase: string;
+  onEdit: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
+}) {
+  const primaryDisplayId = tx.primary_card_item_id ?? tx.primary_item_id;
+  const counterpartyDisplayId = tx.counterparty_card_item_id ?? tx.counterparty_item_id;
+  const primaryItem = primaryDisplayId != null ? itemsById.get(primaryDisplayId) ?? null : null;
+  const counterpartyItem = counterpartyDisplayId != null ? itemsById.get(counterpartyDisplayId) ?? null : null;
+  const primaryCounterparty = getItemCounterparty(primaryDisplayId);
+  const counterpartyItemCounterparty = getItemCounterparty(counterpartyDisplayId);
+  const [l1, l2, l3] = getCategoryLines(tx.category_id);
+  const t0 = l1?.trim();
+  const t1 = l2?.trim();
+  const t2 = l3?.trim();
+  const visible = [
+    t0 && t0 !== "-" ? t0 : null,
+    t1 && t1 !== "-" ? t1 : null,
+    t2 && t2 !== "-" ? t2 : null,
+  ];
+  const lastIndex = visible[2] ? 2 : visible[1] ? 1 : visible[0] ? 0 : -1;
+  const displayCategoryLabel = lastIndex >= 0 ? visible[lastIndex]! : (tx.direction === "TRANSFER" ? "Перевод" : "—");
+  const currencyCode = primaryItem?.currency_code ?? "RUB";
+  const counterpartyCurrencyCode = counterpartyItem?.currency_code ?? currencyCode;
+  const isIncome = tx.direction === "INCOME";
+  const isExpense = tx.direction === "EXPENSE";
+  const isTransfer = tx.direction === "TRANSFER";
+  const textColor = tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
+  const counterpartyName = counterparty ? buildCounterpartyName(counterparty) : null;
+  const accountName = itemName(primaryDisplayId) || "—";
+  const accountToName = itemName(counterpartyDisplayId) || "—";
+  const commentText = tx.comment?.trim() || null;
+  const primaryAmountCents = tx.amount;
+  const counterpartyAmountCents = tx.amount_counterparty ?? tx.amount;
+  const [transferIconFormat, setTransferIconFormat] = useState<"png" | null>("png");
+  const transferIcon3dPath = transferIconPath(transferIconFormat);
+  const {
+    currentSrc: counterpartyLogoUrl,
+    onError: counterpartyLogoOnError,
+    showFallbackIcon: counterpartyShowFallbackIcon,
+  } = useCounterpartyImage(counterparty ?? null, apiBase);
+  const CounterpartyFallbackIcon = counterparty?.entity_type === "PERSON" ? User : Building2;
+  const {
+    imageSrc: categoryImageSrc,
+    onError: categoryImageOnError,
+    showFallbackIcon: categoryShowFallbackIcon,
+    CategoryIcon: CategoryIconFallback,
+    setCategoryIconFormat,
+  } = useCategoryImage(tx.category_id, categoryLookup, apiBase);
+  // Как на десктопе: подсветка (полоска 10px + тень), фон MODAL_BG
+  const row1HighlightColor = tx.isDeleted ? "transparent" : isIncome ? GREEN_TRANSACTION : isExpense ? RED : ACCENT2;
+  const row1Bg = tx.isDeleted ? "transparent" : MODAL_BG;
+  const amountColor = tx.isDeleted ? textColor : isTransfer ? RED : isIncome ? GREEN : RED;
+  const rightAmountColor = tx.isDeleted ? textColor : isTransfer ? GREEN : textColor;
+
+  return (
+    <TableRow
+      className="border-b border-border bg-transparent hover:bg-transparent cursor-pointer"
+      onClick={() => !tx.isDeleted && onEdit(tx)}
+    >
+      <TableCell colSpan={2} className="py-2 px-0 align-top">
+        <div className="flex flex-col gap-0 rounded-none overflow-hidden min-w-0 w-full">
+          {/* Строка 1: подсветка как на десктопе (10px полоска + тень), затем контент на MODAL_BG. Доход/расход: слева иконка категории и категория, справа чип и сумма. Перевод: слева −сумма, по центру иконка, справа +сумма */}
+          <div className="flex items-stretch rounded-none min-w-0 w-full">
+            {/* Подсветка: полоска 10px + тень */}
+            <div
+              className="shrink-0"
+              style={{
+                width: 10,
+                backgroundColor: row1HighlightColor,
+                boxShadow: row1HighlightColor !== "transparent" ? `0 0 250px 50px ${row1HighlightColor}` : "none",
+              }}
+            />
+            <div
+              className="flex items-center justify-between gap-2 flex-1 min-w-0 rounded-none"
+              style={{
+                padding: "10px 12px",
+                backgroundColor: row1Bg,
+              }}
+            >
+              {isTransfer ? (
+                <>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CurrencyChip code={currencyCode} className="text-sm" />
+                    <span className="tabular-nums truncate" style={{ fontSize: 20, fontWeight: 600, color: amountColor }}>
+                      −{formatAmount(primaryAmountCents)}
+                    </span>
+                  </div>
+                  <div className="shrink-0" style={{ width: 28, height: 28 }}>
+                    <CardIcon
+                      src={transferIcon3dPath}
+                      alt=""
+                      size={28}
+                      shadow
+                      fallbackIcon={ArrowRight}
+                      fallbackIconColor={ACCENT2}
+                      onError={() => setTransferIconFormat(null)}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0 justify-end">
+                    <CurrencyChip code={counterpartyCurrencyCode} className="text-sm" />
+                    <span className="tabular-nums truncate" style={{ fontSize: 20, fontWeight: 600, color: rightAmountColor }}>
+                      +{formatAmount(counterpartyAmountCents)}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 min-w-0 shrink-0">
+                    <div className="shrink-0" style={{ width: 28, height: 28 }}>
+                      {categoryImageSrc && !categoryShowFallbackIcon ? (
+                        <CardIcon
+                          src={categoryImageSrc}
+                          alt=""
+                          size={28}
+                          shadow
+                          fallbackIcon={CategoryIconFallback}
+                          fallbackIconColor={ACCENT2}
+                          onError={() => {
+                            categoryImageOnError();
+                            setCategoryIconFormat(null);
+                          }}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center w-full h-full">
+                          <CategoryIconFallback strokeWidth={1.5} style={{ width: 24, height: 24, color: ACCENT2 }} />
+                        </div>
+                      )}
+                    </div>
+                    <span className="truncate text-sm font-medium" style={{ color: textColor }}>
+                      {displayCategoryLabel}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0 justify-end">
+                    <CurrencyChip code={currencyCode} className="text-sm" />
+                    <span className="tabular-nums truncate" style={{ fontSize: 20, fontWeight: 600, color: amountColor }}>
+                      {isExpense ? "−" : "+"}
+                      {formatAmount(tx.amount)}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          {/* Строка 2: доход/расход — слева актив, справа контрагент. Перевод — слева счёт откуда, справа счёт куда */}
+          <div
+            className="flex items-center justify-between gap-3 flex-wrap"
+            style={{ padding: "8px 12px", paddingBottom: commentText ? 6 : 10 }}
+          >
+            <div className="flex items-center gap-2 min-w-0 max-w-[50%]">
+              <div className="shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
+                {primaryItem ? (
+                  <AssetItemIcon
+                    item={primaryItem}
+                    counterparty={primaryCounterparty}
+                    apiBase={apiBase}
+                    size={20}
+                    fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                    alt=""
+                  />
+                ) : (
+                  <Wallet className="h-5 w-5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                )}
+              </div>
+              <span className="truncate text-sm" style={{ color: textColor }}>
+                {accountName}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 min-w-0 max-w-[50%]">
+              {isTransfer ? (
+                <>
+                  <span className="shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
+                    {counterpartyItem ? (
+                      <AssetItemIcon
+                        item={counterpartyItem}
+                        counterparty={counterpartyItemCounterparty}
+                        apiBase={apiBase}
+                        size={20}
+                        fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                        alt=""
+                      />
+                    ) : (
+                      <Wallet className="h-5 w-5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                    )}
+                  </span>
+                  <span className="truncate text-sm" style={{ color: textColor }}>
+                    {accountToName}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
+                    {counterparty ? (
+                      counterpartyLogoUrl && !counterpartyShowFallbackIcon ? (
+                        <CardIcon
+                          src={counterpartyLogoUrl}
+                          alt=""
+                          size={20}
+                          shadow={false}
+                          objectFit="contain"
+                          fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                          onError={counterpartyLogoOnError}
+                        />
+                      ) : (
+                        <CardIcon
+                          src={null}
+                          alt=""
+                          fallbackIcon={CounterpartyFallbackIcon}
+                          size={20}
+                          shadow={false}
+                          fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                        />
+                      )
+                    ) : (
+                      <User className="h-5 w-5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                    )}
+                  </span>
+                  <span className="truncate text-sm" style={{ color: textColor }}>
+                    {counterpartyName || "—"}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+          {/* Строка 3: комментарий */}
+          {commentText && (
+            <div className="flex items-start gap-2 min-w-0" style={{ paddingLeft: 12, paddingRight: 12, paddingBottom: 10 }}>
+              <MessageSquare className="h-4 w-4 shrink-0 mt-0.5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+              <span className="text-xs break-words min-w-0" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                {commentText}
+              </span>
+            </div>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 function TransactionCardRow({
   tx,
   counterparty,
@@ -1797,7 +2061,7 @@ function TransactionCardRow({
             })()}
         </div>
 
-        {/* Контейнер 6: на широком экране — два блока фиксированной ширины (остаток от 1350px делим пополам: 269px + 269px, gap 16) */}
+        {/* Контейнер 6: контрагент, связанный актив, комментарий */}
         <div
           className="flex flex-col justify-center w-[200px] shrink-0 overflow-hidden min-w-0 @[1400px]:flex-row @[1400px]:w-[554px] @[1400px]:shrink-0 @[1400px]:justify-end @[1400px]:gap-4"
           style={{
@@ -1807,7 +2071,6 @@ function TransactionCardRow({
             paddingRight: 0,
           }}
         >
-          {/* 1. Контрагент и под ним связанный актив — фикс. 269px */}
           <div className="flex flex-col justify-center min-w-0 @[1400px]:w-[269px] @[1400px]:shrink-0 @[1400px]:overflow-hidden">
             {counterpartyName && (
               <div className="flex items-start gap-2 min-w-0" style={{ marginBottom: 4 }}>
@@ -1875,7 +2138,6 @@ function TransactionCardRow({
             )}
           </div>
 
-          {/* 2. Комментарий — фикс. 269px */}
           <div className="flex flex-col justify-center min-w-0 @[1400px]:w-[269px] @[1400px]:shrink-0 @[1400px]:overflow-hidden">
             {commentText && commentText !== "-" && (
               <div className="flex items-start gap-2 min-w-0">
@@ -4330,6 +4592,19 @@ function TransactionsView({
     return rows;
   }, [sortedTxs, checkpoints]);
 
+  /** Для мобильной верстки: транзакции по датам (без КТ — контрольные точки не показываем). */
+  const mobileSections = useMemo(() => {
+    const byDate = new Map<string, TransactionCard[]>();
+    sortedTxs.forEach((tx) => {
+      const d = getDateKey(tx.transaction_date);
+      if (!d) return;
+      if (!byDate.has(d)) byDate.set(d, []);
+      byDate.get(d)!.push(tx);
+    });
+    const dates = Array.from(byDate.keys()).sort((a, b) => b.localeCompare(a));
+    return dates.map((dateKey) => ({ dateKey, transactions: byDate.get(dateKey)! }));
+  }, [sortedTxs]);
+
   const checkpointsVisible = useMemo(() => {
     const hasOtherFilter =
       selectedDirections.size > 0 ||
@@ -5749,7 +6024,7 @@ function TransactionsView({
                 >
                   <div className="grid gap-4">
                     {!isBulkEdit && !isRealizeMode && (
-                      <FormField label="Тип транзакции">
+                      <FormField label="">
                         <SegmentedSelector
                           options={[
                             { value: "ACTUAL", label: "Фактическая", colorScheme: "purple" },
@@ -5846,7 +6121,10 @@ function TransactionsView({
                         ]}
                       />
                     ) : isLoanRepayment ? null : (
-                    <FormField label="Характер транзакции">
+                    <FormField
+                      label="Характер транзакции"
+                      inlineLabel={!isDesktop}
+                    >
                       <SegmentedSelector
                         options={[
                           { value: "INCOME", label: "Доход", colorScheme: "green" },
@@ -5864,7 +6142,12 @@ function TransactionsView({
                     </FormField>
                     )}
 
-                    <FormField label="Дата и время" required>
+                    <FormField
+                      label="Дата и время"
+                      required
+                      inlineLabel={!isDesktop}
+                      icon={!isDesktop ? <Calendar className="h-5 w-5" /> : undefined}
+                    >
                       <div className="relative flex items-center gap-2 flex-wrap [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px]">
                         <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
                           <AuthInput
@@ -5872,6 +6155,7 @@ function TransactionsView({
                             value={date}
                             onChange={(e) => setDate(e.target.value)}
                             className="w-full"
+                            placeholder={!isDesktop ? "Дата и время" : undefined}
                           />
                         </div>
                         <div className="relative flex items-center min-h-[40px] shrink-0 min-w-[5.5rem] w-[6rem]">
@@ -5880,7 +6164,7 @@ function TransactionsView({
                             inputMode="numeric"
                             value={time}
                             onChange={(e) => setTime(formatTimeInput(e.target.value))}
-                            placeholder="00:00"
+                            placeholder={!isDesktop ? "Время" : "00:00"}
                             maxLength={5}
                             autoComplete="off"
                             className="w-full"
@@ -5891,13 +6175,17 @@ function TransactionsView({
 
                     {(direction === "TRANSFER" || (isDebts && debtDirection === "DEBT_OFFSET")) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <FormField label="Откуда">
+                      <FormField
+                        label="Откуда"
+                        inlineLabel={!isDesktop}
+                        icon={!isDesktop ? <Wallet className="h-5 w-5" /> : undefined}
+                      >
                         <ItemSelector
                           items={primarySelectItems}
                           selectedIds={primaryItemId ? [primaryItemId] : []}
                           onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
                           selectionMode="single"
-                          placeholder="Выберите"
+                          placeholder={!isDesktop ? "Откуда" : "Выберите"}
                           getItemTypeLabel={getItemTypeLabel}
                           getItemKind={resolveItemEffectiveKind}
                           getCounterpartyForItemId={getCounterpartyForItemId}
@@ -5909,7 +6197,11 @@ function TransactionsView({
                           disabled={false}
                         />
                       </FormField>
-                      <FormField label="Куда">
+                      <FormField
+                        label="Куда"
+                        inlineLabel={!isDesktop}
+                        icon={!isDesktop ? <Wallet className="h-5 w-5" /> : undefined}
+                      >
                         <ItemSelector
                           items={counterpartySelectItems.filter(
                             (it) => it.id !== primaryItemId
@@ -5919,7 +6211,7 @@ function TransactionsView({
                           }
                           onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
                           selectionMode="single"
-                          placeholder="Выберите"
+                          placeholder={!isDesktop ? "Куда" : "Выберите"}
                           getItemTypeLabel={getItemTypeLabel}
                           getItemKind={resolveItemEffectiveKind}
                           getCounterpartyForItemId={getCounterpartyForItemId}
@@ -5946,13 +6238,15 @@ function TransactionsView({
                                 : "Актив / обязательство"
                             : "Актив / обязательство"
                       }
+                      inlineLabel={!isDesktop}
+                      icon={!isDesktop ? <Wallet className="h-5 w-5" /> : undefined}
                     >
                       <ItemSelector
                         items={primarySelectItems}
                         selectedIds={primaryItemId ? [primaryItemId] : []}
                         onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
                         selectionMode="single"
-                        placeholder="Выберите"
+                        placeholder={!isDesktop ? (isLoanRepayment ? "Актив, с которого производится погашение" : isDebts ? (debtDirection === "I_PAID" || debtDirection === "I_PAID_FOR_SOMEONE" ? "Откуда заплатили" : debtDirection === "THEY_PAID" ? "Куда заплатили" : "Актив / обязательство") : "Актив / обязательство") : "Выберите"}
                         getItemTypeLabel={getItemTypeLabel}
                         getItemKind={resolveItemEffectiveKind}
                         getCounterpartyForItemId={getCounterpartyForItemId}
@@ -5973,6 +6267,8 @@ function TransactionsView({
                             ? "Обязательство"
                             : "Корреспондирующий актив"
                         }
+                        inlineLabel={!isDesktop}
+                        icon={!isDesktop ? <Wallet className="h-5 w-5" /> : undefined}
                       >
                         <ItemSelector
                           items={counterpartySelectItems.filter(
@@ -5983,7 +6279,7 @@ function TransactionsView({
                           }
                           onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
                           selectionMode="single"
-                          placeholder="Выберите"
+                          placeholder={!isDesktop ? (isLoanRepayment ? "Обязательство" : "Корреспондирующий актив") : "Выберите"}
                           getItemTypeLabel={getItemTypeLabel}
                           getItemKind={resolveItemEffectiveKind}
                           getCounterpartyForItemId={getCounterpartyForItemId}
@@ -6000,13 +6296,18 @@ function TransactionsView({
 
                     {isDebts && debtDirection === "I_PAID_FOR_SOMEONE" && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <FormField label="Где платите" error={counterpartyError ?? undefined}>
+                        <FormField
+                          label="Где платите"
+                          error={counterpartyError ?? undefined}
+                          inlineLabel={!isDesktop}
+                          icon={!isDesktop ? <User className="h-5 w-5" /> : undefined}
+                        >
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={counterpartyId ? [counterpartyId] : []}
                             onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
                             selectionMode="single"
-                            placeholder="Начните вводить название"
+                            placeholder={!isDesktop ? "Где платите" : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
@@ -6014,7 +6315,11 @@ function TransactionsView({
                             onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
                           />
                         </FormField>
-                        <FormField label="За кого платите">
+                        <FormField
+                          label="За кого платите"
+                          inlineLabel={!isDesktop}
+                          icon={!isDesktop ? <User className="h-5 w-5" /> : undefined}
+                        >
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={debtPayForCounterpartyId ? [debtPayForCounterpartyId] : []}
@@ -6025,7 +6330,7 @@ function TransactionsView({
                               setDebtSettlementNewName("");
                             }}
                             selectionMode="single"
-                            placeholder="Начните вводить название"
+                            placeholder={!isDesktop ? "За кого платите" : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
@@ -6037,13 +6342,18 @@ function TransactionsView({
                     )}
                     {isDebts && debtDirection === "THEY_PAID_FOR_ME" && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <FormField label="Кто платит" error={counterpartyError ?? undefined}>
+                        <FormField
+                          label="Кто платит"
+                          error={counterpartyError ?? undefined}
+                          inlineLabel={!isDesktop}
+                          icon={!isDesktop ? <User className="h-5 w-5" /> : undefined}
+                        >
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={counterpartyId ? [counterpartyId] : []}
                             onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
                             selectionMode="single"
-                            placeholder="Начните вводить название"
+                            placeholder={!isDesktop ? "Кто платит" : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
@@ -6051,13 +6361,17 @@ function TransactionsView({
                             onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
                           />
                         </FormField>
-                        <FormField label="Где платит">
+                        <FormField
+                          label="Где платит"
+                          inlineLabel={!isDesktop}
+                          icon={!isDesktop ? <User className="h-5 w-5" /> : undefined}
+                        >
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={wherePaidCounterpartyId ? [wherePaidCounterpartyId] : []}
                             onChange={(ids) => setWherePaidCounterpartyId(ids[0] ?? null)}
                             selectionMode="single"
-                            placeholder="Начните вводить название"
+                            placeholder={!isDesktop ? "Где платит" : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
@@ -6078,6 +6392,8 @@ function TransactionsView({
                               : "Контрагент"
                           }
                           error={counterpartyError ?? undefined}
+                          inlineLabel={!isDesktop}
+                          icon={!isDesktop ? <User className="h-5 w-5" /> : undefined}
                         >
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
@@ -6091,7 +6407,7 @@ function TransactionsView({
                               }
                             }}
                             selectionMode="single"
-                            placeholder="Начните вводить название"
+                            placeholder={!isDesktop ? (isDebts ? (debtDirection === "I_PAID" ? "Кому платите" : "Кто платит") : "Контрагент") : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
@@ -6123,7 +6439,11 @@ function TransactionsView({
                     )}
 
                     {isDebts && debtDirection !== "DEBT_OFFSET" && currentDebtCounterpartyId != null && (
-                      <FormField label="Долг по контрагенту">
+                      <FormField
+                        label="Долг по контрагенту"
+                        inlineLabel={!isDesktop}
+                        icon={!isDesktop ? <Coins className="h-5 w-5" /> : undefined}
+                      >
                         <div className="grid gap-4">
                           <SegmentedSelector
                             options={[
@@ -6233,7 +6553,11 @@ function TransactionsView({
                             placeholder="Например: 300,00"
                           />
                         </div>
-                        <FormField label="Категория">
+                        <FormField
+                          label="Категория"
+                          inlineLabel={!isDesktop}
+                          icon={!isDesktop ? <Tag className="h-5 w-5" /> : undefined}
+                        >
                           <CategorySelector
                             categoryNodes={categoryNodes}
                             selectedPath={selectedCategoryPath}
@@ -6244,7 +6568,7 @@ function TransactionsView({
                                 applyCategorySelection("", "", "");
                               }
                             }}
-                            placeholder="Поиск категории"
+                            placeholder={!isDesktop ? "Категория" : "Поиск категории"}
                             direction="EXPENSE"
                             disabled={false}
                             onAddCategory={() => setCreateCategoryOpen(true)}
@@ -6284,29 +6608,37 @@ function TransactionsView({
                       </div>
                     ) : (
                       <div className="grid gap-2">
-                        <div className="flex items-center justify-between">
-                          <Label>Сумма</Label>
-                          {isTransfer && primaryItemId && (
-                            <button
-                              type="button"
-                              onClick={handleFullAmountClick}
-                              className="text-sm font-medium text-violet-600 hover:underline"
-                            >
-                              Вся сумма
-                            </button>
-                          )}
-                        </div>
-                        <TextField
-                          label=""
-                          currencyCode={primaryCurrencyCode ?? undefined}
-                          value={amountStr}
-                          onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                          onBlur={() =>
-                            setAmountStr((prev) => normalizeRubOnBlur(prev))
-                          }
-                          inputMode="decimal"
-                          placeholder="Например: 1 234,56"
-                        />
+                        {isDesktop && (
+                          <div className="flex items-center justify-between">
+                            <Label>Сумма</Label>
+                            {isTransfer && primaryItemId && (
+                              <button
+                                type="button"
+                                onClick={handleFullAmountClick}
+                                className="text-sm font-medium text-violet-600 hover:underline"
+                              >
+                                Вся сумма
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        <FormField
+                          label="Сумма"
+                          inlineLabel={!isDesktop}
+                          icon={!isDesktop ? <Banknote className="h-5 w-5" /> : undefined}
+                        >
+                          <TextField
+                            label=""
+                            currencyCode={primaryCurrencyCode ?? undefined}
+                            value={amountStr}
+                            onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+                            onBlur={() =>
+                              setAmountStr((prev) => normalizeRubOnBlur(prev))
+                            }
+                            inputMode="decimal"
+                            placeholder={!isDesktop ? "Сумма" : "Например: 1 234,56"}
+                          />
+                        </FormField>
                         {isDebtCrossCurrency && (
                           <div className="grid gap-2">
                             <Label>Изменение суммы долга</Label>
@@ -6371,7 +6703,11 @@ function TransactionsView({
                       )}
 
                     {(!isTransfer && !isDebts) || (isDebts && debtDirection === "THEY_PAID_FOR_ME") || isLoanRepayment ? (
-                      <FormField label="Категория">
+                      <FormField
+                        label="Категория"
+                        inlineLabel={!isDesktop}
+                        icon={!isDesktop ? <Tag className="h-5 w-5" /> : undefined}
+                      >
                         <CategorySelector
                           categoryNodes={categoryNodes}
                           selectedPath={selectedCategoryPath}
@@ -6382,7 +6718,7 @@ function TransactionsView({
                               applyCategorySelection("", "", "");
                             }
                           }}
-                          placeholder="Поиск категории"
+                          placeholder={!isDesktop ? "Категория" : "Поиск категории"}
                           direction={isLoanRepayment || (isDebts && debtDirection === "THEY_PAID_FOR_ME") ? "EXPENSE" : direction === "TRANSFER" ? undefined : direction}
                           disabled={false}
                           onAddCategory={() => setCreateCategoryOpen(true)}
@@ -6391,7 +6727,11 @@ function TransactionsView({
                     ) : null}
 
                     {!(direction === "TRANSFER" || (isDebts && debtDirection === "DEBT_OFFSET")) && (
-                    <FormField label="Связанный актив">
+                    <FormField
+                      label="Связанный актив"
+                      inlineLabel={!isDesktop}
+                      icon={!isDesktop ? <Link2 className="h-5 w-5" /> : undefined}
+                    >
                       <ItemSelector
                         items={itemsForSelector}
                         selectedIds={relatedItemId ? [relatedItemId] : []}
@@ -6401,7 +6741,7 @@ function TransactionsView({
                           if (next == null) setAssetLinkType(null);
                         }}
                         selectionMode="single"
-                        placeholder="Выберите"
+                        placeholder={!isDesktop ? "Связанный актив" : "Выберите"}
                         getItemTypeLabel={getItemTypeLabel}
                         getItemKind={resolveItemEffectiveKind}
                         getCounterpartyForItemId={getCounterpartyForItemId}
@@ -6417,7 +6757,11 @@ function TransactionsView({
                     )}
 
                     {direction !== "TRANSFER" && relatedItemId != null && (
-                      <FormField label="Тип привязки к активу">
+                      <FormField
+                        label="Тип привязки к активу"
+                        inlineLabel={!isDesktop}
+                        icon={!isDesktop ? <Link2 className="h-5 w-5" /> : undefined}
+                      >
                         <SelectField
                           value={assetLinkType ?? "__none"}
                           onValueChange={(v) =>
@@ -6436,17 +6780,25 @@ function TransactionsView({
                                   { value: "ASSET_INCOME", label: "Доход от актива" },
                                 ]),
                           ]}
-                          placeholder="Выберите тип"
+                          placeholder={!isDesktop ? "Тип привязки к активу" : "Выберите тип"}
                         />
                       </FormField>
                     )}
 
-                    <TextField
+                    <FormField
                       label="Комментарий"
-                      value={comment}
-                      onChange={(e) => setComment(e.target.value)}
-                      placeholder="Например: с коллегами"
-                    />
+                      inlineLabel={!isDesktop}
+                      icon={!isDesktop ? <MessageSquare className="h-5 w-5" /> : undefined}
+                    >
+                      <div className="relative [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] [&_input]:text-sm [&_input]:font-normal">
+                        <AuthInput
+                          value={comment}
+                          onChange={(e) => setComment(e.target.value)}
+                          placeholder={!isDesktop ? "Комментарий" : "Например: с коллегами"}
+                          className="w-full"
+                        />
+                      </div>
+                    </FormField>
 
                     {(!isBulkEdit && formMode === "STANDARD" && !isDebts && !isLoanRepayment && !addChildParentTx) || (!isDesktop && !isBulkEdit && !addChildParentTx) ? (
                       <div>
@@ -6970,6 +7322,46 @@ function TransactionsView({
               </div>
             {mergedRows.length === 0 ? (
               <EmptyState />
+            ) : !isDesktop ? (
+              /* Мобильная верстка: карточки от края до края экрана */
+              <div
+                className="w-screen relative left-1/2 -translate-x-1/2 max-w-none space-y-6"
+                style={{
+                  opacity: 1,
+                  transition: "opacity 0.3s ease-in-out",
+                }}
+              >
+                {mobileSections.map(({ dateKey, transactions }) => (
+                  <div key={dateKey}>
+                    <div
+                      className="text-lg font-medium pt-1 pb-0.5 first:pt-0 px-4"
+                      style={{ color: ACTIVE_TEXT_DARK }}
+                    >
+                      {formatDateSectionHeader(dateKey)}
+                    </div>
+                    <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b [&_tr]:border-border">
+                      <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
+                        {transactions.map((tx) => (
+                          <TransactionMobileTableRow
+                            key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
+                            tx={tx}
+                            counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
+                            itemName={itemName}
+                            categoryLookup={categoryLookup}
+                            getCategoryLines={getCategoryLines}
+                            resolveCategoryIcon={resolveCategoryIcon}
+                            itemsById={itemsById}
+                            getItemCounterparty={getItemCounterparty}
+                            getCounterpartyForItemId={getCounterpartyForItemId}
+                            apiBase={API_BASE}
+                            onEdit={openEditDialog}
+                          />
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div
                 className="space-y-3"

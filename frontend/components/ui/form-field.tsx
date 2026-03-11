@@ -29,13 +29,28 @@ interface FormFieldProps {
   required?: boolean;
   error?: string;
   className?: string;
+  /** На мобильной: не показывать подпись сверху, показать icon слева от поля; placeholder в поле задаётся в дочернем компоненте. */
+  inlineLabel?: boolean;
+  /** Иконка слева от поля (при inlineLabel). */
+  icon?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export function FormField({ label, labelHint, required, error, className, children }: FormFieldProps) {
+export function FormField({
+  label,
+  labelHint,
+  required,
+  error,
+  className,
+  inlineLabel = false,
+  icon,
+  children,
+}: FormFieldProps) {
+  const showLabelAbove = label && !inlineLabel;
+
   return (
-    <div className={cn("grid min-w-0", label ? "gap-2" : "gap-0", className)}>
-      {label ? (
+    <div className={cn("grid min-w-0", showLabelAbove ? "gap-2" : "gap-0", className)}>
+      {showLabelAbove ? (
         <Label style={{ color: ACTIVE_TEXT_DARK }} className="flex min-h-6 flex-wrap items-center gap-x-1.5 gap-y-0">
           <span>{label}{required && <span style={{ color: "#FB4C4F" }}> *</span>}</span>
           {labelHint ? (
@@ -51,7 +66,16 @@ export function FormField({ label, labelHint, required, error, className, childr
           ) : null}
         </Label>
       ) : null}
-      {children}
+      {inlineLabel && icon ? (
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+            {icon}
+          </span>
+          <div className="flex-1 min-w-0">{children}</div>
+        </div>
+      ) : (
+        children
+      )}
       {error && (
         <p className="text-xs" style={{ color: "#FB4C4F" }}>
           {error}

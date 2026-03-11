@@ -130,7 +130,7 @@ export function FormModal({
             </div>
           )}
           <div
-            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 flex flex-col gap-4 [&_.text-sm]:text-xs [&_.text-base]:text-sm [&_.text-lg]:text-base [&_input]:text-sm [&_button]:text-sm"
+            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pt-4 flex flex-col gap-4 [&_.text-sm]:text-xs [&_.text-base]:text-sm [&_.text-lg]:text-base [&_input]:text-sm [&_button]:text-sm"
             style={{
               WebkitOverflowScrolling: "touch",
               touchAction: "pan-y",

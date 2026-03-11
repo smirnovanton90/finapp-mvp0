@@ -42,6 +42,7 @@ import { CategoryIconImage } from "@/components/category-icon-image";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import {
   ACCENT,
+  ACCENT2,
   ACTIVE_TEXT_DARK,
   PLACEHOLDER_COLOR_DARK,
   SIDEBAR_TEXT_ACTIVE,
@@ -238,17 +239,36 @@ function CategoryCard({
             fallbackIconColor={ACCENT}
           />
         </div>
-        <div className="flex-1 min-w-0">
-          <div
-            className={cn("font-medium text-lg break-words", isDeleted && "opacity-70")}
-            style={{ color: textColor }}
-          >
-            {node.name}
+        <div className="flex-1 min-w-0 flex items-start gap-3">
+          <div className="min-w-0">
+            <div
+              className={cn("font-medium text-lg break-words", isDeleted && "opacity-70")}
+              style={{ color: textColor }}
+            >
+              {node.name}
+            </div>
+            {parentName && (
+              <div className="text-sm mt-0.5">
+                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Родитель </span>
+                <span style={{ color: ACTIVE_TEXT_DARK }}>{parentName}</span>
+              </div>
+            )}
           </div>
-          {parentName && (
-            <div className="text-sm mt-0.5">
-              <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Родитель </span>
-              <span style={{ color: ACTIVE_TEXT_DARK }}>{parentName}</span>
+          {(node.synonyms ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-2 shrink-0 justify-end">
+              {(node.synonyms ?? []).map((chip, i) => (
+                <span
+                  key={`${i}-${chip}`}
+                  className="inline-flex items-center rounded-md border px-2 py-1 text-sm font-normal shrink-0"
+                  style={{
+                    borderColor: ACCENT2,
+                    backgroundColor: "rgba(85, 68, 209, 0.15)",
+                    color: ACTIVE_TEXT_DARK,
+                  }}
+                >
+                  <span className="max-w-[200px] truncate">{chip}</span>
+                </span>
+              ))}
             </div>
           )}
         </div>

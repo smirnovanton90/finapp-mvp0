@@ -19,6 +19,7 @@ import {
   Plus,
   MessageSquare,
   ExternalLink,
+  Target,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -35,6 +36,11 @@ import {
   fetchItemCosts,
   fetchItemMarketValues,
   fetchItemCostHistory,
+  fetchItemBalanceCheckpoints,
+  fetchItemBalanceAt,
+  createBalanceCheckpoint,
+  updateBalanceCheckpoint,
+  deleteBalanceCheckpoint,
   fetchTransactions,
   fetchTransactionsPage,
   fetchCounterparties,
@@ -49,6 +55,9 @@ import {
   ItemCostsOut,
   ItemMarketValueOut,
   ItemCostHistoryOut,
+  BalanceCheckpointOut,
+  BalanceCheckpointCreate,
+  BalanceCheckpointUpdate,
   CounterpartyOut,
   PrimaryValueKind,
   TransactionOut,
@@ -74,6 +83,15 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
 import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { AuthInput } from "@/components/ui/auth-input";
+import { FormField, TextField } from "@/components/ui/form-field";
+import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
 import { CardIcon } from "@/components/card-icon";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
@@ -253,6 +271,7 @@ export default function AssetDetailPage() {
   const [costChartTooltipLeft, setCostChartTooltipLeft] = useState<number | null>(null);
   const [costChartContainerReady, setCostChartContainerReady] = useState(false);
   const [costChartCurrency, setCostChartCurrency] = useState<"RUB" | "CURRENCY">("RUB");
+  // Для инвалютного актива по умолчанию показываем график в валюте счёта (стабильная сумма), RUB пересчитывается по курсу на дату.
   const [quantityBlockOpen, setQuantityBlockOpen] = useState(false);
   const qtyChartContainerRef = useRef<HTMLDivElement | null>(null);
   const qtyChartSvgRef = useRef<SVGSVGElement | null>(null);
@@ -263,6 +282,17 @@ export default function AssetDetailPage() {
   const [qtyChartContainerReady, setQtyChartContainerReady] = useState(false);
   const [rentabilityOpen, setRentabilityOpen] = useState<"income" | "expense" | null>(null);
   const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [checkpoints, setCheckpoints] = useState<BalanceCheckpointOut[]>([]);
+  const [checkpointModalOpen, setCheckpointModalOpen] = useState(false);
+  const [checkpointEditId, setCheckpointEditId] = useState<number | null>(null);
+  const [checkpointDateStr, setCheckpointDateStr] = useState("");
+  const [checkpointTimeStr, setCheckpointTimeStr] = useState("");
+  const [checkpointAmountStr, setCheckpointAmountStr] = useState("");
+  const [checkpointComputedCents, setCheckpointComputedCents] = useState<number | null>(null);
+  const [checkpointBalanceAtLoading, setCheckpointBalanceAtLoading] = useState(false);
+  const [checkpointSaving, setCheckpointSaving] = useState(false);
+  const [checkpointModalError, setCheckpointModalError] = useState<string | null>(null);
+  const [checkpointChartHoverDate, setCheckpointChartHoverDate] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(id)) return;
@@ -278,6 +308,16 @@ export default function AssetDetailPage() {
       setItem(itemRes);
       setCosts(costsRes);
       setMarketValues(marketRes);
+      if ((itemRes.primary_value_kind ?? "BALANCE") === "BALANCE") {
+        try {
+          const list = await fetchItemBalanceCheckpoints(itemRes.id);
+          setCheckpoints(list);
+        } catch {
+          setCheckpoints([]);
+        }
+      } else {
+        setCheckpoints([]);
+      }
       if (itemRes.instrument_id) {
         setLoadingQuantityHistory(true);
         try {
@@ -364,6 +404,118 @@ export default function AssetDetailPage() {
       setLoadingCostHistory(false);
     }
   }, [item?.id, item?.open_date]);
+
+  /** Собирает ISO datetime в UTC из локальных даты и времени (чтобы бэкенд и отображение совпадали). */
+  const buildCheckpointAtIso = useCallback((dateStr: string, timeStr: string) => {
+    const [y, mo, day] = dateStr.split("-").map((x) => parseInt(x, 10));
+    const t = timeStr && /^\d{1,2}:\d{2}$/.test(timeStr.trim()) ? timeStr.trim() : "00:00";
+    const [h, m] = t.split(":").map((x) => parseInt(x, 10));
+    const localDate = new Date(
+      Number.isFinite(y) ? y : 0,
+      Number.isFinite(mo) ? mo - 1 : 0,
+      Number.isFinite(day) ? day : 1,
+      Number.isFinite(h) ? h : 0,
+      Number.isFinite(m) ? m : 0,
+      0,
+      0
+    );
+    return localDate.toISOString();
+  }, []);
+
+  const toLocalDateKey = useCallback((d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }, []);
+
+  const openCheckpointModal = useCallback((editId: number | null) => {
+    setCheckpointEditId(editId);
+    setCheckpointModalError(null);
+    if (editId != null) {
+      const cp = checkpoints.find((c) => c.id === editId);
+      if (cp) {
+        const d = new Date(cp.checkpoint_at);
+        const dateStr = toLocalDateKey(d);
+        const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        setCheckpointDateStr(dateStr);
+        setCheckpointTimeStr(timeStr);
+        setCheckpointAmountStr(formatCentsForInput(cp.stated_balance_cents));
+        setCheckpointComputedCents(cp.computed_balance_cents);
+      }
+    } else {
+      const now = new Date();
+      const dateStr = toLocalDateKey(now);
+      const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      setCheckpointDateStr(dateStr);
+      setCheckpointTimeStr(timeStr);
+      setCheckpointAmountStr("");
+      setCheckpointComputedCents(null);
+    }
+    setCheckpointModalOpen(true);
+  }, [checkpoints, toLocalDateKey]);
+
+  useEffect(() => {
+    if (!checkpointModalOpen || !item?.id || !checkpointDateStr) return;
+    const at = buildCheckpointAtIso(checkpointDateStr, checkpointTimeStr);
+    let cancelled = false;
+    setCheckpointBalanceAtLoading(true);
+    fetchItemBalanceAt(item.id, at)
+      .then((r) => {
+        if (!cancelled) setCheckpointComputedCents(r.computed_balance_cents);
+      })
+      .catch(() => {
+        if (!cancelled) setCheckpointComputedCents(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCheckpointBalanceAtLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkpointModalOpen, item?.id, checkpointDateStr, checkpointTimeStr, buildCheckpointAtIso]);
+
+  const saveCheckpoint = useCallback(async () => {
+    if (!item?.id || !checkpointDateStr) return;
+    setCheckpointModalError(null);
+    const at = buildCheckpointAtIso(checkpointDateStr, checkpointTimeStr);
+    const cents = parseRubToCents(checkpointAmountStr);
+    if (!Number.isFinite(cents)) {
+      setCheckpointModalError("Введите корректную сумму.");
+      return;
+    }
+    setCheckpointSaving(true);
+    try {
+      if (checkpointEditId != null) {
+        await updateBalanceCheckpoint(item.id, checkpointEditId, {
+          checkpoint_at: at,
+          stated_balance_cents: cents,
+        });
+      } else {
+        await createBalanceCheckpoint(item.id, { checkpoint_at: at, stated_balance_cents: cents });
+      }
+      const list = await fetchItemBalanceCheckpoints(item.id);
+      setCheckpoints(list);
+      refetchCostHistory();
+      setCheckpointModalOpen(false);
+    } catch (e) {
+      setCheckpointModalError((e as Error)?.message ?? "Ошибка сохранения");
+    } finally {
+      setCheckpointSaving(false);
+    }
+  }, [item?.id, checkpointDateStr, checkpointTimeStr, checkpointAmountStr, checkpointEditId, buildCheckpointAtIso, refetchCostHistory]);
+
+  const deleteCheckpoint = useCallback(async (checkpointId: number) => {
+    if (!item?.id) return;
+    try {
+      await deleteBalanceCheckpoint(item.id, checkpointId);
+      const list = await fetchItemBalanceCheckpoints(item.id);
+      setCheckpoints(list);
+      refetchCostHistory();
+    } catch {
+      // ignore
+    }
+  }, [item?.id, refetchCostHistory]);
 
   useEffect(() => {
     if (!item?.id || !item?.open_date) {
@@ -1088,17 +1240,18 @@ export default function AssetDetailPage() {
     return raw;
   }, [costHistoryOpen, costHistoryData]);
 
-  // costChartSeries хранит стоимость в валюте актива (balance/acquisition/invested/market). При отображении в RUB — рублёвый эквивалент = стоимость в валюте актива × курс.
+  // Источник истины — валюта счёта: costChartSeries в минорных единицах валюты актива. В режиме RUB пересчитываем по курсу на дату точки (рубли меняются от курса).
   const costChartDisplaySeries = useMemo(() => {
     if (!item?.currency_code || item.currency_code === "RUB") return costChartSeries;
-    if (costChartCurrency === "CURRENCY") return costChartSeries; // в валюте актива — как есть
-    // RUB: рублёвый эквивалент = стоимость в валюте актива × курс
+    if (costChartCurrency === "CURRENCY") return costChartSeries; // в валюте актива — как есть (стабильная сумма)
+    // RUB: рублёвый эквивалент = сумма в валюте актива × курс на дату точки (курс на каждую дату — рубли колеблются)
+    const latestRate = latestRatesByCurrency.get((item.currency_code ?? "").toUpperCase())?.rate ?? null;
     return costChartSeries.map((p) => {
-      const rate = getRateForDateKey(p.date);
-      const valueInRub = rate != null && rate > 0 ? p.valueRub * rate : p.valueRub;
+      const rate = getRateForDateKey(p.date) ?? latestRate;
+      const valueInRub = rate != null && rate > 0 ? p.valueRub * rate : (latestRate != null ? p.valueRub * latestRate : p.valueRub);
       return { ...p, valueRub: valueInRub };
     });
-  }, [costChartSeries, costChartCurrency, item?.currency_code, getRateForDateKey]);
+  }, [costChartSeries, costChartCurrency, item?.currency_code, getRateForDateKey, latestRatesByCurrency]);
 
   useEffect(() => {
     if (!costHistoryOpen || costChartSeries.length === 0) setCostChartContainerReady(false);
@@ -1107,8 +1260,9 @@ export default function AssetDetailPage() {
   useEffect(() => {
     setCostChartHoverIndex(null);
     setCostChartTooltipLeft(null);
-    setCostChartCurrency("RUB");
-  }, [costHistoryOpen]);
+    // Для инвалютного актива по умолчанию — валюта счёта (источник истины); в RUB — пересчёт по курсу на дату.
+    setCostChartCurrency(item?.currency_code && item.currency_code !== "RUB" ? "CURRENCY" : "RUB");
+  }, [costHistoryOpen, item?.currency_code]);
 
   useEffect(() => {
     if (!costChartContainerReady || !costChartContainerRef.current) return;
@@ -1232,6 +1386,28 @@ export default function AssetDetailPage() {
       costChartGeometry.innerHeight * costChartGeometry.valueToRatio(value);
     return { x, y, value };
   }, [costChartHoverIndex, costChartDisplaySeries, costChartGeometry]);
+
+  const costChartCheckpointLines = useMemo(() => {
+    if (costHistoryOpen !== "balance" || checkpoints.length === 0 || !costChartGeometry || costChartDisplaySeries.length === 0) return [];
+    const series = costChartDisplaySeries;
+    const n = series.length;
+    const { padding, innerWidth } = costChartGeometry;
+    const byDate = new Map<string, BalanceCheckpointOut[]>();
+    for (const cp of checkpoints) {
+      const dateKey = cp.checkpoint_at.slice(0, 10);
+      if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+      byDate.get(dateKey)!.push(cp);
+    }
+    const result: { dateKey: string; x: number; checkpoints: BalanceCheckpointOut[] }[] = [];
+    for (const [dateKey, cps] of byDate) {
+      const idx = series.findIndex((p) => p.date >= dateKey);
+      const i = idx >= 0 ? idx : n - 1;
+      const progress = n <= 1 ? 0 : i / (n - 1);
+      const x = padding.left + innerWidth * progress;
+      result.push({ dateKey, x, checkpoints: cps });
+    }
+    return result;
+  }, [costHistoryOpen, checkpoints, costChartGeometry, costChartDisplaySeries]);
 
   const qtyChartPadding = costChartPadding;
   const qtyChartGeometry = useMemo(() => {
@@ -2206,6 +2382,39 @@ export default function AssetDetailPage() {
                                 className="relative w-full min-w-0"
                                 style={costHistoryOpen === "balance" ? { height: 400 } : { aspectRatio: `${costChartSize.width}/${costChartSize.height}` }}
                               >
+                              {costHistoryOpen === "balance" && checkpointChartHoverDate != null && costChartGeometry && (() => {
+                                const lineData = costChartCheckpointLines.find((l) => l.dateKey === checkpointChartHoverDate);
+                                if (!lineData) return null;
+                                const scaleX = costChartSize.width / costChartGeometry.width;
+                                const leftPx = lineData.x * scaleX;
+                                return (
+                                  <div
+                                    className="pointer-events-none absolute z-20 rounded-[9px] px-4 py-3 text-[14px] font-normal max-w-[280px]"
+                                    style={{ left: `${leftPx}px`, top: 0, transform: "translate(-50%, 0)", backgroundColor: MODAL_BG }}
+                                  >
+                                    <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartDate(new Date(lineData.dateKey))}</div>
+                                    {lineData.checkpoints.map((cp) => {
+                                      const timeStr = new Date(cp.checkpoint_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+                                      return (
+                                        <div key={cp.id} className="mt-2 pt-2 border-t border-white/10 space-y-1">
+                                          <div className="flex items-center justify-between gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+                                            <span>{timeStr}</span>
+                                            <span className="text-xs" style={{ color: cp.status === "OK" ? GREEN : RED }}>{cp.status === "OK" ? "ОК" : "Расхождение"}</span>
+                                          </div>
+                                          <div className="flex justify-between gap-2 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                            <span>Расчётное:</span>
+                                            <AmountWithCurrency valueCents={cp.computed_balance_cents} currencyCode={item.currency_code ?? "RUB"} className="justify-end" />
+                                          </div>
+                                          <div className="flex justify-between gap-2 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                                            <span>Указанное:</span>
+                                            <AmountWithCurrency valueCents={cp.stated_balance_cents} currencyCode={item.currency_code ?? "RUB"} className="justify-end" />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
                               {costChartHoverPoint != null && costChartHoverIndex != null && costChartDisplaySeries[costChartHoverIndex] && (
                                 <div
                                   ref={costChartTooltipRef}
@@ -2289,6 +2498,20 @@ export default function AssetDetailPage() {
                                 ))}
                                 <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.baselineY} y2={costChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1} strokeDasharray="4 4" strokeOpacity={0.7} />
                                 <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.averageLineY} y2={costChartGeometry.averageLineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1.5} strokeDasharray="6 4" strokeOpacity={0.9} />
+                                {costHistoryOpen === "balance" && costChartCheckpointLines.map(({ dateKey, x, checkpoints: cps }) => {
+                                  const hasMismatch = cps.some((c) => c.status === "MISMATCH");
+                                  const strokeColor = hasMismatch ? RED : GREEN;
+                                  return (
+                                    <g
+                                      key={dateKey}
+                                      onMouseEnter={() => setCheckpointChartHoverDate(dateKey)}
+                                      onMouseLeave={() => setCheckpointChartHoverDate(null)}
+                                    >
+                                      <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={strokeColor} strokeWidth={2} strokeOpacity={0.9} />
+                                      <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke="transparent" strokeWidth={16} style={{ cursor: "pointer" }} />
+                                    </g>
+                                  );
+                                })}
                                 {costChartHoverPoint && (
                                   <>
                                     <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
@@ -2675,8 +2898,82 @@ export default function AssetDetailPage() {
           </div>
         </div>
 
+        {(item && (item.primary_value_kind ?? "BALANCE") === "BALANCE" && (
+          <div className="relative rounded-lg overflow-hidden border-0 outline-none mt-6" style={{ backgroundColor: MODAL_BG }}>
+            <div className="p-6">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <h3 className="text-2xl font-medium shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>Контрольные точки</h3>
+                <Button
+                  type="button"
+                  className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
+                  style={{ backgroundColor: ACCENT }}
+                  onClick={() => openCheckpointModal(null)}
+                >
+                  <Plus className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                  <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+                </Button>
+              </div>
+              {checkpoints.length === 0 ? (
+                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет контрольных точек.</p>
+              ) : (
+                <div className="rounded-lg overflow-hidden">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: BACKGROUND_DT }}>
+                        <th className="pl-6 pr-4 py-3 text-sm font-medium">Дата и время</th>
+                        <th className="px-4 py-3 text-sm font-medium">Расчётное сальдо</th>
+                        <th className="px-4 py-3 text-sm font-medium">Должно быть</th>
+                        <th className="px-4 py-3 text-sm font-medium">Статус</th>
+                        <th className="px-6 py-3 text-sm font-medium text-right" aria-label="Действия" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {checkpoints.map((cp) => {
+                        const dt = new Date(cp.checkpoint_at);
+                        const dateTimeLabel = dt.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                        return (
+                          <tr key={cp.id} className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
+                            <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{dateTimeLabel}</td>
+                            <td className="px-4 py-2 text-sm">
+                              <AmountWithCurrency valueCents={cp.computed_balance_cents} currencyCode={item.currency_code ?? "RUB"} />
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              <AmountWithCurrency valueCents={cp.stated_balance_cents} currencyCode={item.currency_code ?? "RUB"} />
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              <span
+                                className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
+                                style={{
+                                  backgroundColor: cp.status === "OK" ? "rgba(34, 197, 94, 0.2)" : "rgba(239, 68, 68, 0.2)",
+                                  color: cp.status === "OK" ? GREEN : RED,
+                                }}
+                              >
+                                {cp.status === "OK" ? "ОК" : "Расхождение"}
+                              </span>
+                            </td>
+                            <td className="px-6 py-2 text-sm text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <IconButton aria-label="Редактировать" onClick={() => openCheckpointModal(cp.id)}>
+                                  <Pencil className="h-4 w-4" />
+                                </IconButton>
+                                <IconButton aria-label="Удалить" onClick={() => deleteCheckpoint(cp.id)}>
+                                  <Trash2 className="h-4 w-4" style={{ color: RED }} />
+                                </IconButton>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
         {costs && (
-          <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
+          <div className="relative rounded-lg overflow-hidden border-0 outline-none mt-6" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
               <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Доходы и расходы</h3>
               <div className="flex flex-col gap-2">
@@ -2973,6 +3270,133 @@ export default function AssetDetailPage() {
             }}
           />
         )}
+
+        <Dialog open={checkpointModalOpen} onOpenChange={setCheckpointModalOpen}>
+          <DialogContent className="sm:max-w-md" style={{ backgroundColor: MODAL_BG }}>
+            <DialogHeader>
+              <DialogTitle
+                className="flex items-center gap-3 text-[32px] font-medium"
+                style={{ color: ACTIVE_TEXT_DARK }}
+              >
+                <Target className="w-8 h-8 shrink-0" />
+                {checkpointEditId != null ? "Редактировать контрольную точку" : "Добавить контрольную точку"}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <FormField label="Дата и время" required>
+                <div className="relative flex items-center gap-2 flex-wrap [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px]">
+                  <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
+                    <AuthInput
+                      type="date"
+                      value={checkpointDateStr}
+                      onChange={(e) => setCheckpointDateStr(e.target.value)}
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="relative flex items-center min-h-[40px] shrink-0 min-w-[5.5rem] w-[6rem]">
+                    <AuthInput
+                      type="text"
+                      inputMode="numeric"
+                      value={checkpointTimeStr}
+                      onChange={(e) => setCheckpointTimeStr(e.target.value)}
+                      placeholder="00:00"
+                      maxLength={5}
+                      autoComplete="off"
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              </FormField>
+              <TextField
+                label="Сумма"
+                currencyCode={item?.currency_code ?? "RUB"}
+                value={checkpointAmountStr}
+                onChange={(e) => setCheckpointAmountStr(formatRubInput(e.target.value))}
+                onBlur={(e) => setCheckpointAmountStr(e.target.value.trim() ? normalizeRubOnBlur(e.target.value) : e.target.value)}
+                placeholder="0,00"
+                required
+              />
+              {checkpointBalanceAtLoading ? (
+                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка…</p>
+              ) : checkpointComputedCents != null && checkpointAmountStr.trim() !== "" ? (
+                (() => {
+                  const statedCents = parseRubToCents(normalizeRubOnBlur(checkpointAmountStr));
+                  if (statedCents === null) return null;
+                  const matches = statedCents === checkpointComputedCents;
+                  return matches ? (
+                    <div
+                      className="text-sm rounded-md border p-3"
+                      style={{
+                        color: "#34D399",
+                        backgroundColor: "rgba(52, 211, 153, 0.08)",
+                        borderColor: "rgba(52, 211, 153, 0.3)",
+                      }}
+                    >
+                      Совпадает с расчетной суммой
+                    </div>
+                  ) : (
+                    <div
+                      className="text-sm rounded-md border p-3 flex flex-wrap items-center gap-2"
+                      style={{
+                        color: "#FB4C4F",
+                        backgroundColor: "rgba(251, 76, 79, 0.08)",
+                        borderColor: "rgba(251, 76, 79, 0.3)",
+                      }}
+                    >
+                      <span>Не совпадает с расчетной суммой —</span>
+                      <AmountWithCurrency valueCents={checkpointComputedCents} currencyCode={item?.currency_code ?? "RUB"} />
+                    </div>
+                  );
+                })()
+              ) : null}
+              {checkpointModalError && (
+                <div
+                  className="text-sm rounded-md border p-3"
+                  style={{
+                    color: "#FB4C4F",
+                    backgroundColor: "rgba(251, 76, 79, 0.08)",
+                    borderColor: "rgba(251, 76, 79, 0.3)",
+                  }}
+                >
+                  {checkpointModalError}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="glass"
+                className="rounded-lg border-0"
+                style={
+                  {
+                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                  } as React.CSSProperties
+                }
+                onClick={() => setCheckpointModalOpen(false)}
+              >
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                variant="authPrimary"
+                className="rounded-lg border-0"
+                style={
+                  {
+                    "--auth-primary-bg":
+                      "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+                    "--auth-primary-bg-hover":
+                      "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+                  } as React.CSSProperties
+                }
+                onClick={saveCheckpoint}
+                disabled={checkpointSaving || !checkpointDateStr}
+              >
+                {checkpointSaving ? "Сохранение…" : checkpointEditId != null ? "Сохранить" : "Добавить"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </main>
   );

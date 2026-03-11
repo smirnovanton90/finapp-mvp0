@@ -11,12 +11,14 @@ import {
   fetchTransactionsPage,
   fetchTransactionChains,
   fetchGoals,
+  fetchBalanceCheckpointsForItems,
   createCounterparty,
   createCategory,
   createItem,
   createTransactionChain,
   createTransaction,
   createGoal,
+  createBalanceCheckpoint,
   type ItemOut,
   type CounterpartyOut,
   type CategoryNode,
@@ -44,6 +46,7 @@ const SECTION_ITEMS = "[ITEMS]";
 const SECTION_TRANSACTION_CHAINS = "[TRANSACTION_CHAINS]";
 const SECTION_TRANSACTIONS = "[TRANSACTIONS]";
 const SECTION_GOALS = "[GOALS]";
+const SECTION_BALANCE_CHECKPOINTS = "[BALANCE_CHECKPOINTS]";
 
 const UTF8_BOM = "\uFEFF";
 
@@ -341,6 +344,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
     transactions,
     chains,
     goals,
+    checkpointsWithItems,
   ] = await Promise.all([
     fetchItems({ includeArchived: true, includeClosed: true }),
     fetchCounterparties({ include_deleted: true }),
@@ -348,6 +352,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
     fetchAllTransactions(),
     fetchTransactionChains(),
     fetchGoals({ include_deleted: true }),
+    fetchBalanceCheckpointsForItems(),
   ]);
 
   const userCounterparties = counterparties.filter((c) => c.owner_user_id != null);
@@ -634,6 +639,16 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
       ])
     );
   }
+  lines.push("");
+
+  // BALANCE_CHECKPOINTS (контрольные точки по активам с балансовой стоимостью)
+  lines.push(SECTION_BALANCE_CHECKPOINTS);
+  lines.push(csvRow(["item_id", "checkpoint_at", "stated_balance_cents"]));
+  for (const cp of checkpointsWithItems) {
+    lines.push(
+      csvRow([cp.item_id, cp.checkpoint_at, cp.stated_balance_cents])
+    );
+  }
 
   const csv = lines.join("\r\n");
   const filename = `finapp-export-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -647,6 +662,7 @@ export type ParsedExport = {
   transactionChains: Array<Record<string, string>>;
   transactions: Array<Record<string, string>>;
   goals: Array<Record<string, string>>;
+  balanceCheckpoints: Array<Record<string, string>>;
 };
 
 function parseCsvSection(
@@ -717,6 +733,7 @@ export function parseExportCsv(csvText: string): ParsedExport {
     transactionChains: [],
     transactions: [],
     goals: [],
+    balanceCheckpoints: [],
   };
   let i = 0;
   while (i < lines.length) {
@@ -760,6 +777,13 @@ export function parseExportCsv(csvText: string): ParsedExport {
       i += 1;
       const { rows, nextIndex } = parseCsvSection(lines, i);
       result.goals = rows;
+      i = nextIndex;
+      continue;
+    }
+    if (line === SECTION_BALANCE_CHECKPOINTS) {
+      i += 1;
+      const { rows, nextIndex } = parseCsvSection(lines, i);
+      result.balanceCheckpoints = rows;
       i = nextIndex;
       continue;
     }
@@ -885,6 +909,7 @@ export type ImportResult = {
     transactionChains: number;
     transactions: number;
     goals: number;
+    balanceCheckpoints: number;
   };
 };
 
@@ -909,6 +934,7 @@ export async function runImport(
     transactionChains: 0,
     transactions: 0,
     goals: 0,
+    balanceCheckpoints: 0,
   };
 
   try {
@@ -1260,6 +1286,26 @@ export async function runImport(
       };
       await createGoal(payload);
       counts.goals += 1;
+    }
+
+    // 7. Контрольные точки (только для актива, который импортирован или сопоставлен)
+    const totalCheckpoints = data.balanceCheckpoints?.length ?? 0;
+    for (let i = 0; i < totalCheckpoints; i++) {
+      const row = data.balanceCheckpoints[i];
+      report("Контрольные точки", i + 1, totalCheckpoints);
+      const oldItemId = num(row.item_id);
+      const checkpointAt = str(row.checkpoint_at).trim();
+      const statedCents = num(row.stated_balance_cents);
+      if (oldItemId == null || !itemIdMap.has(oldItemId) || !checkpointAt || statedCents == null) continue;
+      try {
+        await createBalanceCheckpoint(itemIdMap.get(oldItemId)!, {
+          checkpoint_at: checkpointAt,
+          stated_balance_cents: statedCents,
+        });
+        counts.balanceCheckpoints += 1;
+      } catch {
+        // пропускаем при ошибке (например, актив не балансовый)
+      }
     }
 
     report("Готово", 1, 1);

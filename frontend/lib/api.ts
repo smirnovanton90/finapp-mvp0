@@ -146,6 +146,35 @@ export type ItemCostHistoryOut = {
   points: ItemCostHistoryPoint[];
 };
 
+export type CheckpointStatus = "OK" | "MISMATCH";
+
+export type BalanceCheckpointOut = {
+  id: number;
+  checkpoint_at: string;
+  stated_balance_cents: number;
+  computed_balance_cents: number;
+  status: CheckpointStatus;
+};
+
+export type BalanceCheckpointCreate = {
+  checkpoint_at: string;
+  stated_balance_cents: number;
+};
+
+export type BalanceCheckpointUpdate = {
+  checkpoint_at?: string | null;
+  stated_balance_cents?: number | null;
+};
+
+export type BalanceAtOut = {
+  computed_balance_cents: number;
+};
+
+export type BalanceCheckpointWithItemOut = BalanceCheckpointOut & {
+  item_id: number;
+  item_name: string;
+};
+
 export type ItemCreate = {
   kind: ItemKind;
   type_code: string;
@@ -554,6 +583,7 @@ export type TransactionCreate = {
   related_item_id?: number | null;
   asset_link_type?: AssetLinkType | null;
   parent_transaction_id?: number | null;
+  is_split_parent?: boolean;
 };
 
 export type TransactionSplitPartCreate = {
@@ -1344,6 +1374,78 @@ export async function deleteItemMarketValue(itemId: number, mvId: number): Promi
   if (!res.ok) throw new Error(await readError(res));
 }
 
+export async function fetchItemBalanceAt(
+  itemId: number,
+  at: string
+): Promise<BalanceAtOut> {
+  const res = await authFetch(
+    `${API_BASE}/items/${itemId}/balance-at?at=${encodeURIComponent(at)}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchItemBalanceCheckpoints(
+  itemId: number
+): Promise<BalanceCheckpointOut[]> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}/balance-checkpoints`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createBalanceCheckpoint(
+  itemId: number,
+  payload: BalanceCheckpointCreate
+): Promise<BalanceCheckpointOut> {
+  const res = await authFetch(`${API_BASE}/items/${itemId}/balance-checkpoints`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function updateBalanceCheckpoint(
+  itemId: number,
+  checkpointId: number,
+  payload: BalanceCheckpointUpdate
+): Promise<BalanceCheckpointOut> {
+  const res = await authFetch(
+    `${API_BASE}/items/${itemId}/balance-checkpoints/${checkpointId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function deleteBalanceCheckpoint(
+  itemId: number,
+  checkpointId: number
+): Promise<void> {
+  const res = await authFetch(
+    `${API_BASE}/items/${itemId}/balance-checkpoints/${checkpointId}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function fetchBalanceCheckpointsForItems(
+  itemIds?: number[]
+): Promise<BalanceCheckpointWithItemOut[]> {
+  const q =
+    itemIds != null && itemIds.length > 0
+      ? `?item_ids=${itemIds.join(",")}`
+      : "";
+  const res = await authFetch(`${API_BASE}/balance-checkpoints${q}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 async function readError(res: Response) {
   const text = await res.text();
   if (!text) return res.statusText || "Request failed";
@@ -1471,6 +1573,9 @@ export async function createTransaction(
   const body: Record<string, unknown> = { ...rest, amount_rub: amount };
   if (payload.parent_transaction_id != null) {
     body.parent_transaction_id = payload.parent_transaction_id;
+  }
+  if (payload.is_split_parent === true) {
+    body.is_split_parent = true;
   }
   const res = await authFetch(`${API_BASE}/transactions`, {
     method: "POST",

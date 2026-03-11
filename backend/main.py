@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 import xml.etree.ElementTree as ET
 import bisect
 from datetime import datetime, timedelta, date as date_type
+from zoneinfo import ZoneInfo
 import requests
 from pathlib import Path
 from io import BytesIO
@@ -17,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError, ProgrammingError
 from db import get_db
 from models import (
     Item,
+    ItemBalanceCheckpoint,
     ItemMarketValue,
     ItemPlanSettings,
     User,
@@ -55,6 +57,11 @@ from schemas import (
     ItemCostsOut,
     ItemCostHistoryPoint,
     ItemCostHistoryOut,
+    BalanceCheckpointCreate,
+    BalanceCheckpointUpdate,
+    BalanceCheckpointOut,
+    BalanceAtOut,
+    BalanceCheckpointWithItemOut,
 )
 from auth import get_current_user, create_access_token, hash_password, verify_password
 
@@ -1182,7 +1189,7 @@ def list_items(
                 )
                 from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
                 inv_sum += _convert_amount_between_currencies(
-                    tx.amount_rub or 0,
+                    tx.amount_primary_minor or 0,
                     from_currency,
                     item_currency,
                     rate_date,
@@ -1248,7 +1255,7 @@ def get_item(
         if latest is not None:
             setattr(item, "latest_market_value_rub", latest)
     acq = (
-        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        db.query(func.coalesce(func.sum(Transaction.amount_primary_minor), 0))
         .filter(
             Transaction.user_id == user.id,
             Transaction.related_item_id == item_id,
@@ -1261,7 +1268,7 @@ def get_item(
         or 0
     )
     inv_sum = (
-        db.query(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        db.query(func.coalesce(func.sum(Transaction.amount_primary_minor), 0))
         .filter(
             Transaction.user_id == user.id,
             Transaction.related_item_id == item_id,
@@ -2407,7 +2414,7 @@ def _compute_acquisition_cost_basis(
                 )
                 from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
                 total += _convert_amount_between_currencies(
-                    tx.amount_rub or 0,
+                    tx.amount_primary_minor or 0,
                     from_currency,
                     item_currency,
                     rate_date,
@@ -2449,7 +2456,7 @@ def _compute_acquisition_cost_basis(
                 )
                 from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
                 total += _convert_amount_between_currencies(
-                    tx.amount_rub or 0,
+                    tx.amount_primary_minor or 0,
                     from_currency,
                     item_currency,
                     rate_date,
@@ -2498,7 +2505,7 @@ def _compute_acquisition_cost_basis(
 
     for tx in txs:
         if tx.asset_link_type == "ASSET_PURCHASE":
-            cost_basis += tx.amount_rub or 0
+            cost_basis += tx.amount_primary_minor or 0
             if is_moex_item(item):
                 running_qty += tx.primary_quantity_lots or 0
             else:
@@ -2560,7 +2567,7 @@ def get_item_costs(
             )
             from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
             investment_sum += _convert_amount_between_currencies(
-                tx.amount_rub or 0,
+                tx.amount_primary_minor or 0,
                 from_currency,
                 item_currency,
                 rate_date,
@@ -2664,7 +2671,7 @@ def get_item_costs(
             )
             from_currency = primary_by_id.get(tx.primary_item_id, "RUB")
             total += _convert_amount_between_currencies(
-                tx.amount_rub or 0,
+                tx.amount_primary_minor or 0,
                 from_currency,
                 "RUB",
                 rate_date,
@@ -2682,6 +2689,146 @@ def get_item_costs(
         market_value_rub=market_value_rub,
         income_rub=income_rub,
         expense_rub=expense_rub,
+    )
+
+
+# Все даты/время транзакций и контрольных точек считаются в поясе Москвы.
+_MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+
+
+def _at_as_moscow_naive(dt: datetime) -> datetime:
+    """Приводит момент времени к «наивному» datetime в поясе Москвы для сравнения с transaction_date (хранятся как Москва)."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(_MOSCOW_TZ).replace(tzinfo=None)
+    return dt
+
+
+def _compute_balance_in_item_currency_cents(
+    db: Session,
+    user_id: int,
+    item: Item,
+    at: datetime,
+) -> int:
+    """Баланс по активу в валюте счёта (минорные единицы) на момент at. Считается по цепочке транзакций без учёта курсов; курс применяется только при переводе в рубли для отображения."""
+    at = _at_as_moscow_naive(at)
+    item_id = item.id
+    item_currency = (item.currency_code or "RUB").upper()
+    balance_txs = (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.deleted_at.is_(None),
+            Transaction.is_split_parent.is_(False),
+            Transaction.transaction_date <= at,
+            or_(
+                Transaction.primary_item_id == item_id,
+                Transaction.counterparty_item_id == item_id,
+            ),
+        )
+        .order_by(Transaction.transaction_date.asc())
+        .all()
+    )
+    items_by_id: dict[int, Item] = {}
+    if balance_txs:
+        all_ids = {t.primary_item_id for t in balance_txs} | {
+            t.counterparty_item_id for t in balance_txs if t.counterparty_item_id is not None
+        }
+        items_by_id = {r.id: r for r in db.query(Item).filter(Item.id.in_(all_ids)).all()}
+
+    # При переводе с/на «Взаиморасчёты» (settlement) сумма по стороне кошелька хранится в amount_primary_minor; при apply в transactions.py та же логика — повторяем при реплее.
+    SETTLEMENT_TYPE = "counterparty_settlements"
+
+    def delta_in_item_currency(tx: Transaction) -> int:
+        amt = tx.amount_primary_minor or 0
+        amt_counterparty_raw = tx.amount_counterparty if tx.amount_counterparty is not None else amt
+        if tx.primary_item_id == item_id:
+            if tx.direction == "INCOME":
+                return amt
+            if tx.direction == "EXPENSE":
+                return -amt
+            if tx.direction == "TRANSFER":
+                primary = items_by_id.get(tx.primary_item_id)
+                counter = items_by_id.get(tx.counterparty_item_id) if tx.counterparty_item_id else None
+                kind = primary.kind if primary else "ASSET"
+                primary_is_settlement = getattr(primary, "type_code", None) == SETTLEMENT_TYPE
+                counter_is_settlement = getattr(counter, "type_code", None) == SETTLEMENT_TYPE
+                if primary_is_settlement and not counter_is_settlement:
+                    amt_primary, amt_counter = amt_counterparty_raw, amt
+                elif counter_is_settlement and not primary_is_settlement:
+                    amt_primary, amt_counter = amt, amt_counterparty_raw
+                else:
+                    amt_primary, amt_counter = amt, amt_counterparty_raw
+                return transfer_delta(kind, True, amt_primary)
+        if tx.counterparty_item_id == item_id and tx.direction == "TRANSFER":
+            primary = items_by_id.get(tx.primary_item_id)
+            counter = items_by_id.get(tx.counterparty_item_id)
+            kind = counter.kind if counter else "ASSET"
+            primary_is_settlement = getattr(primary, "type_code", None) == SETTLEMENT_TYPE
+            counter_is_settlement = getattr(counter, "type_code", None) == SETTLEMENT_TYPE
+            if primary_is_settlement and not counter_is_settlement:
+                amt_primary, amt_counter = amt_counterparty_raw, amt
+            elif counter_is_settlement and not primary_is_settlement:
+                amt_primary, amt_counter = amt, amt_counterparty_raw
+            else:
+                amt_primary, amt_counter = amt, amt_counterparty_raw
+            return transfer_delta(kind, False, amt_counter)
+        return 0
+
+    if item.opening_counterparty_item_id is not None:
+        balance_cumul = 0
+    elif item_currency == "RUB":
+        balance_cumul = item.initial_value_rub
+    else:
+        open_date = item.open_date if hasattr(item, "open_date") and item.open_date else at.date() if hasattr(at, "date") else at
+        balance_cumul = _convert_amount_between_currencies(
+            item.initial_value_rub, "RUB", item_currency, open_date, db
+        )
+    for tx in balance_txs:
+        balance_cumul += delta_in_item_currency(tx)
+    return balance_cumul
+
+
+def _compute_balance_cents_at(
+    db: Session,
+    user_id: int,
+    item: Item,
+    at: datetime,
+) -> int:
+    """Баланс по активу в валюте актива (центы/копейки) на момент at. Логика только в валюте счёта, без промежуточной конвертации в рубли."""
+    return _compute_balance_in_item_currency_cents(db, user_id, item, at)
+
+
+def _compute_balance_rub_at(
+    db: Session,
+    user_id: int,
+    item: Item,
+    at: datetime,
+) -> int:
+    """Баланс по активу в рублях (копейки) на момент at. Сначала сальдо в валюте счёта, затем пересчёт в рубли по курсу на дату at."""
+    balance_cents = _compute_balance_in_item_currency_cents(db, user_id, item, at)
+    item_currency = (item.currency_code or "RUB").upper()
+    if item_currency == "RUB":
+        return balance_cents
+    at_date = at.date() if hasattr(at, "date") else at
+    return _convert_amount_between_currencies(
+        balance_cents, item_currency, "RUB", at_date, db
+    )
+
+
+def _checkpoint_to_out(
+    row: "ItemBalanceCheckpoint",
+    item: Item,
+    db: Session,
+) -> BalanceCheckpointOut:
+    computed = _compute_balance_cents_at(db, row.user_id, item, row.checkpoint_at)
+    status: str = "OK" if computed == row.stated_balance_cents else "MISMATCH"
+    return BalanceCheckpointOut(
+        id=row.id,
+        checkpoint_at=row.checkpoint_at,
+        stated_balance_cents=row.stated_balance_cents,
+        computed_balance_cents=computed,
+        status=status,
     )
 
 
@@ -2728,9 +2875,12 @@ def _build_item_cost_history(
         item_rows = db.query(Item).filter(Item.id.in_(all_ids)).all()
         items_by_id = {r.id: r for r in item_rows}
 
-    def balance_delta_for_item(tx: Transaction) -> int:
-        amt = tx.amount_rub or 0
-        amt_counter = tx.amount_counterparty if tx.amount_counterparty is not None else amt
+    # Дельта в валюте счёта (без конвертации в рубли). Для TRANSFER — та же логика amt_primary/amt_counter, что и при apply (в т.ч. settlement).
+    SETTLEMENT_TYPE = "counterparty_settlements"
+
+    def delta_in_item_currency(tx: Transaction) -> int:
+        amt = tx.amount_primary_minor or 0
+        amt_counterparty_raw = tx.amount_counterparty if tx.amount_counterparty is not None else amt
         if tx.primary_item_id == item_id:
             if tx.direction == "INCOME":
                 return amt
@@ -2738,13 +2888,30 @@ def _build_item_cost_history(
                 return -amt
             if tx.direction == "TRANSFER":
                 primary = items_by_id.get(tx.primary_item_id)
+                counter = items_by_id.get(tx.counterparty_item_id) if tx.counterparty_item_id else None
                 kind = primary.kind if primary else "ASSET"
-                return transfer_delta(kind, True, amt)
-        if tx.counterparty_item_id == item_id:
-            if tx.direction == "TRANSFER":
-                counter = items_by_id.get(tx.counterparty_item_id)
-                kind = counter.kind if counter else "ASSET"
-                return transfer_delta(kind, False, amt_counter)
+                primary_is_settlement = getattr(primary, "type_code", None) == SETTLEMENT_TYPE
+                counter_is_settlement = getattr(counter, "type_code", None) == SETTLEMENT_TYPE
+                if primary_is_settlement and not counter_is_settlement:
+                    amt_primary, amt_counter = amt_counterparty_raw, amt
+                elif counter_is_settlement and not primary_is_settlement:
+                    amt_primary, amt_counter = amt, amt_counterparty_raw
+                else:
+                    amt_primary, amt_counter = amt, amt_counterparty_raw
+                return transfer_delta(kind, True, amt_primary)
+        if tx.counterparty_item_id == item_id and tx.direction == "TRANSFER":
+            primary = items_by_id.get(tx.primary_item_id)
+            counter = items_by_id.get(tx.counterparty_item_id)
+            kind = counter.kind if counter else "ASSET"
+            primary_is_settlement = getattr(primary, "type_code", None) == SETTLEMENT_TYPE
+            counter_is_settlement = getattr(counter, "type_code", None) == SETTLEMENT_TYPE
+            if primary_is_settlement and not counter_is_settlement:
+                amt_primary, amt_counter = amt_counterparty_raw, amt
+            elif counter_is_settlement and not primary_is_settlement:
+                amt_primary, amt_counter = amt, amt_counterparty_raw
+            else:
+                amt_primary, amt_counter = amt, amt_counterparty_raw
+            return transfer_delta(kind, False, amt_counter)
         return 0
 
     # Market: for non-MOEX use manual ItemMarketValue; for MOEX use lots × price from API
@@ -2848,12 +3015,16 @@ def _build_item_cost_history(
             pass
 
     result = []
-    # Если есть транзакция открытия, начальный баланс уже учтён в ней — не дублируем initial_value_rub
-    balance_cumul = (
-        0
-        if item.opening_counterparty_item_id is not None
-        else item.initial_value_rub
-    )
+    item_currency_hist = (item.currency_code or "RUB").upper()
+    if item.opening_counterparty_item_id is not None:
+        balance_cumul = 0
+    elif item_currency_hist == "RUB":
+        balance_cumul = item.initial_value_rub
+    else:
+        open_date = getattr(item, "open_date", None) or start
+        balance_cumul = _convert_amount_between_currencies(
+            item.initial_value_rub, "RUB", item_currency_hist, open_date, db
+        )
     balance_tx_index = 0
     lot_balance = lot_initial
     lot_tx_index = 0
@@ -2866,7 +3037,7 @@ def _build_item_cost_history(
             tx_d = tx.transaction_date.date() if hasattr(tx.transaction_date, "date") else tx.transaction_date
             if tx_d > d:
                 break
-            balance_cumul += balance_delta_for_item(tx)
+            balance_cumul += delta_in_item_currency(tx)
             balance_tx_index += 1
 
         while lot_tx_index < len(lot_txs):
@@ -2919,7 +3090,7 @@ def _build_item_cost_history(
                 )
                 from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
                 inv_extra += _convert_amount_between_currencies(
-                    tx.amount_rub or 0,
+                    tx.amount_primary_minor or 0,
                     from_currency,
                     item_currency,
                     rate_date,
@@ -2995,12 +3166,26 @@ def _build_item_cost_history(
                                 market_rub = vr
                     break
 
+        # balance_cumul уже в валюте счёта (накапливали без конвертации в рубли). acquisition/invested — в рублях, для инвалютного переводим в валюту актива по курсу на дату.
+        item_currency = (item.currency_code or "RUB").upper()
+        balance_out = balance_cumul
+        if item_currency == "RUB":
+            acquisition_out = acq_rub
+            invested_out = invested_rub
+        else:
+            acquisition_out = _convert_amount_between_currencies(
+                acq_rub, "RUB", item_currency, d, db
+            )
+            invested_out = _convert_amount_between_currencies(
+                invested_rub, "RUB", item_currency, d, db
+            )
+
         result.append(
             ItemCostHistoryPoint(
                 date=d_str,
-                balance_rub=balance_cumul,
-                acquisition_rub=acq_rub,
-                invested_rub=invested_rub,
+                balance_rub=balance_out,
+                acquisition_rub=acquisition_out,
+                invested_rub=invested_out,
                 market_rub=market_rub,
                 market_quantity_units=market_quantity_units,
                 market_price_rub=market_price_rub,
@@ -3039,6 +3224,169 @@ def get_item_cost_history(
         return ItemCostHistoryOut(points=[])
     points = _build_item_cost_history(db, user.id, item, start, end)
     return ItemCostHistoryOut(points=points)
+
+
+@app.get("/items/{item_id}/balance-at", response_model=BalanceAtOut)
+def get_item_balance_at(
+    item_id: int,
+    at: datetime,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Расчётное сальдо на произвольную дату и время (в валюте актива, центы)."""
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    primary = (item.primary_value_kind or "BALANCE").upper()
+    if primary != "BALANCE":
+        raise HTTPException(status_code=400, detail="Balance checkpoints only for balance-type items")
+    cents = _compute_balance_cents_at(db, user.id, item, at)
+    return BalanceAtOut(computed_balance_cents=cents)
+
+
+@app.get("/items/{item_id}/balance-checkpoints", response_model=list[BalanceCheckpointOut])
+def list_item_balance_checkpoints(
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    rows = (
+        db.query(ItemBalanceCheckpoint)
+        .filter(
+            ItemBalanceCheckpoint.item_id == item_id,
+            ItemBalanceCheckpoint.user_id == user.id,
+        )
+        .order_by(ItemBalanceCheckpoint.checkpoint_at.desc())
+        .all()
+    )
+    return [_checkpoint_to_out(r, item, db) for r in rows]
+
+
+@app.post("/items/{item_id}/balance-checkpoints", response_model=BalanceCheckpointOut)
+def create_balance_checkpoint(
+    item_id: int,
+    payload: BalanceCheckpointCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    primary = (item.primary_value_kind or "BALANCE").upper()
+    if primary != "BALANCE":
+        raise HTTPException(status_code=400, detail="Balance checkpoints only for balance-type items")
+    row = ItemBalanceCheckpoint(
+        user_id=user.id,
+        item_id=item_id,
+        checkpoint_at=payload.checkpoint_at,
+        stated_balance_cents=payload.stated_balance_cents,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _checkpoint_to_out(row, item, db)
+
+
+@app.patch("/items/{item_id}/balance-checkpoints/{checkpoint_id}", response_model=BalanceCheckpointOut)
+def update_balance_checkpoint(
+    item_id: int,
+    checkpoint_id: int,
+    payload: BalanceCheckpointUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    row = db.get(ItemBalanceCheckpoint, checkpoint_id)
+    if not row or row.item_id != item_id or row.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    if payload.checkpoint_at is not None:
+        row.checkpoint_at = payload.checkpoint_at
+    if payload.stated_balance_cents is not None:
+        row.stated_balance_cents = payload.stated_balance_cents
+    db.commit()
+    db.refresh(row)
+    return _checkpoint_to_out(row, item, db)
+
+
+@app.delete("/items/{item_id}/balance-checkpoints/{checkpoint_id}", status_code=204)
+def delete_balance_checkpoint(
+    item_id: int,
+    checkpoint_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    row = (
+        db.query(ItemBalanceCheckpoint)
+        .filter(
+            ItemBalanceCheckpoint.id == checkpoint_id,
+            ItemBalanceCheckpoint.item_id == item_id,
+            ItemBalanceCheckpoint.user_id == user.id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    db.delete(row)
+    db.commit()
+    return None
+
+
+@app.get("/balance-checkpoints", response_model=list[BalanceCheckpointWithItemOut])
+def list_balance_checkpoints_for_items(
+    item_ids: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Список КТ по выбранным активам (для страницы транзакций). item_ids — comma-separated; пусто = все BALANCE-активы пользователя."""
+    if item_ids:
+        id_list = [int(x.strip()) for x in item_ids.split(",") if x.strip()]
+        if not id_list:
+            return []
+        items = db.query(Item).filter(Item.id.in_(id_list), Item.user_id == user.id).all()
+        allowed_ids = {i.id for i in items}
+    else:
+        items = (
+            db.query(Item)
+            .filter(
+                Item.user_id == user.id,
+                Item.archived_at.is_(None),
+                Item.closed_at.is_(None),
+            )
+            .filter(or_(Item.primary_value_kind.is_(None), Item.primary_value_kind == "BALANCE"))
+            .all()
+        )
+        allowed_ids = {i.id for i in items}
+    if not allowed_ids:
+        return []
+    rows = (
+        db.query(ItemBalanceCheckpoint)
+        .filter(
+            ItemBalanceCheckpoint.user_id == user.id,
+            ItemBalanceCheckpoint.item_id.in_(allowed_ids),
+        )
+        .order_by(ItemBalanceCheckpoint.checkpoint_at.asc())
+        .all()
+    )
+    items_by_id = {i.id: i for i in items}
+    result = []
+    for r in rows:
+        item = items_by_id.get(r.item_id)
+        if not item:
+            continue
+        out = _checkpoint_to_out(r, item, db)
+        result.append(
+            BalanceCheckpointWithItemOut(
+                **out.model_dump(),
+                item_id=item.id,
+                item_name=item.name,
+            )
+        )
+    return result
 
 
 @app.get("/items/{item_id}/market-values", response_model=list[ItemMarketValueOut])

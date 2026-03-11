@@ -104,7 +104,7 @@ def build_notification_text(
         lines.append("Сегодня:")
         for tx in today_txs:
             name = _get_tx_display_name(tx)
-            amount = format_amount_rub(tx.amount_rub, tx.direction)
+            amount = format_amount_rub(tx.amount_primary_minor, tx.direction)
             item_name = _get_item_display_name(tx)
             lines.append(f"• {name} — {amount} ({item_name})")
         lines.append("")
@@ -113,7 +113,7 @@ def build_notification_text(
         lines.append("Просроченные:")
         for tx in overdue_txs:
             name = _get_tx_display_name(tx)
-            amount = format_amount_rub(tx.amount_rub, tx.direction)
+            amount = format_amount_rub(tx.amount_primary_minor, tx.direction)
             item_name = _get_item_display_name(tx)
             tx_date = tx.transaction_date.date()
             date_str_tx = tx_date.strftime("%d.%m.%Y")

@@ -245,6 +245,15 @@ export async function executeImportDzen(
             icon_name: state.iconName || null,
           });
           categoryNameToId.set(cat.name, created.id);
+          // Добавить название из выписки в синонимы новой категории для последующего автоопределения
+          const nameToAdd = cat.name.trim();
+          if (nameToAdd) {
+            try {
+              await addCategorySynonyms(created.id, [nameToAdd]);
+            } catch {
+              // Игнорируем ошибку (лимит синонимов или дубликат)
+            }
+          }
         }
       } else {
         const parentId = (() => {
@@ -546,6 +555,7 @@ export async function executeImportDzen(
         }
       }
     }
+    // Добавить название из выписки в синонимы выбранной категории, чтобы при следующем импорте категория определилась автоматически
     for (const cat of parsedData.categories ?? []) {
       const state = categoryCardStates.get(cat.name);
       if (state?.linkEnabled && state.linkedPath != null) {

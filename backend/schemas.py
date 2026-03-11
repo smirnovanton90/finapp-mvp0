@@ -511,10 +511,10 @@ class ItemCostsOut(BaseModel):
 
 
 class ItemCostHistoryPoint(BaseModel):
-    """One day in cost history (all in kopecks)."""
+    """Один день в истории стоимости. Для RUB-активов — в копейках; для инвалютных — в минорных единицах валюты актива (balance/acquisition/invested)."""
 
     date: str  # YYYY-MM-DD
-    balance_rub: int
+    balance_rub: int  # баланс: RUB — копейки; иначе — минорные единицы валюты актива
     acquisition_rub: int
     invested_rub: int
     market_rub: int | None
@@ -529,12 +529,48 @@ class ItemCostHistoryOut(BaseModel):
     points: list[ItemCostHistoryPoint]
 
 
+CheckpointStatus = Literal["OK", "MISMATCH"]
+
+
+class BalanceCheckpointCreate(BaseModel):
+    checkpoint_at: datetime
+    stated_balance_cents: int
+
+
+class BalanceCheckpointUpdate(BaseModel):
+    checkpoint_at: datetime | None = None
+    stated_balance_cents: int | None = None
+
+
+class BalanceCheckpointOut(BaseModel):
+    id: int
+    checkpoint_at: datetime
+    stated_balance_cents: int
+    computed_balance_cents: int
+    status: CheckpointStatus
+
+    class Config:
+        from_attributes = True
+
+
+class BalanceAtOut(BaseModel):
+    computed_balance_cents: int
+
+
+class BalanceCheckpointWithItemOut(BalanceCheckpointOut):
+    """КТ с полем item для списка на странице транзакций."""
+
+    item_id: int
+    item_name: str
+
+
 class TransactionBase(BaseModel):
     transaction_date: datetime
     primary_item_id: int
     counterparty_item_id: int | None = None
     counterparty_id: int | None = None
-    amount_rub: int = Field(ge=0)
+    # Сумма в валюте счёта primary (минорные единицы). В API по историческим причинам поле называется amount_rub.
+    amount_primary_minor: int = Field(ge=0, validation_alias="amount_rub", serialization_alias="amount_rub")
     amount_counterparty: int | None = Field(default=None, ge=0)
     primary_quantity_lots: int | None = Field(default=None, ge=0)
     counterparty_quantity_lots: int | None = Field(default=None, ge=0)
@@ -560,6 +596,7 @@ class TransactionBase(BaseModel):
 class TransactionCreate(TransactionBase):
     status: TransactionStatus | None = None
     parent_transaction_id: int | None = None
+    is_split_parent: bool = False
 
     @model_validator(mode="after")
     def validate_asset_link_input(self) -> "TransactionCreate":
@@ -598,7 +635,8 @@ class TransactionDebtsCreate(BaseModel):
     transaction_counterparty_id: int | None = None  # If set, used as transaction counterparty (e.g. «Где платите»); otherwise same as counterparty_id
     primary_item_id: int = Field(..., description="User-selected asset/liability (source or target)")
     transaction_date: datetime
-    amount_rub: int = Field(..., ge=1)
+    # Сумма в валюте счёта primary (минорные единицы). В API — amount_rub.
+    amount_primary_minor: int = Field(..., ge=1, validation_alias="amount_rub", serialization_alias="amount_rub")
     amount_counterparty: int | None = Field(default=None, ge=0)
     transaction_type: TransactionType = "ACTUAL"
     comment: str | None = None
@@ -614,7 +652,8 @@ class TransactionTheyPaidForMeCreate(BaseModel):
 
     who_paid_counterparty_id: int
     where_paid_counterparty_id: int
-    amount_rub: int = Field(..., ge=1)
+    # Сумма в валюте счёта (минорные единицы). В API — amount_rub.
+    amount_primary_minor: int = Field(..., ge=1, validation_alias="amount_rub", serialization_alias="amount_rub")
     transaction_date: datetime | None = None
     category_id: int | None = None
     comment: str | None = None
@@ -649,6 +688,7 @@ class TransactionStatusUpdate(BaseModel):
 
 
 class TransactionSplitPartCreate(BaseModel):
+    # Сумма части в валюте счёта primary (минорные единицы). В API поле называется amount_rub.
     amount_rub: int = Field(..., ge=0)
     category_id: int | None = None
 
@@ -674,7 +714,8 @@ class TransactionChainCreate(BaseModel):
     primary_item_id: int
     counterparty_item_id: int | None = None
     counterparty_id: int | None = None
-    amount_rub: int = Field(ge=0)
+    # Сумма в валюте счёта primary (минорные единицы). В API — amount_rub.
+    amount_primary_minor: int = Field(ge=0, validation_alias="amount_rub", serialization_alias="amount_rub")
     amount_counterparty: int | None = Field(default=None, ge=0)
     direction: TransactionDirection
     category_id: int | None = None

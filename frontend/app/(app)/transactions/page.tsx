@@ -148,10 +148,12 @@ import {
   fetchTransactions,
   fetchTransactionsPage,
   fetchTransactionChains,
+  fetchBalanceCheckpointsForItems,
   recognizeReceipt,
   splitTransaction,
   unsplitTransaction,
   BankOut,
+  BalanceCheckpointWithItemOut,
   CounterpartyOut,
   CounterpartyIndustryOut,
   FxRateOut,
@@ -213,6 +215,7 @@ type TransactionFormMode = "STANDARD" | "LOAN_REPAYMENT" | "DEBTS";
 
 type BulkEditBaseline = {
   date: string;
+  time: string;
   direction: TransactionOut["direction"];
   primaryItemId: number | null;
   counterpartyItemId: number | null;
@@ -326,6 +329,12 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Собирает transaction_date: YYYY-MM-DDTHH:mm:00 (время не указано → 00:00:00). */
+function buildTransactionDate(dateKey: string, timeHHmm: string): string {
+  const t = /^\d{1,2}:\d{2}$/.test(timeHHmm) ? timeHHmm : "00:00";
+  return `${dateKey}T${t}:00`;
 }
 
 /** Для разделителей между днями: текущий год — "8 марта", иначе "10 октября 2027". */
@@ -989,13 +998,6 @@ function formatDateTimeForApi(date: Date) {
   return `${dateKey}T${hh}:${mm}:${ss}`;
 }
 
-function mergeDateWithTime(dateValue: string, existingDate?: string | null) {
-  if (!existingDate) return dateValue;
-  const match = /[T\s](\d{1,2}:\d{2}(?::\d{2})?)/.exec(existingDate);
-  if (!match) return dateValue;
-  return `${dateValue}T${match[1]}`;
-}
-
 function parseAmountCell(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -1264,7 +1266,9 @@ function TransactionCardRow({
   const counterpartyAmountCentsRaw = isDebtTransfer
     ? bothSettlements
       ? (tx.amount_counterparty ?? tx.amount)
-      : amountForDisplayItem(counterpartyDisplayId)
+      : counterpartyDisplayId != null
+        ? amountForDisplayItem(counterpartyDisplayId)
+        : (tx.amount_counterparty ?? tx.amount)
     : (tx.amount_counterparty ?? tx.amount);
   const amountValue = formatAmount(primaryAmountCentsRaw);
   const counterpartyAmountValue = formatAmount(counterpartyAmountCentsRaw);
@@ -2155,6 +2159,7 @@ function TransactionsView({
   );
 
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [time, setTime] = useState("");
   const [direction, setDirection] = useState<"INCOME" | "EXPENSE" | "TRANSFER">(
     "EXPENSE"
   );
@@ -2209,6 +2214,7 @@ function TransactionsView({
   const [isBulkConfirming, setIsBulkConfirming] = useState(false);
   const txRequestIdRef = useRef(0);
   const onboardingAppliedRef = useRef<string | null>(null);
+  const [checkpoints, setCheckpoints] = useState<BalanceCheckpointWithItemOut[]>([]);
 
   useEffect(() => {
     if (!isWizardOpen) {
@@ -2743,6 +2749,7 @@ function TransactionsView({
 
   const resetForm = () => {
     setDate(new Date().toISOString().slice(0, 10));
+    setTime("");
     setDirection("EXPENSE");
     setFormMode("STANDARD");
     setDebtDirection("I_PAID");
@@ -2910,25 +2917,37 @@ function TransactionsView({
         transaction_type: formTransactionType,
         comment: comment || null,
       };
-      const expensePayload = {
+      const parentPayload = {
+        ...basePayload,
+        counterparty_item_id: null,
+        amount: totalCents,
+        amount_counterparty: null,
+        direction: "EXPENSE" as const,
+        category_id: expenseCategoryId,
+        is_split_parent: true,
+      };
+      const parent = await createTransaction(parentPayload);
+      const childExpensePayload = {
         ...basePayload,
         counterparty_item_id: null,
         amount: interestCents,
         amount_counterparty: null,
         direction: "EXPENSE" as const,
         category_id: expenseCategoryId,
+        parent_transaction_id: parent.id,
       };
-      const transferPayload = {
+      const childTransferPayload = {
         ...basePayload,
         counterparty_item_id: counterpartyItemId,
         amount: principalCents,
         amount_counterparty: null,
         direction: "TRANSFER" as const,
         category_id: null,
+        parent_transaction_id: parent.id,
       };
       await Promise.all([
-        createTransaction(expensePayload),
-        createTransaction(transferPayload),
+        createTransaction(childExpensePayload),
+        createTransaction(childTransferPayload),
       ]);
       closeLoanRepaymentModal();
       await loadAll();
@@ -2974,7 +2993,10 @@ function TransactionsView({
         if (qrData.i) commentParts.push(`ФД: ${qrData.i}`);
         if (commentParts.length) setComment(commentParts.join(", "));
       } else if (ocrResult) {
-        if (ocrResult.transaction_date) setDate(ocrResult.transaction_date);
+        if (ocrResult.transaction_date) {
+          setDate(getDateKey(ocrResult.transaction_date));
+          setTime(formatTime(ocrResult.transaction_date));
+        }
         if (ocrResult.amount != null) setAmountStr(formatCentsForInput(ocrResult.amount));
       }
 
@@ -3132,6 +3154,7 @@ function TransactionsView({
     setIsBulkEditConfirmOpen(false);
     setDialogMode("edit");
     setDate(getDateKey(tx.transaction_date));
+    setTime(formatTime(tx.transaction_date));
     setFormTransactionType(tx.transaction_type);
     // Суммы в форме всегда по отображаемым сторонам: Откуда = первый селектор, Куда = второй.
     const displayPrimaryId = getDisplayPrimaryItemId(tx);
@@ -3149,7 +3172,7 @@ function TransactionsView({
         return itemId === tx.primary_item_id ? tx.amount : (primaryIsSettlement ? tx.amount : (tx.amount_counterparty ?? tx.amount));
       };
       setAmountStr(formatCentsForInput(amountForItem(displayPrimaryId)));
-      setAmountCounterpartyStr(formatCentsForInput(amountForItem(displayCounterpartyId)));
+      setAmountCounterpartyStr(formatCentsForInput(displayCounterpartyId != null ? amountForItem(displayCounterpartyId) : (tx.amount_counterparty ?? tx.amount)));
     } else {
       setAmountStr(formatCentsForInput(tx.amount));
       setAmountCounterpartyStr(
@@ -3203,6 +3226,7 @@ function TransactionsView({
     setIsBulkEditConfirmOpen(false);
     setDialogMode("create");
     setDate(getDateKey(tx.transaction_date));
+    setTime(formatTime(tx.transaction_date));
     setDirection(tx.direction);
     setFormTransactionType(tx.transaction_type);
     setPrimaryItemId(getDisplayPrimaryItemId(tx));
@@ -3255,6 +3279,7 @@ function TransactionsView({
     setIsBulkEditConfirmOpen(false);
     setDialogMode("create");
     setDate(getDateKey(tx.transaction_date));
+    setTime(formatTime(tx.transaction_date));
     setDirection(tx.direction);
     setFormTransactionType(tx.transaction_type);
     setPrimaryItemId(getDisplayPrimaryItemId(tx));
@@ -3307,6 +3332,7 @@ function TransactionsView({
     setIsBulkEditConfirmOpen(false);
     setDialogMode("create");
     setDate(getDateKey(tx.transaction_date));
+    setTime(formatTime(tx.transaction_date));
     setDirection(tx.direction);
     setFormTransactionType("ACTUAL");
     setPrimaryItemId(getDisplayPrimaryItemId(tx));
@@ -3355,6 +3381,7 @@ function TransactionsView({
     );
     const baseline = {
       date: getDateKey(baselineTx.transaction_date),
+      time: formatTime(baselineTx.transaction_date),
       direction: baselineTx.direction,
       primaryItemId: getDisplayPrimaryItemId(baselineTx),
       counterpartyItemId: getDisplayCounterpartyItemId(baselineTx),
@@ -3391,6 +3418,7 @@ function TransactionsView({
     setBulkEditBaseline(baseline);
     setIsBulkEditConfirmOpen(false);
     setDate(baseline.date);
+    setTime(baseline.time);
     setDirection(baseline.direction);
     setPrimaryItemId(baseline.primaryItemId);
     setCounterpartyItemId(baseline.counterpartyItemId);
@@ -3438,7 +3466,7 @@ function TransactionsView({
   const getBulkEditChanges = () => {
     if (!bulkEditBaseline) return null;
     return {
-      hasDateChanged: date !== bulkEditBaseline.date,
+      hasDateChanged: date !== bulkEditBaseline.date || time !== bulkEditBaseline.time,
       hasDirectionChanged: direction !== bulkEditBaseline.direction,
       hasPrimaryItemChanged: primaryItemId !== bulkEditBaseline.primaryItemId,
       hasCounterpartyItemChanged:
@@ -3632,7 +3660,7 @@ function TransactionsView({
         targets.map((tx) => {
           const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
           const baseDate = changes.hasDateChanged ? date : getDateKey(tx.transaction_date);
-          const nextDate = mergeDateWithTime(baseDate, tx.transaction_date);
+          const nextDate = buildTransactionDate(baseDate, changes.hasDateChanged ? time : formatTime(tx.transaction_date));
           const basePrimaryItemId = getDisplayPrimaryItemId(tx);
           const baseCounterpartyItemId = getDisplayCounterpartyItemId(tx);
           const nextPrimaryItemId = changes.hasPrimaryItemChanged
@@ -4068,6 +4096,22 @@ function TransactionsView({
   }, [session, loadTransactions, txQuery]);
 
   useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    const ids = itemFilterIds.length > 0 ? itemFilterIds : undefined;
+    fetchBalanceCheckpointsForItems(ids)
+      .then((list) => {
+        if (!cancelled) setCheckpoints(list);
+      })
+      .catch(() => {
+        if (!cancelled) setCheckpoints([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, itemFilterIds]);
+
+  useEffect(() => {
     const dates = new Set<string>();
     txs.forEach((tx) => {
       const dateKey = getDateKey(tx.transaction_date);
@@ -4151,22 +4195,34 @@ function TransactionsView({
 
   const sortedTxs = useMemo(() => {
     const list = [...filteredTxs];
+    const familyDateByParentId = new Map<number, string>();
+    for (const t of list) {
+      if (t.is_split_parent) {
+        familyDateByParentId.set(t.id, t.transaction_date ?? "");
+      }
+    }
+    const getFamilyDate = (tx: TransactionCard) => {
+      if (tx.parent_transaction_id != null) {
+        return familyDateByParentId.get(tx.parent_transaction_id) ?? tx.transaction_date ?? "";
+      }
+      return tx.transaction_date ?? "";
+    };
     list.sort((a, b) => {
       const dateA = getDateKey(a.transaction_date);
       const dateB = getDateKey(b.transaction_date);
       if (dateB !== dateA) return dateB.localeCompare(dateA);
-      const txDateA = a.transaction_date ?? "";
-      const txDateB = b.transaction_date ?? "";
-      if (txDateB !== txDateA) return txDateB.localeCompare(txDateA);
-      const createdA = a.created_at ?? "";
-      const createdB = b.created_at ?? "";
-      if (createdA !== createdB) return createdB.localeCompare(createdA);
+      const familyDateA = getFamilyDate(a);
+      const familyDateB = getFamilyDate(b);
+      if (familyDateB !== familyDateA) return familyDateB.localeCompare(familyDateA);
       const groupA = a.parent_transaction_id ?? a.id;
       const groupB = b.parent_transaction_id ?? b.id;
       if (groupA !== groupB) return groupA - groupB;
       const parentFirstA = a.is_split_parent ? 0 : 1;
       const parentFirstB = b.is_split_parent ? 0 : 1;
       if (parentFirstA !== parentFirstB) return parentFirstA - parentFirstB;
+      const createdA = a.created_at ?? "";
+      const createdB = b.created_at ?? "";
+      if (createdA !== createdB) return createdB.localeCompare(createdA);
       return a.id - b.id;
     });
     return list;
@@ -4190,6 +4246,43 @@ function TransactionsView({
       )
       .sort((a, b) => a.id - b.id);
   }, [sortedTxs, editingTx?.id, editingTx?.is_split_parent]);
+  type MergedRow =
+    | { type: "date_header"; dateKey: string }
+    | { type: "checkpoint_line"; dateKey: string; timeKey: string; checkpoints: BalanceCheckpointWithItemOut[] }
+    | { type: "transaction"; tx: TransactionCard };
+
+  const mergedRows = useMemo((): MergedRow[] => {
+    const dateKeys = new Set<string>();
+    sortedTxs.forEach((tx) => {
+      const d = getDateKey(tx.transaction_date);
+      if (d) dateKeys.add(d);
+    });
+    checkpoints.forEach((cp) => {
+      dateKeys.add(cp.checkpoint_at.slice(0, 10));
+    });
+    const sortedDates = Array.from(dateKeys).sort((a, b) => b.localeCompare(a));
+    const rows: MergedRow[] = [];
+    for (const dateKey of sortedDates) {
+      rows.push({ type: "date_header", dateKey });
+      const cpsOnDate = checkpoints.filter((c) => c.checkpoint_at.slice(0, 10) === dateKey);
+      const byTime = new Map<string, BalanceCheckpointWithItemOut[]>();
+      for (const cp of cpsOnDate) {
+        const timeKey = cp.checkpoint_at.slice(11, 16) || "00:00";
+        if (!byTime.has(timeKey)) byTime.set(timeKey, []);
+        byTime.get(timeKey)!.push(cp);
+      }
+      const timeKeys = Array.from(byTime.keys()).sort();
+      for (const timeKey of timeKeys) {
+        rows.push({ type: "checkpoint_line", dateKey, timeKey, checkpoints: byTime.get(timeKey)! });
+      }
+      const txsOnDate = sortedTxs.filter((tx) => getDateKey(tx.transaction_date) === dateKey);
+      for (const tx of txsOnDate) {
+        rows.push({ type: "transaction", tx });
+      }
+    }
+    return rows;
+  }, [sortedTxs, checkpoints]);
+
   const selectableIds = useMemo(
     () => sortedTxs.filter((tx) => !tx.isDeleted).map((tx) => tx.id),
     [sortedTxs]
@@ -4240,7 +4333,8 @@ function TransactionsView({
   }, [sortedTxs.map((t) => t.id).join(",")]);
 
   const contentVisible =
-    sortedTxs.length > 0 && readyRowCount >= sortedTxs.length;
+    mergedRows.length > 0 &&
+    (sortedTxs.length === 0 || readyRowCount >= sortedTxs.length);
 
   const handleLoadMore = useCallback(() => {
     if (!hasMoreTxs || isLoadingMore || loading) return;
@@ -4967,7 +5061,7 @@ function TransactionsView({
                       }
                       try {
                         await deleteTransaction(editingTx.id);
-                        const transactionDate = mergeDateWithTime(date, editingTx.transaction_date);
+                        const transactionDate = buildTransactionDate(date, time);
                         const basePayload = {
                           transaction_date: transactionDate,
                           primary_item_id: primaryItemId,
@@ -5038,7 +5132,7 @@ function TransactionsView({
                       }
                       const transactionDate =
                         isEditMode && editingTx
-                          ? mergeDateWithTime(date, editingTx.transaction_date)
+                          ? buildTransactionDate(date, time)
                           : date;
                       try {
                         if (isEditMode && editingTx) {
@@ -5120,7 +5214,7 @@ function TransactionsView({
                       }
                       const transactionDate =
                         isEditMode && editingTx
-                          ? mergeDateWithTime(date, editingTx.transaction_date)
+                          ? buildTransactionDate(date, time)
                           : date;
                       try {
                         if (isEditMode && editingTx) {
@@ -5222,7 +5316,7 @@ function TransactionsView({
                       try {
                         const transactionDate =
                           isEditMode && editingTx
-                            ? mergeDateWithTime(date, editingTx.transaction_date)
+                            ? buildTransactionDate(date, time)
                             : date;
                         if (isEditMode && editingTx) {
                           await deleteTransaction(editingTx.id);
@@ -5367,7 +5461,7 @@ function TransactionsView({
                           : formTransactionType;
                         const transactionDate =
                           isEditMode && editingTx
-                            ? mergeDateWithTime(date, editingTx.transaction_date)
+                            ? buildTransactionDate(date, time)
                             : date;
                         const resolvedCategoryId = isTransfer
                           ? null
@@ -5655,11 +5749,30 @@ function TransactionsView({
                     </FormField>
                     )}
 
-                    <DateField
-                      label={direction === "INCOME" || direction === "EXPENSE" || direction === "TRANSFER" || (isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID" || debtDirection === "I_PAID_FOR_SOMEONE" || debtDirection === "THEY_PAID_FOR_ME" || debtDirection === "DEBT_OFFSET")) ? "Дата" : "Дата транзакции"}
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                    />
+                    <FormField label="Дата и время" required>
+                      <div className="relative flex items-center gap-2 flex-wrap [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px]">
+                        <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
+                          <AuthInput
+                            type="date"
+                            value={date}
+                            onChange={(e) => setDate(e.target.value)}
+                            className="w-full"
+                          />
+                        </div>
+                        <div className="relative flex items-center min-h-[40px] shrink-0 min-w-[5.5rem] w-[6rem]">
+                          <AuthInput
+                            type="text"
+                            inputMode="numeric"
+                            value={time}
+                            onChange={(e) => setTime(e.target.value)}
+                            placeholder="00:00"
+                            maxLength={5}
+                            autoComplete="off"
+                            className="w-full"
+                          />
+                        </div>
+                      </div>
+                    </FormField>
 
                     {(direction === "TRANSFER" || (isDebts && debtDirection === "DEBT_OFFSET")) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -6427,7 +6540,6 @@ function TransactionsView({
                                             setSplitParts(next);
                                           }}
                                           placeholder="Категория"
-                                          buildPaths={buildCategoryPaths}
                                         />
                                       </div>
                                     </div>
@@ -6488,11 +6600,30 @@ function TransactionsView({
                     onChange={(v) => setFormTransactionType(v as TransactionOut["transaction_type"])}
                   />
                 </FormField>
-                <DateField
-                  label="Дата транзакции"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                />
+                <FormField label="Дата и время" required>
+                  <div className="relative flex items-center gap-2 flex-wrap [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px]">
+                    <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
+                      <AuthInput
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="relative flex items-center min-h-[40px] shrink-0 min-w-[5.5rem] w-[6rem]">
+                      <AuthInput
+                        type="text"
+                        inputMode="numeric"
+                        value={time}
+                        onChange={(e) => setTime(e.target.value)}
+                        placeholder="00:00"
+                        maxLength={5}
+                        autoComplete="off"
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                </FormField>
                 <FormField label="Актив, с которого производится погашение">
                   <ItemSelector
                     items={assetItems}
@@ -6716,7 +6847,7 @@ function TransactionsView({
                   </div>
                 )}
               </div>
-            {sortedTxs.length === 0 ? (
+            {mergedRows.length === 0 ? (
               <EmptyState />
             ) : (
               <div
@@ -6726,65 +6857,116 @@ function TransactionsView({
                   transition: "opacity 0.3s ease-in-out",
                 }}
               >
-                {(() => {
-                  let lastDateKey = "";
-                  return sortedTxs.map((tx) => {
-                    const dateKey = getDateKey(tx.transaction_date);
-                    const showDate = Boolean(dateKey && dateKey !== lastDateKey);
-                    if (showDate) lastDateKey = dateKey;
+                {mergedRows.map((row, idx) => {
+                  if (row.type === "date_header") {
                     return (
-                      <Fragment
-                        key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
+                      <div
+                        key={`date-${row.dateKey}`}
+                        className="text-2xl font-medium pt-1 pb-0.5 first:pt-0"
+                        style={{ color: ACTIVE_TEXT_DARK }}
                       >
-                        {showDate && (
-                          <div
-                            className="text-2xl font-medium pt-1 pb-0.5 first:pt-0"
-                            style={{ color: ACTIVE_TEXT_DARK }}
-                          >
-                            {formatDateSectionHeader(dateKey)}
-                          </div>
-                        )}
-                        <TransactionCardRow
-                          tx={tx}
-                    counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
-                    itemName={itemName}
-                    itemCurrencyCode={itemCurrencyCode}
-                    getItemTypeCode={(id) => itemsById.get(id)?.type_code}
-                    primaryItemCounterparty={getItemCounterparty(tx.primary_card_item_id ?? tx.primary_item_id)}
-                    counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
-                    apiBase={API_BASE}
-                    itemBankName={itemBankName}
-                    categoryLookup={categoryLookup}
-                    categoryLinesForId={getCategoryLines}
-                    getRubEquivalentCents={getRubEquivalentCents}
-                    isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
-                    onToggleSelection={toggleTxSelection}
-                    onCreateFrom={openCreateFromDialog}
-                    onRealize={openRealizeDialog}
-                    onEdit={openEditDialog}
-                    onDelete={(id) => openDeleteDialog([id])}
-                    isDeleting={isDeleting}
-                    onConfirm={handleConfirmStatus}
-                    isConfirming={
-                      confirmingTxId === tx.id ||
-                      (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
-                    }
-                    onReady={() => {
-                      if (!readyRowSetRef.current.has(tx.id)) {
-                        readyRowSetRef.current.add(tx.id);
-                        setReadyRowCount((prev) => prev + 1);
-                      }
-                    }}
-                    relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
-                    relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
-                    onUnsplit={(t) => setUnsplitConfirmTxId(t.id)}
-                    onAddChild={openAddChildDialog}
-                    childrenSumCents={tx.is_split_parent ? (childrenSumByParentId.get(tx.id) ?? null) : undefined}
-                  />
-                      </Fragment>
+                        {formatDateSectionHeader(row.dateKey)}
+                      </div>
                     );
-                  });
-                })()}
+                  }
+                  if (row.type === "checkpoint_line") {
+                    const hasMismatch = row.checkpoints.some((c) => c.status === "MISMATCH");
+                    const lineColor = hasMismatch ? RED : GREEN;
+                    return (
+                      <div
+                        key={`cp-${row.dateKey}-${row.timeKey}-${idx}`}
+                        className="rounded-lg overflow-hidden"
+                      >
+                        <div className="px-3 py-2 space-y-1.5">
+                          {row.checkpoints.map((cp) => {
+                            const item = itemsById.get(cp.item_id);
+                            const currencyCode = item?.currency_code ?? "RUB";
+                            const d = new Date(cp.checkpoint_at);
+                            const dateTimeLabel = `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+                            return (
+                              <div key={cp.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                                <span className="tabular-nums shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>{dateTimeLabel}</span>
+                                {item ? (
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <div className="h-8 w-8 shrink-0 rounded overflow-hidden flex items-center justify-center">
+                                      <AssetItemIcon
+                                        item={item}
+                                        counterparty={getCounterpartyForItemId(cp.item_id)}
+                                        apiBase={API_BASE}
+                                        size={20}
+                                        className="h-5 w-5 rounded object-contain"
+                                        fallbackIconColor={ACTIVE_TEXT_DARK}
+                                        alt={cp.item_name}
+                                      />
+                                    </div>
+                                    <span className="font-medium" style={{ color: ACTIVE_TEXT_DARK }}>{cp.item_name}</span>
+                                  </div>
+                                ) : (
+                                  <span className="font-medium" style={{ color: ACTIVE_TEXT_DARK }}>{cp.item_name}</span>
+                                )}
+                                <span className="tabular-nums flex items-center gap-1.5">
+                                  <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Расчётное сальдо:</span> <CurrencyChip code={currencyCode} />
+                                  <span style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(cp.computed_balance_cents)}</span>
+                                </span>
+                                <span className="tabular-nums flex items-center gap-1.5">
+                                  <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Должно быть:</span> <CurrencyChip code={currencyCode} />
+                                  <span style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(cp.stated_balance_cents)}</span>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div
+                          className="h-1 w-full"
+                          style={{ backgroundColor: lineColor, opacity: 0.9 }}
+                          aria-hidden
+                        />
+                      </div>
+                    );
+                  }
+                  const tx = row.tx;
+                  return (
+                    <Fragment key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}>
+                      <TransactionCardRow
+                        tx={tx}
+                        counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
+                        itemName={itemName}
+                        itemCurrencyCode={itemCurrencyCode}
+                        getItemTypeCode={(id: number | null | undefined) => (id != null ? itemsById.get(id)?.type_code : undefined)}
+                        primaryItemCounterparty={getItemCounterparty(tx.primary_card_item_id ?? tx.primary_item_id)}
+                        counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
+                        apiBase={API_BASE}
+                        itemBankName={itemBankName}
+                        categoryLookup={categoryLookup}
+                        categoryLinesForId={getCategoryLines}
+                        getRubEquivalentCents={getRubEquivalentCents}
+                        isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
+                        onToggleSelection={toggleTxSelection}
+                        onCreateFrom={openCreateFromDialog}
+                        onRealize={openRealizeDialog}
+                        onEdit={openEditDialog}
+                        onDelete={(id) => openDeleteDialog([id])}
+                        isDeleting={isDeleting}
+                        onConfirm={handleConfirmStatus}
+                        isConfirming={
+                          confirmingTxId === tx.id ||
+                          (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
+                        }
+                        onReady={() => {
+                          if (!readyRowSetRef.current.has(tx.id)) {
+                            readyRowSetRef.current.add(tx.id);
+                            setReadyRowCount((prev) => prev + 1);
+                          }
+                        }}
+                        relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
+                        relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
+                        onUnsplit={(t) => setUnsplitConfirmTxId(t.id)}
+                        onAddChild={openAddChildDialog}
+                        childrenSumCents={tx.is_split_parent ? (childrenSumByParentId.get(tx.id) ?? null) : undefined}
+                      />
+                    </Fragment>
+                  );
+                })}
               </div>
             )}
             {hasMoreTxs && (

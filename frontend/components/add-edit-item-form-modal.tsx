@@ -2406,6 +2406,24 @@ export function AddEditItemFormModal({
                     )}
                   </div>
                 </div>
+
+                {/* Привязать к счету — только для дебетовых карт */}
+                {showBankCardFields && !isCreditCard && (
+                  <div className="grid gap-2">
+                    <Label style={{ color: ACTIVE_TEXT_DARK }}>Привязать к счету</Label>
+                    <ItemSelector
+                      items={items.filter((it) => it.type_code === "bank_account" || it.type_code === "savings_account")}
+                      selectedIds={cardAccountId ? [Number(cardAccountId)] : []}
+                      onChange={(ids) => setCardAccountId(ids[0] != null ? String(ids[0]) : "")}
+                      selectionMode="single"
+                      placeholder="Не привязывать"
+                      clearLabel="Не привязывать"
+                      getItemTypeLabel={(it) => (it.name || "") + (it.account_last7 ? ` ***${it.account_last7}` : "")}
+                      getCounterpartyForItemId={getCounterpartyForItemId}
+                      apiBase={API_BASE}
+                    />
+                  </div>
+                )}
               </div>
             </CollapsibleFormSection>
 
@@ -3200,15 +3218,7 @@ export function AddEditItemFormModal({
               {showContractNumberField && <TextField label="Номер договора" value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} placeholder="Необязательно" />}
 
               {showBankCardFields && (
-                <>
-                  <TextField label="Последние 4 цифры карты" value={cardLast4} onChange={(e) => setCardLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="Необязательно" />
-                  {!isCreditCard && (
-                    <div className="grid gap-2">
-                      <Label style={{ color: ACTIVE_TEXT_DARK }}>Привязать к счету</Label>
-                      <ItemSelector items={items.filter((it) => it.type_code === "bank_account" || it.type_code === "savings_account")} selectedIds={cardAccountId ? [Number(cardAccountId)] : []} onChange={(ids) => setCardAccountId(ids[0] != null ? String(ids[0]) : "")} selectionMode="single" placeholder="Не привязывать" getItemTypeLabel={(it) => (it.name || "") + (it.account_last7 ? ` ***${it.account_last7}` : "")} />
-                    </div>
-                  )}
-                </>
+                <TextField label="Последние 4 цифры карты" value={cardLast4} onChange={(e) => setCardLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="Необязательно" />
               )}
 
 

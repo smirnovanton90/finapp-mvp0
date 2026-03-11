@@ -438,6 +438,10 @@ class Item(Base):
         back_populates="item",
         cascade="all, delete-orphan",
     )
+    balance_checkpoints: Mapped[list["ItemBalanceCheckpoint"]] = relationship(
+        back_populates="item",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         CheckConstraint("kind in ('ASSET','LIABILITY')", name="ck_items_kind"),
@@ -494,6 +498,24 @@ class ItemMarketValue(Base):
     value_currency_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     """Value in asset currency (kopecks/cents). When set, value_rub is legacy or computed for API."""
     created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ItemBalanceCheckpoint(Base):
+    """Контрольная точка сверки сальдо по активу на момент времени."""
+
+    __tablename__ = "item_balance_checkpoints"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    user: Mapped["User"] = relationship()
+    item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    item: Mapped["Item"] = relationship(back_populates="balance_checkpoints")
+    checkpoint_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stated_balance_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    """Указанное пользователем сальдо в валюте актива (копейки/центы)."""
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
@@ -612,7 +634,9 @@ class Transaction(Base):
         foreign_keys=[counterparty_id]
     )
 
-    amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)  # в копейках
+    # Сумма в валюте счёта primary (минорные единицы: копейки, центы и т.д.). Может быть любая валюта, не только RUB.
+    # Историческое имя колонки в БД — amount_rub (без миграции переименования).
+    amount_primary_minor: Mapped[int] = mapped_column("amount_rub", BigInteger, nullable=False)
     amount_counterparty: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     primary_quantity_lots: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     counterparty_quantity_lots: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -657,6 +681,11 @@ class Transaction(Base):
     )
 
     is_split_parent: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+    @property
+    def amount_rub(self) -> int:
+        """Алиас для amount_primary_minor: API и Pydantic-схемы ожидают поле amount_rub при сериализации."""
+        return self.amount_primary_minor
 
     @property
     def chain_name(self) -> str | None:

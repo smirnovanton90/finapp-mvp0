@@ -331,7 +331,7 @@ def list_transactions_page(
     if related_item_ids:
         stmt = stmt.where(Transaction.related_item_id.in_(related_item_ids))
     if min_amount is not None or max_amount is not None:
-        abs_amount = func.abs(Transaction.amount_rub)
+        abs_amount = func.abs(Transaction.amount_primary_minor)
         if min_amount is not None:
             stmt = stmt.where(abs_amount >= min_amount)
         if max_amount is not None:
@@ -495,7 +495,7 @@ def create_debts_transaction(
         primary_item_id=primary_item_id,
         counterparty_item_id=counterparty_item_id,
         counterparty_id=tx_counterparty_id,
-        amount_rub=data.amount_rub,
+        amount_primary_minor=data.amount_primary_minor,
         amount_counterparty=data.amount_counterparty,
         primary_quantity_lots=None,
         counterparty_quantity_lots=None,
@@ -596,7 +596,7 @@ def create_they_paid_for_me_transaction(
         primary_item_id=settlements_item.id,
         counterparty_item_id=None,
         counterparty_id=data.where_paid_counterparty_id,
-        amount_rub=data.amount_rub,
+        amount_primary_minor=data.amount_primary_minor,
         amount_counterparty=None,
         primary_quantity_lots=None,
         counterparty_quantity_lots=None,
@@ -731,8 +731,8 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
                 amount_counterparty = data.amount_counterparty
             else:
                 if data.amount_counterparty is None:
-                    amount_counterparty = data.amount_rub
-                elif data.amount_counterparty != data.amount_rub:
+                    amount_counterparty = data.amount_primary_minor
+                elif data.amount_counterparty != data.amount_primary_minor:
                     raise HTTPException(
                         status_code=400,
                         detail="amount_counterparty must match amount_rub for same-currency transfer",
@@ -788,7 +788,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
             counter_side.card_item.id if counter_side and counter_side.card_item else None
         ),
         counterparty_id=data.counterparty_id,
-        amount_rub=data.amount_rub,
+        amount_primary_minor=data.amount_primary_minor,
         amount_counterparty=amount_counterparty,
         primary_quantity_lots=data.primary_quantity_lots,
         counterparty_quantity_lots=data.counterparty_quantity_lots,
@@ -804,10 +804,11 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         related_item_id=data.related_item_id,
         asset_link_type=data.asset_link_type,
         parent_transaction_id=data.parent_transaction_id,
+        is_split_parent=data.is_split_parent,
     )
 
-    if data.transaction_type == "ACTUAL":
-        amt = data.amount_rub
+    if data.transaction_type == "ACTUAL" and not data.is_split_parent:
+        amt = data.amount_primary_minor
 
         if data.direction == "INCOME":
             if primary_is_moex:
@@ -1034,8 +1035,8 @@ def update_transaction(
                 amount_counterparty = data.amount_counterparty
             else:
                 if data.amount_counterparty is None:
-                    amount_counterparty = data.amount_rub
-                elif data.amount_counterparty != data.amount_rub:
+                    amount_counterparty = data.amount_primary_minor
+                elif data.amount_counterparty != data.amount_primary_minor:
                     raise HTTPException(
                         status_code=400,
                         detail="amount_counterparty must match amount_rub for same-currency transfer",
@@ -1079,7 +1080,7 @@ def update_transaction(
         units_deltas[item_id] = units_deltas.get(item_id, 0.0) + delta
 
     if tx.transaction_type == "ACTUAL":
-        old_amt = tx.amount_rub
+        old_amt = tx.amount_primary_minor
         old_counter_amt = (
             tx.amount_counterparty if tx.amount_counterparty is not None else old_amt
         )
@@ -1125,7 +1126,7 @@ def update_transaction(
             add_delta(old_counter.id, -old_counter_delta)
 
     if data.transaction_type == "ACTUAL":
-        new_amt = data.amount_rub
+        new_amt = data.amount_primary_minor
         new_counter_amt = (
             amount_counterparty if amount_counterparty is not None else new_amt
         )
@@ -1242,7 +1243,7 @@ def update_transaction(
         else None
     )
     tx.counterparty_id = data.counterparty_id
-    tx.amount_rub = data.amount_rub
+    tx.amount_primary_minor = data.amount_primary_minor
     tx.amount_counterparty = amount_counterparty if data.direction == "TRANSFER" else None
     if data.primary_quantity_lots is not None or tx.asset_link_type not in ("ASSET_PURCHASE", "ASSET_SALE"):
         tx.primary_quantity_lots = data.primary_quantity_lots
@@ -1297,7 +1298,7 @@ def _rollback_transaction_balance(db: Session, user: User, tx: Transaction) -> N
     primary_is_crypto = is_crypto_item(primary)
     counter_is_crypto = is_crypto_item(counter) if counter else False
 
-    amt = tx.amount_rub
+    amt = tx.amount_primary_minor
     amt_counterparty = tx.amount_counterparty or amt
 
     if tx.direction == "INCOME":
@@ -1384,7 +1385,7 @@ def _apply_transaction_balance(db: Session, user: User, tx: Transaction) -> None
     primary_is_crypto = is_crypto_item(primary)
     counter_is_crypto = is_crypto_item(counter) if counter else False
 
-    amt = tx.amount_rub
+    amt = tx.amount_primary_minor
     amt_counterparty = tx.amount_counterparty or amt
 
     if tx.direction == "INCOME":
@@ -1530,7 +1531,7 @@ def split_transaction(
         raise HTTPException(status_code=400, detail="Cannot split a transaction that is already a part")
 
     parts_sum = sum(p.amount_rub for p in data.parts)
-    if parts_sum > tx.amount_rub:
+    if parts_sum > tx.amount_primary_minor:
         raise HTTPException(
             status_code=400,
             detail="Sum of parts must not exceed the transaction amount",
@@ -1561,22 +1562,22 @@ def split_transaction(
         cat_id = category.id if category else None
 
         amount_counterparty_part = None
-        if tx.direction == "TRANSFER" and tx.amount_counterparty is not None and tx.amount_rub:
-            amount_counterparty_part = int(round(tx.amount_counterparty * part_data.amount_rub / tx.amount_rub))
+        if tx.direction == "TRANSFER" and tx.amount_counterparty is not None and tx.amount_primary_minor:
+            amount_counterparty_part = int(round(tx.amount_counterparty * part_data.amount_rub / tx.amount_primary_minor))
 
         part_lots = None
         part_counterparty_lots = None
         part_units = None
         part_counterparty_units = None
-        if tx.amount_rub:
+        if tx.amount_primary_minor:
             if tx.primary_quantity_lots is not None:
-                part_lots = int(round(tx.primary_quantity_lots * part_data.amount_rub / tx.amount_rub))
+                part_lots = int(round(tx.primary_quantity_lots * part_data.amount_rub / tx.amount_primary_minor))
             if tx.counterparty_quantity_lots is not None:
-                part_counterparty_lots = int(round(tx.counterparty_quantity_lots * part_data.amount_rub / tx.amount_rub))
+                part_counterparty_lots = int(round(tx.counterparty_quantity_lots * part_data.amount_rub / tx.amount_primary_minor))
             if tx.primary_quantity_units is not None:
-                part_units = round(float(tx.primary_quantity_units) * part_data.amount_rub / tx.amount_rub, 10)
+                part_units = round(float(tx.primary_quantity_units) * part_data.amount_rub / tx.amount_primary_minor, 10)
             if tx.counterparty_quantity_units is not None:
-                part_counterparty_units = round(float(tx.counterparty_quantity_units) * part_data.amount_rub / tx.amount_rub, 10)
+                part_counterparty_units = round(float(tx.counterparty_quantity_units) * part_data.amount_rub / tx.amount_primary_minor, 10)
 
         part_tx = Transaction(
             user_id=user.id,
@@ -1586,7 +1587,7 @@ def split_transaction(
             counterparty_item_id=tx.counterparty_item_id,
             counterparty_card_item_id=tx.counterparty_card_item_id,
             counterparty_id=tx.counterparty_id,
-            amount_rub=part_data.amount_rub,
+            amount_primary_minor=part_data.amount_rub,
             amount_counterparty=amount_counterparty_part if tx.direction == "TRANSFER" else None,
             primary_quantity_lots=part_lots,
             counterparty_quantity_lots=part_counterparty_lots,

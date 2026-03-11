@@ -244,7 +244,7 @@ async def recognize_receipt(
     return ReceiptRecognizeOut(
         inn=inn,
         transaction_date=transaction_date,
-        amount_rub=amount_rub,
+        amount_primary_minor=amount_rub,
         raw_text=raw_text,
         counterparty=counterparty,
     )

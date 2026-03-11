@@ -231,8 +231,8 @@ def create_transaction_chain(
             amount_counterparty = data.amount_counterparty
         else:
             if data.amount_counterparty is None:
-                amount_counterparty = data.amount_rub
-            elif data.amount_counterparty != data.amount_rub:
+                amount_counterparty = data.amount_primary_minor
+            elif data.amount_counterparty != data.amount_primary_minor:
                 raise HTTPException(
                     status_code=400,
                     detail="amount_counterparty must match amount_rub for same-currency transfer",
@@ -283,7 +283,7 @@ def create_transaction_chain(
             counter_side.card_item.id if counter_side and counter_side.card_item else None
         ),
         counterparty_id=data.counterparty_id,
-        amount_rub=data.amount_rub,
+        amount_primary_minor=data.amount_primary_minor,
         amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
         amount_is_variable=False,
         amount_min_rub=None,
@@ -309,7 +309,7 @@ def create_transaction_chain(
                     counter_side.card_item.id if counter_side and counter_side.card_item else None
                 ),
                 counterparty_id=data.counterparty_id,
-                amount_rub=data.amount_rub,
+                amount_primary_minor=data.amount_primary_minor,
                 amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
                 direction=data.direction,
                 transaction_type="PLANNED",

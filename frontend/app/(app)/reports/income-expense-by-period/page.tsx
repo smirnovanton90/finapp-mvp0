@@ -963,6 +963,7 @@ function CategoryBreakdownSection({
       const periodSet = new Set(clickedPeriodKeys);
       return chartTxList
         .filter((tx) => {
+          if (tx.is_split_parent === true) return false;
           if (tx.direction !== direction) return false;
           const catId = tx.category_id;
           if (!catId || !ids.has(catId)) return false;

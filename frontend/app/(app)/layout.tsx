@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
+import { MobileFloatingBar } from "@/components/mobile-floating-bar";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -132,6 +133,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <AppHeader />
         <MobileFiltersDrawer />
+        <MobileFloatingBar />
         <PwaInstallPrompt />
         <div className="relative z-10 flex">
           <Sidebar />
@@ -139,7 +141,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             className={cn(
               "flex-1 transition-all duration-300 @container",
               !isSpecialPage && "min-h-screen flex items-center",
-              !isDesktop && "pt-14 px-4"
+              !isDesktop && "px-4 pb-24"
             )}
             style={{ marginLeft: contentMarginLeft }}
           >

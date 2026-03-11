@@ -135,6 +135,7 @@ import {
 } from "@/components/ui/select";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { EmptyState } from "@/components/empty-state";
+import { MobileAddTransactionSheet } from "@/components/mobile-add-transaction-sheet";
 import { CreateCategoryModal } from "@/components/create-category-modal";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import {
@@ -2031,7 +2032,7 @@ function TransactionsView({
   const searchParams = useSearchParams();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
-  const { isCollapsed, filtersSlotId } = useSidebar();
+  const { isCollapsed, filtersSlotId, isDesktop } = useSidebar();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
   const defaultShowPlannedRealized = isPlanningView;
@@ -2235,6 +2236,8 @@ function TransactionsView({
     inn?: string;
   } | null>(null);
   const receiptToolbarInputRef = useRef<HTMLInputElement>(null);
+  /** На мобильной: меню выбора типа добавления (Простая транзакция / Погашение кредита / Долг / Чек) по нажатию "+". */
+  const [mobileAddMenuOpen, setMobileAddMenuOpen] = useState(false);
 
   const [selectedTxIds, setSelectedTxIds] = useState<Set<number>>(() => new Set());
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
@@ -3171,6 +3174,21 @@ function TransactionsView({
     openCreateDialog,
     scopedCategoryMaps,
   ]);
+
+  // Открытие по ссылке с мобильной плавающей панели (?openCreate=1): на десктопе — форма, на мобильной — меню выбора типа
+  useEffect(() => {
+    if (pathname !== "/transactions") return;
+    if (searchParams.get("openCreate") !== "1") return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("openCreate");
+    const next = params.toString() ? `/transactions?${params}` : "/transactions";
+    router.replace(next);
+    if (isDesktop) {
+      openCreateDialog();
+    } else {
+      setMobileAddMenuOpen(true);
+    }
+  }, [pathname, searchParams, router, isDesktop, openCreateDialog]);
 
   const openEditDialog = (tx: TransactionCard, trigger?: HTMLElement | null) => {
     lastActiveElementRef.current =
@@ -4991,6 +5009,29 @@ function TransactionsView({
                 if (file) handleQrCodeUpload(file);
               }}
             />
+
+            {/* Мобильная нижняя панель выбора типа добавления: раздвигается вверх от бара, свайп вниз закрывает */}
+            <MobileAddTransactionSheet
+              open={mobileAddMenuOpen}
+              onOpenChange={setMobileAddMenuOpen}
+              onSimpleTransaction={() => {
+                setMobileAddMenuOpen(false);
+                openCreateDialog();
+              }}
+              onLoanRepayment={() => {
+                setMobileAddMenuOpen(false);
+                openLoanRepaymentModal();
+              }}
+              onDebt={() => {
+                setMobileAddMenuOpen(false);
+                openCreateDialog("DEBTS");
+              }}
+              onReceipt={() => {
+                setMobileAddMenuOpen(false);
+                setTimeout(() => receiptToolbarInputRef.current?.click(), 0);
+              }}
+              receiptRecognizing={receiptRecognizing}
+            />
             
             {/* Unified Import: source selection then step-by-step modal */}
             <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
@@ -6783,93 +6824,97 @@ function TransactionsView({
         <div className="flex-1 min-w-0 pt-[30px]">
           <div className={CONTENT_WIDTH_CLASS}>
             <div className="flex flex-wrap items-center gap-2 mb-4">
-              <Dialog
-                open={isDialogOpen}
-                modal
-                onOpenChange={(open) => {
-                  if (open) {
-                    if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
-                    openCreateDialog();
-                  } else {
-                    closeDialog();
-                  }
-                }}
-              >
-                <div className="flex rounded-[9px] overflow-hidden border-0">
-                  <DialogTrigger asChild>
-                    <Button
-                      className="rounded-r-none rounded-l-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-                      style={{ backgroundColor: ACCENT }}
-                    >
-                      <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                      <span style={{ color: "white", opacity: 0.85 }}>Простая транзакция</span>
-                    </Button>
-                  </DialogTrigger>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        className="rounded-l-none rounded-r-[9px] border-0 border-l border-white/30 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal min-w-[44px] px-2"
-                        style={{ backgroundColor: ACCENT }}
-                        aria-label="Специальная транзакция"
-                      >
-                        <SlidersHorizontal className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuItem
-                        onSelect={openLoanRepaymentModal}
-                      >
-                        <GraduationCap className="mr-2 h-4 w-4" />
-                        Погашение кредитов
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => openCreateDialog("DEBTS")}
-                      >
-                        <Coins className="mr-2 h-4 w-4" />
-                        Долги
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </Dialog>
-              <Button
-                type="button"
-                variant="glass"
-                className="rounded-[9px] border-0 flex items-center justify-center text-sm font-normal"
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as CSSProperties
-                }
-                onClick={() => receiptToolbarInputRef.current?.click()}
-                disabled={receiptRecognizing}
-              >
-                {receiptRecognizing ? (
-                  <span style={{ color: "white", opacity: 0.85 }}>Распознавание…</span>
-                ) : (
-                  <>
-                    <Receipt className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                    <span style={{ color: "white", opacity: 0.85 }}>Загрузить чек</span>
-                  </>
-                )}
-              </Button>
-              <Button
-                type="button"
-                variant="glass"
-                className="rounded-[9px] border-0 flex items-center justify-center text-sm font-normal"
-                style={
-                  {
-                    "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                  } as CSSProperties
-                }
-                onClick={() => handleImportOpenChange(true)}
-              >
-                <FileDown className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                <span style={{ color: "white", opacity: 0.85 }}>Импорт</span>
-              </Button>
+              {isDesktop && (
+                <>
+                  <Dialog
+                    open={isDialogOpen}
+                    modal
+                    onOpenChange={(open) => {
+                      if (open) {
+                        if (dialogMode === "edit" || dialogMode === "bulk-edit") return;
+                        openCreateDialog();
+                      } else {
+                        closeDialog();
+                      }
+                    }}
+                  >
+                    <div className="flex rounded-[9px] overflow-hidden border-0">
+                      <DialogTrigger asChild>
+                        <Button
+                          className="rounded-r-none rounded-l-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                          style={{ backgroundColor: ACCENT }}
+                        >
+                          <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                          <span style={{ color: "white", opacity: 0.85 }}>Простая транзакция</span>
+                        </Button>
+                      </DialogTrigger>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            className="rounded-l-none rounded-r-[9px] border-0 border-l border-white/30 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal min-w-[44px] px-2"
+                            style={{ backgroundColor: ACCENT }}
+                            aria-label="Специальная транзакция"
+                          >
+                            <SlidersHorizontal className="h-5 w-5" style={{ color: "white", opacity: 0.85 }} />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem
+                            onSelect={openLoanRepaymentModal}
+                          >
+                            <GraduationCap className="mr-2 h-4 w-4" />
+                            Погашение кредитов
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => openCreateDialog("DEBTS")}
+                          >
+                            <Coins className="mr-2 h-4 w-4" />
+                            Долги
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </Dialog>
+                  <Button
+                    type="button"
+                    variant="glass"
+                    className="rounded-[9px] border-0 flex items-center justify-center text-sm font-normal"
+                    style={
+                      {
+                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                      } as CSSProperties
+                    }
+                    onClick={() => receiptToolbarInputRef.current?.click()}
+                    disabled={receiptRecognizing}
+                  >
+                    {receiptRecognizing ? (
+                      <span style={{ color: "white", opacity: 0.85 }}>Распознавание…</span>
+                    ) : (
+                      <>
+                        <Receipt className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                        <span style={{ color: "white", opacity: 0.85 }}>Загрузить чек</span>
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="glass"
+                    className="rounded-[9px] border-0 flex items-center justify-center text-sm font-normal"
+                    style={
+                      {
+                        "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                        "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                      } as CSSProperties
+                    }
+                    onClick={() => handleImportOpenChange(true)}
+                  >
+                    <FileDown className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                    <span style={{ color: "white", opacity: 0.85 }}>Импорт</span>
+                  </Button>
+                </>
+              )}
             </div>
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">

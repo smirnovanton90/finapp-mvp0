@@ -34,6 +34,8 @@ import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { CardIcon } from "@/components/card-icon";
 import { CurrencyChip } from "@/components/currency-chip";
+import { TableRow, TableCell } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 const MOEX_TYPE_CODES = ["securities", "bonds", "etf", "bpif", "pif"];
 const isCryptoItem = (item: ItemOut) => item.type_code === "crypto";
@@ -89,8 +91,8 @@ function getMoexUnitPriceCents(
 
 interface AssetCardProps {
   item: ItemOut;
-  /** card — компактная карточка в сетке; row — на всю ширину, блоки по горизонтали */
-  layout?: "card" | "row";
+  /** card — компактная карточка в сетке; row — на всю ширину, блоки по горизонтали; tableRow — одна строка таблицы (иконка, название, сумма) */
+  layout?: "card" | "row" | "tableRow";
   accountingStartDate: string | null;
   rate?: number | null;
   rubEquivalent?: number | null;
@@ -249,7 +251,9 @@ export function AssetCard({
   const textColor = isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
   const badgeColor = isDeleted ? PLACEHOLDER_COLOR_DARK : undefined;
 
-  const menuDropdown = item.type_code !== "counterparty_settlements" && (
+  const tableRowFallbackIcon = (counterparty && CounterpartyFallbackIcon) || TypeIcon || null;
+
+  const menuDropdown = item.type_code !== "counterparty_settlements" && layout !== "tableRow" && (
     <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
       <DropdownMenu
         onOpenChange={(open) => {
@@ -317,6 +321,113 @@ export function AssetCard({
       </DropdownMenu>
     </div>
   );
+
+  if (layout === "tableRow") {
+    return (
+      <TableRow
+        className={cn(
+          "border-b border-border bg-transparent hover:bg-transparent [&:last-child]:border-b",
+          onNavigate && "cursor-pointer"
+        )}
+        onClick={() => onNavigate?.(item)}
+        role={onNavigate ? "button" : undefined}
+      >
+        <TableCell className="w-10 py-2 pl-2 pr-2 align-middle">
+          <div className="flex h-8 w-8 items-center justify-center shrink-0">
+            {hasPhoto ? (
+              <CardIcon
+                src={hasPhoto}
+                alt={item.name}
+                size={32}
+                shadow={false}
+                objectFit="cover"
+                imgRef={(el) => setImageRef(0, el)}
+                onLoad={() => handleImageLoad(0)}
+                onError={() => handleImageError(0)}
+              />
+            ) : counterparty && counterpartyCurrentSrc && !showCounterpartyIcon ? (
+              <CardIcon
+                src={counterpartyCurrentSrc}
+                alt=""
+                fallbackIcon={CounterpartyFallbackIcon ?? undefined}
+                size={32}
+                shadow={false}
+                objectFit="contain"
+                fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                imgRef={(el) => setImageRef(1, el)}
+                onLoad={() => handleImageLoad(1)}
+                onError={() => {
+                  counterpartyOnError();
+                  handleImageError(1);
+                }}
+              />
+            ) : icon3dPath ? (
+              <CardIcon
+                src={icon3dPath}
+                alt=""
+                fallbackIcon={TypeIcon ?? undefined}
+                size={32}
+                shadow={false}
+                objectFit="contain"
+                fallbackIconColor={ACCENT}
+                imgRef={(el) => setImageRef(0, el)}
+                onLoad={() => handleImageLoad(0)}
+                onError={() => {
+                  setIconFormat(null);
+                  handleImageError(0);
+                }}
+              />
+            ) : tableRowFallbackIcon ? (
+              <CardIcon
+                src={null}
+                alt=""
+                fallbackIcon={tableRowFallbackIcon}
+                size={32}
+                shadow={false}
+                fallbackIconColor={ACCENT}
+              />
+            ) : null}
+          </div>
+        </TableCell>
+        <TableCell className="w-[55%] py-2 px-2 align-middle">
+          <span
+            className="text-sm font-normal block break-words whitespace-normal line-clamp-2"
+            style={{ color: textColor }}
+          >
+            {item.name}
+          </span>
+        </TableCell>
+        <TableCell className="min-w-[90px] py-2 pr-2 pl-2 align-middle text-right">
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="inline-flex items-center gap-1">
+              <CurrencyChip code="RUB" className="text-xs" />
+              <span className="text-sm font-medium tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
+                {rubEquivalent != null
+                  ? isAsset
+                    ? hasNegativeBalance
+                      ? `-${formatAmount(Math.abs(rubEquivalent))}`
+                      : formatAmount(rubEquivalent)
+                    : `-${formatAmount(Math.abs(rubEquivalent))}`
+                  : "-"}
+              </span>
+            </span>
+            {currencyCode && currencyCode !== "RUB" && (
+              <span className="inline-flex items-center gap-1 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                <CurrencyChip code={currencyCode} className="text-[10px]" />
+                <span className="tabular-nums">
+                  {isAsset
+                    ? hasNegativeBalance
+                      ? `-${formatAmount(Math.abs(displayBalanceCents))}`
+                      : formatAmount(displayBalanceCents)
+                    : `-${formatAmount(Math.abs(displayBalanceCents))}`}
+                </span>
+              </span>
+            )}
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  }
 
   if (layout === "row") {
     return (

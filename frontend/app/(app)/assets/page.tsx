@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Archive,
@@ -625,6 +625,8 @@ export default function Page() {
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
@@ -649,7 +651,7 @@ export default function Page() {
   const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
   const [isTypeCodeFilterOpen, setIsTypeCodeFilterOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  /** Вид карточек: grid — колонки карточек, list — полная ширина, блоки по горизонтали. Восстанавливается из localStorage. */
+  /** Вид карточек на десктопе: grid — колонки карточек, list — полная ширина, блоки по горизонтали. Восстанавливается из localStorage. */
   const [cardsViewMode, setCardsViewMode] = useState<"grid" | "list">("grid");
 
   useEffect(() => {
@@ -2539,6 +2541,17 @@ export default function Page() {
     setIsCreateOpen(true);
   };
 
+  // Открытие формы добавления по ссылке с мобильной плавающей панели (?openCreate=1)
+  useEffect(() => {
+    if (pathname !== "/assets") return;
+    if (searchParams.get("openCreate") !== "1") return;
+    openCreateModal("ASSET", ALL_TYPE_CODES, { general: true });
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("openCreate");
+    const next = params.toString() ? `/assets?${params}` : "/assets";
+    router.replace(next);
+  }, [pathname, searchParams, router]);
+
   useEffect(() => {
     if (!isWizardOpen || activeStep?.key !== "assets") return;
     if (!accountingStartDate) return;
@@ -3071,7 +3084,7 @@ export default function Page() {
 
   /* ------------------ основной UI ------------------ */
 
-  const { isCollapsed, filtersSlotId } = useSidebar();
+  const { isCollapsed, filtersSlotId, isDesktop } = useSidebar();
 
   return (
     <main
@@ -3489,55 +3502,55 @@ export default function Page() {
 
       <div className="flex-1 min-w-0">
         <div className={CONTENT_WIDTH_CLASS} style={{ paddingTop: "30px" }}>
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-            <Button
-              className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-              style={{ backgroundColor: ACCENT }}
-              onClick={() => openCreateModal("ASSET", ALL_TYPE_CODES, { general: true })}
-            >
-              <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-              <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
-            </Button>
-            <div className="flex items-center rounded-[9px] border border-border overflow-hidden">
-              <Tooltip content="Карточки">
-                <button
-                  type="button"
-                  aria-label="Вид карточками"
-                  className={cn(
-                    "p-2 transition-colors",
-                    cardsViewMode !== "grid" && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
-                  )}
-                  style={cardsViewMode === "grid" ? { backgroundColor: ACCENT, color: "white" } : undefined}
-                  onClick={() => setCardsViewMode("grid")}
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                </button>
-              </Tooltip>
-              <Tooltip content="Список">
-                <button
-                  type="button"
-                  aria-label="Вид списком"
-                  className={cn(
-                    "p-2 transition-colors",
-                    cardsViewMode !== "list" && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
-                  )}
-                  style={cardsViewMode === "list" ? { backgroundColor: ACCENT, color: "white" } : undefined}
-                  onClick={() => setCardsViewMode("list")}
-                >
-                  <List className="h-4 w-4" />
-                </button>
-              </Tooltip>
-            </div>
-          </div>
             {loading ? (
               <div className="flex items-center justify-center py-16" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                 Загрузка…
               </div>
             ) : visibleItems.length === 0 ? (
               <EmptyState />
-            ) : (
+            ) : isDesktop ? (
+              /* Десктоп: кнопка «Добавить», переключатель вида, карточки/список с градиентом сумм */
               <div className="relative">
-                {/* Разделы с карточками: каждая карточка сама управляет своей opacity при загрузке изображений */}
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                  <Button
+                    className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                    style={{ backgroundColor: ACCENT }}
+                    onClick={() => openCreateModal("ASSET", ALL_TYPE_CODES, { general: true })}
+                  >
+                    <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                    <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+                  </Button>
+                  <div className="flex items-center rounded-[9px] border border-border overflow-hidden">
+                    <Tooltip content="Карточки">
+                      <button
+                        type="button"
+                        aria-label="Вид карточками"
+                        className={cn(
+                          "p-2 transition-colors",
+                          cardsViewMode !== "grid" && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
+                        )}
+                        style={cardsViewMode === "grid" ? { backgroundColor: ACCENT, color: "white" } : undefined}
+                        onClick={() => setCardsViewMode("grid")}
+                      >
+                        <LayoutGrid className="h-4 w-4" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Список">
+                      <button
+                        type="button"
+                        aria-label="Вид списком"
+                        className={cn(
+                          "p-2 transition-colors",
+                          cardsViewMode !== "list" && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
+                        )}
+                        style={cardsViewMode === "list" ? { backgroundColor: ACCENT, color: "white" } : undefined}
+                        onClick={() => setCardsViewMode("list")}
+                      >
+                        <List className="h-4 w-4" />
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
                 <div className="space-y-8">
                   {orderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
                     <div key={section.id}>
@@ -3632,6 +3645,69 @@ export default function Page() {
                           );
                         })}
                       </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              /* Мобильная: таблица без кнопки и переключателя, один режим — таблица */
+              <div className="relative">
+                <div className="space-y-8">
+                  {orderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
+                    <div key={section.id}>
+                      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                        <h2
+                          className="text-sm font-medium"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          {section.label}
+                        </h2>
+                        <span
+                          className="text-sm font-medium"
+                          style={{ color: ACTIVE_TEXT_DARK }}
+                        >
+                          {section.kind === "LIABILITY"
+                            ? totalRubCents < 0
+                              ? formatRub(totalRubCents)
+                              : `-${formatRub(totalRubCents)}`
+                            : formatRub(totalRubCents)}
+                        </span>
+                      </div>
+                      <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b [&_tr]:border-border">
+                        <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
+                          {items.map((item) => {
+                            const rate = rateByCode[item.currency_code];
+                            const rubEquivalent = getPrimaryValueRubCents(item);
+                            const counterparty = item.counterparty_id
+                              ? counterpartiesById.get(item.counterparty_id) ?? null
+                              : null;
+                            return (
+                              <AssetCard
+                                key={item.id}
+                                item={item}
+                                layout="tableRow"
+                                accountingStartDate={accountingStartDate}
+                                rate={rate}
+                                rubEquivalent={rubEquivalent}
+                                primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
+                                counterparty={counterparty}
+                                moexMarketPrice={
+                                  MOEX_TYPE_CODES.includes(item.type_code)
+                                    ? moexMarketPrices.get(item.id) ?? null
+                                    : null
+                                }
+                                onEdit={(item) => openEditModal(item)}
+                                onDelete={(item) => onArchive(item)}
+                                onArchive={(item) => onArchive(item)}
+                                onClose={(item) => onClose(item)}
+                                onBuySell={(item) => setBuySellAsset(item)}
+                                getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                                onNavigate={(it) => router.push(`/assets/${it.id}`)}
+                              />
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
                     </div>
                   ))}
                 </div>

@@ -2500,7 +2500,7 @@ function TransactionsView({
       }
     }
     const currencyCode = effective.currency_code || selected.currency_code || "";
-    return { selected, effective, minDate, currencyCode };
+    return { selected, effective, minDate, currencyCode, typeCode: selected.type_code };
   };
   const counterpartyLabel = (id: number | null | undefined) => {
     if (!id) return "";
@@ -2846,13 +2846,13 @@ function TransactionsView({
     }
     const primaryMeta = getEffectiveItemMeta(primaryItemId);
     const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
-    if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+    if (primaryMeta?.minDate && date < primaryMeta.minDate && primaryMeta.typeCode !== "counterparty_settlements") {
       setFormError(
         "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
       );
       return;
     }
-    if (counterpartyMeta?.minDate && date < counterpartyMeta.minDate) {
+    if (counterpartyMeta?.minDate && date < counterpartyMeta.minDate && counterpartyMeta.typeCode !== "counterparty_settlements") {
       setFormError(
         "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
       );
@@ -3591,7 +3591,7 @@ function TransactionsView({
 
       if (changes.hasDateChanged || changes.hasPrimaryItemChanged) {
         const primaryMeta = getEffectiveItemMeta(resolvedPrimaryItemId);
-        if (primaryMeta?.minDate && nextDate < primaryMeta.minDate) {
+        if (primaryMeta?.minDate && nextDate < primaryMeta.minDate && primaryMeta.typeCode !== "counterparty_settlements") {
           return "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства.";
         }
       }
@@ -3604,7 +3604,7 @@ function TransactionsView({
       ) {
         if (nextCounterpartyItemId) {
           const counterpartyMeta = getEffectiveItemMeta(nextCounterpartyItemId);
-          if (counterpartyMeta?.minDate && nextDate < counterpartyMeta.minDate) {
+          if (counterpartyMeta?.minDate && nextDate < counterpartyMeta.minDate && counterpartyMeta.typeCode !== "counterparty_settlements") {
             return "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства.";
           }
         }
@@ -4285,6 +4285,49 @@ function TransactionsView({
     }
     return rows;
   }, [sortedTxs, checkpoints]);
+
+  const checkpointsVisible = useMemo(() => {
+    const hasOtherFilter =
+      selectedDirections.size > 0 ||
+      !!amountFrom ||
+      !!amountTo ||
+      selectedCurrencyCodes.size > 0 ||
+      selectedRelatedItemIds.size > 0 ||
+      selectedCategoryFilterKeys.size > 0 ||
+      chainIdFilter != null ||
+      selectedCounterpartyIds.size > 0 ||
+      commentFilter.trim() !== "" ||
+      !(showConfirmed && showUnconfirmed) ||
+      showActual !== initialShowActual ||
+      showPlanned !== (initialShowPlannedRealized || initialShowPlannedUnrealized) ||
+      (showPlanned &&
+        (showPlannedRealized !== initialShowPlannedRealized ||
+          showPlannedUnrealized !== initialShowPlannedUnrealized)) ||
+      !showActive ||
+      showDeleted;
+    return !hasOtherFilter;
+  }, [
+    selectedDirections.size,
+    amountFrom,
+    amountTo,
+    selectedCurrencyCodes.size,
+    selectedRelatedItemIds.size,
+    selectedCategoryFilterKeys.size,
+    chainIdFilter,
+    selectedCounterpartyIds.size,
+    commentFilter,
+    showConfirmed,
+    showUnconfirmed,
+    showActual,
+    showPlanned,
+    showPlannedRealized,
+    showPlannedUnrealized,
+    showActive,
+    showDeleted,
+    initialShowActual,
+    initialShowPlannedRealized,
+    initialShowPlannedUnrealized,
+  ]);
 
   const selectableIds = useMemo(
     () => sortedTxs.filter((tx) => !tx.isDeleted).map((tx) => tx.id),
@@ -5006,13 +5049,13 @@ function TransactionsView({
                       }
                       const primaryMeta = getEffectiveItemMeta(primaryItemId);
                       const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
-                      if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+                      if (primaryMeta?.minDate && date < primaryMeta.minDate && primaryMeta.typeCode !== "counterparty_settlements") {
                         setFormError(
                           "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
                         );
                         return;
                       }
-                      if (counterpartyMeta?.minDate && date < counterpartyMeta.minDate) {
+                      if (counterpartyMeta?.minDate && date < counterpartyMeta.minDate && counterpartyMeta.typeCode !== "counterparty_settlements") {
                         setFormError(
                           "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
                         );
@@ -5204,7 +5247,7 @@ function TransactionsView({
                       }
                       const expenseCents = fullCents - splitCents;
                       const primaryMeta = getEffectiveItemMeta(primaryItemId);
-                      if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+                      if (primaryMeta?.minDate && date < primaryMeta.minDate && primaryMeta.typeCode !== "counterparty_settlements") {
                         setFormError(
                           "Дата не может быть раньше даты начала действия выбранного актива."
                         );
@@ -5286,7 +5329,7 @@ function TransactionsView({
                         );
                         return;
                       }
-                      const debtCents = parseRubToCents(amountStr);
+                      const debtCents = parseRubToCents(normalizeRubOnBlur(amountStr.trim()) || "0");
                       if (!Number.isFinite(debtCents) || debtCents <= 0) {
                         setFormError("Введите сумму в формате 1234,56 (больше нуля).");
                         return;
@@ -5301,7 +5344,7 @@ function TransactionsView({
                         debtCounterpartyCents = parsed;
                       }
                       const primaryMeta = getEffectiveItemMeta(primaryItemId);
-                      if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+                      if (primaryMeta?.minDate && date < primaryMeta.minDate && primaryMeta.typeCode !== "counterparty_settlements") {
                         setFormError(
                           "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
                         );
@@ -5414,7 +5457,7 @@ function TransactionsView({
                       }
 
                       const primaryMeta = getEffectiveItemMeta(primaryItemId);
-                      if (primaryMeta?.minDate && date < primaryMeta.minDate) {
+                      if (primaryMeta?.minDate && date < primaryMeta.minDate && primaryMeta.typeCode !== "counterparty_settlements") {
                         setFormError(
                           "Дата транзакции не может быть раньше даты начала действия выбранного актива/обязательства."
                         );
@@ -5432,7 +5475,8 @@ function TransactionsView({
                         const counterpartyMeta = getEffectiveItemMeta(counterpartyItemId);
                         if (
                           counterpartyMeta?.minDate &&
-                          date < counterpartyMeta.minDate
+                          date < counterpartyMeta.minDate &&
+                          counterpartyMeta.typeCode !== "counterparty_settlements"
                         ) {
                           setFormError(
                             "Дата транзакции не может быть раньше даты начала действия корреспондирующего актива/обязательства."
@@ -6862,6 +6906,18 @@ function TransactionsView({
               >
                 {mergedRows.map((row, idx) => {
                   if (row.type === "date_header") {
+                    if (!checkpointsVisible) {
+                      let hasTransactionOnDate = false;
+                      for (let i = idx + 1; i < mergedRows.length; i++) {
+                        const r = mergedRows[i];
+                        if (r.type === "date_header") break;
+                        if (r.type === "transaction") {
+                          hasTransactionOnDate = true;
+                          break;
+                        }
+                      }
+                      if (!hasTransactionOnDate) return null;
+                    }
                     return (
                       <div
                         key={`date-${row.dateKey}`}
@@ -6873,6 +6929,7 @@ function TransactionsView({
                     );
                   }
                   if (row.type === "checkpoint_line") {
+                    if (!checkpointsVisible) return null;
                     const hasMismatch = row.checkpoints.some((c) => c.status === "MISMATCH");
                     const lineColor = hasMismatch ? RED : GREEN;
                     return (

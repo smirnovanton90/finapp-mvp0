@@ -472,7 +472,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
     "lot_size",
     "face_value_cents",
     "quantity_units",
-    "initial_value_rub",
+    "initial_balance_minor",
     "plan_settings_json",
   ];
   lines.push(csvRow(itemHeaders));
@@ -506,7 +506,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
         i.lot_size ?? "",
         i.face_value_cents ?? "",
         i.quantity_units ?? "",
-        i.initial_value_rub,
+        i.initial_balance_minor,
         i.plan_settings ? JSON.stringify(i.plan_settings) : "",
       ])
     );
@@ -1148,7 +1148,7 @@ export async function runImport(
         instrument_board_id: str(row.instrument_board_id) || null,
         position_lots: num(row.position_lots) ?? null,
         quantity_units: num(row.quantity_units) ?? null,
-        initial_value_rub: num(row.initial_value_rub) ?? 0,
+        initial_balance_minor: num(row.initial_balance_minor ?? row.initial_value_rub) ?? 0,
         synonyms: str(row.synonyms) ? str(row.synonyms).split(";").filter(Boolean) : [],
       };
       if (row.plan_settings_json) {

@@ -147,7 +147,7 @@ def _create_transfer(
     user: User,
     primary_item_id: int,
     counterparty_item_id: int,
-    amount_rub: int,
+    amount_primary_minor: int,
     tx_date: date,
     related_item_id: int | None,
     source: str,
@@ -179,7 +179,7 @@ def _create_transfer(
             detail="Opening transfer requires matching currencies.",
         )
 
-    amount = amount_rub
+    amount = amount_primary_minor
     primary_is_moex = is_moex_item(primary)
     counter_is_moex = is_moex_item(counter)
     primary_is_crypto = is_crypto_item(primary)
@@ -190,26 +190,30 @@ def _create_transfer(
         elif primary_is_crypto and primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, -(primary_quantity_units or 0), tx_date)
         primary_delta = transfer_delta(primary.kind, True, amount)
-        primary_next = primary.current_value_rub + primary_delta
+        primary_next = primary.current_balance_minor + primary_delta
         if primary_next < get_min_balance(primary):
             raise HTTPException(
                 status_code=400,
                 detail="Opening transfer would make balance negative.",
             )
-        primary.current_value_rub = primary_next
+        primary.current_balance_minor = primary_next
+        if (primary.currency_code or "RUB").upper() == "RUB":
+            primary.current_value_rub = primary.current_balance_minor
 
         if counter_is_moex and counterparty_quantity_lots:
             _apply_position_delta(counter, counterparty_quantity_lots or 0, tx_date)
         elif counter_is_crypto and primary_quantity_units is not None:
             _apply_quantity_units_delta(counter, primary_quantity_units or 0, tx_date)
         counter_delta = transfer_delta(counter.kind, False, amount)
-        counter_next = counter.current_value_rub + counter_delta
+        counter_next = counter.current_balance_minor + counter_delta
         if counter_next < get_min_balance(counter):
             raise HTTPException(
                 status_code=400,
                 detail="Opening transfer would make balance negative.",
             )
-        counter.current_value_rub = counter_next
+        counter.current_balance_minor = counter_next
+        if (counter.currency_code or "RUB").upper() == "RUB":
+            counter.current_value_rub = counter.current_balance_minor
 
     tx = Transaction(
         user_id=user.id,
@@ -244,7 +248,7 @@ def _create_income_expense(
     db: Session,
     user: User,
     item_id: int,
-    amount_rub: int,
+    amount_primary_minor: int,
     tx_date: date,
     direction: str,
     category_name: str,
@@ -260,6 +264,7 @@ def _create_income_expense(
     _validate_tx_date(tx_date, primary_side, "Transaction")
     primary = primary_side.effective_item
 
+    # amount_primary_minor — сумма в валюте актива (минорные единицы)
     if direction == "INCOME":
         if is_moex_item(primary):
             if primary_quantity_lots:
@@ -267,7 +272,9 @@ def _create_income_expense(
         elif is_crypto_item(primary) and primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, primary_quantity_units or 0, tx_date)
         else:
-            primary.current_value_rub += amount_rub
+            primary.current_balance_minor += amount_primary_minor
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
     else:
         if is_moex_item(primary):
             if primary_quantity_lots:
@@ -275,15 +282,19 @@ def _create_income_expense(
         elif is_crypto_item(primary) and primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, -(primary_quantity_units or 0), tx_date)
         elif primary.kind == "LIABILITY":
-            primary.current_value_rub += amount_rub
+            primary.current_balance_minor += amount_primary_minor
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
         else:
-            next_balance = primary.current_value_rub - amount_rub
+            next_balance = primary.current_balance_minor - amount_primary_minor
             if next_balance < get_min_balance(primary):
                 raise HTTPException(
                     status_code=400,
                     detail="Opening transaction would make balance negative.",
                 )
-            primary.current_value_rub = next_balance
+            primary.current_balance_minor = next_balance
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
 
     category = _resolve_category_by_name(db, user, category_name)
     tx = Transaction(
@@ -295,7 +306,7 @@ def _create_income_expense(
         counterparty_item_id=None,
         counterparty_card_item_id=None,
         counterparty_id=counterparty_id,
-        amount_primary_minor=amount_rub,
+        amount_primary_minor=amount_primary_minor,
         amount_counterparty=None,
         primary_quantity_lots=primary_quantity_lots,
         counterparty_quantity_lots=None,

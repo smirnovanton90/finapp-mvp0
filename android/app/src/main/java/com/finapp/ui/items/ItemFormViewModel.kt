@@ -75,7 +75,7 @@ class ItemFormViewModel(private val itemsRepository: ItemsRepository) : ViewMode
                 name = state.name,
                 currencyCode = state.currencyCode,
                 openDate = openDateString,
-                initialValueRub = (state.initialValueRub * 100).toInt()
+                initialBalanceMinor = (state.initialValueRub * 100).toInt()
             )
             
             itemsRepository.createItem(itemCreate)

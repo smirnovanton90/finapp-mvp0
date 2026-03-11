@@ -1309,7 +1309,7 @@ export default function DashboardPage() {
       const dateKey = toDateKey(current);
       const newItems = itemsByStartDate.get(dateKey) ?? [];
       newItems.forEach((item) => {
-        balances.set(item.id, item.initial_value_rub);
+        balances.set(item.id, item.initial_balance_minor);
       });
 
       const dayDeltas = deltasByDate.get(dateKey);
@@ -1347,13 +1347,14 @@ export default function DashboardPage() {
         if (startKeyForItem && dateKey < startKeyForItem) {
           return;
         }
-        const valueCents = balances.get(item.id) ?? item.initial_value_rub;
-
+        const valueCents = balances.get(item.id) ?? item.initial_balance_minor;
+        const currency = (item.currency_code ?? "RUB").toUpperCase();
+        // Для валютных элементов баланс в API в рублях (current_value_rub), в рублёвый итог не умножаем на курс
         const rate = getRate(item.currency_code);
         if (rate === null) {
-          if (item.currency_code !== "RUB") missingRate = true;
+          if (currency !== "RUB") missingRate = true;
         } else {
-          const rubValueCents = Math.round((valueCents / 100) * rate * 100);
+          const rubValueCents = currency !== "RUB" ? valueCents : Math.round((valueCents / 100) * rate * 100);
           const effectiveKind = resolveItemEffectiveKind(item, valueCents);
           const signedRub = effectiveKind === "LIABILITY" ? -rubValueCents : rubValueCents;
           if (totalRubCents !== null) totalRubCents += signedRub;

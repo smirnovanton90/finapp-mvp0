@@ -401,7 +401,11 @@ class Item(Base):
     face_value_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     quantity_units: Mapped[float | None] = mapped_column(Numeric(20, 10), nullable=True)
 
-    initial_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Начальный остаток в ВАЛЮТЕ АКТИВА (минорные единицы: копейки для RUB, центы для USD и т.д.).
+    initial_balance_minor: Mapped[int] = mapped_column("initial_balance_minor", BigInteger, nullable=False)
+    # Текущее сальдо в валюте актива (минорные единицы). Для RUB = копейки; для не-RUB = центы в валюте.
+    current_balance_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Рублёвый эквивалент текущего сальдо (копейки); кэш, пересчитывается при отдаче или при apply.
     current_value_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
     initial_acquisition_rub: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 

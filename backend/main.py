@@ -5,7 +5,7 @@ from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import xml.etree.ElementTree as ET
 import bisect
-from datetime import datetime, timedelta, date as date_type
+from datetime import datetime, timedelta, date as date_type, time, timezone
 from zoneinfo import ZoneInfo
 import requests
 from pathlib import Path
@@ -52,6 +52,7 @@ from schemas import (
     UserProfileUpdate,
     AccountingStartDateUpdate,
     ItemCloseRequest,
+    ItemClosedAtUpdate,
     ItemMarketValueCreate,
     ItemMarketValueOut,
     ItemCostsOut,
@@ -1197,6 +1198,24 @@ def list_items(
                 )
         setattr(item, "acquisition_rub", acq)
         setattr(item, "invested_rub", acq + inv_sum)
+    today = date_type.today()
+    for item in items:
+        bc, br = _item_balance_currency_and_rub(db, item, today)
+        setattr(item, "balance_currency_cents", bc)
+        setattr(item, "balance_rub_cents", br)
+    # Снять ошибочную пометку «закрыт» у взаиморасчётов в валюте с ненулевым сальдо
+    # (ранее закрытие определялось по current_value_rub, который для не-RUB не обновлялся)
+    needs_commit = False
+    for item in items:
+        if (
+            getattr(item, "type_code", None) == "counterparty_settlements"
+            and getattr(item, "balance_currency_cents", 0) != 0
+            and item.closed_at is not None
+        ):
+            item.closed_at = None
+            needs_commit = True
+    if needs_commit:
+        db.commit()
     for item in items:
         _apply_item_photo_url(item)
     return items
@@ -1282,6 +1301,9 @@ def get_item(
     )
     setattr(item, "acquisition_rub", int(acq))
     setattr(item, "invested_rub", int(acq) + int(inv_sum))
+    bc, br = _item_balance_currency_and_rub(db, item, date_type.today())
+    setattr(item, "balance_currency_cents", bc)
+    setattr(item, "balance_rub_cents", br)
     _apply_item_photo_url(item)
     return item
 
@@ -1511,17 +1533,18 @@ def create_item(
         if is_moex
         else (quantity_units is not None and quantity_units > 0)
         if is_crypto
-        else payload.initial_value_rub > 0
+        else payload.initial_balance_minor > 0
     )
     opening_price_cents = payload.opening_price_cents if (is_moex or is_crypto) else None
     # У рыночных активов (MOEX, crypto, MARKET не-биржевые) баланс всегда 0 — отображается рыночная стоимость
     primary_value_kind_pre = getattr(payload, "primary_value_kind", None)
-    initial_value_rub_for_item = (
+    # Начальный остаток в валюте актива (минорные единицы). API принимает в валюте актива.
+    initial_balance_minor_for_item = (
         0
         if (is_moex or is_crypto or primary_value_kind_pre == "MARKET")
-        else payload.initial_value_rub
+        else payload.initial_balance_minor
     )
-    opening_amount_rub = payload.initial_value_rub
+    opening_amount_rub = payload.initial_balance_minor
     if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
     elif is_crypto and opening_price_cents is not None and quantity_units is not None and quantity_units > 0:
@@ -1583,26 +1606,38 @@ def create_item(
         )
 
     min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
-    if initial_value_rub_for_item < min_balance:
+    if initial_balance_minor_for_item < min_balance:
         detail = "Initial balance must be non-negative."
         if min_balance < 0:
             detail = "Initial balance cannot be below credit limit."
         raise HTTPException(status_code=400, detail=detail)
 
-    # Для элементов, созданных в день начала учета, current_value_rub должен быть равен initial_value_rub,
-    # так как транзакции открытия не создаются (create_opening_transactions возвращается раньше).
-    # Для элементов, созданных после дня начала учета, current_value_rub устанавливается в 0,
-    # и транзакция открытия обновит его. У MOEX всегда 0 до подстановки рыночной стоимости.
+    # Текущее сальдо в валюте актива: без opening-tx равно начальному; с opening-tx транзакция обновит.
     will_create_opening_tx = (
         history_status == "NEW"
         and has_opening_value
         and payload.open_date > accounting_start_date
     )
-    initial_current_value_rub = (
+    initial_current_balance_minor = (
         0
         if (will_create_opening_tx or is_moex or primary_value_kind_pre == "MARKET")
-        else initial_value_rub_for_item
+        else initial_balance_minor_for_item
     )
+    # Рублёвый кэш: для RUB = сальдо; для не-RUB = конвертация на дату открытия
+    if (currency_code or "RUB").upper() == "RUB":
+        initial_current_value_rub = initial_current_balance_minor
+    else:
+        initial_current_value_rub = (
+            _convert_amount_between_currencies(
+                initial_current_balance_minor,
+                (currency_code or "RUB").upper(),
+                "RUB",
+                payload.open_date,
+                db,
+            )
+            if initial_current_balance_minor
+            else 0
+        )
 
     synonyms_list = getattr(payload, "synonyms", None) or []
     primary_value_kind = (
@@ -1640,7 +1675,8 @@ def create_item(
         quantity_units=0
         if is_crypto and history_status == "NEW" and has_opening_value
         else quantity_units,
-        initial_value_rub=initial_value_rub_for_item,
+        initial_balance_minor=initial_balance_minor_for_item,
+        current_balance_minor=initial_current_balance_minor,
         current_value_rub=initial_current_value_rub,
         start_date=accounting_start_date,
         history_status=history_status,
@@ -1897,10 +1933,10 @@ def update_item(
         if is_moex
         else (quantity_units is not None and quantity_units > 0)
         if is_crypto
-        else payload.initial_value_rub > 0
+        else payload.initial_balance_minor > 0
     )
     opening_price_cents = payload.opening_price_cents if (is_moex or is_crypto) else None
-    opening_amount_rub = payload.initial_value_rub
+    opening_amount_rub = payload.initial_balance_minor
     if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
     elif is_crypto and opening_price_cents is not None and quantity_units is not None and quantity_units > 0:
@@ -1966,7 +2002,7 @@ def update_item(
         if is_moex
         else (quantity_units != (item.quantity_units if item.quantity_units is not None else None))
         if is_crypto
-        else payload.initial_value_rub != item.initial_value_rub
+        else payload.initial_balance_minor != item.initial_balance_minor
     )
     opening_counterparty_changed = (
         payload.opening_counterparty_item_id != item.opening_counterparty_item_id
@@ -1983,16 +2019,14 @@ def update_item(
     if commission_requested:
         delete_commission_transactions(db, user, item.id)
 
-    # Для элементов, созданных в день начала учета, базовое значение - это initial_value_rub,
-    # так как транзакции открытия не создаются. Для элементов, созданных после дня начала учета,
-    # базовое значение - это 0, так как транзакция открытия обновит current_value_rub. У MARKET — всегда 0.
+    # Базовое значение — начальный остаток в валюте актива; дельта — изменение текущего сальдо (тоже в валюте).
     patch_primary_value_kind = getattr(payload, "primary_value_kind", None)
     old_will_have_opening_tx = (
         item.history_status == "NEW"
         and item.open_date > accounting_start_date
     )
-    old_base = 0 if old_will_have_opening_tx else item.initial_value_rub
-    delta = item.current_value_rub - old_base
+    old_base = 0 if old_will_have_opening_tx else item.initial_balance_minor
+    delta = item.current_balance_minor - old_base
     new_will_have_opening_tx = (
         new_history_status == "NEW"
         and payload.open_date > accounting_start_date
@@ -2000,13 +2034,13 @@ def update_item(
     new_base = (
         0
         if (new_will_have_opening_tx or patch_primary_value_kind == "MARKET")
-        else payload.initial_value_rub
+        else payload.initial_balance_minor
     )
-    next_current_value = new_base + delta
+    next_current_balance_minor = new_base + delta
     if is_moex:
-        next_current_value = item.current_value_rub
+        next_current_balance_minor = item.current_balance_minor
     min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
-    if not is_moex and next_current_value < min_balance:
+    if not is_moex and next_current_balance_minor < min_balance:
         detail = "New initial value would make current balance negative."
         if min_balance < 0:
             detail = "New initial value would exceed the credit limit."
@@ -2042,12 +2076,22 @@ def update_item(
         item.quantity_units = quantity_units
     item.lot_size = lot_size
     item.face_value_cents = face_value_cents
-    item.initial_value_rub = (
+    item.initial_balance_minor = (
         0
         if (is_moex or is_crypto or patch_primary_value_kind == "MARKET")
-        else payload.initial_value_rub
+        else payload.initial_balance_minor
     )
-    item.current_value_rub = next_current_value
+    item.current_balance_minor = next_current_balance_minor
+    if (currency_code or "RUB").upper() == "RUB":
+        item.current_value_rub = next_current_balance_minor
+    else:
+        item.current_value_rub = _convert_amount_between_currencies(
+            next_current_balance_minor,
+            (currency_code or "RUB").upper(),
+            "RUB",
+            date_type.today(),
+            db,
+        )
     item.start_date = accounting_start_date
     item.history_status = new_history_status
     item.opening_counterparty_item_id = (
@@ -2208,11 +2252,18 @@ def close_item(
         )
     if item.archived_at is not None:
         raise HTTPException(status_code=400, detail="Cannot close deleted item")
-    
+    if not payload or payload.closing_date is None:
+        raise HTTPException(
+            status_code=400,
+            detail="При закрытии необходимо указать дату закрытия (closing_date).",
+        )
+
     # Merge close_cards from query param and body
     if payload:
         close_cards = payload.close_cards or close_cards
-    
+
+    closing_date = payload.closing_date
+
     # Check balance
     is_moex = is_moex_item(item)
     has_balance = False
@@ -2229,19 +2280,18 @@ def close_item(
                 if value is not None:
                     balance_amount = value
     else:
-        balance_amount = item.current_value_rub
+        balance_amount = item.current_balance_minor
         has_balance = item.type_code != "bank_card" and balance_amount != 0
     
     # If balance is non-zero, require closing options
-    if has_balance and not payload:
+    if has_balance and not (payload.transfer_to_item_id or payload.write_off):
         raise HTTPException(
             status_code=400,
             detail="Item balance is non-zero. Closing options are required.",
         )
-    
+
     # Handle closing with non-zero balance
     if has_balance and payload:
-        closing_date = payload.closing_date or date_type.today()
         
         if payload.transfer_to_item_id:
             # Create transfer transaction
@@ -2273,7 +2323,7 @@ def close_item(
                     user=user,
                     primary_item_id=primary_id,
                     counterparty_item_id=counter_id,
-                    amount_rub=balance_amount,
+                    amount_primary_minor=balance_amount,
                     tx_date=closing_date,
                     related_item_id=item.id,
                     source=AUTO_CLOSING_SOURCE,
@@ -2297,7 +2347,7 @@ def close_item(
                     user=user,
                     primary_item_id=primary_id,
                     counterparty_item_id=counter_id,
-                    amount_rub=balance_amount,
+                    amount_primary_minor=balance_amount,
                     tx_date=closing_date,
                     related_item_id=item.id,
                     source=AUTO_CLOSING_SOURCE,
@@ -2353,15 +2403,42 @@ def close_item(
                 detail="Account has active cards. Close cards first.",
             )
         if linked_cards and close_cards:
-            now = func.now()
+            closed_dt = datetime.combine(closing_date, time.min, tzinfo=timezone.utc)
             for card in linked_cards:
-                card.closed_at = now
+                card.closed_at = closed_dt
 
+    # Храним дату закрытия как полночь UTC, чтобы календарная дата не сдвигалась при отображении в любом часовом поясе
+    closed_dt = datetime.combine(closing_date, time.min, tzinfo=timezone.utc)
     if item.closed_at is None:
-        item.closed_at = func.now()
+        item.closed_at = closed_dt
 
     delete_auto_chains(db, user, item.id, keep_realized=True)
 
+    db.commit()
+    db.refresh(item)
+    _apply_item_photo_url(item)
+    return item
+
+
+@app.patch("/items/{item_id}/closed_at", response_model=ItemOut)
+def update_item_closed_at(
+    item_id: int,
+    payload: ItemClosedAtUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Обновить дату закрытия у уже закрытого актива/обязательства."""
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if item.closed_at is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Актив не закрыт. Редактирование даты закрытия доступно только для закрытых активов.",
+        )
+    # Полночь UTC, чтобы календарная дата отображалась без сдвига по поясу
+    closed_dt = datetime.combine(payload.closing_date, time.min, tzinfo=timezone.utc)
+    item.closed_at = closed_dt
     db.commit()
     db.refresh(item)
     _apply_item_photo_url(item)
@@ -2536,7 +2613,9 @@ def get_item_costs(
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
-    balance_rub = item.current_value_rub
+    balance_currency_cents, balance_rub_cents = _item_balance_currency_and_rub(
+        db, item, date_type.today()
+    )
     acquisition_rub = _compute_acquisition_cost_basis(db, user.id, item_id, item)
     # Investment: ASSET_INVESTMENT, приведённые к валюте актива
     inv_q = (
@@ -2682,7 +2761,9 @@ def get_item_costs(
     income_rub = _sum_asset_link("ASSET_INCOME")
     expense_rub = _sum_asset_link("ASSET_EXPENSE")
     return ItemCostsOut(
-        balance_rub=balance_rub,
+        balance_currency_cents=balance_currency_cents,
+        balance_rub_cents=balance_rub_cents,
+        balance_rub=balance_rub_cents,
         acquisition_rub=acquisition_rub,
         invested_rub=invested_rub,
         market_rub=market_rub,
@@ -2690,6 +2771,24 @@ def get_item_costs(
         income_rub=income_rub,
         expense_rub=expense_rub,
     )
+
+
+def _item_balance_currency_and_rub(
+    db: Session,
+    item: Item,
+    as_of_date: date_type,
+) -> tuple[int, int]:
+    """Текущее сальдо в валюте актива и в рублях (минорные единицы). Единый источник для API."""
+    balance_currency = getattr(item, "current_balance_minor", None)
+    if balance_currency is None:
+        balance_currency = item.current_value_rub  # fallback до миграции
+    item_currency = (item.currency_code or "RUB").upper()
+    if item_currency == "RUB":
+        return balance_currency, balance_currency
+    balance_rub = _convert_amount_between_currencies(
+        balance_currency, item_currency, "RUB", as_of_date, db
+    )
+    return balance_currency, balance_rub
 
 
 # Все даты/время транзакций и контрольных точек считаются в поясе Москвы.
@@ -2775,15 +2874,11 @@ def _compute_balance_in_item_currency_cents(
             return transfer_delta(kind, False, amt_counter)
         return 0
 
+    # Начальный остаток всегда в валюте актива (RUB — копейки, не-RUB — центы).
     if item.opening_counterparty_item_id is not None:
         balance_cumul = 0
-    elif item_currency == "RUB":
-        balance_cumul = item.initial_value_rub
     else:
-        open_date = item.open_date if hasattr(item, "open_date") and item.open_date else at.date() if hasattr(at, "date") else at
-        balance_cumul = _convert_amount_between_currencies(
-            item.initial_value_rub, "RUB", item_currency, open_date, db
-        )
+        balance_cumul = item.initial_balance_minor
     for tx in balance_txs:
         balance_cumul += delta_in_item_currency(tx)
     return balance_cumul
@@ -3022,13 +3117,9 @@ def _build_item_cost_history(
     item_currency_hist = (item.currency_code or "RUB").upper()
     if item.opening_counterparty_item_id is not None:
         balance_cumul = 0
-    elif item_currency_hist == "RUB":
-        balance_cumul = item.initial_value_rub
     else:
-        open_date = getattr(item, "open_date", None) or start
-        balance_cumul = _convert_amount_between_currencies(
-            item.initial_value_rub, "RUB", item_currency_hist, open_date, db
-        )
+        # Начальный остаток в валюте актива (уже хранится в валюте).
+        balance_cumul = item.initial_balance_minor
     balance_tx_index = 0
     lot_balance = lot_initial
     lot_tx_index = 0

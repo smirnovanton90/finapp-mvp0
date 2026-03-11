@@ -198,9 +198,10 @@ def balance_violation_detail(item: Item, amount: int, tx_date) -> str:
             "Сумма транзакции превышает кредитный лимит по "
             f"{item.name}. Текущий кредитный лимит: {limit_label}."
         )
+    balance = getattr(item, "current_balance_minor", item.current_value_rub)
     return insufficient_funds_detail(
         amount=amount,
-        balance=item.current_value_rub,
+        balance=balance,
         item_name=item.name,
         tx_date=tx_date,
     )
@@ -816,7 +817,9 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
             elif primary_is_crypto and data.primary_quantity_units is not None:
                 _apply_quantity_units_delta(primary, data.primary_quantity_units or 0, data.transaction_date)
             else:
-                primary.current_value_rub += amt
+                primary.current_balance_minor += amt
+                if (primary.currency_code or "RUB").upper() == "RUB":
+                    primary.current_value_rub = primary.current_balance_minor
 
         elif data.direction == "EXPENSE":
             if primary_is_moex:
@@ -824,13 +827,15 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
             elif primary_is_crypto and data.primary_quantity_units is not None:
                 _apply_quantity_units_delta(primary, -(data.primary_quantity_units or 0), data.transaction_date)
             else:
-                next_balance = primary.current_value_rub - amt
+                next_balance = primary.current_balance_minor - amt
                 if next_balance < get_min_balance(primary):
                     raise HTTPException(
                         status_code=400,
                         detail=balance_violation_detail(primary, amt, data.transaction_date),
                     )
-                primary.current_value_rub = next_balance
+                primary.current_balance_minor = next_balance
+                if (primary.currency_code or "RUB").upper() == "RUB":
+                    primary.current_value_rub = primary.current_balance_minor
 
         elif data.direction == "TRANSFER":
             if not counter:
@@ -851,24 +856,28 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
             elif primary_is_crypto and data.primary_quantity_units is not None:
                 _apply_quantity_units_delta(primary, -(data.primary_quantity_units or 0), data.transaction_date)
             primary_delta = transfer_delta(primary.kind, True, amt_primary)
-            primary_next = primary.current_value_rub + primary_delta
+            primary_next = primary.current_balance_minor + primary_delta
             if primary_next < get_min_balance(primary):
                 raise HTTPException(
                     status_code=400,
                     detail=balance_violation_detail(primary, -primary_delta, data.transaction_date),
                 )
-            primary.current_value_rub = primary_next
+            primary.current_balance_minor = primary_next
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
 
             if counter_is_moex:
                 _apply_position_delta(counter, data.counterparty_quantity_lots or 0, data.transaction_date)
             counter_delta = transfer_delta(counter.kind, False, amt_counter)
-            counter_next = counter.current_value_rub + counter_delta
+            counter_next = counter.current_balance_minor + counter_delta
             if counter_next < get_min_balance(counter):
                 raise HTTPException(
                     status_code=400,
                     detail=balance_violation_detail(counter, -counter_delta, data.transaction_date),
                 )
-            counter.current_value_rub = counter_next
+            counter.current_balance_minor = counter_next
+            if (counter.currency_code or "RUB").upper() == "RUB":
+                counter.current_value_rub = counter.current_balance_minor
 
         if related_item and related_is_moex and data.primary_quantity_lots is not None:
             if data.direction == "EXPENSE":
@@ -1181,7 +1190,8 @@ def update_transaction(
         if not item:
             raise HTTPException(status_code=400, detail="Item not found")
         min_balance = get_min_balance(item)
-        if item.current_value_rub + delta < min_balance:
+        balance = getattr(item, "current_balance_minor", item.current_value_rub)
+        if balance + delta < min_balance:
             detail = "Cannot update: would make balance negative. Update later transactions first."
             if min_balance < 0:
                 detail = "Cannot update: would exceed credit limit. Update later transactions first."
@@ -1213,7 +1223,10 @@ def update_transaction(
             )
 
     for item_id, delta in deltas.items():
-        items_by_id[item_id].current_value_rub += delta
+        it = items_by_id[item_id]
+        it.current_balance_minor += delta
+        if (it.currency_code or "RUB").upper() == "RUB":
+            it.current_value_rub = it.current_balance_minor
 
     for item_id, delta in lot_deltas.items():
         item = items_by_id[item_id]
@@ -1307,14 +1320,18 @@ def _rollback_transaction_balance(db: Session, user: User, tx: Transaction) -> N
         elif primary_is_crypto and tx.primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
         else:
-            primary.current_value_rub -= amt
+            primary.current_balance_minor -= amt
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
     elif tx.direction == "EXPENSE":
         if primary_is_moex:
             _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx.transaction_date)
         elif primary_is_crypto and tx.primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
         else:
-            primary.current_value_rub += amt
+            primary.current_balance_minor += amt
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
     elif tx.direction == "TRANSFER" and counter:
         primary_is_settlement = primary.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
         counter_is_settlement = counter.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
@@ -1333,12 +1350,16 @@ def _rollback_transaction_balance(db: Session, user: User, tx: Transaction) -> N
             _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
         else:
             primary_delta = -transfer_delta(primary.kind, True, amt_primary)
-            primary.current_value_rub += primary_delta
+            primary.current_balance_minor += primary_delta
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
         if counter_is_moex:
             _apply_position_delta(counter, -(tx.counterparty_quantity_lots or 0), tx.transaction_date)
         else:
             counter_delta = -transfer_delta(counter.kind, False, amt_counter)
-            counter.current_value_rub += counter_delta
+            counter.current_balance_minor += counter_delta
+            if (counter.currency_code or "RUB").upper() == "RUB":
+                counter.current_value_rub = counter.current_balance_minor
 
     if tx.related_item_id:
         related_item = db.query(Item).filter(Item.id == tx.related_item_id, Item.user_id == user.id).with_for_update().first()
@@ -1394,20 +1415,24 @@ def _apply_transaction_balance(db: Session, user: User, tx: Transaction) -> None
         elif primary_is_crypto and tx.primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx.transaction_date)
         else:
-            primary.current_value_rub += amt
+            primary.current_balance_minor += amt
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
     elif tx.direction == "EXPENSE":
         if primary_is_moex:
             _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx.transaction_date)
         elif primary_is_crypto and tx.primary_quantity_units is not None:
             _apply_quantity_units_delta(primary, -float(tx.primary_quantity_units or 0), tx.transaction_date)
         else:
-            next_balance = primary.current_value_rub - amt
+            next_balance = primary.current_balance_minor - amt
             if next_balance < get_min_balance(primary):
                 raise HTTPException(
                     status_code=400,
                     detail=balance_violation_detail(primary, amt, tx.transaction_date),
                 )
-            primary.current_value_rub = next_balance
+            primary.current_balance_minor = next_balance
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
     elif tx.direction == "TRANSFER" and counter:
         primary_is_settlement = primary.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
         counter_is_settlement = counter.type_code == COUNTERPARTY_SETTLEMENTS_TYPE
@@ -1426,12 +1451,16 @@ def _apply_transaction_balance(db: Session, user: User, tx: Transaction) -> None
             _apply_quantity_units_delta(primary, -(float(tx.primary_quantity_units or 0)), tx.transaction_date)
         else:
             primary_delta = transfer_delta(primary.kind, True, amt_primary)
-            primary.current_value_rub += primary_delta
+            primary.current_balance_minor += primary_delta
+            if (primary.currency_code or "RUB").upper() == "RUB":
+                primary.current_value_rub = primary.current_balance_minor
         if counter_is_moex:
             _apply_position_delta(counter, tx.counterparty_quantity_lots or 0, tx.transaction_date)
         else:
             counter_delta = transfer_delta(counter.kind, False, amt_counter)
-            counter.current_value_rub += counter_delta
+            counter.current_balance_minor += counter_delta
+            if (counter.currency_code or "RUB").upper() == "RUB":
+                counter.current_value_rub = counter.current_balance_minor
 
     if tx.related_item_id:
         related_item = db.query(Item).filter(Item.id == tx.related_item_id, Item.user_id == user.id).with_for_update().first()

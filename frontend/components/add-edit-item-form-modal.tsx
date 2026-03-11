@@ -303,7 +303,11 @@ export function AddEditItemFormModal({
       setTypeCode(resolvedTypeCode);
       setCurrencyCode(editingItem.type_code === "crypto" ? "USD" : editingItem.currency_code);
       setName(editingItem.name);
-      setAmountStr(formatAmount(editingItem.initial_value_rub));
+      setAmountStr(
+        (editingItem.currency_code ?? "RUB").toUpperCase() === "RUB"
+          ? formatAmount(editingItem.initial_balance_minor)
+          : ""
+      );
       setCounterpartyId(editingItem.counterparty_id);
       setOpenDate(editingItem.open_date ?? getTodayDateKey());
       setInstrumentQuery(editingItem.instrument_id ? `${editingItem.instrument_id} - ${editingItem.name ?? ""}`.trim() : "");
@@ -869,7 +873,7 @@ export function AddEditItemFormModal({
         kind: item.kind,
         typeCode: item.type_code,
         currencyCode: item.currency_code,
-        initialValue: item.initial_value_rub,
+        initialValue: item.initial_balance_minor,
         openDate: item.open_date ?? null,
         depositTermDays: item.deposit_term_days ?? null,
         interestRate: item.interest_rate != null ? String(item.interest_rate) : null,
@@ -1339,7 +1343,10 @@ export function AddEditItemFormModal({
   }, [isCryptoType, cryptoPriceOnOpenDate]);
 
   useEffect(() => {
-    const needFx = showInstrumentBlock && (isCryptoType || (isMoexType && currencyCode !== "RUB")) && openDate;
+    const needFxForInstrument =
+      showInstrumentBlock && (isCryptoType || (isMoexType && currencyCode !== "RUB")) && openDate;
+    const needFxForInitialBalance = currencyCode !== "RUB" && openDate;
+    const needFx = needFxForInstrument || needFxForInitialBalance;
     if (!needFx) {
       setFxRatesByDate({});
       return;
@@ -1356,6 +1363,12 @@ export function AddEditItemFormModal({
       });
     return () => { cancelled = true; };
   }, [showInstrumentBlock, isCryptoType, isMoexType, currencyCode, openDate]);
+
+  // При открытии формы редактирования для валютного актива показываем начальный остаток в валюте актива (без перевода в рубли).
+  useEffect(() => {
+    if (!editingItem || (editingItem.currency_code ?? "RUB").toUpperCase() === "RUB") return;
+    setAmountStr(formatAmount(editingItem.initial_balance_minor));
+  }, [editingItem]);
 
   useEffect(() => {
     if (typeCode !== "bonds" || !selectedInstrument?.secid) {
@@ -1697,17 +1710,23 @@ export function AddEditItemFormModal({
 
     const cents = amountCentsForSubmit;
     // У рыночных (MOEX) и крипто активов нет начальной балансовой стоимости — в payload передаём 0.
-    // Для исторического актива с рыночной стоимостью в initial_value_rub передаём рыночную стоимость, стоимость приобретения — в acquisition_value_rub.
+    // Для исторического актива с рыночной стоимостью в initial_balance_minor передаём рыночную стоимость, стоимость приобретения — в acquisition_value_rub.
     const isHistoricalMarketNonMoex =
       resolvedHistoryStatus === "HISTORICAL" &&
       primaryValueKind === "MARKET" &&
       !isMoexType &&
       !isCryptoType;
-    const initialValueRubForPayload = isMoexType || isCryptoType
-      ? 0
-      : isHistoricalMarketNonMoex
-        ? parseRubToCents(marketValueStr)
-        : cents;
+    let initialValueRubForPayload: number;
+    if (isMoexType || isCryptoType) {
+      initialValueRubForPayload = 0;
+    } else if (isHistoricalMarketNonMoex) {
+      initialValueRubForPayload = parseRubToCents(marketValueStr);
+    } else if (currencyCode !== "RUB") {
+      // Начальный остаток в валюте актива (центы/копейки) — отправляем как есть, без перевода в рубли.
+      initialValueRubForPayload = cents;
+    } else {
+      initialValueRubForPayload = cents;
+    }
     if (
       !Number.isFinite(initialValueRubForPayload) ||
       (initialValueRubForPayload < 0 && !(showBankCardFields && isCreditCard))
@@ -1894,7 +1913,7 @@ export function AddEditItemFormModal({
         counterparty_id: showCounterpartyField ? counterpartyId : null,
         open_date: openDate,
         opening_counterparty_item_id: openingCounterpartyValue,
-        initial_value_rub: initialValueRubForPayload,
+        initial_balance_minor: initialValueRubForPayload,
         primary_value_kind: primaryValueKind,
       };
       if (isHistoricalMarketNonMoex && Number.isFinite(parseRubToCents(amountStr))) {

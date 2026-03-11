@@ -168,12 +168,6 @@ export default function ReportsPage() {
       <div className="w-full max-w-[900px] space-y-6">
         <section className="flex flex-col gap-6">
           <ReportCard
-            href="/reports/income-expense-by-period"
-            title="Динамика доходов и расходов"
-            description="Этот отчет позволяет увидеть динамику доходов и расходов за выбранный период с возможностью детализации категорий, контрагентов и счетов"
-            imageSrc="/reports/income-expense-by-period.png"
-          />
-          <ReportCard
             href="/reports/assets-dynamics"
             title="Динамика стоимости активов"
             description="Отчет, в котором можно отследить стоимость одного или нескольких активов / обязательств"

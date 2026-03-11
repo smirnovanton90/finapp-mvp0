@@ -2,10 +2,9 @@ import { ItemKind, ItemOut, TransactionOut } from "@/lib/api";
 
 /**
  * Возвращает основную стоимость актива в копейках/центах (для отображения по primary_value_kind).
- * Значение всегда в валюте актива: рубли в копейках или иностранная валюта в центах.
- * Использовать везде: карточки, селекторы, отчёты, дашборд.
+ * Значение в валюте актива. Использует balance_currency_cents/balance_rub_cents из API при наличии.
  */
-export function getItemPrimaryValueCents(item: ItemOut): number {
+export function getItemPrimaryValueCents(item: ItemOut, _fxRateForCurrency?: number): number {
   const kind = item.primary_value_kind ?? "BALANCE";
   if (kind === "MARKET") {
     if (item.currency_code && item.currency_code !== "RUB" && item.latest_market_value_currency_cents != null) {
@@ -13,9 +12,12 @@ export function getItemPrimaryValueCents(item: ItemOut): number {
     }
     if (item.latest_market_value_rub != null) return item.latest_market_value_rub;
   }
-  // acquisitionCents / investedCents на ItemOut — в валюте актива (копейки/центы)
   if (kind === "ACQUISITION" && item.acquisitionCents != null) return item.acquisitionCents;
   if (kind === "INVESTED" && item.investedCents != null) return item.investedCents;
+  // BALANCE: единый источник — API отдаёт balance_currency_cents (в валюте актива)
+  if (item.balance_currency_cents != null) {
+    return item.balance_currency_cents;
+  }
   return item.current_value_rub;
 }
 

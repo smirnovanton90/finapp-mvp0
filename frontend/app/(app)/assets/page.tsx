@@ -29,12 +29,11 @@ import {
   Camera,
 } from "lucide-react";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
 import { ConfirmModal } from "@/components/confirm-modal";
+import { FormModal } from "@/components/form-modal";
 import { EmptyState } from "@/components/empty-state";
 
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { CurrencyChip } from "@/components/currency-chip";
@@ -50,7 +49,7 @@ import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { CollapsibleFormSection } from "@/components/ui/collapsible-form-section";
-import { TextField, DateField, SelectField } from "@/components/ui/form-field";
+import { TextField, DateField, SelectField, FormField } from "@/components/ui/form-field";
 import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
 import { cn } from "@/lib/utils";
@@ -657,6 +656,7 @@ export default function Page() {
   const [sectionId, setSectionId] = useState("");
 
   const [closeItemDialogOpen, setCloseItemDialogOpen] = useState(false);
+  const [closeDialogError, setCloseDialogError] = useState<string | null>(null);
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
   const [closingItem, setClosingItem] = useState<ItemOut | null>(null);
   const [buySellAsset, setBuySellAsset] = useState<ItemOut | null>(null);
@@ -865,7 +865,7 @@ export default function Page() {
         kind: item.kind,
         typeCode: item.type_code,
         currencyCode: item.currency_code,
-        initialValue: item.initial_value_rub,
+        initialValue: item.initial_balance_minor,
         openDate: item.open_date ?? null,
         depositTermDays: item.deposit_term_days ?? null,
         interestRate:
@@ -913,11 +913,11 @@ export default function Page() {
     (item: ItemOut) => {
       if (isBankCardItem(item) && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
-        if (linked) return getItemPrimaryValueCents(linked);
+        if (linked) return getItemPrimaryValueCents(linked, rateByCode[linked.currency_code ?? "RUB"]);
       }
-      return getItemPrimaryValueCents(item);
+      return getItemPrimaryValueCents(item, rateByCode[item.currency_code ?? "RUB"]);
     },
-    [itemsById]
+    [itemsById, rateByCode]
   );
 
   const resolveItemEffectiveKind = useCallback(
@@ -969,11 +969,16 @@ export default function Page() {
       // Если рыночная цена не загружена, возвращаем null
       return null;
     }
-    
-    // Для обычных активов/обязательств используем основную стоимость
+    // Для валютных с BALANCE используем balance_rub_cents (рублёвый эквивалент из API)
+    const currency = (item.currency_code ?? "RUB").toUpperCase();
+    if (currency !== "RUB" && (item.primary_value_kind ?? "BALANCE") === "BALANCE") {
+      if (item.balance_rub_cents != null) return item.balance_rub_cents;
+      return item.current_value_rub;
+    }
+    // Для обычных (RUB) или иных видов стоимости — переводим из валюты в рубли по курсу
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
-    const amount = Math.abs(getItemPrimaryValueCents(item)) / 100;
+    const amount = Math.abs(getItemPrimaryValueCents(item, rate)) / 100;
     return Math.round(amount * rate * 100);
   }
 
@@ -981,9 +986,15 @@ export default function Page() {
   function getPrimaryValueRubCents(item: ItemOut): number | null {
     const kind = item.primary_value_kind ?? "BALANCE";
     if (kind === "MARKET") return getRubEquivalentCents(item);
+    // Для валютных с BALANCE используем balance_rub_cents (рублёвый эквивалент из API)
+    const currency = (item.currency_code ?? "RUB").toUpperCase();
+    if (currency !== "RUB") {
+      if (item.balance_rub_cents != null) return item.balance_rub_cents;
+      return item.current_value_rub;
+    }
     const rate = rateByCode[item.currency_code];
     if (!rate) return null;
-    const amount = Math.abs(getItemPrimaryValueCents(item)) / 100;
+    const amount = Math.abs(getItemPrimaryValueCents(item, rate)) / 100;
     return Math.round(amount * rate * 100);
   }
 
@@ -2573,82 +2584,53 @@ export default function Page() {
     }
   }
 
-  async function onClose(item: ItemOut) {
+  function onClose(item: ItemOut) {
     setError(null);
-    
-    const hasBalance = hasNonZeroBalance(item);
-    
-    if (hasBalance) {
-      setClosingItem(item);
-      setClosingDate(getTodayDateKey());
-      setCloseTransferItemId("");
-      setCloseWriteOff(false);
-      setCloseItemDialogOpen(true);
-      return;
-    }
-    
-    // Если баланс нулевой, продолжаем как раньше
-    setLoading(true);
-    try {
-      if (item.type_code === "bank_account") {
-        const linkedCards = linkedCardsByAccountId.get(item.id) ?? [];
-        if (linkedCards.length > 0) {
-          const confirmed = await askConfirm(
-            "Закрыть счет?",
-            "К счету привязаны активные карты. Закрыть счет вместе с привязанными картами?"
-          );
-          if (!confirmed) {
-            setLoading(false);
-            return;
-          }
-          await closeItem(item.id, { closeCards: true });
-        } else {
-          await closeItem(item.id);
-        }
-      } else {
-        await closeItem(item.id);
-      }
-      await loadItems();
-    } catch (e: any) {
-      setError(e?.message ?? "Не удалось закрыть счет");
-    } finally {
-      setLoading(false);
-    }
+    setCloseDialogError(null);
+    setClosingItem(item);
+    setClosingDate(getTodayDateKey());
+    setCloseTransferItemId("");
+    setCloseWriteOff(false);
+    setCloseItemDialogOpen(true);
   }
 
-  async function onConfirmClose() {
+  async function onConfirmClose(errorSetter?: (msg: string | null) => void) {
     if (!closingItem) return;
-    
+    const hasBalance = hasNonZeroBalance(closingItem);
+    const setErr = errorSetter ?? setError;
+
     setLoading(true);
-    setError(null);
+    setErr(null);
     try {
-      const payload: any = {
+      const payload: { closing_date: string; closeCards?: boolean; write_off?: boolean; transfer_to_item_id?: number } = {
         closing_date: closingDate,
       };
-      
-      if (closeWriteOff) {
-        payload.write_off = true;
-      } else if (closeTransferItemId) {
-        payload.transfer_to_item_id = Number(closeTransferItemId);
-      } else {
-        setError("Выберите способ обработки остатка: перевод или списание");
-        setLoading(false);
-        return;
+
+      if (hasBalance) {
+        if (closeWriteOff) {
+          payload.write_off = true;
+        } else if (closeTransferItemId) {
+          payload.transfer_to_item_id = Number(closeTransferItemId);
+        } else {
+          setErr("Выберите способ обработки остатка: перевод или списание");
+          setLoading(false);
+          return;
+        }
       }
-      
+
       if (closingItem.type_code === "bank_account") {
         const linkedCards = linkedCardsByAccountId.get(closingItem.id) ?? [];
         if (linkedCards.length > 0) {
           payload.closeCards = true;
         }
       }
-      
+
       await closeItem(closingItem.id, payload);
       await loadItems();
       setCloseItemDialogOpen(false);
       setClosingItem(null);
     } catch (e: any) {
-      setError(e?.message ?? "Не удалось закрыть счет");
+      setErr(e?.message ?? "Не удалось закрыть счет");
     } finally {
       setLoading(false);
     }
@@ -3104,57 +3086,61 @@ export default function Page() {
 
 
 
-      <Dialog open={closeItemDialogOpen} onOpenChange={setCloseItemDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Закрытие актива/обязательства</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid gap-2">
-              <Label>Дата закрытия</Label>
-              <Input
-                type="date"
-                value={closingDate}
-                onChange={(e) => setClosingDate(e.target.value)}
-                className="border-2 border-border/70 bg-white shadow-none"
+      <FormModal
+        open={closeItemDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCloseItemDialogOpen(false);
+            setClosingItem(null);
+            setCloseDialogError(null);
+          }
+        }}
+        title="Закрытие актива/обязательства"
+        icon={<Archive className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
+        formError={closeDialogError}
+        onSubmit={(e) => {
+          e.preventDefault();
+          onConfirmClose(setCloseDialogError);
+        }}
+        onCancel={() => {
+          setCloseItemDialogOpen(false);
+          setClosingItem(null);
+          setCloseDialogError(null);
+        }}
+        submitLabel={loading ? "Закрываем..." : "Закрыть"}
+        cancelLabel="Отмена"
+        loading={loading}
+        disabled={
+          !closingDate ||
+          (closingItem != null &&
+            hasNonZeroBalance(closingItem) &&
+            !closeWriteOff &&
+            !closeTransferItemId)
+        }
+      >
+        <DateField
+          label="Дата закрытия"
+          required
+          value={closingDate}
+          onChange={(e) => setClosingDate(e.target.value)}
+        />
+        {closingItem && hasNonZeroBalance(closingItem) && (
+          <>
+            <FormField label="Обработка остатка">
+              <SegmentedSelector
+                options={[
+                  { value: "transfer", label: "Перевести на", colorScheme: "purple" },
+                  { value: "write_off", label: "Списать", colorScheme: "red" },
+                ]}
+                value={closeWriteOff ? "write_off" : "transfer"}
+                onChange={(v) => {
+                  setCloseWriteOff(v === "write_off");
+                  if (v === "transfer") setCloseTransferItemId("");
+                }}
               />
-            </div>
-            
-            <div className="grid gap-2">
-              <Label>Обработка остатка</Label>
-              <div className="inline-flex items-stretch overflow-hidden rounded-full border-2 border-border/70 bg-card p-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCloseWriteOff(false);
-                    setCloseTransferItemId("");
-                  }}
-                  className={[
-                    segmentedButtonBase,
-                    !closeWriteOff ? "bg-violet-600 text-white" : "bg-card text-foreground hover:bg-accent",
-                  ].join(" ")}
-                >
-                  Перевести на
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCloseWriteOff(true);
-                    setCloseTransferItemId("");
-                  }}
-                  className={[
-                    segmentedButtonBase,
-                    closeWriteOff ? "bg-violet-600 text-white" : "bg-card text-foreground hover:bg-accent",
-                  ].join(" ")}
-                >
-                  Списать
-                </button>
-              </div>
-            </div>
-
+            </FormField>
             {!closeWriteOff && (
-              <div className="grid gap-2">
-                <Label>Актив/обязательство для перевода</Label>
+              <FormField label="Актив/обязательство для перевода">
                 <ItemSelector
                   items={activeItems.filter((item) => item.id !== closingItem?.id)}
                   selectedIds={closeTransferItemId ? [Number(closeTransferItemId)] : []}
@@ -3175,29 +3161,11 @@ export default function Page() {
                   itemCounts={itemTxCounts}
                   ariaLabel="Актив/обязательство для перевода"
                 />
-              </div>
+              </FormField>
             )}
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="border-2 border-border/70 bg-white shadow-none"
-              onClick={() => setCloseItemDialogOpen(false)}
-            >
-              Отмена
-            </Button>
-            <Button
-              type="button"
-              disabled={loading || (!closeWriteOff && !closeTransferItemId)}
-              onClick={onConfirmClose}
-              className="bg-violet-600 hover:bg-violet-700 text-white"
-            >
-              {loading ? "Закрываем..." : "Закрыть"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </>
+        )}
+      </FormModal>
 
       <CreateCounterpartyModal
         open={createCounterpartyOpen}

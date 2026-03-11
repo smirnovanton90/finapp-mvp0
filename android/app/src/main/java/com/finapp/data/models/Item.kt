@@ -44,7 +44,8 @@ data class Item(
     @SerializedName("position_lots") val positionLots: Int?,
     @SerializedName("lot_size") val lotSize: Int?,
     @SerializedName("face_value_cents") val faceValueCents: Int?,
-    @SerializedName("initial_value_rub") val initialValueRub: Int,
+    /** Начальный остаток в валюте актива (минорные единицы: копейки/центы). */
+    @SerializedName("initial_balance_minor") val initialBalanceMinor: Int,
     @SerializedName("current_value_rub") val currentValueRub: Int,
     @SerializedName("start_date") val startDate: String,
     @SerializedName("history_status") val historyStatus: ItemHistoryStatus,
@@ -79,5 +80,6 @@ data class ItemCreate(
     @SerializedName("commission_enabled") val commissionEnabled: Boolean? = null,
     @SerializedName("commission_amount_rub") val commissionAmountRub: Int? = null,
     @SerializedName("commission_payment_item_id") val commissionPaymentItemId: Int? = null,
-    @SerializedName("initial_value_rub") val initialValueRub: Int
+    /** Начальный остаток в валюте актива (минорные единицы: копейки/центы). */
+    @SerializedName("initial_balance_minor") val initialBalanceMinor: Int
 )

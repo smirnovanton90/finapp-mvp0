@@ -383,7 +383,7 @@ export async function executeImportDzen(
           name: (state.name || acc.name).trim(),
           currency_code: (state.currency ?? acc.currency) || "RUB",
           open_date: accountOpenDate,
-          initial_value_rub: initialValueCents,
+          initial_balance_minor: initialValueCents,
           counterparty_id: state.counterpartyId ?? null,
         });
         accountKeyToItemId.set(key, created.id);

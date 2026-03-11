@@ -94,7 +94,7 @@ def plan_signature(item: Item, settings: ItemPlanSettings | None) -> tuple | Non
             "INTEREST",
             item.type_code,
             item.currency_code,
-            item.initial_value_rub,
+            item.initial_balance_minor,
             item.open_date,
             item.deposit_term_days,
             item.deposit_end_date,
@@ -127,7 +127,7 @@ def plan_signature(item: Item, settings: ItemPlanSettings | None) -> tuple | Non
             item.type_code,
             item.kind,
             item.currency_code,
-            item.initial_value_rub,
+            item.initial_balance_minor,
             item.open_date,
             item.start_date,
             item.interest_rate,
@@ -474,7 +474,7 @@ def _create_interest_chain(
 
     amounts_precise: list[Decimal] = []
     amounts_rounded: list[int] = []
-    principal_cents = item.initial_value_rub
+    principal_cents = item.initial_balance_minor
     
     # Для вкладов используем deposit_term_days вместо фактического количества дней между датами
     if item.type_code == "deposit" and item.deposit_term_days is not None:
@@ -581,7 +581,7 @@ def _create_deposit_closing_transaction(
     interest_amounts: list[int],
 ) -> None:
     """Одна плановая транзакция закрытия вклада на дату окончания (без цепочки). Сумма = тело вклада + все плановые проценты при капитализации. Счёт перевода — счёт, с которого открывался вклад."""
-    closing_amount = item.initial_value_rub or 0
+    closing_amount = item.initial_balance_minor or 0
     if item.interest_capitalization and interest_amounts:
         closing_amount += sum(interest_amounts)
 
@@ -867,7 +867,7 @@ def _create_loan_chains(
 
     if item.kind == "LIABILITY":
         principal_amounts, interest_amounts = _build_auto_loan_schedule(
-            principal_cents=item.initial_value_rub,
+            principal_cents=item.initial_balance_minor,
             rate=item.interest_rate,
             period_start=base_date,
             payout_dates=schedule_dates,
@@ -881,7 +881,7 @@ def _create_loan_chains(
         if settings.payment_amount_rub is None or settings.payment_amount_kind is None:
             raise HTTPException(status_code=400, detail="payment amount is required")
         principal_amounts, interest_amounts = _build_loan_schedule(
-            principal_cents=item.initial_value_rub,
+            principal_cents=item.initial_balance_minor,
             rate=item.interest_rate,
             period_start=base_date,
             payout_dates=schedule_dates,

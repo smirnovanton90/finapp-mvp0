@@ -78,11 +78,13 @@ export function getRateForDate(
   return null;
 }
 
+/** Формат суммы в рублях: без лишних нулей после запятой (как в остальном UI). */
 export function formatRub(valueInCents: number): string {
-  return new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 2,
+  const formatted = new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(valueInCents / 100);
+  return formatted.replace(/,0+$/, "").replace(/,$/, "");
 }
 
 export function formatSignedValue(valueInCents: number, formatter: (value: number) => string): string {

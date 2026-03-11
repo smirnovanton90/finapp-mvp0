@@ -61,8 +61,13 @@ export type ItemOut = {
   lot_size: number | null;
   face_value_cents: number | null;
   quantity_units: number | null;
-  initial_value_rub: number;
+  /** Начальный остаток в валюте актива (минорные единицы: копейки/центы). */
+  initial_balance_minor: number;
   current_value_rub: number;
+  /** Текущее сальдо в валюте актива (минорные единицы). Заполняется в list/get. */
+  balance_currency_cents?: number | null;
+  /** Текущее сальдо в рублях (копейки). Заполняется в list/get. */
+  balance_rub_cents?: number | null;
   start_date: string;
   history_status: ItemHistoryStatus;
   created_at: string;
@@ -101,25 +106,21 @@ export type ItemMarketValueCreate = {
 };
 
 /**
- * Стоимости актива.
- * Все числовые поля (balance, acquisition, invested, market, income, expense) — значения в валюте актива:
- * для рублёвого актива — рубли в копейках, для актива в иностранной валюте — сумма в этой валюте в центах.
+ * Стоимости актива (поля совпадают с API).
+ * Баланс: balance_currency_cents (в валюте актива), balance_rub_cents (в рублях).
+ * acquisition_rub, invested_rub, market_rub — в валюте актива (копейки/центы).
+ * income_rub, expense_rub — рублёвый эквивалент по курсу на дату каждой транзакции.
  */
 export type ItemCostsOut = {
-  /** Балансовая стоимость в валюте актива (копейки/центы). */
-  balance: number;
-  /** Стоимость приобретения в валюте актива (копейки/центы). */
-  acquisition: number;
-  /** Стоимость вложенных средств в валюте актива (копейки/центы). */
-  invested: number;
-  /** Рыночная стоимость в валюте актива (копейки/центы). */
-  market: number | null;
-  /** Эквивалент рыночной стоимости в рублях (копейки). */
+  balance_currency_cents: number;
+  balance_rub_cents: number;
+  balance_rub: number;
+  acquisition_rub: number;
+  invested_rub: number;
+  market_rub: number | null;
   market_value_rub?: number | null;
-  /** Доход по активу за период в валюте актива (копейки/центы). */
-  income: number;
-  /** Расход по активу за период в валюте актива (копейки/центы). */
-  expense: number;
+  income_rub: number;
+  expense_rub: number;
 };
 
 /**
@@ -206,7 +207,8 @@ export type ItemCreate = {
   commission_enabled?: boolean | null;
   commission_amount_rub?: number | null;
   commission_payment_item_id?: number | null;
-  initial_value_rub: number;
+  /** Начальный остаток в валюте актива (минорные единицы: копейки/центы). */
+  initial_balance_minor: number;
   plan_settings?: ItemPlanSettings | null;
   synonyms?: string[];
   primary_value_kind?: PrimaryValueKind | null;
@@ -1235,27 +1237,37 @@ export async function archiveItem(id: number): Promise<ItemOut> {
 
 export async function closeItem(
   id: number,
-  payload?: {
+  payload: {
+    closing_date: string;
     closeCards?: boolean;
-    closing_date?: string;
     transfer_to_item_id?: number;
     write_off?: boolean;
   }
 ): Promise<ItemOut> {
   const params = new URLSearchParams();
-  if (payload?.closeCards) params.set("close_cards", "true");
+  if (payload.closeCards) params.set("close_cards", "true");
   const qs = params.toString();
-  const bodyPayload: any = {};
-  if (payload) {
-    if (payload.closeCards !== undefined) bodyPayload.close_cards = payload.closeCards;
-    if (payload.closing_date !== undefined) bodyPayload.closing_date = payload.closing_date;
-    if (payload.transfer_to_item_id !== undefined) bodyPayload.transfer_to_item_id = payload.transfer_to_item_id;
-    if (payload.write_off !== undefined) bodyPayload.write_off = payload.write_off;
-  }
-  const body = Object.keys(bodyPayload).length > 0 ? JSON.stringify(bodyPayload) : undefined;
+  const bodyPayload: Record<string, unknown> = {
+    closing_date: payload.closing_date,
+  };
+  if (payload.closeCards !== undefined) bodyPayload.close_cards = payload.closeCards;
+  if (payload.transfer_to_item_id !== undefined) bodyPayload.transfer_to_item_id = payload.transfer_to_item_id;
+  if (payload.write_off !== undefined) bodyPayload.write_off = payload.write_off;
   const res = await authFetch(`${API_BASE}/items/${id}/close${qs ? `?${qs}` : ""}`, {
     method: "PATCH",
-    ...(body ? { body } : {}),
+    body: JSON.stringify(bodyPayload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return mapItemFromApi(await res.json());
+}
+
+export async function updateItemClosedAt(
+  id: number,
+  closing_date: string
+): Promise<ItemOut> {
+  const res = await authFetch(`${API_BASE}/items/${id}/closed_at`, {
+    method: "PATCH",
+    body: JSON.stringify({ closing_date }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return mapItemFromApi(await res.json());
@@ -1271,17 +1283,21 @@ function mapItemFromApi(raw: unknown): ItemOut {
   } as ItemOut;
 }
 
-/** Маппинг ответа API: *_rub → поля в валюте актива (balance, acquisition, invested, market, income, expense). */
+/** Маппинг ответа API: поля совпадают с ItemCostsOut (balance_currency_cents, balance_rub_cents, *_rub). */
 function mapItemCostsFromApi(raw: unknown): ItemCostsOut {
   const r = raw as Record<string, unknown>;
+  const balanceCurrency = (r.balance_currency_cents ?? r.balance ?? r.balance_rub) as number;
+  const balanceRub = (r.balance_rub_cents ?? r.balance_rub ?? r.balance_currency_cents ?? r.balance) as number;
   return {
-    balance: (r.balance ?? r.balance_rub) as number,
-    acquisition: (r.acquisition ?? r.acquisition_rub) as number,
-    invested: (r.invested ?? r.invested_rub) as number,
-    market: (r.market ?? r.market_rub) as number | null,
+    balance_currency_cents: balanceCurrency,
+    balance_rub_cents: balanceRub,
+    balance_rub: balanceRub,
+    acquisition_rub: (r.acquisition_rub ?? r.acquisition) as number,
+    invested_rub: (r.invested_rub ?? r.invested) as number,
+    market_rub: (r.market_rub ?? r.market) as number | null,
     market_value_rub: r.market_value_rub as number | null | undefined,
-    income: (r.income ?? r.income_rub) as number,
-    expense: (r.expense ?? r.expense_rub) as number,
+    income_rub: (r.income_rub ?? r.income) as number,
+    expense_rub: (r.expense_rub ?? r.expense) as number,
   };
 }
 
@@ -1574,7 +1590,13 @@ export async function createTransaction(
   payload: TransactionCreate
 ): Promise<TransactionOut> {
   const { amount, ...rest } = payload;
-  const body: Record<string, unknown> = { ...rest, amount_rub: amount };
+  const amountCents =
+    amount != null && Number.isFinite(amount) ? amount : 0;
+  const body: Record<string, unknown> = {
+    ...rest,
+    amount_rub: amountCents,
+    amount: amountCents,
+  };
   if (payload.parent_transaction_id != null) {
     body.parent_transaction_id = payload.parent_transaction_id;
   }
@@ -1594,7 +1616,17 @@ export async function createDebtsTransaction(
   payload: TransactionDebtsCreate
 ): Promise<TransactionOut> {
   const { amount, amount_counterparty, ...rest } = payload;
-  const body = { ...rest, amount_rub: amount, amount_counterparty: amount_counterparty ?? undefined };
+  const amountCents =
+    amount != null && Number.isFinite(amount) ? amount : 0;
+  if (amountCents < 1) {
+    throw new Error("Укажите сумму транзакции (больше нуля).");
+  }
+  const body: Record<string, unknown> = {
+    ...rest,
+    amount_rub: amountCents,
+    amount: amountCents,
+  };
+  if (amount_counterparty != null) body.amount_counterparty = amount_counterparty;
   const res = await authFetch(`${API_BASE}/transactions/debts`, {
     method: "POST",
     body: JSON.stringify(body),

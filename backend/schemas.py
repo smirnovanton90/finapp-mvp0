@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, date
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from typing import Literal
 
 ItemKind = Literal["ASSET", "LIABILITY"]
@@ -123,7 +123,7 @@ class AccountingStartDateUpdate(BaseModel):
 
 class ItemCloseRequest(BaseModel):
     close_cards: bool = False
-    closing_date: date | None = None
+    closing_date: date  # обязательна при закрытии
     transfer_to_item_id: int | None = None
     write_off: bool = False
 
@@ -132,6 +132,11 @@ class ItemCloseRequest(BaseModel):
         if self.write_off and self.transfer_to_item_id is not None:
             raise ValueError("Cannot specify both write_off and transfer_to_item_id")
         return self
+
+
+class ItemClosedAtUpdate(BaseModel):
+    """Обновление даты закрытия (только для уже закрытых активов)."""
+    closing_date: date
 
 
 class OnboardingStateOut(BaseModel):
@@ -252,7 +257,8 @@ class ItemCreate(BaseModel):
     commission_enabled: bool | None = None
     commission_amount_rub: int | None = Field(default=None, ge=0)
     commission_payment_item_id: int | None = None
-    initial_value_rub: int
+    # Начальный остаток в валюте актива (минорные единицы: копейки/центы).
+    initial_balance_minor: int
     plan_settings: ItemPlanSettingsBase | None = None
     synonyms: list[str] | None = None
     primary_value_kind: PrimaryValueKind | None = None
@@ -350,13 +356,13 @@ class ItemCreate(BaseModel):
                     raise ValueError("card_account_id is not allowed for credit bank_card")
                 if self.credit_limit is None:
                     raise ValueError("credit_limit is required for credit bank_card")
-                if self.initial_value_rub < -self.credit_limit:
-                    raise ValueError("initial_value_rub cannot be below credit_limit")
+                if self.initial_balance_minor < -self.credit_limit:
+                    raise ValueError("initial_balance_minor cannot be below credit_limit")
             else:
                 if self.credit_limit is not None:
                     raise ValueError("credit_limit is only allowed for credit bank_card")
-                if self.initial_value_rub < 0:
-                    raise ValueError("initial_value_rub must be non-negative")
+                if self.initial_balance_minor < 0:
+                    raise ValueError("initial_balance_minor must be non-negative")
         else:
             # Активы: отрицательное сальдо допускается
             pass
@@ -410,8 +416,14 @@ class ItemOut(BaseModel):
     lot_size: int | None
     face_value_cents: int | None
     quantity_units: float | None = None
-    initial_value_rub: int
+    # Начальный остаток в валюте актива (минорные единицы: копейки/центы).
+    initial_balance_minor: int
     current_value_rub: int
+    """Рублёвый эквивалент текущего сальдо (копейки). Для RUB = current_balance_minor."""
+    balance_currency_cents: int | None = None
+    """Текущее сальдо в валюте актива (минорные единицы). Заполняется в list/get."""
+    balance_rub_cents: int | None = None
+    """Текущее сальдо в рублях (копейки). Заполняется в list/get."""
     start_date: date
     history_status: ItemHistoryStatus
     created_at: datetime
@@ -496,9 +508,14 @@ class ItemMarketValueOut(BaseModel):
 
 
 class ItemCostsOut(BaseModel):
-    """Four cost types for an item (all in kopecks)."""
+    """Cost types for an item. Баланс в валюте актива и в рублях."""
 
+    balance_currency_cents: int
+    """Баланс в валюте актива (минорные единицы)."""
+    balance_rub_cents: int
+    """Баланс в рублях (копейки)."""
     balance_rub: int
+    """Алиас balance_rub_cents для обратной совместимости."""
     acquisition_rub: int
     invested_rub: int
     market_rub: int | None
@@ -573,8 +590,12 @@ class TransactionBase(BaseModel):
     primary_item_id: int
     counterparty_item_id: int | None = None
     counterparty_id: int | None = None
-    # Сумма в валюте счёта primary (минорные единицы). В API по историческим причинам поле называется amount_rub.
-    amount_primary_minor: int = Field(ge=0, validation_alias="amount_rub", serialization_alias="amount_rub")
+    # Сумма в валюте счёта primary (минорные единицы). В API — amount_rub или amount; при конструировании в коде — amount_primary_minor.
+    amount_primary_minor: int = Field(
+        ge=0,
+        validation_alias=AliasChoices("amount_rub", "amount", "amount_primary_minor"),
+        serialization_alias="amount_rub",
+    )
     amount_counterparty: int | None = Field(default=None, ge=0)
     primary_quantity_lots: int | None = Field(default=None, ge=0)
     counterparty_quantity_lots: int | None = Field(default=None, ge=0)
@@ -639,8 +660,12 @@ class TransactionDebtsCreate(BaseModel):
     transaction_counterparty_id: int | None = None  # If set, used as transaction counterparty (e.g. «Где платите»); otherwise same as counterparty_id
     primary_item_id: int = Field(..., description="User-selected asset/liability (source or target)")
     transaction_date: datetime
-    # Сумма в валюте счёта primary (минорные единицы). В API — amount_rub.
-    amount_primary_minor: int = Field(..., ge=1, validation_alias="amount_rub", serialization_alias="amount_rub")
+    # Сумма в валюте счёта primary (минорные единицы). В API — amount_rub или amount.
+    amount_primary_minor: int = Field(
+        ..., ge=1,
+        validation_alias=AliasChoices("amount_rub", "amount", "amount_primary_minor"),
+        serialization_alias="amount_rub",
+    )
     amount_counterparty: int | None = Field(default=None, ge=0)
     transaction_type: TransactionType = "ACTUAL"
     comment: str | None = None
@@ -656,8 +681,12 @@ class TransactionTheyPaidForMeCreate(BaseModel):
 
     who_paid_counterparty_id: int
     where_paid_counterparty_id: int
-    # Сумма в валюте счёта (минорные единицы). В API — amount_rub.
-    amount_primary_minor: int = Field(..., ge=1, validation_alias="amount_rub", serialization_alias="amount_rub")
+    # Сумма в валюте счёта (минорные единицы). В API — amount_rub или amount.
+    amount_primary_minor: int = Field(
+        ..., ge=1,
+        validation_alias=AliasChoices("amount_rub", "amount"),
+        serialization_alias="amount_rub",
+    )
     transaction_date: datetime | None = None
     category_id: int | None = None
     comment: str | None = None

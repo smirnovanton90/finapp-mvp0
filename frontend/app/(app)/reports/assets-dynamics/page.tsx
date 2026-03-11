@@ -743,20 +743,20 @@ export default function AssetsDynamicsPage() {
       if (item.type_code === "bank_card" && item.card_account_id) {
         const linked = itemsById.get(item.card_account_id);
         if (linked) {
-          // Для элементов, созданных в день начала учета, начальное значение - это initial_value_rub
+          // Для элементов, созданных в день начала учета, начальное значение — начальный остаток в валюте актива
           const linkedStartKey = getItemStartKey(linked, accountingStartDate);
           const isCreatedOnStartDate = linkedStartKey === accountingStartDate;
           return linked.history_status === "NEW" && !isCreatedOnStartDate
             ? 0
-            : linked.initial_value_rub;
+            : linked.initial_balance_minor;
         }
       }
-      // Для элементов, созданных в день начала учета, начальное значение - это initial_value_rub
+      // Для элементов, созданных в день начала учета, начальное значение — начальный остаток в валюте актива
       const itemStartKey = getItemStartKey(item, accountingStartDate);
       const isCreatedOnStartDate = itemStartKey === accountingStartDate;
       return item.history_status === "NEW" && !isCreatedOnStartDate
         ? 0
-        : item.initial_value_rub;
+        : item.initial_balance_minor;
     },
     [itemsById, accountingStartDate]
   );
@@ -2339,32 +2339,51 @@ export default function AssetsDynamicsPage() {
                 </div>
               </div>
             )}
-            <div
-              className="relative py-6"
-              style={{
-                opacity: loading || loadingCostHistory ? 0.6 : 1,
-                transition: "opacity 0.3s ease-in-out",
-              }}
-            >
-              {error && (
+            <div className="relative py-6">
+              {(loading || (effectiveSelectedItems.length > 0 && loadingCostHistory) || (needsRates && ratesLoading)) && (
+                <div
+                  className="relative w-full min-w-0 rounded-lg"
+                  style={{ aspectRatio: `${width}/${height}`, minHeight: 280 }}
+                  aria-hidden
+                >
+                  <div
+                    className="absolute inset-0 rounded-lg animate-pulse"
+                    style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
+                  />
+                  <div className="absolute inset-0 flex flex-col justify-end gap-1 px-12 pb-8 pt-10">
+                    {[85, 60, 45, 55, 70, 50, 65, 75, 40, 90].map((w, i) => (
+                      <div
+                        key={i}
+                        className="h-2 rounded"
+                        style={{
+                          width: `${w}%`,
+                          backgroundColor: "rgba(255,255,255,0.12)",
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!loading && !(effectiveSelectedItems.length > 0 && loadingCostHistory) && !(needsRates && ratesLoading) && error && (
                 <div className="flex h-80 items-center justify-center text-sm text-red-600">
                   {error}
                 </div>
               )}
 
-              {!error && effectiveSelectedItems.length === 0 && !loading && (
+              {!loading && !(effectiveSelectedItems.length > 0 && loadingCostHistory) && !(needsRates && ratesLoading) && !error && effectiveSelectedItems.length === 0 && (
                 <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Нет активов и обязательств для построения отчета.
                 </div>
               )}
 
-              {!error && effectiveSelectedItems.length > 0 && chartDataForDisplay.length === 0 && !loading && (
+              {!loading && !(effectiveSelectedItems.length > 0 && loadingCostHistory) && !(needsRates && ratesLoading) && !error && effectiveSelectedItems.length > 0 && chartDataForDisplay.length === 0 && (
                 <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">
                   Нет данных для выбранного периода.
                 </div>
               )}
 
-              {!error && effectiveSelectedItems.length > 0 && chartDataForDisplay.length > 0 && (
+              {!loading && !(effectiveSelectedItems.length > 0 && loadingCostHistory) && !(needsRates && ratesLoading) && !error && effectiveSelectedItems.length > 0 && chartDataForDisplay.length > 0 && (
                 <div
                   ref={setChartRef}
                   className="relative w-full min-w-0"

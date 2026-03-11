@@ -75,10 +75,6 @@ const nav = [
         label: "\u0414\u0438\u043d\u0430\u043c\u0438\u043a\u0430 \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u0438 \u0430\u043a\u0442\u0438\u0432\u043e\u0432",
       },
       {
-        href: "/reports/income-expense-by-period",
-        label: "Динамика доходов и расходов",
-      },
-      {
         href: "/reports/income-expense-dynamics",
         label:
           "Динамика доходов и расходов по категориям",

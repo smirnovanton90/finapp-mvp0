@@ -47,7 +47,8 @@ def ensure_counterparty_settlements_item(
         currency_code=currency_code,
         counterparty_id=counterparty_id,
         open_date=open_date,
-        initial_value_rub=0,
+        initial_balance_minor=0,
+        current_balance_minor=0,
         current_value_rub=0,
         start_date=accounting_start_date,
         history_status="NEW",
@@ -82,7 +83,8 @@ def create_counterparty_settlements_item(
         currency_code=currency_code,
         counterparty_id=counterparty_id,
         open_date=open_date,
-        initial_value_rub=0,
+        initial_balance_minor=0,
+        current_balance_minor=0,
         current_value_rub=0,
         start_date=accounting_start_date,
         history_status="NEW",
@@ -93,10 +95,13 @@ def create_counterparty_settlements_item(
 
 
 def update_settlements_item_closed_status(db: Session, item: Item) -> None:
-    """If item is counterparty_settlements: set closed_at when balance is 0, clear when non-zero."""
+    """If item is counterparty_settlements: set closed_at when balance is 0, clear when non-zero.
+    Используем current_balance_minor (сальдо в валюте актива), т.к. для валютных счетов current_value_rub
+    может не обновляться при каждой транзакции."""
     if item.type_code != COUNTERPARTY_SETTLEMENTS_TYPE:
         return
-    if item.current_value_rub == 0:
+    balance_minor = getattr(item, "current_balance_minor", item.current_value_rub)
+    if balance_minor == 0:
         if item.closed_at is None:
             item.closed_at = datetime.now(timezone.utc)
     else:

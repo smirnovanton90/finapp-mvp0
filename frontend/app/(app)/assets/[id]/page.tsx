@@ -1543,8 +1543,8 @@ export default function AssetDetailPage() {
     );
     if (pointsInRange.length === 0) return null;
 
-    // API: balance/acquisition/invested — в рублёвых копейках; market для не-RUB — в центах валюты актива.
-    // Приводим к рублям для avgDailyRub (для валютного актива — по курсу на дату точки).
+    // API: для не-RUB актива все поля точки (balance, acquisition, invested, market) — в центах валюты актива.
+    // Для расчёта рентабельности в рублях знаменатель — среднедневная стоимость в рублёвых эквивалентах (по курсу на дату точки).
     const itemCurrency = (item.currency_code ?? "RUB").toUpperCase();
     const isCurrencyAsset = itemCurrency !== "RUB";
     const selectValueInRub = (p: (typeof costHistoryData.points)[number]): number => {
@@ -1558,7 +1558,7 @@ export default function AssetDetailPage() {
       } else {
         raw = p.balance ?? 0;
       }
-      if (primaryKind === "MARKET" && isCurrencyAsset && raw !== 0) {
+      if (isCurrencyAsset && raw !== 0) {
         const rate = getRateForDateKey(p.date);
         return (raw / 100) * (rate ?? 0);
       }
@@ -1643,8 +1643,10 @@ export default function AssetDetailPage() {
     }
 
     let yieldAssetAnnualRub: number | null = null;
+    const fxProfitRubCents = dynamics?.courseDiffRub ?? 0;
     if (avgDailyRub > 0 && annualFactor > 0) {
-      yieldAssetAnnualRub = ((incomeRubCents - expenseRubCents) / 100 / avgDailyRub) * annualFactor;
+      const numeratorRub = (incomeRubCents - expenseRubCents + fxProfitRubCents) / 100;
+      yieldAssetAnnualRub = (numeratorRub / avgDailyRub) * annualFactor;
     }
     let yieldAssetAnnualCurrency: number | null = null;
     if (
@@ -1765,16 +1767,20 @@ export default function AssetDetailPage() {
     const showRent = rentHasRub || rentHasCur;
     const showInv = profitability.hasMarketPrimary && (invHasRub || invHasCur);
     if (!showRent && !showInv) return null;
+    const rentRubNumerator = (profitability.incomeFromAsset - profitability.expenseForAsset) / 100 + (profitability.fxProfitRub ?? 0) / 100;
     const rentRubTooltip = (
       <div className="space-y-1.5 text-left">
         <div className="font-medium">Рентабельность (RUB)</div>
-        <div>Формула: (Доход − Расход) / Среднедневная стоимость × (365 / дней)</div>
+        <div>Формула: (Доход − Расход + Курсовые разницы) / Среднедневная стоимость × (365 / дней)</div>
         <div>Доход: {formatAmount(profitability.incomeFromAsset)} ₽</div>
         <div>Расход: {formatAmount(profitability.expenseForAsset)} ₽</div>
+        {profitability.fxProfitRub != null && profitability.fxProfitRub !== 0 && (
+          <div>Курсовые разницы: {formatAmount(profitability.fxProfitRub)} ₽</div>
+        )}
         <div>Среднедневная стоимость: {formatAmount(Math.round(profitability.avgDailyRub * 100))} ₽</div>
         <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
         <div className="pt-0.5 border-t border-white/10">
-          Расчёт: ({fmt((profitability.incomeFromAsset - profitability.expenseForAsset) / 100)} / {fmt(profitability.avgDailyRub)}) × {fmt(profitability.annualFactor)} = {pctFmt(profitability.yieldAssetAnnualRub!)}%
+          Расчёт: ({fmt(rentRubNumerator)} / {fmt(profitability.avgDailyRub)}) × {fmt(profitability.annualFactor)} = {profitability.yieldAssetAnnualRub! > 0 ? "+" : ""}{pctFmt(profitability.yieldAssetAnnualRub!)}%
         </div>
       </div>
     );
@@ -1787,7 +1793,7 @@ export default function AssetDetailPage() {
         <div>Среднедневная стоимость: {fmt(profitability.avgDailyCurrency)} {currencyCode}</div>
         <div>Период: {profitability.dateStart} — {profitability.dateEnd} ({profitability.daysCount} дн.)</div>
         <div className="pt-0.5 border-t border-white/10">
-          Расчёт: ({fmt(profitability.incomeFromAssetInCurrency - profitability.expenseForAssetInCurrency)} / {fmt(profitability.avgDailyCurrency)}) × {fmt(profitability.annualFactor)} = {pctFmt(profitability.yieldAssetAnnualCurrency!)}%
+          Расчёт: ({fmt(profitability.incomeFromAssetInCurrency - profitability.expenseForAssetInCurrency)} / {fmt(profitability.avgDailyCurrency)}) × {fmt(profitability.annualFactor)} = {profitability.yieldAssetAnnualCurrency! > 0 ? "+" : ""}{pctFmt(profitability.yieldAssetAnnualCurrency!)}%
         </div>
       </div>
     ) : null;
@@ -1814,14 +1820,14 @@ export default function AssetDetailPage() {
       </div>
     ) : null;
     const PctCard = ({ value, tooltip, code }: { value: number; tooltip: React.ReactNode; code: string }) => (
-      <div className="flex flex-col items-center gap-2">
-        <CurrencyChip code={code} />
+      <div className="flex flex-row items-center gap-2">
+        <CurrencyChip code={code} className="shrink-0" />
         <Tooltip content={tooltip} side="bottom">
           <span
             className="tabular-nums italic text-4xl font-semibold cursor-help whitespace-nowrap"
             style={value >= 0 ? gradientStyle : { color: RED }}
           >
-            {pctFmt(value)}%
+            {value > 0 ? "+" : ""}{pctFmt(value)}%
           </span>
         </Tooltip>
       </div>
@@ -1830,17 +1836,17 @@ export default function AssetDetailPage() {
       <div className={`flex flex-col gap-3 ${showRent && showInv ? "sm:flex-row" : ""}`}>
         {showRent && (
           <div className="flex flex-col items-center gap-2">
-            <div className="flex flex-wrap justify-center gap-2">
-              {rentHasCur && <PctCard value={profitability.yieldAssetAnnualCurrency!} tooltip={rentCurTooltip ?? ""} code={item?.currency_code ?? "RUB"} />}
+            <div className="flex flex-col items-center gap-2">
               {rentHasRub && <PctCard value={profitability.yieldAssetAnnualRub!} tooltip={rentRubTooltip} code="RUB" />}
+              {rentHasCur && <PctCard value={profitability.yieldAssetAnnualCurrency!} tooltip={rentCurTooltip ?? ""} code={item?.currency_code ?? "RUB"} />}
             </div>
           </div>
         )}
         {showInv && (
           <div className="flex flex-col items-center gap-2">
-            <div className="flex flex-wrap justify-center gap-2">
-              {invHasCur && <PctCard value={profitability.yieldInvestmentsAnnualCurrency!} tooltip={invCurTooltip ?? ""} code={item?.currency_code ?? "RUB"} />}
+            <div className="flex flex-col items-center gap-2">
               {invHasRub && <PctCard value={profitability.yieldInvestmentsAnnualRub!} tooltip={invRubTooltip} code="RUB" />}
+              {invHasCur && <PctCard value={profitability.yieldInvestmentsAnnualCurrency!} tooltip={invCurTooltip ?? ""} code={item?.currency_code ?? "RUB"} />}
             </div>
           </div>
         )}

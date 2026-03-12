@@ -112,6 +112,8 @@ interface AssetCardProps {
   onNavigate?: (item: ItemOut) => void;
   /** Показывать рублёвый эквивалент (по умолчанию true). На мобильной — false, только сальдо в валюте актива. */
   showRubEquivalent?: boolean;
+  /** Для мобильной версии: точки основной стоимости за последние 30 дней (рубли, копейки) — рисуется мини-график справа. */
+  dailyPrimaryValueRubCents?: { date: string; valueRubCents: number }[];
 }
 
 // Simplified industry icon mapping (can be expanded if needed)
@@ -144,6 +146,80 @@ const REPAYMENT_TYPE_LABELS: Record<string, string> = {
   DIFFERENTIATED: "Дифференцированный",
 };
 
+/** Мини-график основной стоимости за 30 дней (как на дэшборде): area + line. */
+function buildMiniChartPath(
+  points: { x: number; y: number; value: number }[],
+  baselineY: number
+): { linePath: string; areaPath: string } {
+  if (points.length === 0) return { linePath: "", areaPath: "" };
+  const lineParts = [`M ${points[0].x} ${points[0].y}`];
+  for (let i = 1; i < points.length; i++) {
+    lineParts.push(`L ${points[i].x} ${points[i].y}`);
+  }
+  const linePath = lineParts.join(" ");
+  const areaPath = linePath
+    ? `${linePath} L ${points[points.length - 1].x} ${baselineY} L ${points[0].x} ${baselineY} Z`
+    : "";
+  return { linePath, areaPath };
+}
+
+function AssetCardMiniChart({
+  series,
+  itemId,
+  strokeColor,
+}: {
+  series: { date: string; valueRubCents: number }[];
+  itemId: number;
+  strokeColor: string;
+}) {
+  if (series.length <= 1) return null;
+  const width = 72;
+  const height = 40;
+  const padding = { top: 4, right: 4, bottom: 4, left: 4 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const values = series.map((p) => p.valueRubCents / 100);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = Math.max(maxV - minV, 1);
+  const paddedMin = minV - range * 0.1;
+  const paddedMax = maxV + range * 0.1;
+  const valueToRatio = (v: number) => (v - paddedMin) / (paddedMax - paddedMin || 1);
+  const points = series.map((p, i) => {
+    const progress = series.length <= 1 ? 0 : i / (series.length - 1);
+    const x = padding.left + innerWidth * progress;
+    const y = padding.top + innerHeight - innerHeight * valueToRatio(p.valueRubCents / 100);
+    return { x, y, value: p.valueRubCents / 100 };
+  });
+  const baselineY = padding.top + innerHeight;
+  const { linePath, areaPath } = buildMiniChartPath(points, baselineY);
+  const gradientId = `asset-mini-chart-${itemId}`;
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="h-10 w-[72px] shrink-0"
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={strokeColor} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} />}
+      {linePath && (
+        <path
+          d={linePath}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
+  );
+}
+
 export function AssetCard({
   item,
   layout = "card",
@@ -162,6 +238,7 @@ export function AssetCard({
   onReady,
   onNavigate,
   showRubEquivalent = true,
+  dailyPrimaryValueRubCents,
 }: AssetCardProps) {
   const isArchived = Boolean(item.archived_at);
   const isClosed = Boolean(item.closed_at);
@@ -392,21 +469,13 @@ export function AssetCard({
             ) : null}
           </div>
         </TableCell>
-        <TableCell className="w-[55%] py-2 px-2 align-middle">
-          <span
-            className="text-sm font-normal block break-words whitespace-normal line-clamp-2"
-            style={{ color: textColor }}
-          >
-            {item.name}
-          </span>
-        </TableCell>
-        <TableCell className="min-w-[90px] py-2 pr-2 pl-2 align-middle text-right">
-          <div className="flex flex-col items-end gap-0.5">
+        <TableCell className="min-w-0 py-2 pl-2 pr-2 align-middle">
+          <div className="flex flex-col gap-1">
+            {/* Сумма над названием, чип после суммы, шрифт суммы крупнее */}
             {showRubEquivalent ? (
               <>
-                <span className="inline-flex items-center gap-1">
-                  <CurrencyChip code="RUB" className="text-xs" />
-                  <span className="text-sm font-medium tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
+                <span className="inline-flex items-center gap-1.5 flex-wrap">
+                  <span className="text-lg font-semibold tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
                     {rubEquivalent != null
                       ? isAsset
                         ? hasNegativeBalance
@@ -415,10 +484,10 @@ export function AssetCard({
                         : `-${formatAmount(Math.abs(rubEquivalent))}`
                       : "-"}
                   </span>
+                  <CurrencyChip code="RUB" className="text-xs" />
                 </span>
                 {currencyCode && currencyCode !== "RUB" && (
-                  <span className="inline-flex items-center gap-1 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                    <CurrencyChip code={currencyCode} className="text-[10px]" />
+                  <span className="inline-flex items-center gap-1.5 flex-wrap text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                     <span className="tabular-nums">
                       {isAsset
                         ? hasNegativeBalance
@@ -426,23 +495,41 @@ export function AssetCard({
                           : formatAmount(displayBalanceCents)
                         : `-${formatAmount(Math.abs(displayBalanceCents))}`}
                     </span>
+                    <CurrencyChip code={currencyCode} className="text-[10px]" />
                   </span>
                 )}
               </>
             ) : (
-              <span className="inline-flex items-center gap-1">
-                <CurrencyChip code={currencyCode || "RUB"} className="text-xs" />
-                <span className="text-sm font-medium tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
+              <span className="inline-flex items-center gap-1.5 flex-wrap">
+                <span className="text-lg font-semibold tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
                   {isAsset
                     ? hasNegativeBalance
                       ? `-${formatAmount(Math.abs(displayBalanceCents))}`
                       : formatAmount(displayBalanceCents)
                     : `-${formatAmount(Math.abs(displayBalanceCents))}`}
                 </span>
+                <CurrencyChip code={currencyCode || "RUB"} className="text-xs" />
               </span>
             )}
+            <span
+              className="text-sm font-normal break-words whitespace-normal line-clamp-2"
+              style={{ color: PLACEHOLDER_COLOR_DARK }}
+            >
+              {item.name}
+            </span>
           </div>
         </TableCell>
+        {dailyPrimaryValueRubCents != null && (
+          <TableCell className="w-[72px] py-2 pl-0 pr-2 align-middle">
+            {dailyPrimaryValueRubCents.length > 1 ? (
+              <AssetCardMiniChart
+                series={dailyPrimaryValueRubCents}
+                itemId={item.id}
+                strokeColor={ACCENT}
+              />
+            ) : null}
+          </TableCell>
+        )}
       </TableRow>
     );
   }

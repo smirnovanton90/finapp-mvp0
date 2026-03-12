@@ -53,6 +53,8 @@ import { useSidebar } from "@/components/ui/sidebar-context";
 import { CollapsibleFormSection } from "@/components/ui/collapsible-form-section";
 import { TextField, DateField, SelectField, FormField } from "@/components/ui/form-field";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
+import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
+import { buildItemDailyPrimaryValueRubCents } from "@/lib/item-daily-value";
 import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE, DROPDOWN_BG, MODAL_BG, BACKGROUND_DT, ACCENT_FILL_MEDIUM } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
 import { cn } from "@/lib/utils";
@@ -81,6 +83,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -641,6 +644,7 @@ export default function Page() {
   const [filterType, setFilterType] = useState<Set<string>>(new Set());
   const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set(["active"]));
   const [filterName, setFilterName] = useState("");
+  const [mobileAssetsSearch, setMobileAssetsSearch] = useState("");
   const [filterAmountFrom, setFilterAmountFrom] = useState("");
   const [filterAmountTo, setFilterAmountTo] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
@@ -1521,6 +1525,26 @@ export default function Page() {
     });
     return list;
   }, [visibleItems, itemTxCounts, resolveItemEffectiveKind, getRubEquivalentCents, getPrimaryValueRubCents]);
+
+  // Мобильная версия: фильтрация по поиску (название, контрагент, валюта)
+  const mobileOrderedSectionsWithItems = useMemo(() => {
+    const q = mobileAssetsSearch.trim().toLowerCase();
+    if (!q) return orderedSectionsWithItems;
+    return orderedSectionsWithItems
+      .map(({ section, items, totalRubCents }) => {
+        const filtered = items.filter((item) => {
+          const nameMatch = item.name?.toLowerCase().includes(q);
+          const cp = item.counterparty_id ? counterpartiesById.get(item.counterparty_id) : null;
+          const cpMatch = cp ? buildCounterpartyDisplayName(cp).toLowerCase().includes(q) : false;
+          const currencyMatch = (item.currency_code ?? "").toLowerCase().includes(q);
+          return nameMatch || cpMatch || currencyMatch;
+        });
+        if (filtered.length === 0) return null;
+        const totalRubCentsFiltered = filtered.reduce((sum, it) => sum + (getPrimaryValueRubCents(it) ?? 0), 0);
+        return { section, items: filtered, totalRubCents: totalRubCentsFiltered };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }, [orderedSectionsWithItems, counterpartiesById, mobileAssetsSearch, getPrimaryValueRubCents]);
 
   const activeAssetItems = useMemo(
     () =>
@@ -3086,6 +3110,24 @@ export default function Page() {
 
   const { isCollapsed, filtersSlotId, isDesktop } = useSidebar();
 
+  // Мини-график основной стоимости за 30 дней (только для мобильной версии)
+  const itemDailyPrimaryValueByItemId = useMemo(() => {
+    if (isDesktop) return new Map<number, { date: string; valueRubCents: number }[]>();
+    const map = new Map<number, { date: string; valueRubCents: number }[]>();
+    visibleItems.forEach((item) => {
+      const rate = rateByCode[item.currency_code ?? "RUB"] ?? 1;
+      const series = buildItemDailyPrimaryValueRubCents(
+        item,
+        txs,
+        accountingStartDate,
+        rate,
+        { days: 30 }
+      );
+      map.set(item.id, series);
+    });
+    return map;
+  }, [isDesktop, visibleItems, txs, accountingStartDate, rateByCode]);
+
   return (
     <main
       className={cn(
@@ -3554,21 +3596,19 @@ export default function Page() {
                 <div className="space-y-8">
                   {orderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
                     <div key={section.id}>
-                      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                      <div
+                        className="flex flex-wrap items-baseline justify-between gap-2 mb-3 px-3 py-2 rounded-lg"
+                        style={{ background: PINK_GRADIENT }}
+                      >
                         <h2
                           className="text-2xl font-medium"
-                          style={{ color: ACTIVE_TEXT_DARK }}
+                          style={{ color: "rgba(255,255,255,0.95)" }}
                         >
                           {section.label}
                         </h2>
                         <span
-                          className="text-2xl font-medium"
-                          style={{
-                            background: PINK_GRADIENT,
-                            WebkitBackgroundClip: "text",
-                            WebkitTextFillColor: "transparent",
-                            backgroundClip: "text",
-                          }}
+                          className="text-2xl font-medium tabular-nums"
+                          style={{ color: "rgba(255,255,255,0.95)" }}
                         >
                           {section.kind === "LIABILITY"
                             ? totalRubCents < 0
@@ -3652,65 +3692,90 @@ export default function Page() {
                 </div>
               </div>
             ) : (
-              /* Мобильная: таблица без кнопки и переключателя, один режим — таблица */
-              <div className="relative">
+              /* Мобильная: поле поиска (при потягивании вниз видно) + карточки активов */
+              <div className="relative flex flex-col gap-4">
+                <div className="sticky top-0 z-10 -mx-4 px-4 pt-0 pb-1" style={{ backgroundColor: "var(--app-bg, #000)" }}>
+                  <Input
+                    type="text"
+                    placeholder="Поиск по названию, контрагенту, валюте"
+                    value={mobileAssetsSearch}
+                    onChange={(e) => setMobileAssetsSearch(e.target.value)}
+                    className="w-full text-sm font-normal border-0 shadow-none outline-none focus-visible:ring-0 focus-visible:border-0 placeholder:opacity-70 rounded-lg"
+                    style={{
+                      color: PLACEHOLDER_COLOR_DARK,
+                      backgroundColor: "rgba(197, 191, 241, 0.18)",
+                    }}
+                    aria-label="Поиск активов и обязательств"
+                  />
+                </div>
                 <div className="space-y-8">
-                  {orderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
+                  {mobileOrderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
                     <div key={section.id}>
                       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                         <h2
-                          className="text-sm font-medium"
+                          className="text-lg font-semibold"
                           style={{ color: ACTIVE_TEXT_DARK }}
                         >
                           {section.label}
                         </h2>
-                        <span
-                          className="text-sm font-medium"
-                          style={{ color: ACTIVE_TEXT_DARK }}
-                        >
-                          {section.kind === "LIABILITY"
-                            ? totalRubCents < 0
-                              ? formatRub(totalRubCents)
-                              : `-${formatRub(totalRubCents)}`
-                            : formatRub(totalRubCents)}
+                        <span className="inline-flex items-center gap-1.5">
+                          <CurrencyChip code="RUB" className="text-xs" />
+                          <span
+                            className="text-lg font-semibold tabular-nums"
+                            style={{ color: ACTIVE_TEXT_DARK }}
+                          >
+                            {section.kind === "LIABILITY"
+                              ? totalRubCents < 0
+                                ? formatRub(totalRubCents)
+                                : `-${formatRub(totalRubCents)}`
+                              : formatRub(totalRubCents)}
+                          </span>
                         </span>
                       </div>
-                      <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b [&_tr]:border-border">
-                        <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
-                          {items.map((item) => {
-                            const rate = rateByCode[item.currency_code];
-                            const rubEquivalent = getPrimaryValueRubCents(item);
-                            const counterparty = item.counterparty_id
-                              ? counterpartiesById.get(item.counterparty_id) ?? null
-                              : null;
-                            return (
-                              <AssetCard
-                                key={item.id}
-                                item={item}
-                                layout="tableRow"
-                                accountingStartDate={accountingStartDate}
-                                rate={rate}
-                                rubEquivalent={rubEquivalent}
-                                showRubEquivalent={isDesktop}
-                                primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
-                                counterparty={counterparty}
-                                moexMarketPrice={
-                                  MOEX_TYPE_CODES.includes(item.type_code)
-                                    ? moexMarketPrices.get(item.id) ?? null
-                                    : null
-                                }
-                                onEdit={(item) => openEditModal(item)}
-                                onDelete={(item) => onArchive(item)}
-                                onArchive={(item) => onArchive(item)}
-                                onClose={(item) => onClose(item)}
-                                onBuySell={(item) => setBuySellAsset(item)}
-                                getItemDisplayBalanceCents={getItemDisplayBalanceCents}
-                                onNavigate={(it) => router.push(`/assets/${it.id}`)}
-                              />
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
+                      <div className="space-y-3">
+                        {items.map((item) => {
+                          const rate = rateByCode[item.currency_code];
+                          const rubEquivalent = getPrimaryValueRubCents(item);
+                          const counterparty = item.counterparty_id
+                            ? counterpartiesById.get(item.counterparty_id) ?? null
+                            : null;
+                          return (
+                            <div
+                              key={item.id}
+                              className="rounded-lg overflow-hidden border-0 outline-none shadow-lg p-4"
+                              style={{ backgroundColor: MODAL_BG }}
+                            >
+                              <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b-0">
+                                <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
+                                  <AssetCard
+                                    item={item}
+                                    layout="tableRow"
+                                    accountingStartDate={accountingStartDate}
+                                    rate={rate}
+                                    rubEquivalent={rubEquivalent}
+                                    showRubEquivalent={isDesktop}
+                                    primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
+                                    counterparty={counterparty}
+                                    moexMarketPrice={
+                                      MOEX_TYPE_CODES.includes(item.type_code)
+                                        ? moexMarketPrices.get(item.id) ?? null
+                                        : null
+                                    }
+                                    onEdit={(item) => openEditModal(item)}
+                                    onDelete={(item) => onArchive(item)}
+                                    onArchive={(item) => onArchive(item)}
+                                    onClose={(item) => onClose(item)}
+                                    onBuySell={(item) => setBuySellAsset(item)}
+                                    getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                                    onNavigate={(it) => router.push(`/assets/${it.id}`)}
+                                    dailyPrimaryValueRubCents={itemDailyPrimaryValueByItemId.get(item.id)}
+                                  />
+                                </TableBody>
+                              </Table>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -105,6 +105,7 @@ import {
   fetchMarketInstrumentPrices,
   fetchTransactions,
   fetchTransactionChains,
+  fetchItemCosts,
   createItem,
   createItemMarketValue,
   updateItem,
@@ -125,6 +126,7 @@ import {
   MarketPriceOut,
   TransactionChainOut,
   TransactionOut,
+  ItemCostsOut,
   TransactionChainFrequency,
   TransactionChainMonthlyRule,
   FirstPayoutRule,
@@ -3128,6 +3130,52 @@ export default function Page() {
     return map;
   }, [isDesktop, visibleItems, txs, accountingStartDate, rateByCode]);
 
+  // Данные costs по активу (как на странице актива [id]) — только для мобильной версии, по активам с небалансовой основной стоимостью
+  const [itemCostsByItemId, setItemCostsByItemId] = useState<Map<number, ItemCostsOut>>(new Map());
+
+  useEffect(() => {
+    if (isDesktop) return;
+    const nonBalanceIds = visibleItems
+      .filter((item) => (item.primary_value_kind ?? "BALANCE") !== "BALANCE")
+      .map((item) => item.id);
+    if (nonBalanceIds.length === 0) {
+      setItemCostsByItemId(new Map());
+      return;
+    }
+    let cancelled = false;
+    Promise.all(nonBalanceIds.map((id) => fetchItemCosts(id)))
+      .then((results) => {
+        if (cancelled) return;
+        const map = new Map<number, ItemCostsOut>();
+        nonBalanceIds.forEach((id, i) => map.set(id, results[i]));
+        setItemCostsByItemId(map);
+      })
+      .catch(() => {
+        if (!cancelled) setItemCostsByItemId(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDesktop, visibleItems]);
+
+  // Доходы и расходы в валюте актива из costs (как на странице [id]: income_rub/expense_rub, для валютного — делим на курс)
+  const itemIncomeExpenseCentsByItemId = useMemo(() => {
+    if (isDesktop) return new Map<number, { incomeCents: number; expenseCents: number }>();
+    const map = new Map<number, { incomeCents: number; expenseCents: number }>();
+    itemCostsByItemId.forEach((costs, itemId) => {
+      const item = itemsById.get(itemId);
+      if (!item) return;
+      const currency = item.currency_code ?? "RUB";
+      const rate = currency === "RUB" ? 1 : rateByCode[currency] ?? 1;
+      const incomeCents =
+        currency === "RUB" ? costs.income_rub : Math.round(costs.income_rub / rate);
+      const expenseCents =
+        currency === "RUB" ? costs.expense_rub : Math.round(costs.expense_rub / rate);
+      map.set(itemId, { incomeCents, expenseCents });
+    });
+    return map;
+  }, [isDesktop, itemCostsByItemId, itemsById, rateByCode]);
+
   return (
     <main
       className={cn(
@@ -3769,6 +3817,8 @@ export default function Page() {
                                     getItemDisplayBalanceCents={getItemDisplayBalanceCents}
                                     onNavigate={(it) => router.push(`/assets/${it.id}`)}
                                     dailyPrimaryValueRubCents={itemDailyPrimaryValueByItemId.get(item.id)}
+                                    totalIncomeCents={itemIncomeExpenseCentsByItemId.get(item.id)?.incomeCents}
+                                    totalExpenseCents={itemIncomeExpenseCentsByItemId.get(item.id)?.expenseCents}
                                   />
                                 </TableBody>
                               </Table>

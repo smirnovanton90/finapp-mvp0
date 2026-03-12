@@ -114,6 +114,9 @@ interface AssetCardProps {
   showRubEquivalent?: boolean;
   /** Для мобильной версии: точки основной стоимости за последние 30 дней (рубли, копейки) — рисуется мини-график справа. */
   dailyPrimaryValueRubCents?: { date: string; valueRubCents: number }[];
+  /** Для мобильной версии при небалансовой основной стоимости: сумма доходов и расходов по активу в валюте актива за весь период (копейки/центы). */
+  totalIncomeCents?: number | null;
+  totalExpenseCents?: number | null;
 }
 
 // Simplified industry icon mapping (can be expanded if needed)
@@ -239,6 +242,8 @@ export function AssetCard({
   onNavigate,
   showRubEquivalent = true,
   dailyPrimaryValueRubCents,
+  totalIncomeCents,
+  totalExpenseCents,
 }: AssetCardProps) {
   const isArchived = Boolean(item.archived_at);
   const isClosed = Boolean(item.closed_at);
@@ -517,6 +522,25 @@ export function AssetCard({
             >
               {item.name}
             </span>
+            {(item.primary_value_kind ?? "BALANCE") !== "BALANCE" &&
+              (totalIncomeCents != null || totalExpenseCents != null) &&
+              (totalIncomeCents !== 0 || totalExpenseCents !== 0) && (
+                <span
+                  className="text-xs font-normal flex flex-wrap items-center gap-x-3 gap-y-0.5"
+                  style={{ color: PLACEHOLDER_COLOR_DARK }}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <span>Доходы:</span>
+                    <span className="tabular-nums">{formatAmount(totalIncomeCents ?? 0)}</span>
+                    <CurrencyChip code={currencyCode || "RUB"} className="text-[10px]" />
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span>Расходы:</span>
+                    <span className="tabular-nums">{formatAmount(totalExpenseCents ?? 0)}</span>
+                    <CurrencyChip code={currencyCode || "RUB"} className="text-[10px]" />
+                  </span>
+                </span>
+              )}
           </div>
         </TableCell>
         {dailyPrimaryValueRubCents != null && (

@@ -81,7 +81,7 @@ import {
 } from "@/lib/asset-item-form-constants";
 import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
 import { formatTimeInput } from "@/lib/format-time";
-import { PINK_GRADIENT } from "@/lib/gradients";
+import { PINK_GRADIENT, ASSET_DETAIL_HEADER_GRADIENT } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
 import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip";
@@ -105,6 +105,7 @@ import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInpu
 import { CardIcon } from "@/components/card-icon";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
+import { useSidebar } from "@/components/ui/sidebar-context";
 import {
   toTxDateKey,
   getTxDeltaForItem,
@@ -1096,6 +1097,8 @@ export default function AssetDetailPage() {
       : Building2
     : null;
 
+  const { isDesktop } = useSidebar();
+
   const getRateForDateKey = useCallback(
     (dateKey: string): number | null => {
       const currencyCode = (item?.currency_code ?? "RUB").toUpperCase();
@@ -2048,18 +2051,181 @@ export default function AssetDetailPage() {
       : "";
 
   return (
-    <main className={`min-h-screen px-8 py-8 box-border ${CONTENT_WIDTH_CLASS}`}>
-      <div className="flex w-full flex-col gap-6">
-        <div className="flex flex-wrap items-center gap-2 -ml-2">
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/assets" className="flex items-center gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              К активам и обязательствам
-            </Link>
-          </Button>
-        </div>
+    <main className={`min-h-screen py-8 box-border ${CONTENT_WIDTH_CLASS} ${isDesktop ? "px-8" : "px-0 max-w-none"} ${!isDesktop ? "w-full min-w-0" : ""}`}>
+      <div className={`flex flex-col gap-6 ${!isDesktop ? "w-full min-w-0" : "w-full"}`}>
+        {/* Мобильная шапка: градиент с контентом (при прокрутке уезжает вверх) */}
+        {!isDesktop && (
+          <div
+            className="relative flex flex-col gap-4 pt-4 pb-6 mt-[-2rem] px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
+          >
+            {/* Слой градиента: тянется под следующий блок и плавно исчезает маской */}
+            <div
+              className="absolute top-0 left-0 right-0 h-[75vh] z-0 pointer-events-none"
+              style={{
+                background: ASSET_DETAIL_HEADER_GRADIENT,
+                WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 28%, transparent 100%)",
+                maskImage: "linear-gradient(to bottom, black 0%, black 28%, transparent 100%)",
+              }}
+            />
+            <div className="relative z-10 flex flex-col gap-4">
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/assets" className="flex items-center gap-2 text-white/90 hover:text-white">
+                <ArrowLeft className="h-4 w-4" />
+                К активам и обязательствам
+              </Link>
+            </Button>
+            <div className="flex flex-col items-center gap-3">
+              <div
+                className="relative w-[152px] h-[152px] rounded-lg overflow-hidden shrink-0 cursor-pointer group"
+                onClick={() => itemPhotoInputRef.current?.click()}
+              >
+                {photoUrl ? (
+                  <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+                ) : icon3dPath ? (
+                  <img src={icon3dPath} alt="" className="w-full h-full object-contain" onError={() => setIconFormat(null)} />
+                ) : TypeIcon ? (
+                  <div className="w-full h-full flex items-center justify-center" style={{ color: ACCENT }}>
+                    <TypeIcon className="w-20 h-20" strokeWidth={1.5} />
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-[rgba(93,95,215,0.22)]">
+                    <Camera className="w-12 h-12" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                  <Upload className="w-6 h-6 text-white" />
+                </div>
+              </div>
+              <input
+                ref={itemPhotoInputRef}
+                type="file"
+                accept={ALLOWED_PHOTO_TYPES.join(",")}
+                className="hidden"
+                disabled={itemPhotoUploading}
+                onChange={(e) => handleItemPhotoChange(e.target.files?.[0] ?? null)}
+              />
+              {itemPhotoError && (
+                <p className="text-xs text-center" style={{ color: "#FB4C4F" }}>{itemPhotoError}</p>
+              )}
+              <div className="flex items-center gap-2 flex-wrap justify-center max-w-full">
+                <h2 className="text-3xl font-medium text-center break-words" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {item.name}
+                </h2>
+                {item.currency_code && (
+                  <CurrencyChip code={item.currency_code} />
+                )}
+              </div>
+              <div className="flex items-center gap-4 flex-wrap justify-center max-w-full">
+                <span className="text-sm font-normal text-white/80">
+                  {getItemTypeLabel(item)}
+                </span>
+                {itemCounterparty && CounterpartyFallbackIcon && (
+                  <>
+                    <span className="text-sm text-white/80">в</span>
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">
+                        <CardIcon
+                          src={counterpartyCurrentSrc && !showCounterpartyIcon ? counterpartyCurrentSrc : null}
+                          alt={buildCounterpartyDisplayName(itemCounterparty)}
+                          fallbackIcon={CounterpartyFallbackIcon}
+                          size={20}
+                          shadow={false}
+                          objectFit="contain"
+                          fallbackIconColor="rgba(255,255,255,0.7)"
+                          onError={counterpartyOnError}
+                        />
+                      </div>
+                      <span className="text-sm text-white/80">{buildCounterpartyDisplayName(itemCounterparty)}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              {item.synonyms && item.synonyms.length > 0 && (
+                <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2">
+                  {item.synonyms.map((chip, i) => (
+                    <span
+                      key={`${i}-${chip}`}
+                      className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-normal shrink-0 max-w-[200px] truncate"
+                      style={{
+                        borderColor: ACCENT2,
+                        backgroundColor: "rgba(85, 68, 209, 0.15)",
+                        color: ACTIVE_TEXT_DARK,
+                      }}
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {costs && (() => {
+                const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
+                const rows = [
+                  { kind: "BALANCE" as PrimaryValueKind, label: "Балансовая стоимость", valueCents: costs.balance_currency_cents },
+                  { kind: "MARKET" as PrimaryValueKind, label: "Рыночная стоимость", valueCents: costs.market_rub },
+                  { kind: "ACQUISITION" as PrimaryValueKind, label: "Стоимость приобретения", valueCents: costs.acquisition_rub },
+                  { kind: "INVESTED" as PrimaryValueKind, label: "Стоимость вложенных средств", valueCents: costs.invested_rub },
+                ];
+                const primaryRow = rows.find((r) => r.kind === primaryKind);
+                const otherRows = rows.filter((r) => r.kind !== primaryKind);
+                const primaryAmountStyle = { background: PINK_GRADIENT, WebkitBackgroundClip: "text" as const, WebkitTextFillColor: "transparent", backgroundClip: "text" as const, fontSize: "1.875rem", fontWeight: 500 };
+                return (
+                  <>
+                    {primaryRow && (
+                      <div className="w-full min-w-0 mt-2">
+                        <div className="rounded-[9px] p-[2px] min-w-0 overflow-hidden" style={{ backgroundImage: PINK_GRADIENT }}>
+                          <div
+                            className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0"
+                            style={{ backgroundColor: "#25243F" }}
+                          >
+                            <p className="text-sm mb-1 truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                            <div className="flex items-center gap-2 min-w-0">
+                              {primaryRow.valueCents != null ? (
+                                <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={primaryAmountStyle} />
+                              ) : (
+                                <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={primaryAmountStyle}>—</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex gap-2 w-full min-w-0 mt-2">
+                      {otherRows.map((row) => (
+                        <div
+                          key={row.kind}
+                          className="flex-1 min-w-0 rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px]"
+                          style={{ backgroundColor: "#25243F" }}
+                        >
+                          <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
+                          {row.valueCents != null ? (
+                            <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "0.875rem", fontWeight: 500 }} />
+                          ) : (
+                            <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+            </div>
+          </div>
+        )}
+
+        {isDesktop && (
+          <div className="flex flex-wrap items-center gap-2 -ml-2">
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/assets" className="flex items-center gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                К активам и обязательствам
+              </Link>
+            </Button>
+          </div>
+        )}
 
         <div className="flex flex-col gap-4">
+        {isDesktop && (
         <div className="flex flex-row items-center gap-4">
             <div className="relative flex-shrink-0">
               <div
@@ -2269,7 +2435,7 @@ export default function AssetDetailPage() {
               </div>
             </div>
           </div>
-        </div>
+        )}
 
         {(isMoexItem(item) || isCryptoItem(item)) && (() => {
           const isCrypto = item.type_code === "crypto";
@@ -2457,8 +2623,8 @@ export default function AssetDetailPage() {
           );
         })()}
 
-        <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
-          <div className="p-6">
+        <div className={`relative rounded-lg overflow-hidden border-0 outline-none ${!isDesktop ? "w-full min-w-0" : ""}`} style={{ backgroundColor: MODAL_BG }}>
+          <div className={`p-6 ${!isDesktop ? "min-w-0" : ""}`}>
             <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Стоимость</h3>
             {costs && (
               <div className="flex flex-col gap-2">
@@ -2528,7 +2694,7 @@ export default function AssetDetailPage() {
                           </div>
                         </div>
                         {isExpanded && costHistoryOpen === key && (
-                          <div className="p-4 pt-0" style={{ backgroundColor: "transparent" }}>
+                          <div className={`p-4 pt-0 ${!isDesktop ? "min-w-0 overflow-x-auto" : ""}`} style={{ backgroundColor: "transparent" }}>
                           {item.currency_code && item.currency_code !== "RUB" ? (
                             <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
                               {item.currency_code && item.currency_code !== "RUB" && (
@@ -3562,6 +3728,7 @@ export default function AssetDetailPage() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
     </main>
   );

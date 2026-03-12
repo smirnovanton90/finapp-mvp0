@@ -3598,6 +3598,7 @@ export default function Page() {
                               accountingStartDate={accountingStartDate}
                               rate={rate}
                               rubEquivalent={rubEquivalent}
+                              showRubEquivalent={isDesktop}
                               primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                               counterparty={counterparty}
                               moexMarketPrice={
@@ -3626,6 +3627,7 @@ export default function Page() {
                                 accountingStartDate={accountingStartDate}
                                 rate={rate}
                                 rubEquivalent={rubEquivalent}
+                                showRubEquivalent={isDesktop}
                                 primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                                 counterparty={counterparty}
                                 moexMarketPrice={
@@ -3689,6 +3691,7 @@ export default function Page() {
                                 accountingStartDate={accountingStartDate}
                                 rate={rate}
                                 rubEquivalent={rubEquivalent}
+                                showRubEquivalent={isDesktop}
                                 primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                                 counterparty={counterparty}
                                 moexMarketPrice={

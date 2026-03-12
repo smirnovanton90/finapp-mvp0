@@ -112,21 +112,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         loadingContent
       ) : (
       <div
-        className="relative min-h-screen overflow-hidden"
+        className={cn(
+          "relative min-h-screen overflow-hidden",
+          !isDesktop && "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+        )}
         key={sessionKey}
       >
-        {/* APP_BG_GRADIENT / AUTH_BG_GRADIENT_LIGHT — fixed to viewport so they don't scroll away with content */}
+        {/* Фон: на мобильной — чёрный, на десктопе — градиент */}
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
-            background: APP_BG_GRADIENT,
+            background: !isDesktop ? "#000" : APP_BG_GRADIENT,
             opacity: isDark ? 1 : 0,
           }}
         />
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
-            background: AUTH_BG_GRADIENT_LIGHT,
+            background: !isDesktop ? "#000" : AUTH_BG_GRADIENT_LIGHT,
             opacity: isDark ? 0 : 1,
           }}
         />

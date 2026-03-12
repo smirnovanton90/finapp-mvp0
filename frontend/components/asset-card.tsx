@@ -110,6 +110,8 @@ interface AssetCardProps {
   onReady?: () => void;
   /** При клике по карточке (не по меню) — переход на детальную страницу */
   onNavigate?: (item: ItemOut) => void;
+  /** Показывать рублёвый эквивалент (по умолчанию true). На мобильной — false, только сальдо в валюте актива. */
+  showRubEquivalent?: boolean;
 }
 
 // Simplified industry icon mapping (can be expanded if needed)
@@ -159,6 +161,7 @@ export function AssetCard({
   getItemDisplayBalanceCents,
   onReady,
   onNavigate,
+  showRubEquivalent = true,
 }: AssetCardProps) {
   const isArchived = Boolean(item.archived_at);
   const isClosed = Boolean(item.closed_at);
@@ -399,22 +402,37 @@ export function AssetCard({
         </TableCell>
         <TableCell className="min-w-[90px] py-2 pr-2 pl-2 align-middle text-right">
           <div className="flex flex-col items-end gap-0.5">
-            <span className="inline-flex items-center gap-1">
-              <CurrencyChip code="RUB" className="text-xs" />
-              <span className="text-sm font-medium tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
-                {rubEquivalent != null
-                  ? isAsset
-                    ? hasNegativeBalance
-                      ? `-${formatAmount(Math.abs(rubEquivalent))}`
-                      : formatAmount(rubEquivalent)
-                    : `-${formatAmount(Math.abs(rubEquivalent))}`
-                  : "-"}
-              </span>
-            </span>
-            {currencyCode && currencyCode !== "RUB" && (
-              <span className="inline-flex items-center gap-1 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                <CurrencyChip code={currencyCode} className="text-[10px]" />
-                <span className="tabular-nums">
+            {showRubEquivalent ? (
+              <>
+                <span className="inline-flex items-center gap-1">
+                  <CurrencyChip code="RUB" className="text-xs" />
+                  <span className="text-sm font-medium tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
+                    {rubEquivalent != null
+                      ? isAsset
+                        ? hasNegativeBalance
+                          ? `-${formatAmount(Math.abs(rubEquivalent))}`
+                          : formatAmount(rubEquivalent)
+                        : `-${formatAmount(Math.abs(rubEquivalent))}`
+                      : "-"}
+                  </span>
+                </span>
+                {currencyCode && currencyCode !== "RUB" && (
+                  <span className="inline-flex items-center gap-1 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    <CurrencyChip code={currencyCode} className="text-[10px]" />
+                    <span className="tabular-nums">
+                      {isAsset
+                        ? hasNegativeBalance
+                          ? `-${formatAmount(Math.abs(displayBalanceCents))}`
+                          : formatAmount(displayBalanceCents)
+                        : `-${formatAmount(Math.abs(displayBalanceCents))}`}
+                    </span>
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="inline-flex items-center gap-1">
+                <CurrencyChip code={currencyCode || "RUB"} className="text-xs" />
+                <span className="text-sm font-medium tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
                   {isAsset
                     ? hasNegativeBalance
                       ? `-${formatAmount(Math.abs(displayBalanceCents))}`
@@ -530,41 +548,71 @@ export function AssetCard({
               </div>
             )}
           </div>
-          {/* Стоимость: как на странице актива [id] — сначала рубли, под ними сумма в валюте (для валютных), один стиль text-2xl font-medium. Отрицательные сальдо — с минусом и предупреждением как в режиме «Карточки». */}
+          {/* Стоимость: при showRubEquivalent — рубли и под ними валюта актива; иначе только сальдо в валюте актива. */}
           <div className="flex flex-col items-end shrink-0 text-right min-w-0 gap-0.5">
-            <div className="flex items-center justify-end gap-1.5 flex-wrap">
-              <CurrencyChip code="RUB" />
-              {hasNegativeBalance && !(currencyCode && currencyCode !== "RUB") && (
-                <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Отрицательное сальдо" />
-              )}
-              <span
-                className="text-2xl font-medium tabular-nums"
-                style={{
-                  background: isDeleted ? undefined : PINK_GRADIENT_CONST,
-                  WebkitBackgroundClip: isDeleted ? undefined : "text",
-                  WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
-                  backgroundClip: isDeleted ? undefined : "text",
-                }}
-              >
-                {rubEquivalent != null
-                  ? isAsset
-                    ? hasNegativeBalance
-                      ? `-${formatAmount(Math.abs(rubEquivalent))}`
-                      : formatAmount(rubEquivalent)
-                    : `-${formatAmount(Math.abs(rubEquivalent))}`
-                  : "-"}
-              </span>
-            </div>
-            {currencyCode && currencyCode !== "RUB" && (
+            {showRubEquivalent ? (
+              <>
+                <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                  <CurrencyChip code="RUB" />
+                  {hasNegativeBalance && !(currencyCode && currencyCode !== "RUB") && (
+                    <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Отрицательное сальдо" />
+                  )}
+                  <span
+                    className="text-2xl font-medium tabular-nums"
+                    style={{
+                      background: isDeleted ? undefined : PINK_GRADIENT_CONST,
+                      WebkitBackgroundClip: isDeleted ? undefined : "text",
+                      WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
+                      backgroundClip: isDeleted ? undefined : "text",
+                    }}
+                  >
+                    {rubEquivalent != null
+                      ? isAsset
+                        ? hasNegativeBalance
+                          ? `-${formatAmount(Math.abs(rubEquivalent))}`
+                          : formatAmount(rubEquivalent)
+                        : `-${formatAmount(Math.abs(rubEquivalent))}`
+                      : "-"}
+                  </span>
+                </div>
+                {currencyCode && currencyCode !== "RUB" && (
+                  <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                    <CurrencyChip
+                      code={currencyCode}
+                      className={badgeColor ? "" : undefined}
+                      style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined}
+                    />
+                    {hasNegativeBalance && (
+                      <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Отрицательное сальдо" />
+                    )}
+                    <span
+                      className="text-2xl font-medium tabular-nums"
+                      style={{
+                        background: isDeleted ? undefined : PINK_GRADIENT_CONST,
+                        WebkitBackgroundClip: isDeleted ? undefined : "text",
+                        WebkitTextFillColor: isDeleted ? PLACEHOLDER_COLOR_DARK : "transparent",
+                        backgroundClip: isDeleted ? undefined : "text",
+                      }}
+                    >
+                      {isAsset
+                        ? hasNegativeBalance
+                          ? `-${formatAmount(Math.abs(displayBalanceCents))}`
+                          : formatAmount(displayBalanceCents)
+                        : `-${formatAmount(Math.abs(displayBalanceCents))}`}
+                    </span>
+                  </div>
+                )}
+              </>
+            ) : (
               <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                <CurrencyChip
-                  code={currencyCode}
-                  className={badgeColor ? "" : undefined}
-                  style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined}
-                />
                 {hasNegativeBalance && (
                   <AlertCircle className="h-5 w-5 shrink-0" style={{ color: RED }} aria-label="Отрицательное сальдо" />
                 )}
+                <CurrencyChip
+                  code={currencyCode || "RUB"}
+                  className={badgeColor ? "" : undefined}
+                  style={badgeColor ? { color: badgeColor, backgroundColor: `${badgeColor}20` } : undefined}
+                />
                 <span
                   className="text-2xl font-medium tabular-nums"
                   style={{

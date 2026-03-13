@@ -2497,62 +2497,97 @@ export default function AssetDetailPage() {
                 };
                 return (
                   <>
-                    {primaryRow && (
-                      <div className="w-full min-w-0 mt-2">
-                        <div
-                          className="rounded-[9px] p-[2px] min-w-0 overflow-hidden"
-                          style={{ backgroundImage: PINK_GRADIENT }}
-                          role={!isDesktop ? "button" : undefined}
-                          tabIndex={!isDesktop ? 0 : undefined}
-                          onClick={!isDesktop ? () => openCostOverlay(kindToKey(primaryRow.kind)) : undefined}
-                          onKeyDown={!isDesktop ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(primaryRow.kind)); } } : undefined}
-                        >
-                          <div
-                            className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3"
-                            style={{ backgroundColor: "#25243F" }}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm mb-1 truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
-                              <div className="flex items-center gap-2 min-w-0">
-                                {primaryRow.valueCents != null ? (
-                                  <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={primaryAmountStyle} />
-                                ) : (
-                                  <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={primaryAmountStyle}>—</span>
+                    {isDesktop ? (
+                      <>
+                        {primaryRow && (
+                          <div className="w-full min-w-0 mt-2">
+                            <div
+                              className="rounded-[9px] p-[2px] min-w-0 overflow-hidden"
+                              style={{ backgroundImage: PINK_GRADIENT }}
+                            >
+                              <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3" style={{ backgroundColor: "#25243F" }}>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm mb-1 truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    {primaryRow.valueCents != null ? (
+                                      <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={primaryAmountStyle} />
+                                    ) : (
+                                      <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={primaryAmountStyle}>—</span>
+                                    )}
+                                  </div>
+                                </div>
+                                {primaryValueMiniChartSeries.length > 1 && (
+                                  <AssetCardMiniChart series={primaryValueMiniChartSeries} itemId={item.id} strokeColor={ACCENT} />
                                 )}
                               </div>
                             </div>
-                            {primaryValueMiniChartSeries.length > 1 && (
-                              <AssetCardMiniChart
-                                series={primaryValueMiniChartSeries}
-                                itemId={item.id}
-                                strokeColor={ACCENT}
-                              />
+                          </div>
+                        )}
+                        <div className="flex gap-2 w-full min-w-0 mt-2">
+                          {otherRows.map((row) => (
+                            <div key={row.kind} className="flex-1 min-w-0 rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px]" style={{ backgroundColor: "#25243F" }}>
+                              <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
+                              {row.valueCents != null ? (
+                                <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "0.875rem", fontWeight: 500 }} />
+                              ) : (
+                                <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div
+                        className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                        style={{ WebkitOverflowScrolling: "touch" }}
+                      >
+                        <div className="shrink-0 w-4 min-w-4" aria-hidden />
+                        {primaryRow && (
+                          <div
+                            className="shrink-0 w-[min(85vw,320px)] snap-start snap-always rounded-[9px] p-[2px] overflow-hidden cursor-pointer active:opacity-95"
+                            style={{ backgroundImage: PINK_GRADIENT }}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openCostOverlay(kindToKey(primaryRow.kind))}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(primaryRow.kind)); } }}
+                          >
+                            <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3" style={{ backgroundColor: "#25243F" }}>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm mb-1 truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {primaryRow.valueCents != null ? (
+                                    <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={primaryAmountStyle} />
+                                  ) : (
+                                    <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={primaryAmountStyle}>—</span>
+                                  )}
+                                </div>
+                              </div>
+                              {primaryValueMiniChartSeries.length > 1 && (
+                                <AssetCardMiniChart series={primaryValueMiniChartSeries} itemId={item.id} strokeColor={ACCENT} />
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {otherRows.map((row) => (
+                          <div
+                            key={row.kind}
+                            className="shrink-0 w-[260px] snap-start snap-always rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px] cursor-pointer active:opacity-95"
+                            style={{ backgroundColor: "#25243F" }}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openCostOverlay(kindToKey(row.kind))}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(row.kind)); } }}
+                          >
+                            <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
+                            {row.valueCents != null ? (
+                              <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "0.875rem", fontWeight: 500 }} />
+                            ) : (
+                              <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
                             )}
                           </div>
-                        </div>
+                        ))}
+                        <div className="shrink-0 w-4 min-w-4" aria-hidden />
                       </div>
-                    )}
-                    {isDesktop && (
-                    <div className="flex gap-2 w-full min-w-0 mt-2">
-                      {otherRows.map((row) => (
-                        <div
-                          key={row.kind}
-                          className="flex-1 min-w-0 rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px]"
-                          style={{ backgroundColor: "#25243F" }}
-                          role={!isDesktop ? "button" : undefined}
-                          tabIndex={!isDesktop ? 0 : undefined}
-                          onClick={!isDesktop ? () => openCostOverlay(kindToKey(row.kind)) : undefined}
-                          onKeyDown={!isDesktop ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(row.kind)); } } : undefined}
-                        >
-                          <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
-                          {row.valueCents != null ? (
-                            <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "0.875rem", fontWeight: 500 }} />
-                          ) : (
-                            <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
                     )}
                   </>
                 );

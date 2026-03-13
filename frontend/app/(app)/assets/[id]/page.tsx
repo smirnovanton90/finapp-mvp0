@@ -93,6 +93,7 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
 import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
+import { MobileBottomSheet } from "@/components/mobile-bottom-sheet";
 import {
   Dialog,
   DialogContent,
@@ -3564,26 +3565,12 @@ export default function AssetDetailPage() {
       </div>
 
       {typeof document !== "undefined" && !isDesktop && mobileCostOverlayKey && createPortal(
-        <div className="fixed inset-0 z-50 flex flex-col" aria-modal role="dialog">
-          <div
-            className="absolute inset-0 bg-black/50"
-            aria-hidden
-            onClick={() => setMobileCostOverlayKey(null)}
-          />
-          <div className="relative z-10 flex flex-col w-full max-h-full bg-[#1C1B2E]" style={{ minHeight: "100dvh" }}>
-            <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
-              <h2 className="text-lg font-medium truncate" style={{ color: ACTIVE_TEXT_DARK }}>
-                {mobileCostOverlayKey === "balance" ? "Балансовая стоимость" : mobileCostOverlayKey === "market" ? "Рыночная стоимость" : mobileCostOverlayKey === "acquisition" ? "Стоимость приобретения" : "Стоимость вложенных средств"}
-              </h2>
-              <IconButton variant="ghost" size="icon" aria-label="Закрыть" onClick={() => setMobileCostOverlayKey(null)}>
-                <ChevronUp className="h-5 w-5 rotate-180" style={{ color: ACTIVE_TEXT_DARK }} />
-              </IconButton>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-              {mobileCostOverlayKey && renderCostSectionExpandedContent({ rowKey: mobileCostOverlayKey, isMobileOverlay: true, chartContainerRef: overlayChartContainerRef, dayMarksOverride: overlayDayMarks })}
-            </div>
-          </div>
-        </div>,
+        <MobileBottomSheet
+          title={mobileCostOverlayKey === "balance" ? "Балансовая стоимость" : mobileCostOverlayKey === "market" ? "Рыночная стоимость" : mobileCostOverlayKey === "acquisition" ? "Стоимость приобретения" : "Стоимость вложенных средств"}
+          onClose={() => setMobileCostOverlayKey(null)}
+        >
+          {renderCostSectionExpandedContent({ rowKey: mobileCostOverlayKey, isMobileOverlay: true, chartContainerRef: overlayChartContainerRef, dayMarksOverride: overlayDayMarks })}
+        </MobileBottomSheet>,
         document.body
       )}
     </main>

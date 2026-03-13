@@ -2376,7 +2376,7 @@ export default function AssetDetailPage() {
         {/* Мобильная шапка: градиент с контентом (при прокрутке уезжает вверх) */}
         {!isDesktop && (
           <div
-            className="relative flex flex-col gap-4 pt-4 pb-6 mt-[-2rem] px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
+            className="relative flex flex-col gap-4 pt-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
           >
             {/* Слой градиента: тянется под следующий блок и плавно исчезает маской */}
             <div
@@ -2532,6 +2532,7 @@ export default function AssetDetailPage() {
                         </div>
                       </div>
                     )}
+                    {isDesktop && (
                     <div className="flex gap-2 w-full min-w-0 mt-2">
                       {otherRows.map((row) => (
                         <div
@@ -2552,6 +2553,7 @@ export default function AssetDetailPage() {
                         </div>
                       ))}
                     </div>
+                    )}
                   </>
                 );
               })()}
@@ -2969,6 +2971,7 @@ export default function AssetDetailPage() {
           );
         })()}
 
+        {isDesktop && (
         <div className={`relative rounded-lg overflow-hidden border-0 outline-none ${!isDesktop ? "w-full min-w-0" : ""}`} style={{ backgroundColor: MODAL_BG }}>
           <div className={`p-6 ${!isDesktop ? "min-w-0" : ""}`}>
             <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Стоимость</h3>
@@ -3047,12 +3050,11 @@ export default function AssetDetailPage() {
             })}
           </div>
         )}
-
-
           </div>
         </div>
+        )}
 
-        {(item && (item.primary_value_kind ?? "BALANCE") === "BALANCE" && (
+        {isDesktop && (item && (item.primary_value_kind ?? "BALANCE") === "BALANCE" && (
           <div className="relative rounded-lg overflow-hidden border-0 outline-none mt-6" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
               <div className="flex items-center justify-between gap-4 mb-4">
@@ -3141,7 +3143,7 @@ export default function AssetDetailPage() {
           </div>
         ))}
 
-        {costs && (
+        {isDesktop && costs && (
           <div className="relative rounded-lg overflow-hidden border-0 outline-none mt-6" style={{ backgroundColor: MODAL_BG }}>
             <div className="p-6">
               <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Доходы и расходы</h3>

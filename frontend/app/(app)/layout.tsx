@@ -114,7 +114,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div
         className={cn(
           "relative min-h-screen overflow-hidden",
-          !isDesktop && "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+          !isDesktop && "h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] flex flex-col"
         )}
         key={sessionKey}
       >
@@ -138,15 +138,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <MobileFiltersDrawer />
         <MobileFloatingBar />
         <PwaInstallPrompt />
-        <div className="relative z-10 flex">
+        <div className={cn("relative z-10 flex", !isDesktop && "min-h-0 flex-1 overflow-hidden")}>
           <Sidebar />
           <div
             className={cn(
               "flex-1 transition-all duration-300 @container",
               !isSpecialPage && "min-h-screen flex items-center",
-              !isDesktop && "px-4 pb-24"
+              !isDesktop && "px-4 pb-6 overflow-y-auto min-h-0",
+              !isDesktop && isAssetDetailPage && "pt-4"
             )}
-            style={{ marginLeft: contentMarginLeft }}
+            style={
+              !isDesktop
+                ? {
+                    marginLeft: contentMarginLeft,
+                    height: "calc(100dvh - env(safe-area-inset-top) - 72px - env(safe-area-inset-bottom))",
+                    WebkitOverflowScrolling: "touch",
+                  }
+                : { marginLeft: contentMarginLeft }
+            }
           >
             {isSpecialPage || isAssetDetailPage ? (
               <div className="w-full min-w-0">

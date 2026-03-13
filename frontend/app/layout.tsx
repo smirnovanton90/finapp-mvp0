@@ -5,11 +5,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "FinApp",
   description: "Учёт активов, транзакций и планирование финансов",
-  // Добавить на экран «Домой» в Safari на iPhone. black-translucent — прозрачная область Dynamic Island/челки, контент под ней; отступы даём через safe-area.
+  // Добавить на экран «Домой» в Safari на iPhone. black — непрозрачная чёрная полоса статуса, без полупрозрачной полосы сверху.
   appleWebApp: {
     capable: true,
     title: "FinApp",
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "black",
   },
   // Иконка на домашнем экране (180×180). При наличии app/apple-icon.png Next.js подставит её сам.
   icons: {

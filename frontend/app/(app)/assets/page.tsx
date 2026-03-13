@@ -3597,7 +3597,23 @@ export default function Page() {
                 Загрузка…
               </div>
             ) : visibleItems.length === 0 ? (
-              <EmptyState />
+              isDesktop ? (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Button
+                      className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
+                      style={{ backgroundColor: ACCENT }}
+                      onClick={() => openCreateModal("ASSET", ALL_TYPE_CODES, { general: true })}
+                    >
+                      <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                      <span style={{ color: "white", opacity: 0.85 }}>Добавить</span>
+                    </Button>
+                  </div>
+                  <EmptyState />
+                </div>
+              ) : (
+                <EmptyState />
+              )
             ) : isDesktop ? (
               /* Десктоп: кнопка «Добавить», переключатель вида, карточки/список с градиентом сумм */
               <div className="relative">

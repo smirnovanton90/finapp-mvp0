@@ -166,7 +166,7 @@ function buildMiniChartPath(
   return { linePath, areaPath };
 }
 
-function AssetCardMiniChart({
+export function AssetCardMiniChart({
   series,
   itemId,
   strokeColor,

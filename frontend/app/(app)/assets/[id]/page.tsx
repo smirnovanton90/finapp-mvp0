@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -85,6 +86,7 @@ import { PINK_GRADIENT, ASSET_DETAIL_HEADER_GRADIENT } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
 import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip";
+import { AssetCardMiniChart } from "@/components/asset-card";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
@@ -245,6 +247,8 @@ export default function AssetDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingPrimary, setSavingPrimary] = useState(false);
   const [costHistoryOpen, setCostHistoryOpen] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
+  const [mobileCostOverlayKey, setMobileCostOverlayKey] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
+  const overlayChartContainerRef = useRef<HTMLDivElement | null>(null);
   const costHistoryInitializedForItemIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (!item) return;
@@ -1304,6 +1308,38 @@ export default function AssetDetailPage() {
     });
   }, [costChartSeries, costChartCurrency, item?.currency_code, getRateForDateKey, latestRatesByCurrency]);
 
+  // Серия основной стоимости в рублях (копейки) для мини-графика в блоке основной стоимости на мобильной
+  const primaryValueMiniChartSeries = useMemo((): { date: string; valueRubCents: number }[] => {
+    if (!item?.id || !costHistoryData?.points.length) return [];
+    const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
+    const key = primaryKind === "BALANCE" ? "balance" : primaryKind === "MARKET" ? "market" : primaryKind === "ACQUISITION" ? "acquisition" : "invested";
+    const raw = costHistoryData.points.map((p) => {
+      let valueRub: number;
+      if (key === "market" && p.market_price_rub != null && p.market_quantity_units != null) {
+        valueRub = (p.market_price_rub * p.market_quantity_units) / 100;
+      } else {
+        valueRub = ((p as unknown as Record<string, number | null>)[key] ?? 0) / 100;
+      }
+      return { date: p.date, valueRub };
+    });
+    const withFill = key === "market"
+      ? (() => {
+          const firstWithValue = raw.find((p) => p.valueRub > 0);
+          const fillValue = firstWithValue?.valueRub ?? 0;
+          return fillValue > 0 ? raw.map((p) => ({ ...p, valueRub: p.valueRub || fillValue })) : raw;
+        })()
+      : raw;
+    if (!item.currency_code || item.currency_code === "RUB") {
+      return withFill.map((p) => ({ date: p.date, valueRubCents: Math.round(p.valueRub * 100) }));
+    }
+    const latestRate = latestRatesByCurrency.get((item.currency_code ?? "").toUpperCase())?.rate ?? null;
+    return withFill.map((p) => {
+      const rate = getRateForDateKey(p.date) ?? latestRate;
+      const valueInRub = rate != null && rate > 0 ? p.valueRub * rate : (latestRate != null ? p.valueRub * latestRate : p.valueRub);
+      return { date: p.date, valueRubCents: Math.round(valueInRub * 100) };
+    });
+  }, [item?.id, item?.primary_value_kind, item?.currency_code, costHistoryData?.points, getRateForDateKey, latestRatesByCurrency]);
+
   useEffect(() => {
     if (!costHistoryOpen || costChartSeries.length === 0) setCostChartContainerReady(false);
   }, [costHistoryOpen, costChartSeries.length]);
@@ -1315,9 +1351,12 @@ export default function AssetDetailPage() {
     setCostChartCurrency(item?.currency_code && item.currency_code !== "RUB" ? "CURRENCY" : "RUB");
   }, [costHistoryOpen, item?.currency_code]);
 
+  const [overlayChartContainerReady, setOverlayChartContainerReady] = useState(false);
   useEffect(() => {
-    if (!costChartContainerReady || !costChartContainerRef.current) return;
-    const element = costChartContainerRef.current;
+    const isOverlay = !isDesktop && !!mobileCostOverlayKey;
+    const element = isOverlay ? overlayChartContainerRef.current : costChartContainerRef.current;
+    const ready = isOverlay ? overlayChartContainerReady : costChartContainerReady;
+    if (!ready || !element) return;
     const updateSize = () => {
       const rect = element.getBoundingClientRect();
       const nextWidth = Math.max(1, Math.round(rect.width));
@@ -1331,7 +1370,7 @@ export default function AssetDetailPage() {
     const observer = new ResizeObserver(updateSize);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [costChartContainerReady, costHistoryOpen]);
+  }, [costChartContainerReady, overlayChartContainerReady, costHistoryOpen, isDesktop, mobileCostOverlayKey]);
 
   const costChartPadding = useMemo(() => ({ top: 24, right: 120, bottom: 44, left: 0 }), []);
   const costChartGeometry = useMemo(() => {
@@ -1405,6 +1444,28 @@ export default function AssetDetailPage() {
       averageLineY,
     };
   }, [costChartDisplaySeries, costChartSize, costChartPadding]);
+
+  const overlayDayMarks = useMemo(() => {
+    if (!costChartGeometry || costChartDisplaySeries.length === 0) return null;
+    const step = Math.max(1, Math.ceil(costChartDisplaySeries.length / 4));
+    const padding = costChartGeometry.padding;
+    const innerWidth = costChartGeometry.innerWidth;
+    const dayMarks: { label: string; x: number }[] = [];
+    for (let i = 0; i < costChartDisplaySeries.length; i += step) {
+      const p = costChartDisplaySeries[i];
+      if (!p) continue;
+      const progress = costChartDisplaySeries.length <= 1 ? 0 : i / (costChartDisplaySeries.length - 1);
+      dayMarks.push({ label: formatChartDate(new Date(p.date)), x: padding.left + innerWidth * progress });
+    }
+    if (costChartDisplaySeries.length > 0 && dayMarks.length > 0) {
+      const lastX = padding.left + innerWidth;
+      if (Math.abs((dayMarks[dayMarks.length - 1]?.x ?? 0) - lastX) > 2) {
+        const last = costChartDisplaySeries[costChartDisplaySeries.length - 1]!;
+        dayMarks.push({ label: formatChartDate(new Date(last.date)), x: lastX });
+      }
+    }
+    return dayMarks;
+  }, [costChartGeometry, costChartDisplaySeries]);
 
   const costChartDividers = useMemo(() => {
     if (!costChartGeometry || costChartSeries.length <= 1) return [];
@@ -2050,6 +2111,265 @@ export default function AssetDetailPage() {
         })
       : "";
 
+  type CostSectionRowKey = "balance" | "market" | "acquisition" | "invested";
+  const renderCostSectionExpandedContent = (opts: {
+    rowKey: CostSectionRowKey;
+    isMobileOverlay: boolean;
+    chartContainerRef: React.RefObject<HTMLDivElement | null>;
+    dayMarksOverride: { label: string; x: number }[] | null;
+  }) => {
+    const { rowKey, isMobileOverlay, chartContainerRef, dayMarksOverride } = opts;
+    const dayMarks = dayMarksOverride ?? costChartGeometry?.dayMarks ?? [];
+    return (
+      <div className={`${isMobileOverlay ? "pt-0 pb-4" : "p-4 pt-0"} ${!isDesktop && !isMobileOverlay ? "min-w-0 overflow-x-auto" : ""}`} style={{ backgroundColor: "transparent" }}>
+        {item.currency_code && item.currency_code !== "RUB" ? (
+          <div className={`mb-3 flex flex-wrap items-center justify-end gap-2 ${isMobileOverlay ? "px-4" : ""}`}>
+            {item.currency_code && item.currency_code !== "RUB" && (
+              <SegmentedSelector
+                options={[{ value: "RUB", label: "RUB" }, { value: "CURRENCY", label: item.currency_code }]}
+                value={costChartCurrency}
+                onChange={(v) => setCostChartCurrency(v === "RUB" || v === "CURRENCY" ? v : "RUB")}
+                segmentWidth="auto"
+                className="w-fit shrink-0"
+              />
+            )}
+          </div>
+        ) : null}
+        {loadingCostHistory ? (
+          <p className={`text-sm ${isMobileOverlay ? "px-4" : ""}`} style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+        ) : costChartSeries.length === 0 ? (
+          <p className={`text-sm ${isMobileOverlay ? "px-4" : ""}`} style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период.</p>
+        ) : costChartGeometry ? (
+          (() => {
+            const costChartColor = costChartCurrency === "CURRENCY" && item?.currency_code ? (getCurrencyChartColor(item.currency_code) ?? ACCENT) : ACCENT;
+            return (
+              <>
+                <div
+                  ref={(el) => {
+                    (chartContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+                    if (isMobileOverlay) setOverlayChartContainerReady(!!el);
+                    else setCostChartContainerReady(!!el);
+                  }}
+                  className="relative w-full min-w-0"
+                  style={rowKey === "balance" ? { height: 400 } : { aspectRatio: `${costChartSize.width}/${costChartSize.height}` }}
+                >
+                  {rowKey === "balance" && checkpointChartHoverDate != null && costChartGeometry && (() => {
+                    const lineData = costChartCheckpointLines.find((l) => l.dateKey === checkpointChartHoverDate);
+                    if (!lineData) return null;
+                    const scaleX = costChartSize.width / costChartGeometry.width;
+                    const leftPx = lineData.x * scaleX;
+                    return (
+                      <div className="pointer-events-none absolute z-20 rounded-[9px] px-4 py-3 text-[14px] font-normal max-w-[280px]" style={{ left: `${leftPx}px`, top: 0, transform: "translate(-50%, 0)", backgroundColor: MODAL_BG }}>
+                        <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartDate(new Date(lineData.dateKey))}</div>
+                        {lineData.checkpoints.map((cp) => (
+                          <div key={cp.id} className="mt-2 pt-2 border-t border-white/10 space-y-1">
+                            <div className="flex items-center justify-between gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+                              <span>{new Date(cp.checkpoint_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+                              <span className="text-xs" style={{ color: cp.status === "OK" ? GREEN : RED }}>{cp.status === "OK" ? "ОК" : "Расхождение"}</span>
+                            </div>
+                            <div className="flex justify-between gap-2 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                              <span>Расчётное:</span>
+                              <AmountWithCurrency valueCents={cp.computed_balance_cents} currencyCode={item.currency_code ?? "RUB"} className="justify-end" />
+                            </div>
+                            <div className="flex justify-between gap-2 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                              <span>Указанное:</span>
+                              <AmountWithCurrency valueCents={cp.stated_balance_cents} currencyCode={item.currency_code ?? "RUB"} className="justify-end" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {costChartHoverPoint != null && costChartHoverIndex != null && costChartDisplaySeries[costChartHoverIndex] && (
+                    <div ref={costChartTooltipRef} className="pointer-events-none absolute z-20 whitespace-nowrap rounded-[9px] px-4 py-3 text-[14px] font-normal text-right" style={{ left: costChartTooltipLeft != null ? `${costChartTooltipLeft}px` : `${costChartHoverPoint.x}px`, top: 0, transform: "translate(-50%, 0)", backgroundColor: MODAL_BG }}>
+                      <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartDate(new Date(costChartDisplaySeries[costChartHoverIndex]!.date))}</div>
+                      {rowKey === "market" ? (() => {
+                        const pt = costChartSeries[costChartHoverIndex!] as { marketQuantityUnits?: number; marketPriceRub?: number; valueRub: number; date: string };
+                        const isCurrencyAsset = item.currency_code && item.currency_code !== "RUB";
+                        const valueCurrencyCents = Math.round(pt.valueRub * 100);
+                        const rate = isCurrencyAsset ? getRateForDateKey(pt.date) : null;
+                        const valueRubCents = isCurrencyAsset && rate != null && rate > 0 ? Math.round(pt.valueRub * rate * 100) : valueCurrencyCents;
+                        return (
+                          <>
+                            {pt.marketQuantityUnits != null && (
+                              <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                                <span>Количество</span>
+                                <span className="tabular-nums">{pt.marketQuantityUnits.toLocaleString("ru-RU")}</span>
+                              </div>
+                            )}
+                            <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                              <span>Рыночная стоимость</span>
+                              <div className="flex flex-col items-end gap-0.5">
+                                <AmountWithCurrency valueCents={valueRubCents} currencyCode="RUB" className="justify-end" />
+                                {isCurrencyAsset && <AmountWithCurrency valueCents={valueCurrencyCents} currencyCode={item.currency_code!} className="justify-end" />}
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })() : (
+                        <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
+                          <span>
+                            {rowKey === "balance" && "Балансовая стоимость"}
+                            {rowKey === "acquisition" && "Стоимость приобретения"}
+                            {rowKey === "invested" && "Стоимость вложенных средств"}
+                          </span>
+                          <div className="flex items-center justify-end gap-2">
+                            <AmountWithCurrency valueCents={Math.round(costChartDisplaySeries[costChartHoverIndex]!.valueRub * 100)} currencyCode={costChartCurrency === "RUB" ? "RUB" : item.currency_code ?? "RUB"} className="justify-end" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <svg ref={costChartSvgRef} viewBox={`0 0 ${costChartGeometry.width} ${costChartGeometry.height}`} className="h-full w-full cursor-pointer" style={{ overflow: "visible" }} onMouseMove={handleCostChartPointerMove} onMouseLeave={() => setCostChartHoverIndex(null)}>
+                    <defs>
+                      <linearGradient id="asset-detail-chart-area" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={costChartColor} stopOpacity={0.35} />
+                        <stop offset="100%" stopColor={costChartColor} stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="asset-detail-chart-area-negative" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={RED} stopOpacity={0.35} />
+                        <stop offset="100%" stopColor={RED} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    {costChartGeometry.areaPathNegativeSegments.map((d, idx) => (
+                      <path key={`neg-area-${idx}`} d={d} fill="url(#asset-detail-chart-area-negative)" />
+                    ))}
+                    {costChartGeometry.areaPathPositiveSegments.map((d, idx) => (
+                      <path key={`pos-area-${idx}`} d={d} fill="url(#asset-detail-chart-area)" />
+                    ))}
+                    {costChartGeometry.linePathNegativeSegments.map((d, idx) => (
+                      <path key={`neg-line-${idx}`} d={d} fill="none" stroke={RED} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                    ))}
+                    {costChartGeometry.linePathPositiveSegments.map((d, idx) => (
+                      <path key={`pos-line-${idx}`} d={d} fill="none" stroke={costChartColor} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                    ))}
+                    {costChartDividers.map((div, idx) => (
+                      <line key={`div-${idx}-${div.x}`} x1={div.x} x2={div.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={div.type === "year" ? 1.5 : 1} strokeOpacity={div.type === "year" ? 0.9 : 0.5} />
+                    ))}
+                    <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.baselineY} y2={costChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1} strokeDasharray="4 4" strokeOpacity={0.7} />
+                    {!isMobileOverlay && (
+                      <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.averageLineY} y2={costChartGeometry.averageLineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1.5} strokeDasharray="6 4" strokeOpacity={0.9} />
+                    )}
+                    {rowKey === "balance" && costChartCheckpointLines.map(({ dateKey, x, checkpoints: cps }) => {
+                      const hasMismatch = cps.some((c) => c.status === "MISMATCH");
+                      const strokeColor = hasMismatch ? RED : GREEN;
+                      const iconSize = 24;
+                      const iconY = Math.max(0, costChartGeometry.padding.top - iconSize);
+                      return (
+                        <g key={dateKey} onMouseEnter={() => setCheckpointChartHoverDate(dateKey)} onMouseLeave={() => setCheckpointChartHoverDate(null)}>
+                          <foreignObject x={x - iconSize / 2} y={iconY} width={iconSize} height={iconSize} style={{ overflow: "visible" }}>
+                            <div {...({ xmlns: "http://www.w3.org/1999/xhtml" } as Record<string, unknown>)} className="flex items-center justify-center" style={{ width: iconSize, height: iconSize, color: hasMismatch ? RED : GREEN }}>
+                              {hasMismatch ? <MapPinX size={20} /> : <MapPinCheck size={20} />}
+                            </div>
+                          </foreignObject>
+                          <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={strokeColor} strokeWidth={2} strokeOpacity={0.9} />
+                          <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke="transparent" strokeWidth={16} style={{ cursor: "pointer" }} />
+                        </g>
+                      );
+                    })}
+                    {costChartHoverPoint && (
+                      <>
+                        <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
+                        <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={6} fill={costChartHoverPoint.value < 0 ? RED : costChartColor} stroke="#fff" strokeWidth={2} />
+                      </>
+                    )}
+                    {dayMarks.map((mark, idx) => (
+                      <text key={idx} x={mark.x} y={costChartGeometry.height - 12} textAnchor={idx === 0 ? "start" : idx === dayMarks.length - 1 ? "end" : "middle"} fontSize={14} fill={ACTIVE_TEXT_DARK}>{mark.label}</text>
+                    ))}
+                  </svg>
+                  {!isMobileOverlay && (
+                    <div className="absolute right-0 pointer-events-none flex items-center gap-2 rounded-md px-2 py-1 text-sm tabular-nums shrink-0" style={{ top: `${(costChartGeometry.averageLineY / costChartGeometry.height) * 100}%`, transform: "translateY(-50%)", backgroundColor: MODAL_BG, color: ACTIVE_TEXT_DARK }} aria-label="Средняя величина по дням">
+                      <AmountWithCurrency valueCents={Math.round(costChartGeometry.averageValue * 100)} currencyCode={costChartCurrency === "RUB" ? "RUB" : item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK }} />
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()
+        ) : null}
+        {rowKey === "balance" && (
+          <div className={`mt-3 flex justify-center ${isMobileOverlay ? "px-4" : ""}`}>
+            <Button type="button" className="rounded-[9px] border-0 flex justify-center transition-colors hover:opacity-90 text-sm font-normal" style={{ backgroundColor: ACCENT }} onClick={() => router.push(`/transactions?item_id=${item.id}`)}>
+              <ExternalLink className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
+              <span style={{ color: "white", opacity: 0.85 }}>Просмотреть транзакции</span>
+            </Button>
+          </div>
+        )}
+        {((rowKey === "balance" && dynamicsBalance) || (rowKey === "market" && dynamicsMarket)) && (() => {
+          const d = (rowKey === "balance" ? dynamicsBalance : dynamicsMarket)!;
+          const dynamicsPaddingClass = isMobileOverlay ? "px-4" : "";
+          const formatCur = (v: number) => {
+            const s = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
+            return s.replace(/,0*$/, "") || s;
+          };
+          const formatRub = (cents: number | null) => cents != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100) : "–";
+          const SummaryBlock = ({ title, qtyVal, curVal, rubVal, amountColor, showCurRow = true, showQtyRow = true, showEmptyQtyRow = false }: { title: string; qtyVal?: number | null; curVal: number | null; rubVal: number | null; amountColor?: string; showCurRow?: boolean; showQtyRow?: boolean; showEmptyQtyRow?: boolean }) => (
+            <div className="flex flex-1 min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
+              <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
+              <div className="flex flex-col gap-2">
+                {showEmptyQtyRow && <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden><span className="invisible select-none">0</span></div>}
+                {showQtyRow && qtyVal != null && (
+                  <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                    <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{isCryptoItem(item) ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(qtyVal) : new Intl.NumberFormat("ru-RU").format(qtyVal) + (isMoexItem(item) ? " л." : "")}</span>
+                  </div>
+                )}
+                {d.currencyCode !== "RUB" && (showCurRow ? (
+                  <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                    <CurrencyChip code={d.currencyCode} />
+                    <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{curVal != null ? formatCur(curVal) : "–"}</span>
+                  </div>
+                ) : (
+                  <div className="rounded-md px-2 py-1 flex items-center text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden><span className="invisible select-none">0</span></div>
+                ))}
+                <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
+                  <CurrencyChip code="RUB" />
+                  <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{rubVal != null ? formatRub(rubVal) : "–"}</span>
+                </div>
+              </div>
+            </div>
+          );
+          const dateStartLabel = d.dateStart ? new Date(d.dateStart).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+          const dateEndLabel = d.dateEnd ? new Date(d.dateEnd).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+          const initialDisplayRub = d.initialRubCents != null ? (d.effectiveKind === "LIABILITY" ? Math.abs(d.initialRubCents) : d.initialRubCents) : null;
+          const initialDisplayCur = d.effectiveKind === "LIABILITY" ? Math.abs(d.initialCurCents) / 100 : d.initialCurCents / 100;
+          const finalDisplayRub = d.finalRubCents != null ? (d.effectiveKind === "LIABILITY" ? Math.abs(d.finalRubCents) : d.finalRubCents) : null;
+          const finalDisplayCur = d.effectiveKind === "LIABILITY" ? Math.abs(d.finalCurCents) / 100 : d.finalCurCents / 100;
+          const showCurRow = d.currencyCode !== "RUB";
+          return (
+            <div className={`flex w-full gap-4 mt-4 ${isMobileOverlay ? "flex-col" : "flex-wrap"} ${dynamicsPaddingClass}`}>
+              {d.isBalanceMode ? (
+                <>
+                  <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                  <SummaryBlock title="Доходы" curVal={showCurRow ? d.totalIncomeCur : null} rubVal={d.totalIncomeRub} amountColor={GREEN} showQtyRow={false} showCurRow={showCurRow} />
+                  <SummaryBlock title="Расходы" curVal={showCurRow ? -d.totalExpenseCur : null} rubVal={-d.totalExpenseRub} amountColor={RED} showQtyRow={false} showCurRow={showCurRow} />
+                  <SummaryBlock title="Переводы" curVal={showCurRow ? d.totalTransferCur : null} rubVal={d.totalTransferRub} amountColor={d.totalTransferRub < 0 ? RED : d.totalTransferRub > 0 ? GREEN : undefined} showQtyRow={false} showCurRow={showCurRow} />
+                  {showCurRow && <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />}
+                  <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                </>
+              ) : d.isMarketMode && d.isMarketOrCrypto ? (
+                <>
+                  <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={d.qtyStart} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
+                  <SummaryBlock title="Куплено" qtyVal={d.totalBuyQty} curVal={showCurRow ? d.totalExpenseCur : null} rubVal={d.totalExpenseRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
+                  <SummaryBlock title="Продано" qtyVal={-d.totalSellQty} curVal={showCurRow ? -d.totalSaleCur : null} rubVal={-d.totalSaleRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
+                  <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.priceChangeCur != null ? d.priceChangeCur : null} rubVal={d.priceChangeRub} amountColor={d.priceChangeRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} showEmptyQtyRow={true} />
+                  {showCurRow && <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />}
+                  <SummaryBlock title={`На ${dateEndLabel}`} qtyVal={d.qtyEnd} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
+                </>
+              ) : (
+                <>
+                  <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                  <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.priceChangeCur != null ? d.priceChangeCur : null} rubVal={d.priceChangeRub} amountColor={d.priceChangeRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} />
+                  {showCurRow && <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />}
+                  <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
+                </>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+    );
+  };
+
   return (
     <main className={`min-h-screen py-8 box-border ${CONTENT_WIDTH_CLASS} ${isDesktop ? "px-8" : "px-0 max-w-none"} ${!isDesktop ? "w-full min-w-0" : ""}`}>
       <div className={`flex flex-col gap-6 ${!isDesktop ? "w-full min-w-0" : "w-full"}`}>
@@ -2068,12 +2388,13 @@ export default function AssetDetailPage() {
               }}
             />
             <div className="relative z-10 flex flex-col gap-4">
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/assets" className="flex items-center gap-2 text-white/90 hover:text-white">
-                <ArrowLeft className="h-4 w-4" />
-                К активам и обязательствам
-              </Link>
-            </Button>
+            <div className="self-start">
+              <IconButton variant="ghost" size="icon" asChild aria-label="К активам и обязательствам">
+                <Link href="/assets" className="text-white/90 hover:text-white">
+                  <ArrowLeft className="h-4 w-4" />
+                </Link>
+              </IconButton>
+            </div>
             <div className="flex flex-col items-center gap-3">
               <div
                 className="relative w-[152px] h-[152px] rounded-lg overflow-hidden shrink-0 cursor-pointer group"
@@ -2159,6 +2480,8 @@ export default function AssetDetailPage() {
               )}
               {costs && (() => {
                 const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
+                const kindToKey = (k: PrimaryValueKind): "balance" | "market" | "acquisition" | "invested" =>
+                  k === "MARKET" ? "market" : k === "ACQUISITION" ? "acquisition" : k === "INVESTED" ? "invested" : "balance";
                 const rows = [
                   { kind: "BALANCE" as PrimaryValueKind, label: "Балансовая стоимость", valueCents: costs.balance_currency_cents },
                   { kind: "MARKET" as PrimaryValueKind, label: "Рыночная стоимость", valueCents: costs.market_rub },
@@ -2168,23 +2491,43 @@ export default function AssetDetailPage() {
                 const primaryRow = rows.find((r) => r.kind === primaryKind);
                 const otherRows = rows.filter((r) => r.kind !== primaryKind);
                 const primaryAmountStyle = { background: PINK_GRADIENT, WebkitBackgroundClip: "text" as const, WebkitTextFillColor: "transparent", backgroundClip: "text" as const, fontSize: "1.875rem", fontWeight: 500 };
+                const openCostOverlay = (key: "balance" | "market" | "acquisition" | "invested") => {
+                  setCostHistoryOpen(key);
+                  setMobileCostOverlayKey(key);
+                };
                 return (
                   <>
                     {primaryRow && (
                       <div className="w-full min-w-0 mt-2">
-                        <div className="rounded-[9px] p-[2px] min-w-0 overflow-hidden" style={{ backgroundImage: PINK_GRADIENT }}>
+                        <div
+                          className="rounded-[9px] p-[2px] min-w-0 overflow-hidden"
+                          style={{ backgroundImage: PINK_GRADIENT }}
+                          role={!isDesktop ? "button" : undefined}
+                          tabIndex={!isDesktop ? 0 : undefined}
+                          onClick={!isDesktop ? () => openCostOverlay(kindToKey(primaryRow.kind)) : undefined}
+                          onKeyDown={!isDesktop ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(primaryRow.kind)); } } : undefined}
+                        >
                           <div
-                            className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0"
+                            className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3"
                             style={{ backgroundColor: "#25243F" }}
                           >
-                            <p className="text-sm mb-1 truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
-                            <div className="flex items-center gap-2 min-w-0">
-                              {primaryRow.valueCents != null ? (
-                                <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={primaryAmountStyle} />
-                              ) : (
-                                <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={primaryAmountStyle}>—</span>
-                              )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm mb-1 truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                              <div className="flex items-center gap-2 min-w-0">
+                                {primaryRow.valueCents != null ? (
+                                  <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={primaryAmountStyle} />
+                                ) : (
+                                  <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={primaryAmountStyle}>—</span>
+                                )}
+                              </div>
                             </div>
+                            {primaryValueMiniChartSeries.length > 1 && (
+                              <AssetCardMiniChart
+                                series={primaryValueMiniChartSeries}
+                                itemId={item.id}
+                                strokeColor={ACCENT}
+                              />
+                            )}
                           </div>
                         </div>
                       </div>
@@ -2195,6 +2538,10 @@ export default function AssetDetailPage() {
                           key={row.kind}
                           className="flex-1 min-w-0 rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px]"
                           style={{ backgroundColor: "#25243F" }}
+                          role={!isDesktop ? "button" : undefined}
+                          tabIndex={!isDesktop ? 0 : undefined}
+                          onClick={!isDesktop ? () => openCostOverlay(kindToKey(row.kind)) : undefined}
+                          onKeyDown={!isDesktop ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(row.kind)); } } : undefined}
                         >
                           <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
                           {row.valueCents != null ? (
@@ -2214,13 +2561,12 @@ export default function AssetDetailPage() {
         )}
 
         {isDesktop && (
-          <div className="flex flex-wrap items-center gap-2 -ml-2">
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/assets" className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-start gap-2 -ml-2">
+            <IconButton variant="ghost" size="icon" asChild aria-label="К активам и обязательствам">
+              <Link href="/assets">
                 <ArrowLeft className="h-4 w-4" />
-                К активам и обязательствам
               </Link>
-            </Button>
+            </IconButton>
           </div>
         )}
 
@@ -2693,558 +3039,7 @@ export default function AssetDetailPage() {
                             )}
                           </div>
                         </div>
-                        {isExpanded && costHistoryOpen === key && (
-                          <div className={`p-4 pt-0 ${!isDesktop ? "min-w-0 overflow-x-auto" : ""}`} style={{ backgroundColor: "transparent" }}>
-                          {item.currency_code && item.currency_code !== "RUB" ? (
-                            <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
-                              {item.currency_code && item.currency_code !== "RUB" && (
-                                <SegmentedSelector
-                                  options={[
-                                    { value: "RUB", label: "RUB" },
-                                    { value: "CURRENCY", label: item.currency_code },
-                                  ]}
-                                  value={costChartCurrency}
-                                  onChange={(v) => setCostChartCurrency(v === "RUB" || v === "CURRENCY" ? v : "RUB")}
-                                  segmentWidth="auto"
-                                  className="w-fit shrink-0"
-                                />
-                              )}
-                            </div>
-                          ) : null}
-                          {loadingCostHistory ? (
-                            <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
-                          ) : costChartSeries.length === 0 ? (
-                            <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период.</p>
-                          ) : costChartGeometry ? (() => {
-                            const costChartColor = costChartCurrency === "CURRENCY" && item?.currency_code ? (getCurrencyChartColor(item.currency_code) ?? ACCENT) : ACCENT;
-                            return (
-                            <>
-                              <div
-                                ref={(el) => { costChartContainerRef.current = el; setCostChartContainerReady(!!el); }}
-                                className="relative w-full min-w-0"
-                                style={costHistoryOpen === "balance" ? { height: 400 } : { aspectRatio: `${costChartSize.width}/${costChartSize.height}` }}
-                              >
-                              {costHistoryOpen === "balance" && checkpointChartHoverDate != null && costChartGeometry && (() => {
-                                const lineData = costChartCheckpointLines.find((l) => l.dateKey === checkpointChartHoverDate);
-                                if (!lineData) return null;
-                                const scaleX = costChartSize.width / costChartGeometry.width;
-                                const leftPx = lineData.x * scaleX;
-                                return (
-                                  <div
-                                    className="pointer-events-none absolute z-20 rounded-[9px] px-4 py-3 text-[14px] font-normal max-w-[280px]"
-                                    style={{ left: `${leftPx}px`, top: 0, transform: "translate(-50%, 0)", backgroundColor: MODAL_BG }}
-                                  >
-                                    <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartDate(new Date(lineData.dateKey))}</div>
-                                    {lineData.checkpoints.map((cp) => {
-                                      const timeStr = new Date(cp.checkpoint_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-                                      return (
-                                        <div key={cp.id} className="mt-2 pt-2 border-t border-white/10 space-y-1">
-                                          <div className="flex items-center justify-between gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
-                                            <span>{timeStr}</span>
-                                            <span className="text-xs" style={{ color: cp.status === "OK" ? GREEN : RED }}>{cp.status === "OK" ? "ОК" : "Расхождение"}</span>
-                                          </div>
-                                          <div className="flex justify-between gap-2 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                            <span>Расчётное:</span>
-                                            <AmountWithCurrency valueCents={cp.computed_balance_cents} currencyCode={item.currency_code ?? "RUB"} className="justify-end" />
-                                          </div>
-                                          <div className="flex justify-between gap-2 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                            <span>Указанное:</span>
-                                            <AmountWithCurrency valueCents={cp.stated_balance_cents} currencyCode={item.currency_code ?? "RUB"} className="justify-end" />
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                );
-                              })()}
-                              {costChartHoverPoint != null && costChartHoverIndex != null && costChartDisplaySeries[costChartHoverIndex] && (
-                                <div
-                                  ref={costChartTooltipRef}
-                                  className="pointer-events-none absolute z-20 whitespace-nowrap rounded-[9px] px-4 py-3 text-[14px] font-normal text-right"
-                                  style={{ left: costChartTooltipLeft != null ? `${costChartTooltipLeft}px` : `${costChartHoverPoint.x}px`, top: 0, transform: "translate(-50%, 0)", backgroundColor: MODAL_BG }}
-                                >
-                                  <div className="whitespace-nowrap" style={{ color: PLACEHOLDER_COLOR_DARK }}>{formatChartDate(new Date(costChartDisplaySeries[costChartHoverIndex]!.date))}</div>
-                                  {costHistoryOpen === "market" ? (() => {
-                                    const pt = costChartSeries[costChartHoverIndex!] as { marketQuantityUnits?: number; marketPriceRub?: number; valueRub: number; date: string };
-                                    const isCurrencyAsset = item.currency_code && item.currency_code !== "RUB";
-                                    const valueCurrencyCents = Math.round(pt.valueRub * 100);
-                                    const rate = isCurrencyAsset ? getRateForDateKey(pt.date) : null;
-                                    const valueRubCents = isCurrencyAsset && rate != null && rate > 0 ? Math.round(pt.valueRub * rate * 100) : valueCurrencyCents;
-                                    return (
-                                      <>
-                                        {pt.marketQuantityUnits != null && (
-                                          <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
-                                            <span>Количество</span>
-                                            <span className="tabular-nums">{pt.marketQuantityUnits.toLocaleString("ru-RU")}</span>
-                                          </div>
-                                        )}
-                                        <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
-                                          <span>Рыночная стоимость</span>
-                                          <div className="flex flex-col items-end gap-0.5">
-                                            <AmountWithCurrency valueCents={valueRubCents} currencyCode="RUB" className="justify-end" />
-                                            {isCurrencyAsset && (
-                                              <AmountWithCurrency valueCents={valueCurrencyCents} currencyCode={item.currency_code} className="justify-end" />
-                                            )}
-                                          </div>
-                                        </div>
-                                      </>
-                                    );
-                                  })() : (
-                                    <div className="mt-2 flex items-center justify-between gap-3" style={{ color: ACTIVE_TEXT_DARK }}>
-                                      <span>
-                                        {costHistoryOpen === "balance" && "Балансовая стоимость"}
-                                        {costHistoryOpen === "acquisition" && "Стоимость приобретения"}
-                                        {costHistoryOpen === "invested" && "Стоимость вложенных средств"}
-                                      </span>
-                                      <div className="flex items-center justify-end gap-2">
-                                        <AmountWithCurrency valueCents={Math.round(costChartDisplaySeries[costChartHoverIndex]!.valueRub * 100)} currencyCode={costChartCurrency === "RUB" ? "RUB" : item.currency_code} className="justify-end" />
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                              <svg ref={costChartSvgRef} viewBox={`0 0 ${costChartGeometry.width} ${costChartGeometry.height}`} className="h-full w-full cursor-pointer" style={{ overflow: "visible" }} onMouseMove={handleCostChartPointerMove} onMouseLeave={() => setCostChartHoverIndex(null)}>
-                                <defs>
-                                  <linearGradient id="asset-detail-chart-area" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={costChartColor} stopOpacity={0.35} />
-                                    <stop offset="100%" stopColor={costChartColor} stopOpacity={0} />
-                                  </linearGradient>
-                                  <linearGradient id="asset-detail-chart-area-negative" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={RED} stopOpacity={0.35} />
-                                    <stop offset="100%" stopColor={RED} stopOpacity={0} />
-                                  </linearGradient>
-                                </defs>
-                                {costChartGeometry.areaPathNegativeSegments.map((d, idx) => (
-                                  <path key={`neg-area-${idx}`} d={d} fill="url(#asset-detail-chart-area-negative)" />
-                                ))}
-                                {costChartGeometry.areaPathPositiveSegments.map((d, idx) => (
-                                  <path key={`pos-area-${idx}`} d={d} fill="url(#asset-detail-chart-area)" />
-                                ))}
-                                {costChartGeometry.linePathNegativeSegments.map((d, idx) => (
-                                  <path key={`neg-line-${idx}`} d={d} fill="none" stroke={RED} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
-                                ))}
-                                {costChartGeometry.linePathPositiveSegments.map((d, idx) => (
-                                  <path key={`pos-line-${idx}`} d={d} fill="none" stroke={costChartColor} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
-                                ))}
-                                {costChartDividers.map((div, idx) => (
-                                  <line
-                                    key={`div-${idx}-${div.x}`}
-                                    x1={div.x}
-                                    x2={div.x}
-                                    y1={costChartGeometry.padding.top}
-                                    y2={costChartGeometry.padding.top + costChartGeometry.innerHeight}
-                                    stroke={PLACEHOLDER_COLOR_DARK}
-                                    strokeWidth={div.type === "year" ? 1.5 : 1}
-                                    strokeOpacity={div.type === "year" ? 0.9 : 0.5}
-                                  />
-                                ))}
-                                <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.baselineY} y2={costChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1} strokeDasharray="4 4" strokeOpacity={0.7} />
-                                <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.averageLineY} y2={costChartGeometry.averageLineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1.5} strokeDasharray="6 4" strokeOpacity={0.9} />
-                                {costHistoryOpen === "balance" && costChartCheckpointLines.map(({ dateKey, x, checkpoints: cps }) => {
-                                  const hasMismatch = cps.some((c) => c.status === "MISMATCH");
-                                  const strokeColor = hasMismatch ? RED : GREEN;
-                                  const iconSize = 24;
-                                  const iconY = Math.max(0, costChartGeometry.padding.top - iconSize);
-                                  return (
-                                    <g
-                                      key={dateKey}
-                                      onMouseEnter={() => setCheckpointChartHoverDate(dateKey)}
-                                      onMouseLeave={() => setCheckpointChartHoverDate(null)}
-                                    >
-                                      <foreignObject x={x - iconSize / 2} y={iconY} width={iconSize} height={iconSize} style={{ overflow: "visible" }}>
-                                        <div
-                                          {...({ xmlns: "http://www.w3.org/1999/xhtml" } as Record<string, unknown>)}
-                                          className="flex items-center justify-center"
-                                          style={{ width: iconSize, height: iconSize, color: hasMismatch ? RED : GREEN }}
-                                        >
-                                          {hasMismatch ? <MapPinX size={20} /> : <MapPinCheck size={20} />}
-                                        </div>
-                                      </foreignObject>
-                                      <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={strokeColor} strokeWidth={2} strokeOpacity={0.9} />
-                                      <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke="transparent" strokeWidth={16} style={{ cursor: "pointer" }} />
-                                    </g>
-                                  );
-                                })}
-                                {costChartHoverPoint && (
-                                  <>
-                                    <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
-                                    <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={6} fill={costChartHoverPoint.value < 0 ? RED : costChartColor} stroke="#fff" strokeWidth={2} />
-                                  </>
-                                )}
-                                {costChartGeometry.dayMarks.map((mark, idx) => (
-                                  <text key={idx} x={mark.x} y={costChartGeometry.height - 12} textAnchor={idx === 0 ? "start" : idx === costChartGeometry.dayMarks.length - 1 ? "end" : "middle"} fontSize={14} fill={ACTIVE_TEXT_DARK}>{mark.label}</text>
-                                ))}
-                              </svg>
-                              <div
-                                className="absolute right-0 pointer-events-none flex items-center gap-2 rounded-md px-2 py-1 text-sm tabular-nums shrink-0"
-                                style={{
-                                  top: `${(costChartGeometry.averageLineY / costChartGeometry.height) * 100}%`,
-                                  transform: "translateY(-50%)",
-                                  backgroundColor: MODAL_BG,
-                                  color: ACTIVE_TEXT_DARK,
-                                }}
-                                aria-label="Средняя величина по дням"
-                              >
-                                <AmountWithCurrency
-                                  valueCents={Math.round(costChartGeometry.averageValue * 100)}
-                                  currencyCode={costChartCurrency === "RUB" ? "RUB" : item.currency_code ?? "RUB"}
-                                  amountStyle={{ color: ACTIVE_TEXT_DARK }}
-                                />
-                              </div>
-                              </div>
-                            </>
-                            );
-                          })() : null}
-                          {key === "balance" && (
-                            <div className="mt-3 flex justify-center">
-                              <Button
-                                type="button"
-                                className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal"
-                                style={{ backgroundColor: ACCENT }}
-                                onClick={() => router.push(`/transactions?item_id=${item.id}`)}
-                              >
-                                <ExternalLink className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                                <span style={{ color: "white", opacity: 0.85 }}>Просмотреть транзакции</span>
-                              </Button>
-                            </div>
-                          )}
-                          {(key === "acquisition" || key === "invested") && (() => {
-                            const txs = key === "acquisition" ? purchaseTxsForAsset : investedTxsForAsset;
-                            const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
-                            const isCurrencyAsset = currencyCode !== "RUB";
-                            let costValueCents = key === "acquisition" ? (costs.acquisition_rub ?? 0) : (costs.invested_rub ?? 0);
-                            const rateOnOpen =
-                              isCurrencyAsset && item.open_date
-                                ? getRateForDate(fxRatesByDate, item.open_date, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
-                                : null;
-                            if (isCurrencyAsset && rateOnOpen && rateOnOpen > 0) {
-                              costValueCents = Math.round(costValueCents / rateOnOpen);
-                            }
-                            // tx.amount в валюте primary_item (обычно RUB копейки); конвертируем в валюту актива
-                            const txsSumAssetCents = txs.reduce((sum, tx) => {
-                              const amt = tx.amount ?? 0;
-                              if (!isCurrencyAsset) return sum + amt;
-                              const pi = itemsById.get(tx.primary_item_id) ?? null;
-                              const txCur = (pi?.currency_code ?? "RUB").toUpperCase();
-                              const d = toTxDateKey(tx.transaction_date);
-                              const rateTx = txCur === "RUB" ? 1 : getRateForDate(fxRatesByDate, d, txCur, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
-                              const rubCents = rateTx != null && rateTx > 0 ? Math.round(amt * rateTx) : amt;
-                              const rateA = getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
-                              return sum + (rateA != null && rateA > 0 ? Math.round(rubCents / rateA) : rubCents);
-                            }, 0);
-                            const initialRowAssetCents = costValueCents - txsSumAssetCents;
-                            const hasImplicitInitial = Math.abs(initialRowAssetCents) > 1;
-                            const hasTxs = txs.length > 0;
-                            if (!hasTxs && !hasImplicitInitial) {
-                              return (
-                                <p className="text-sm mt-3" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                  {key === "acquisition" ? "Нет операций приобретения." : "Нет операций вложений."}
-                                </p>
-                              );
-                            }
-                            return (
-                              <table className="w-full text-left border-collapse text-sm mt-3" style={{ color: ACTIVE_TEXT_DARK }}>
-                                <tbody>
-                                  {hasImplicitInitial && item.history_status === "HISTORICAL" && (() => {
-                                    const histRubCents =
-                                      isCurrencyAsset && rateOnOpen != null && rateOnOpen > 0
-                                        ? Math.round((initialRowAssetCents / 100) * rateOnOpen * 100)
-                                        : initialRowAssetCents;
-                                    const histCurrencyUnits = isCurrencyAsset ? initialRowAssetCents / 100 : null;
-                                    const dateLabel = item.open_date
-                                      ? new Date(item.open_date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })
-                                      : "—";
-                                    return (
-                                      <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                                        <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{dateLabel}</td>
-                                        <td className="py-1.5 pr-4 align-middle" colSpan={1}>
-                                          <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Начальная стоимость</span>
-                                        </td>
-                                        <td className="py-1.5 pr-4 align-middle">
-                                          <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>
-                                        </td>
-                                        {isCurrencyAsset && (
-                                          <>
-                                            <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
-                                              <div className="flex items-center gap-2 tabular-nums w-full">
-                                                <CurrencyChip code={currencyCode} />
-                                                <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{histCurrencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(histCurrencyUnits) : "–"}</span>
-                                              </div>
-                                            </td>
-                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>{rateOnOpen != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rateOnOpen) : "–"}</td>
-                                          </>
-                                        )}
-                                        <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
-                                          <div className="flex items-center gap-2 tabular-nums w-full">
-                                            <CurrencyChip code="RUB" />
-                                            <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{formatRub(histRubCents)}</span>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    );
-                                  })()}
-                                  {txs.map((tx) => {
-                                    const d = toTxDateKey(tx.transaction_date);
-                                    const primaryItem = itemsById.get(tx.primary_item_id) ?? null;
-                                    const txCurrency = (primaryItem?.currency_code ?? "RUB").toUpperCase();
-                                    const rateTxCur =
-                                      txCurrency === "RUB"
-                                        ? 1
-                                        : getRateForDate(fxRatesByDate, d, txCurrency, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
-                                    const rateAsset =
-                                      isCurrencyAsset
-                                        ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
-                                        : null;
-                                    const rubCentsTx =
-                                      rateTxCur != null && rateTxCur > 0
-                                        ? Math.round((tx.amount ?? 0) * rateTxCur)
-                                        : (tx.amount ?? 0);
-                                    const assetCentsTx =
-                                      isCurrencyAsset && rateAsset != null && rateAsset > 0
-                                        ? Math.round(rubCentsTx / rateAsset)
-                                        : null;
-                                    const currencyUnits = isCurrencyAsset && assetCentsTx != null ? assetCentsTx / 100 : null;
-                                    const categoryPath = tx.category_id != null ? (categoryLookup.idToPath.get(tx.category_id) ?? []) : [];
-                                    const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : "–";
-                                    return (
-                                      <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                                        <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
-                                        <td className="py-1.5 pr-4 align-middle">
-                                          {tx.category_id != null ? (
-                                            <div className="flex items-center gap-2">
-                                              <CategoryIconImage
-                                                categoryId={tx.category_id}
-                                                categoryLookup={categoryLookup}
-                                                apiBase={API_BASE}
-                                                size={18}
-                                                className="h-4 w-4 rounded-sm object-contain shrink-0"
-                                                fallbackIconColor={ACTIVE_TEXT_DARK}
-                                              />
-                                              <span style={{ color: ACTIVE_TEXT_DARK }}>{categoryLabel}</span>
-                                            </div>
-                                          ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
-                                        </td>
-                                        <td className="py-1.5 pr-4 align-middle">
-                                          {tx.comment?.trim() ? (
-                                            <div className="flex items-center gap-1.5" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                              <MessageSquare className="h-3.5 w-3.5 shrink-0" style={{ color: PLACEHOLDER_COLOR_DARK }} />
-                                              <span className="text-xs">{tx.comment.trim()}</span>
-                                            </div>
-                                          ) : <span style={{ color: PLACEHOLDER_COLOR_DARK }}>–</span>}
-                                        </td>
-                                        {isCurrencyAsset && (
-                                          <>
-                                            <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
-                                              <div className="flex items-center gap-2 tabular-nums w-full">
-                                                <CurrencyChip code={currencyCode} />
-                                                <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{currencyUnits != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits) : "–"}</span>
-                                              </div>
-                                            </td>
-                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>{rateAsset != null ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rateAsset) : "–"}</td>
-                                          </>
-                                        )}
-                                        <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
-                                          <div className="flex items-center gap-2 tabular-nums w-full">
-                                            <CurrencyChip code="RUB" />
-                                            <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{formatRub(rubCentsTx)}</span>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            );
-                          })()}
-                          {key === "market" && !item.instrument_id && !isCryptoItem(item) && (() => {
-                            const currencyCode = (item.currency_code ?? "RUB").toUpperCase();
-                            const isCurrencyAsset = currencyCode !== "RUB";
-                            const mvsSorted = [...marketValues].sort(
-                              (a, b) => a.value_date.localeCompare(b.value_date)
-                            );
-                            return (
-                              <div className="flex gap-4 mt-3 items-start">
-                                <div className="w-1/2 min-w-0">
-                                  {mvsSorted.length === 0 ? (
-                                    <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                      Нет данных о рыночной стоимости.
-                                    </p>
-                                  ) : (
-                                    <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
-                                      <tbody>
-                                        {mvsSorted.map((mv) => {
-                                          const dateLabel = new Date(mv.value_date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
-                                          const rubCents = mv.value_rub;
-                                          const assetCents = mv.value_currency_cents ?? null;
-                                          const rateOnDate =
-                                            isCurrencyAsset
-                                              ? getRateForDate(fxRatesByDate, mv.value_date, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys)
-                                              : null;
-                                          const displayAssetCents =
-                                            assetCents != null
-                                              ? assetCents
-                                              : (isCurrencyAsset && rateOnDate != null && rateOnDate > 0
-                                                  ? Math.round(rubCents / rateOnDate)
-                                                  : null);
-                                          const displayRubCents =
-                                            rubCents !== 0
-                                              ? rubCents
-                                              : (assetCents != null && rateOnDate != null && rateOnDate > 0
-                                                  ? Math.round((assetCents / 100) * rateOnDate * 100)
-                                                  : 0);
-                                          const currencyUnits = displayAssetCents != null ? displayAssetCents / 100 : null;
-                                          return (
-                                            <tr key={mv.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                                              <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{dateLabel}</td>
-                                              {isCurrencyAsset && (
-                                                <>
-                                                  <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
-                                                    <div className="flex items-center gap-2 tabular-nums w-full">
-                                                      <CurrencyChip code={currencyCode} />
-                                                      <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>
-                                                        {currencyUnits != null
-                                                          ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currencyUnits)
-                                                          : "–"}
-                                                      </span>
-                                                    </div>
-                                                  </td>
-                                                  <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                                                    {rateOnDate != null
-                                                      ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(rateOnDate)
-                                                      : "–"}
-                                                  </td>
-                                                </>
-                                              )}
-                                              <td className="py-1.5 pr-4 align-middle w-0 min-w-[120px]">
-                                                <div className="flex items-center gap-2 tabular-nums w-full">
-                                                  <CurrencyChip code="RUB" />
-                                                  <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>{formatRub(displayRubCents)}</span>
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          );
-                                        })}
-                                      </tbody>
-                                    </table>
-                                  )}
-                                </div>
-                                <div className="w-1/2 flex justify-center items-start pt-1">
-                                  <Button
-                                    type="button"
-                                    className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
-                                    style={{ backgroundColor: ACCENT }}
-                                    onClick={() => setEditMarketValueModalOpen(true)}
-                                  >
-                                    <Plus className="h-5 w-5 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                                    <span style={{ color: "white", opacity: 0.85 }}>Добавить/изменить рыночную стоимость</span>
-                                  </Button>
-                                </div>
-                              </div>
-                            );
-                          })()}
-                          {((key === "balance" && dynamicsBalance) || (key === "market" && dynamicsMarket)) && (() => {
-                            const d = (key === "balance" ? dynamicsBalance : dynamicsMarket)!;
-                            const formatCur = (v: number) => {
-                              const s = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
-                              return s.replace(/,0*$/, "") || s;
-                            };
-                            const SummaryBlock = ({
-                              title,
-                              qtyVal,
-                              curVal,
-                              rubVal,
-                              amountColor,
-                              showCurRow = true,
-                              showQtyRow = true,
-                              showEmptyQtyRow = false,
-                            }: {
-                              title: string;
-                              qtyVal?: number | null;
-                              curVal: number | null;
-                              rubVal: number | null;
-                              amountColor?: string;
-                              showCurRow?: boolean;
-                              showQtyRow?: boolean;
-                              showEmptyQtyRow?: boolean;
-                            }) => (
-                              <div className="flex flex-1 min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
-                                <div className="text-xs text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>{title}</div>
-                                <div className="flex flex-col gap-2">
-                                  {showEmptyQtyRow && (
-                                    <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden>
-                                      <span className="invisible select-none">0</span>
-                                    </div>
-                                  )}
-                                  {showQtyRow && qtyVal != null && (
-                                    <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
-                                      <span className="ml-auto" style={{ color: ACTIVE_TEXT_DARK }}>
-                                        {isCryptoItem(item) ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(qtyVal) : new Intl.NumberFormat("ru-RU").format(qtyVal) + (isMoexItem(item) ? " л." : "")}
-                                      </span>
-                                    </div>
-                                  )}
-                                  {d.currencyCode !== "RUB" && (showCurRow ? (
-                                    <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
-                                      <CurrencyChip code={d.currencyCode} />
-                                      <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{curVal != null ? formatCur(curVal) : "–"}</span>
-                                    </div>
-                                  ) : (
-                                    <div className="rounded-md px-2 py-1 flex items-center text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }} aria-hidden>
-                                      <span className="invisible select-none">0</span>
-                                    </div>
-                                  ))}
-                                  <div className="rounded-md px-2 py-1 flex items-center gap-2 text-sm tabular-nums" style={{ backgroundColor: BACKGROUND_DT }}>
-                                    <CurrencyChip code="RUB" />
-                                    <span className="ml-auto" style={{ color: amountColor ?? ACTIVE_TEXT_DARK }}>{rubVal != null ? formatRub(rubVal) : "–"}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                            const dateStartLabel = d.dateStart ? new Date(d.dateStart).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
-                            const dateEndLabel = d.dateEnd ? new Date(d.dateEnd).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
-                            const initialDisplayRub = d.initialRubCents != null ? (d.effectiveKind === "LIABILITY" ? Math.abs(d.initialRubCents) : d.initialRubCents) : null;
-                            const initialDisplayCur = d.effectiveKind === "LIABILITY" ? Math.abs(d.initialCurCents) / 100 : d.initialCurCents / 100;
-                            const finalDisplayRub = d.finalRubCents != null ? (d.effectiveKind === "LIABILITY" ? Math.abs(d.finalRubCents) : d.finalRubCents) : null;
-                            const finalDisplayCur = d.effectiveKind === "LIABILITY" ? Math.abs(d.finalCurCents) / 100 : d.finalCurCents / 100;
-                            const showCurRow = d.currencyCode !== "RUB";
-                            return (
-                              <div className="flex w-full gap-4 flex-wrap mt-4">
-                                {d.isBalanceMode ? (
-                                  <>
-                                    <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Доходы" curVal={showCurRow ? d.totalIncomeCur : null} rubVal={d.totalIncomeRub} amountColor={GREEN} showQtyRow={false} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Расходы" curVal={showCurRow ? -d.totalExpenseCur : null} rubVal={-d.totalExpenseRub} amountColor={RED} showQtyRow={false} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Переводы" curVal={showCurRow ? d.totalTransferCur : null} rubVal={d.totalTransferRub} amountColor={d.totalTransferRub < 0 ? RED : d.totalTransferRub > 0 ? GREEN : undefined} showQtyRow={false} showCurRow={showCurRow} />
-                                    {showCurRow && (
-                                      <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />
-                                    )}
-                                    <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                                  </>
-                                ) : d.isMarketMode && d.isMarketOrCrypto ? (
-                                  <>
-                                    <SummaryBlock title={`На ${dateStartLabel}`} qtyVal={d.qtyStart} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Куплено" qtyVal={d.totalBuyQty} curVal={showCurRow ? d.totalExpenseCur : null} rubVal={d.totalExpenseRub} amountColor={GREEN} showQtyRow={true} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Продано" qtyVal={-d.totalSellQty} curVal={showCurRow ? -d.totalSaleCur : null} rubVal={-d.totalSaleRub} amountColor={RED} showQtyRow={true} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.priceChangeCur != null ? d.priceChangeCur : null} rubVal={d.priceChangeRub} amountColor={d.priceChangeRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} showEmptyQtyRow={true} />
-                                    {showCurRow && (
-                                      <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />
-                                    )}
-                                    <SummaryBlock title={`На ${dateEndLabel}`} qtyVal={d.qtyEnd} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={true} showCurRow={showCurRow} />
-                                  </>
-                                ) : (
-                                  <>
-                                    <SummaryBlock title={`На ${dateStartLabel}`} curVal={showCurRow ? initialDisplayCur : null} rubVal={initialDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                                    <SummaryBlock title="Изменение цены" qtyVal={undefined} curVal={showCurRow && d.priceChangeCur != null ? d.priceChangeCur : null} rubVal={d.priceChangeRub} amountColor={d.priceChangeRub >= 0 ? GREEN : RED} showCurRow={showCurRow} showQtyRow={false} />
-                                    {showCurRow && (
-                                      <SummaryBlock title="Курсовые разницы" curVal={null} rubVal={d.courseDiffRub} amountColor={d.courseDiffRub >= 0 ? GREEN : RED} showQtyRow={false} showCurRow={false} />
-                                    )}
-                                    <SummaryBlock title={`На ${dateEndLabel}`} curVal={showCurRow ? finalDisplayCur : null} rubVal={finalDisplayRub} showQtyRow={false} showCurRow={showCurRow} />
-                                  </>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
+                        {isExpanded && costHistoryOpen === key && (isDesktop || !mobileCostOverlayKey) && renderCostSectionExpandedContent({ rowKey: key, isMobileOverlay: false, chartContainerRef: costChartContainerRef, dayMarksOverride: null })}
                     </div>
                   </div>
                 </div>
@@ -3730,6 +3525,30 @@ export default function AssetDetailPage() {
         </Dialog>
         </div>
       </div>
+
+      {typeof document !== "undefined" && !isDesktop && mobileCostOverlayKey && createPortal(
+        <div className="fixed inset-0 z-50 flex flex-col" aria-modal role="dialog">
+          <div
+            className="absolute inset-0 bg-black/50"
+            aria-hidden
+            onClick={() => setMobileCostOverlayKey(null)}
+          />
+          <div className="relative z-10 flex flex-col w-full max-h-full bg-[#1C1B2E]" style={{ minHeight: "100dvh" }}>
+            <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
+              <h2 className="text-lg font-medium truncate" style={{ color: ACTIVE_TEXT_DARK }}>
+                {mobileCostOverlayKey === "balance" ? "Балансовая стоимость" : mobileCostOverlayKey === "market" ? "Рыночная стоимость" : mobileCostOverlayKey === "acquisition" ? "Стоимость приобретения" : "Стоимость вложенных средств"}
+              </h2>
+              <IconButton variant="ghost" size="icon" aria-label="Закрыть" onClick={() => setMobileCostOverlayKey(null)}>
+                <ChevronUp className="h-5 w-5 rotate-180" style={{ color: ACTIVE_TEXT_DARK }} />
+              </IconButton>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+              {mobileCostOverlayKey && renderCostSectionExpandedContent({ rowKey: mobileCostOverlayKey, isMobileOverlay: true, chartContainerRef: overlayChartContainerRef, dayMarksOverride: overlayDayMarks })}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </main>
   );
 }

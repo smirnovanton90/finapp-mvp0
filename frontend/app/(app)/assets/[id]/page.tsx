@@ -25,6 +25,7 @@ import {
   MapPinCheck,
   MapPinX,
   Calendar,
+  CalendarCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -69,6 +70,7 @@ import {
   TransactionOut,
   FxRateOut,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
@@ -249,6 +251,8 @@ export default function AssetDetailPage() {
   const [savingPrimary, setSavingPrimary] = useState(false);
   const [costHistoryOpen, setCostHistoryOpen] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
   const [mobileCostOverlayKey, setMobileCostOverlayKey] = useState<"balance" | "acquisition" | "invested" | "market" | null>(null);
+  /** Период для графика стоимости на мобильной: Н (неделя), М (месяц), Г (год), all (за весь период). */
+  const [mobileCostPeriod, setMobileCostPeriod] = useState<"week" | "month" | "year" | "all">("month");
   const overlayChartContainerRef = useRef<HTMLDivElement | null>(null);
   const costHistoryInitializedForItemIdRef = useRef<number | null>(null);
   useEffect(() => {
@@ -451,6 +455,34 @@ export default function AssetDetailPage() {
     const day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
   }, []);
+
+  /** Границы текущего календарного периода для мобильного графика стоимости. Возвращает [startDateKey, endDateKey] в формате YYYY-MM-DD. */
+  const mobileCostPeriodBounds = useMemo((): [string, string] => {
+    if (mobileCostPeriod === "all") {
+      const end = item?.closed_at ? item.closed_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const start = item?.open_date ?? end;
+      return [start, end];
+    }
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    if (mobileCostPeriod === "year") {
+      return [`${year}-01-01`, `${year}-12-31`];
+    }
+    if (mobileCostPeriod === "month") {
+      const first = new Date(year, month, 1);
+      const last = new Date(year, month + 1, 0);
+      return [toLocalDateKey(first), toLocalDateKey(last)];
+    }
+    // week: понедельник — воскресенье
+    const dayOfWeek = now.getDay();
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - daysToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return [toLocalDateKey(monday), toLocalDateKey(sunday)];
+  }, [mobileCostPeriod, toLocalDateKey, item?.open_date, item?.closed_at]);
 
   const openCheckpointModal = useCallback((editId: number | null) => {
     setCheckpointEditId(editId);
@@ -1104,6 +1136,275 @@ export default function AssetDetailPage() {
 
   const { isDesktop } = useSidebar();
 
+  // На мобильной — динамика по выбранному периоду (Н/М/Г) для блоков под графиком в шторке.
+  const dynamicsByModeMobilePeriod = useMemo(() => {
+    if (isDesktop || !item || !costs) return null;
+    const [rangeStart, rangeEnd] = mobileCostPeriodBounds;
+    const it = item;
+    const c = costs;
+    const dateStart = rangeStart;
+    const dateEnd = rangeEnd;
+    const currencyCode = (it.currency_code ?? "RUB").toUpperCase();
+    const points = costHistoryData?.points ?? [];
+    const startPoint = points.find((p) => p.date === dateStart) ?? points.filter((p) => p.date <= dateStart).pop() ?? null;
+    const endPoint = points.find((p) => p.date === dateEnd) ?? points.filter((p) => p.date <= dateEnd).pop() ?? null;
+
+    const getRate = (dateKey: string): number | null => {
+      const r = getRateForDate(fxRatesByDate, dateKey, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
+      if (r != null) return r;
+      if (currencyCode !== "RUB") return latestRatesByCurrency.get(currencyCode)?.rate ?? null;
+      return null;
+    };
+
+    const isMarketOrCrypto = isMoexItem(it) || isCryptoItem(it);
+
+    const txsInRange = (() => {
+      const included = dynamicsTxs.filter((tx) => {
+        const d = toTxDateKey(tx.transaction_date);
+        if (d <= dateStart || d > dateEnd) return false;
+        const delta = getTxDeltaForItem(tx, it.id, it.kind, it.currency_code);
+        if (delta !== null) return true;
+        if (isMarketOrCrypto && tx.related_item_id === it.id) return true;
+        return false;
+      });
+      return included
+        .map((tx) => {
+          const res = getTxDeltaForItem(tx, it.id, it.kind, it.currency_code);
+          if (res !== null) return { tx, deltaCents: res.deltaCents, inCurrency: res.inCurrency };
+          if (isMarketOrCrypto && tx.related_item_id === it.id) {
+            const inCurrency = currencyCode !== "RUB";
+            return { tx, deltaCents: tx.amount ?? 0, inCurrency };
+          }
+          return { tx, deltaCents: 0, inCurrency: false };
+        })
+        .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)));
+    })();
+
+    let totalIncomeRub = 0;
+    let totalExpenseRub = 0;
+    let totalIncomeCur = 0;
+    let totalExpenseCur = 0;
+    let totalTransferRub = 0;
+    let totalTransferCur = 0;
+    let totalSaleRub = 0;
+    let totalSaleCur = 0;
+    const isCrypto = isCryptoItem(it);
+    txsInRange.forEach(({ tx, deltaCents, inCurrency }) => {
+      const d = toTxDateKey(tx.transaction_date);
+      const rate = currencyCode !== "RUB" ? getRate(d) : null;
+      let curUnits: number | null = null;
+      let rubCents: number;
+      if (currencyCode === "RUB") {
+        rubCents = deltaCents;
+      } else {
+        if (inCurrency) {
+          curUnits = deltaCents / 100;
+          rubCents = rate != null ? Math.round(curUnits * rate * 100) : 0;
+        } else {
+          curUnits = rate != null ? (deltaCents / 100) / rate : null;
+          rubCents = curUnits != null && rate != null ? Math.round(curUnits * rate * 100) : 0;
+        }
+      }
+      if (tx.direction === "TRANSFER") {
+        totalTransferRub += rubCents;
+        if (curUnits != null) totalTransferCur += curUnits;
+        return;
+      }
+      if (tx.direction === "INCOME") {
+        totalIncomeRub += rubCents;
+        if (curUnits != null) totalIncomeCur += curUnits;
+        if (isMarketOrCrypto && tx.related_item_id === it.id && tx.asset_link_type === "ASSET_SALE") {
+          totalSaleRub += rubCents;
+          if (curUnits != null) totalSaleCur += curUnits;
+        }
+        return;
+      }
+      if (tx.direction === "EXPENSE") {
+        totalExpenseRub += Math.abs(rubCents);
+        if (curUnits != null) totalExpenseCur += Math.abs(curUnits);
+      }
+    });
+
+    const displayFlowRub = totalExpenseRub - totalIncomeRub + totalTransferRub;
+    const displayFlowCur = totalExpenseCur - totalIncomeCur + totalTransferCur;
+    const netFlowRub = displayFlowRub;
+    const netFlowCur = displayFlowCur;
+    const chipFlowRub = totalIncomeRub - totalExpenseRub + totalTransferRub;
+
+    let totalBuyQty = 0;
+    let totalSellQty = 0;
+    if (isMarketOrCrypto) {
+      const getTxQty = (tx: TransactionOut) => {
+        if (tx.related_item_id === it.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+        if (tx.counterparty_item_id === it.id || tx.counterparty_card_item_id === it.id) return isCrypto ? (tx.counterparty_quantity_units ?? 0) : (tx.counterparty_quantity_lots ?? 0);
+        if (tx.primary_item_id === it.id || tx.primary_card_item_id === it.id) return isCrypto ? (tx.primary_quantity_units ?? 0) : (tx.primary_quantity_lots ?? 0);
+        return 0;
+      };
+      const getIsBuy = (tx: TransactionOut) => {
+        if (tx.related_item_id === it.id) return tx.asset_link_type === "ASSET_PURCHASE";
+        if (tx.counterparty_item_id === it.id || tx.counterparty_card_item_id === it.id) return true;
+        return false;
+      };
+      txsInRange.forEach(({ tx }) => {
+        const qty = getTxQty(tx);
+        if (getIsBuy(tx)) totalBuyQty += qty;
+        else totalSellQty += qty;
+      });
+    }
+
+    function buildOne(primaryValueKind: PrimaryValueKind) {
+      const isBalanceMode = primaryValueKind !== "MARKET";
+      const isMarketMode = primaryValueKind === "MARKET";
+      const valueFromPoint = (p: { market: number | null; balance: number }) =>
+        isBalanceMode ? (p.balance ?? 0) : (isMarketOrCrypto ? (p.market ?? p.balance ?? 0) : (p.market ?? p.balance ?? 0));
+
+      let initialRubCents: number | null;
+      let initialCurCents: number;
+      let finalRubCents: number | null;
+      let finalCurCents: number;
+      let qtyStart: number | null = null;
+      let qtyEnd: number | null = null;
+
+      if (startPoint) {
+        const valCur = valueFromPoint(startPoint);
+        initialCurCents = valCur;
+        const rate = currencyCode !== "RUB" ? getRate(dateStart) : null;
+        initialRubCents =
+          currencyCode === "RUB"
+            ? valCur
+            : rate != null
+              ? Math.round((valCur / 100) * rate * 100)
+              : null;
+        const pt = startPoint as { market_quantity_units?: number | null };
+        if (isMarketOrCrypto && pt.market_quantity_units != null) qtyStart = pt.market_quantity_units;
+      } else {
+        initialRubCents = 0;
+        initialCurCents = 0;
+      }
+
+      if (endPoint) {
+        const valCur = valueFromPoint(endPoint);
+        finalCurCents = valCur;
+        const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
+        finalRubCents =
+          currencyCode === "RUB"
+            ? valCur
+            : rate != null
+              ? Math.round((valCur / 100) * rate * 100)
+              : null;
+        const pt = endPoint as { market_quantity_units?: number | null };
+        if (isMarketOrCrypto && pt.market_quantity_units != null) qtyEnd = pt.market_quantity_units;
+        else if (isMarketOrCrypto) {
+          if (it.type_code === "crypto" && it.quantity_units != null) qtyEnd = it.quantity_units;
+          else if (it.position_lots != null) qtyEnd = it.position_lots;
+        }
+      } else {
+        if (isMarketOrCrypto) {
+          finalCurCents = c.market ?? 0;
+          const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
+          finalRubCents =
+            c.market_value_rub ??
+            (currencyCode !== "RUB" && rate != null
+              ? Math.round((finalCurCents / 100) * rate * 100)
+              : (c.market ?? 0));
+          if (it.type_code === "crypto" && it.quantity_units != null) qtyEnd = it.quantity_units;
+          else if (it.position_lots != null) qtyEnd = it.position_lots;
+        } else {
+          finalCurCents = c.balance_currency_cents ?? 0;
+          const rate = currencyCode !== "RUB" ? getRate(dateEnd) : null;
+          finalRubCents =
+            currencyCode === "RUB"
+              ? finalCurCents
+              : rate != null
+                ? Math.round((finalCurCents / 100) * rate * 100)
+                : null;
+        }
+      }
+
+      if (isMarketOrCrypto && qtyEnd == null && qtyStart != null) {
+        qtyEnd = qtyStart + totalBuyQty - totalSellQty;
+      }
+
+      const effectiveKind = getEffectiveItemKind(it, finalCurCents);
+      const signedInitialRub = effectiveKind === "LIABILITY" ? -(initialRubCents ?? 0) : (initialRubCents ?? 0);
+      const signedFinalRub = effectiveKind === "LIABILITY" ? -(finalRubCents ?? 0) : (finalRubCents ?? 0);
+      const totalNonFlowRub = signedFinalRub - signedInitialRub - chipFlowRub;
+      const profitLossFromPriceCur =
+        currencyCode !== "RUB"
+          ? (finalCurCents - initialCurCents) / 100 - netFlowCur
+          : null;
+      const rateEnd = currencyCode !== "RUB" ? getRate(dateEnd) : null;
+      let courseDiffRub: number;
+      let profitLossFromPriceRub: number;
+      if (currencyCode !== "RUB") {
+        if (isMarketMode && profitLossFromPriceCur != null && rateEnd != null) {
+          profitLossFromPriceRub = Math.round(profitLossFromPriceCur * 100 * rateEnd);
+          courseDiffRub = totalNonFlowRub - profitLossFromPriceRub;
+        } else {
+          courseDiffRub = totalNonFlowRub;
+          profitLossFromPriceRub = totalNonFlowRub;
+        }
+      } else {
+        courseDiffRub = 0;
+        profitLossFromPriceRub = totalNonFlowRub;
+      }
+      const capitalFlowRub = totalSaleRub - totalExpenseRub + totalTransferRub;
+      const capitalFlowCur = totalSaleCur - totalExpenseCur + totalTransferCur;
+      const priceChangeRub = signedFinalRub - signedInitialRub - capitalFlowRub;
+      const priceChangeCur =
+        currencyCode !== "RUB"
+          ? (finalCurCents - initialCurCents) / 100 - capitalFlowCur
+          : priceChangeRub / 100;
+
+      const rowGrowthPercent =
+        initialRubCents != null && initialRubCents !== 0
+          ? (effectiveKind === "LIABILITY"
+            ? (Math.abs(signedFinalRub) - Math.abs(signedInitialRub)) / Math.abs(signedInitialRub) * 100
+            : (signedFinalRub - signedInitialRub) / Math.abs(signedInitialRub) * 100)
+          : null;
+
+      return {
+        dateStart,
+        dateEnd,
+        initialRubCents,
+        initialCurCents,
+        finalRubCents,
+        finalCurCents,
+        qtyStart,
+        qtyEnd,
+        netFlowRub,
+        courseDiffRub,
+        profitLossFromPriceRub,
+        profitLossFromPriceCur,
+        priceChangeRub,
+        priceChangeCur,
+        totalIncomeRub,
+        totalExpenseRub,
+        totalIncomeCur,
+        totalExpenseCur,
+        totalSaleRub,
+        totalSaleCur,
+        totalTransferRub,
+        totalTransferCur,
+        totalBuyQty,
+        totalSellQty,
+        rowGrowthPercent,
+        effectiveKind,
+        currencyCode,
+        isMarketOrCrypto,
+        isBalanceMode,
+        isMarketMode,
+      };
+    }
+
+    const primaryKind = (it.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
+    return {
+      balance: buildOne("BALANCE"),
+      market: buildOne("MARKET"),
+      primary: buildOne(primaryKind),
+    };
+  }, [isDesktop, item, costs, costHistoryData, dynamicsTxs, fxRatesByDate, latestRatesByCurrency, sortedFxRateDateKeys, todayKey, mobileCostPeriodBounds]);
+
   const getRateForDateKey = useCallback(
     (dateKey: string): number | null => {
       const currencyCode = (item?.currency_code ?? "RUB").toUpperCase();
@@ -1262,10 +1563,20 @@ export default function AssetDetailPage() {
       .map((p) => ({ date: p.date, value: p.market_quantity_units! }));
   }, [costHistoryData]);
 
+  /** На мобильной — точки в выбранном периоде (Н/М/Г), на десктопе — все точки. */
+  const costHistoryPointsForChart = useMemo(() => {
+    const points = costHistoryData?.points ?? [];
+    if (isDesktop) return points;
+    const [start, end] = mobileCostPeriodBounds;
+    return points.filter((p) => p.date >= start && p.date <= end);
+  }, [costHistoryData?.points, isDesktop, mobileCostPeriodBounds]);
+
   const costChartSeries = useMemo(() => {
-    if (!costHistoryOpen || !costHistoryData?.points.length) return [];
-    const key = costHistoryOpen === "balance" ? "balance" : costHistoryOpen === "acquisition" ? "acquisition" : costHistoryOpen === "invested" ? "invested" : "market";
-    const raw = costHistoryData.points.map((p) => {
+    const points = costHistoryPointsForChart;
+    const openKey = isDesktop ? costHistoryOpen : mobileCostOverlayKey;
+    if (!openKey || !points.length) return [];
+    const key = openKey === "balance" ? "balance" : openKey === "acquisition" ? "acquisition" : openKey === "invested" ? "invested" : "market";
+    const raw = points.map((p) => {
       let valueRub: number;
       if (key === "market" && p.market_price_rub != null && p.market_quantity_units != null) {
         valueRub = (p.market_price_rub * p.market_quantity_units) / 100;
@@ -1294,7 +1605,7 @@ export default function AssetDetailPage() {
       );
     }
     return raw;
-  }, [costHistoryOpen, costHistoryData]);
+  }, [costHistoryPointsForChart, costHistoryOpen, mobileCostOverlayKey, isDesktop]);
 
   // Источник истины — валюта счёта: costChartSeries в минорных единицах валюты актива. В режиме RUB пересчитываем по курсу на дату точки (рубли меняются от курса).
   const costChartDisplaySeries = useMemo(() => {
@@ -1309,12 +1620,13 @@ export default function AssetDetailPage() {
     });
   }, [costChartSeries, costChartCurrency, item?.currency_code, getRateForDateKey, latestRatesByCurrency]);
 
-  // Серия основной стоимости в рублях (копейки) для мини-графика в блоке основной стоимости на мобильной
+  // Серия основной стоимости в рублях (копейки) для мини-графика в блоке основной стоимости; на мобильной — в выбранном периоде (Н/М/Г)
   const primaryValueMiniChartSeries = useMemo((): { date: string; valueRubCents: number }[] => {
-    if (!item?.id || !costHistoryData?.points.length) return [];
+    const points = isDesktop ? (costHistoryData?.points ?? []) : costHistoryPointsForChart;
+    if (!item?.id || !points.length) return [];
     const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
     const key = primaryKind === "BALANCE" ? "balance" : primaryKind === "MARKET" ? "market" : primaryKind === "ACQUISITION" ? "acquisition" : "invested";
-    const raw = costHistoryData.points.map((p) => {
+    const raw = points.map((p) => {
       let valueRub: number;
       if (key === "market" && p.market_price_rub != null && p.market_quantity_units != null) {
         valueRub = (p.market_price_rub * p.market_quantity_units) / 100;
@@ -1339,7 +1651,16 @@ export default function AssetDetailPage() {
       const valueInRub = rate != null && rate > 0 ? p.valueRub * rate : (latestRate != null ? p.valueRub * latestRate : p.valueRub);
       return { date: p.date, valueRubCents: Math.round(valueInRub * 100) };
     });
-  }, [item?.id, item?.primary_value_kind, item?.currency_code, costHistoryData?.points, getRateForDateKey, latestRatesByCurrency]);
+  }, [item?.id, item?.primary_value_kind, item?.currency_code, costHistoryData?.points, costHistoryPointsForChart, isDesktop, getRateForDateKey, latestRatesByCurrency]);
+
+  /** На мобильной: прирост в % основной стоимости за выбранный период (начало → конец). null если нельзя вычислить. */
+  const mobilePrimaryGrowthPercent = useMemo((): number | null => {
+    if (isDesktop || primaryValueMiniChartSeries.length < 2) return null;
+    const startCents = primaryValueMiniChartSeries[0]!.valueRubCents;
+    const endCents = primaryValueMiniChartSeries[primaryValueMiniChartSeries.length - 1]!.valueRubCents;
+    if (startCents === 0) return null;
+    return ((endCents - startCents) / startCents) * 100;
+  }, [isDesktop, primaryValueMiniChartSeries]);
 
   useEffect(() => {
     if (!costHistoryOpen || costChartSeries.length === 0) setCostChartContainerReady(false);
@@ -1373,7 +1694,11 @@ export default function AssetDetailPage() {
     return () => observer.disconnect();
   }, [costChartContainerReady, overlayChartContainerReady, costHistoryOpen, isDesktop, mobileCostOverlayKey]);
 
-  const costChartPadding = useMemo(() => ({ top: 24, right: 120, bottom: 44, left: 0 }), []);
+  const costChartPadding = useMemo(() => {
+    const isMobileOverlay = !isDesktop && !!mobileCostOverlayKey;
+    if (isMobileOverlay) return { top: 24, right: 0, bottom: 44, left: 0 };
+    return { top: 24, right: 120, bottom: 44, left: 0 };
+  }, [isDesktop, mobileCostOverlayKey]);
   const costChartGeometry = useMemo(() => {
     if (costChartDisplaySeries.length === 0) return null;
     const width = costChartSize.width;
@@ -2122,7 +2447,7 @@ export default function AssetDetailPage() {
     const { rowKey, isMobileOverlay, chartContainerRef, dayMarksOverride } = opts;
     const dayMarks = dayMarksOverride ?? costChartGeometry?.dayMarks ?? [];
     return (
-      <div className={`${isMobileOverlay ? "pt-0 pb-4" : "p-4 pt-0"} ${!isDesktop && !isMobileOverlay ? "min-w-0 overflow-x-auto" : ""}`} style={{ backgroundColor: "transparent" }}>
+      <div className={`${isMobileOverlay ? "px-4 pt-0 pb-4" : "p-4 pt-0"} ${!isDesktop && !isMobileOverlay ? "min-w-0 overflow-x-auto" : ""}`} style={{ backgroundColor: "transparent" }}>
         {item.currency_code && item.currency_code !== "RUB" ? (
           <div className={`mb-3 flex flex-wrap items-center justify-end gap-2 ${isMobileOverlay ? "px-4" : ""}`}>
             {item.currency_code && item.currency_code !== "RUB" && (
@@ -2152,7 +2477,13 @@ export default function AssetDetailPage() {
                     else setCostChartContainerReady(!!el);
                   }}
                   className="relative w-full min-w-0"
-                  style={rowKey === "balance" ? { height: 400 } : { aspectRatio: `${costChartSize.width}/${costChartSize.height}` }}
+                  style={
+                    isMobileOverlay
+                      ? { height: 260 }
+                      : rowKey === "balance"
+                        ? { height: 400 }
+                        : { aspectRatio: `${costChartSize.width}/${costChartSize.height}` }
+                  }
                 >
                   {rowKey === "balance" && checkpointChartHoverDate != null && costChartGeometry && (() => {
                     const lineData = costChartCheckpointLines.find((l) => l.dateKey === checkpointChartHoverDate);
@@ -2239,15 +2570,15 @@ export default function AssetDetailPage() {
                       <path key={`pos-area-${idx}`} d={d} fill="url(#asset-detail-chart-area)" />
                     ))}
                     {costChartGeometry.linePathNegativeSegments.map((d, idx) => (
-                      <path key={`neg-line-${idx}`} d={d} fill="none" stroke={RED} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                      <path key={`neg-line-${idx}`} d={d} fill="none" stroke={RED} strokeWidth={isMobileOverlay ? 1.5 : 3} strokeLinecap="round" strokeLinejoin="round" />
                     ))}
                     {costChartGeometry.linePathPositiveSegments.map((d, idx) => (
-                      <path key={`pos-line-${idx}`} d={d} fill="none" stroke={costChartColor} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+                      <path key={`pos-line-${idx}`} d={d} fill="none" stroke={costChartColor} strokeWidth={isMobileOverlay ? 1.5 : 3} strokeLinecap="round" strokeLinejoin="round" />
                     ))}
                     {costChartDividers.map((div, idx) => (
-                      <line key={`div-${idx}-${div.x}`} x1={div.x} x2={div.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={div.type === "year" ? 1.5 : 1} strokeOpacity={div.type === "year" ? 0.9 : 0.5} />
+                      <line key={`div-${idx}-${div.x}`} x1={div.x} x2={div.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={isMobileOverlay ? (div.type === "year" ? 1 : 0.5) : (div.type === "year" ? 1.5 : 1)} strokeOpacity={div.type === "year" ? 0.9 : 0.5} />
                     ))}
-                    <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.baselineY} y2={costChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1} strokeDasharray="4 4" strokeOpacity={0.7} />
+                    <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.baselineY} y2={costChartGeometry.baselineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={isMobileOverlay ? 0.5 : 1} strokeDasharray="4 4" strokeOpacity={0.7} />
                     {!isMobileOverlay && (
                       <line x1={costChartGeometry.padding.left} x2={costChartGeometry.width - costChartGeometry.padding.right} y1={costChartGeometry.averageLineY} y2={costChartGeometry.averageLineY} stroke={PLACEHOLDER_COLOR_DARK} strokeWidth={1.5} strokeDasharray="6 4" strokeOpacity={0.9} />
                     )}
@@ -2263,15 +2594,15 @@ export default function AssetDetailPage() {
                               {hasMismatch ? <MapPinX size={20} /> : <MapPinCheck size={20} />}
                             </div>
                           </foreignObject>
-                          <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={strokeColor} strokeWidth={2} strokeOpacity={0.9} />
+                          <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={strokeColor} strokeWidth={isMobileOverlay ? 1 : 2} strokeOpacity={0.9} />
                           <line x1={x} x2={x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke="transparent" strokeWidth={16} style={{ cursor: "pointer" }} />
                         </g>
                       );
                     })}
                     {costChartHoverPoint && (
                       <>
-                        <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" />
-                        <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={6} fill={costChartHoverPoint.value < 0 ? RED : costChartColor} stroke="#fff" strokeWidth={2} />
+                        <line x1={costChartHoverPoint.x} x2={costChartHoverPoint.x} y1={costChartGeometry.padding.top} y2={costChartGeometry.padding.top + costChartGeometry.innerHeight} stroke={PLACEHOLDER_COLOR_DARK} strokeDasharray="4 6" strokeWidth={isMobileOverlay ? 1 : undefined} />
+                        <circle cx={costChartHoverPoint.x} cy={costChartHoverPoint.y} r={isMobileOverlay ? 4 : 6} fill={costChartHoverPoint.value < 0 ? RED : costChartColor} stroke="#fff" strokeWidth={isMobileOverlay ? 1 : 2} />
                       </>
                     )}
                     {dayMarks.map((mark, idx) => (
@@ -2296,8 +2627,11 @@ export default function AssetDetailPage() {
             </Button>
           </div>
         )}
-        {((rowKey === "balance" && dynamicsBalance) || (rowKey === "market" && dynamicsMarket)) && (() => {
-          const d = (rowKey === "balance" ? dynamicsBalance : dynamicsMarket)!;
+        {((rowKey === "balance" && (dynamicsBalance || dynamicsByModeMobilePeriod?.balance)) || (rowKey === "market" && (dynamicsMarket || dynamicsByModeMobilePeriod?.market))) && (() => {
+          const d = isMobileOverlay && dynamicsByModeMobilePeriod
+            ? (rowKey === "balance" ? dynamicsByModeMobilePeriod.balance : dynamicsByModeMobilePeriod.market)
+            : (rowKey === "balance" ? dynamicsBalance : dynamicsMarket);
+          if (!d) return null;
           const dynamicsPaddingClass = isMobileOverlay ? "px-4" : "";
           const formatCur = (v: number) => {
             const s = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
@@ -2377,7 +2711,8 @@ export default function AssetDetailPage() {
         {/* Мобильная шапка: градиент с контентом (при прокрутке уезжает вверх) */}
         {!isDesktop && (
           <div
-            className="relative flex flex-col gap-4 pt-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
+            className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
+            style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
           >
             {/* Слой градиента: тянется под следующий блок и плавно исчезает маской */}
             <div
@@ -2389,13 +2724,32 @@ export default function AssetDetailPage() {
               }}
             />
             <div className="relative z-10 flex flex-col gap-4">
-            <div className="self-start">
+            {/* Строка под safe area: иконка назад слева, переключатель периода справа */}
+            <div className="flex flex-row items-center justify-between">
               <IconButton variant="ghost" size="icon" asChild aria-label="К активам и обязательствам">
                 <Link href="/assets" className="text-white/90 hover:text-white">
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               </IconButton>
+              <div className="flex items-center rounded-[9px] border border-white/30 overflow-hidden" role="group" aria-label="Период графика">
+                {(["week", "month", "year", "all"] as const).map((period) => (
+                  <button
+                    key={period}
+                    type="button"
+                    aria-label={period === "week" ? "Неделя" : period === "month" ? "Месяц" : period === "year" ? "Год" : "За весь период"}
+                    className={cn(
+                      "px-2.5 py-1.5 text-xs font-medium transition-colors min-w-[2.25rem] flex items-center justify-center",
+                      mobileCostPeriod !== period && "bg-transparent text-white/70 hover:bg-white/10"
+                    )}
+                    style={mobileCostPeriod === period ? { backgroundColor: ACCENT, color: "white" } : undefined}
+                    onClick={() => setMobileCostPeriod(period)}
+                  >
+                    {period === "all" ? <CalendarCheck className="h-3.5 w-3.5" /> : period === "week" ? "Н" : period === "month" ? "М" : "Г"}
+                  </button>
+                ))}
+              </div>
             </div>
+            {/* Картинка актива */}
             <div className="flex flex-col items-center gap-3">
               <div
                 className="relative w-[152px] h-[152px] rounded-lg overflow-hidden shrink-0 cursor-pointer group"
@@ -2538,10 +2892,11 @@ export default function AssetDetailPage() {
                         </div>
                       </>
                     ) : (
-                      <div
-                        className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                        style={{ WebkitOverflowScrolling: "touch" }}
-                      >
+                      <>
+                        <div
+                          className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                          style={{ WebkitOverflowScrolling: "touch" }}
+                        >
                         <div className="shrink-0 w-4 min-w-4" aria-hidden />
                         {primaryRow && (
                           <div
@@ -2554,12 +2909,26 @@ export default function AssetDetailPage() {
                           >
                             <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3" style={{ backgroundColor: "#25243F" }}>
                               <div className="min-w-0 flex-1">
-                                <p className="text-sm mb-1 truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                                <div className="flex items-center gap-2 mb-1 min-w-0">
+                                  <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                                  {mobilePrimaryGrowthPercent != null && (
+                                    <span
+                                      className="shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums"
+                                      style={{
+                                        borderColor: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
+                                        backgroundColor: mobilePrimaryGrowthPercent > 0 ? "rgba(34, 197, 94, 0.15)" : mobilePrimaryGrowthPercent < 0 ? "rgba(239, 68, 68, 0.15)" : "transparent",
+                                        color: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
+                                      }}
+                                    >
+                                      {mobilePrimaryGrowthPercent > 0 ? "+" : ""}{mobilePrimaryGrowthPercent.toFixed(1)}%
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="flex items-center gap-2 min-w-0">
                                   {primaryRow.valueCents != null ? (
-                                    <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={primaryAmountStyle} />
+                                    <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.875rem", fontWeight: 500 }} />
                                   ) : (
-                                    <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={primaryAmountStyle}>—</span>
+                                    <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
                                   )}
                                 </div>
                               </div>
@@ -2588,7 +2957,8 @@ export default function AssetDetailPage() {
                           </div>
                         ))}
                         <div className="shrink-0 w-4 min-w-4" aria-hidden />
-                      </div>
+                        </div>
+                      </>
                     )}
                   </>
                 );
@@ -3568,6 +3938,25 @@ export default function AssetDetailPage() {
         <MobileBottomSheet
           title={mobileCostOverlayKey === "balance" ? "Балансовая стоимость" : mobileCostOverlayKey === "market" ? "Рыночная стоимость" : mobileCostOverlayKey === "acquisition" ? "Стоимость приобретения" : "Стоимость вложенных средств"}
           onClose={() => setMobileCostOverlayKey(null)}
+          headerRight={
+            <div className="flex items-center rounded-[9px] border border-border overflow-hidden" role="group" aria-label="Период графика">
+              {(["week", "month", "year", "all"] as const).map((period) => (
+                <button
+                  key={period}
+                  type="button"
+                  aria-label={period === "week" ? "Неделя" : period === "month" ? "Месяц" : period === "year" ? "Год" : "За весь период"}
+                  className={cn(
+                    "px-2.5 py-1.5 text-xs font-medium transition-colors min-w-[2.25rem] flex items-center justify-center",
+                    mobileCostPeriod !== period && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
+                  )}
+                  style={mobileCostPeriod === period ? { backgroundColor: ACCENT, color: "white" } : undefined}
+                  onClick={() => setMobileCostPeriod(period)}
+                >
+                  {period === "all" ? <CalendarCheck className="h-3.5 w-3.5" /> : period === "week" ? "Н" : period === "month" ? "М" : "Г"}
+                </button>
+              ))}
+            </div>
+          }
         >
           {renderCostSectionExpandedContent({ rowKey: mobileCostOverlayKey, isMobileOverlay: true, chartContainerRef: overlayChartContainerRef, dayMarksOverride: overlayDayMarks })}
         </MobileBottomSheet>,

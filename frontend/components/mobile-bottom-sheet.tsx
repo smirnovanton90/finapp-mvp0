@@ -24,6 +24,8 @@ export interface MobileBottomSheetProps {
   closeDelayMs?: number;
   /** Дополнительный класс для контейнера панели (скруглённый блок) */
   panelClassName?: string;
+  /** Контент справа в шапке (например, переключатель периода) */
+  headerRight?: React.ReactNode;
 }
 
 /**
@@ -40,6 +42,7 @@ export function MobileBottomSheet({
   scrollCloseThresholdVh = DEFAULT_SCROLL_CLOSE_THRESHOLD_VH,
   closeDelayMs = DEFAULT_CLOSE_DELAY_MS,
   panelClassName,
+  headerRight,
 }: MobileBottomSheetProps) {
   const [entered, setEntered] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -162,6 +165,7 @@ export function MobileBottomSheet({
               onTouchEnd={handleHeaderTouchEnd}
             >
               <h2 className="text-lg font-medium truncate flex-1 min-w-0">{title}</h2>
+              {headerRight != null ? <div className="shrink-0" onClick={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>{headerRight}</div> : null}
             </div>
             <div className="w-full">
               {children}

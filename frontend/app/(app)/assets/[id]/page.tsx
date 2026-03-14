@@ -2706,13 +2706,13 @@ export default function AssetDetailPage() {
   };
 
   return (
-    <main className={`min-h-screen box-border ${CONTENT_WIDTH_CLASS} ${isDesktop ? "px-8 py-8" : "px-0 max-w-none pt-0 pb-8"} ${!isDesktop ? "w-full min-w-0" : ""}`}>
+    <main className={`min-h-screen box-border ${CONTENT_WIDTH_CLASS} ${isDesktop ? "px-8 py-8" : "px-0 max-w-none pt-0 pb-3"} ${!isDesktop ? "w-full min-w-0" : ""}`}>
       <div className={`flex flex-col gap-6 ${!isDesktop ? "w-full min-w-0" : "w-full"}`}>
         {/* Мобильная шапка: градиент в safe area и контент (при прокрутке уезжает вверх) */}
         {!isDesktop && (
           <div
             className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
-            style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+            style={{ paddingTop: "max(calc(env(safe-area-inset-top, 0px) + 1.5rem), 60px)" }}
           >
             <style dangerouslySetInnerHTML={{ __html: `
               @keyframes asset-header-gradient-shift {

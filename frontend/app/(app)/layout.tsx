@@ -116,8 +116,16 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <div
         className={cn(
           "relative min-h-screen overflow-hidden",
-          !isDesktop && "h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] flex flex-col"
+          !isDesktop && "h-[100dvh] flex flex-col"
         )}
+        style={
+          !isDesktop
+            ? {
+                paddingTop: "max(env(safe-area-inset-top, 0px), 48px)",
+                paddingBottom: "env(safe-area-inset-bottom, 0px)",
+              }
+            : undefined
+        }
         key={sessionKey}
       >
         {/* Фон: на мобильной — чёрный, на десктопе — градиент */}
@@ -147,7 +155,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
               "flex-1 transition-all duration-300 @container",
               !isSpecialPage && "min-h-screen flex items-center",
               !isDesktop && "px-4 pb-6 overflow-y-auto min-h-0",
-              !isDesktop && isAssetDetailPage && "pt-4"
+              !isDesktop && isAssetDetailPage && "pt-0"
             )}
             style={
               !isDesktop

@@ -13,15 +13,17 @@ import { useTheme } from "@/components/theme-provider";
 import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { MobileFloatingBar } from "@/components/mobile-floating-bar";
+import { MobileWizardOpenProvider, useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
   const { isCollapsed, isFilterPanelCollapsed, isDesktop } = useSidebar();
+  const mobileWizardOpen = useMobileWizardOpen()?.mobileWizardOpen ?? false;
   const sessionKey = (session?.user as { id?: string })?.id ?? "anon";
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -136,7 +138,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <AppHeader />
         <MobileFiltersDrawer />
-        <MobileFloatingBar />
+        {!mobileWizardOpen && <MobileFloatingBar />}
         <PwaInstallPrompt />
         <div className={cn("relative z-10 flex", !isDesktop && "min-h-0 flex-1 overflow-hidden")}>
           <Sidebar />
@@ -173,5 +175,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
       )}
     </AccountingStartGate>
+  );
+}
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <MobileWizardOpenProvider>
+      <AppLayoutInner>{children}</AppLayoutInner>
+    </MobileWizardOpenProvider>
   );
 }

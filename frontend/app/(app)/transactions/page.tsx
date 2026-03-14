@@ -140,6 +140,8 @@ import { ConfirmModal } from "@/components/confirm-modal";
 import { EmptyState } from "@/components/empty-state";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { MobileAddTransactionSheet } from "@/components/mobile-add-transaction-sheet";
+import { MobileAddTransactionWizard } from "@/components/mobile-add-transaction-wizard";
+import { useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { CreateCategoryModal } from "@/components/create-category-modal";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import {
@@ -2500,6 +2502,8 @@ function TransactionsView({
   const receiptToolbarInputRef = useRef<HTMLInputElement>(null);
   /** На мобильной: меню выбора типа добавления (Простая транзакция / Погашение кредита / Долг / Чек) по нажатию "+". */
   const [mobileAddMenuOpen, setMobileAddMenuOpen] = useState(false);
+  /** На мобильной: полноэкранный визард добавления транзакции (открывается по "+", контекст скрывает нижнюю панель). */
+  const { mobileWizardOpen, setMobileWizardOpen } = useMobileWizardOpen() ?? { mobileWizardOpen: false, setMobileWizardOpen: () => {} };
 
   const [selectedTxIds, setSelectedTxIds] = useState<Set<number>>(() => new Set());
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null);
@@ -3437,7 +3441,7 @@ function TransactionsView({
     scopedCategoryMaps,
   ]);
 
-  // Открытие по ссылке с мобильной плавающей панели (?openCreate=1): на десктопе — форма, на мобильной — меню выбора типа
+  // Открытие по ссылке с мобильной плавающей панели (?openCreate=1): на десктопе — форма, на мобильной — полноэкранный визард (первый экран — выбор типа)
   useEffect(() => {
     if (pathname !== "/transactions") return;
     if (searchParams.get("openCreate") !== "1") return;
@@ -3448,7 +3452,7 @@ function TransactionsView({
     if (isDesktop) {
       openCreateDialog();
     } else {
-      setMobileAddMenuOpen(true);
+      setMobileWizardOpen(true);
     }
   }, [pathname, searchParams, router, isDesktop, openCreateDialog]);
 
@@ -5307,7 +5311,26 @@ function TransactionsView({
               }}
               receiptRecognizing={receiptRecognizing}
             />
-            
+
+            {/* Мобильный полноэкранный визард добавления транзакции (открывается по "+", первый экран — выбор типа). */}
+            {!isDesktop && (
+              <MobileAddTransactionWizard
+                open={mobileWizardOpen}
+                onClose={() => setMobileWizardOpen(false)}
+                onSelectLoanRepayment={openLoanRepaymentModal}
+                onSelectDebt={() => openCreateDialog("DEBTS")}
+                onSelectReceipt={() => setTimeout(() => receiptToolbarInputRef.current?.click(), 0)}
+                items={items}
+                categoryNodes={categoryNodes}
+                counterparties={counterparties}
+                industries={industries}
+                itemTxCounts={itemTxCounts}
+                counterpartyTxCounts={counterpartyTxCounts}
+                accountingStartDate={accountingStartDate ?? null}
+                onCreateSuccess={loadAll}
+              />
+            )}
+
             {/* Unified Import: source selection then step-by-step modal */}
             <Dialog open={isImportDialogOpen} onOpenChange={handleImportOpenChange}>
               <DialogContent

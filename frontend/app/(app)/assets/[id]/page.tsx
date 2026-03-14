@@ -2711,8 +2711,7 @@ export default function AssetDetailPage() {
         {/* Мобильная шапка: градиент в safe area и контент (при прокрутке уезжает вверх) */}
         {!isDesktop && (
           <div
-            className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
-            style={{ paddingTop: "max(calc(env(safe-area-inset-top, 0px) + 1.5rem), 60px)" }}
+            className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)] pt-20"
           >
             <style dangerouslySetInnerHTML={{ __html: `
               @keyframes asset-header-gradient-shift {
@@ -2720,12 +2719,12 @@ export default function AssetDetailPage() {
                 50% { background-position: 25% 15%; }
               }
             ` }} />
-            {/* Слой градиента: от верха экрана (включая safe area), плавно исчезает маской */}
+            {/* Слой градиента, плавно исчезает маской (safe area только в корневом layout) */}
             <div
               className="absolute left-0 right-0 z-0 pointer-events-none"
               style={{
                 top: 0,
-                height: "calc(75vh + env(safe-area-inset-top, 0px))",
+                height: "75vh",
                 background: ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
                 backgroundSize: "200% 200%",
                 backgroundPosition: "0% 0%",

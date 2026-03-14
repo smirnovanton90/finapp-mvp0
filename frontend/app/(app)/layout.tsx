@@ -121,8 +121,10 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         style={
           !isDesktop
             ? {
-                paddingTop: "max(env(safe-area-inset-top, 0px), 48px)",
+                paddingTop: "env(safe-area-inset-top, 0px)",
                 paddingBottom: "env(safe-area-inset-bottom, 0px)",
+                paddingLeft: "env(safe-area-inset-left, 0px)",
+                paddingRight: "env(safe-area-inset-right, 0px)",
               }
             : undefined
         }

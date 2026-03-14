@@ -46,6 +46,7 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterSection } from "@/components/filter-panel";
 import { AssetCard } from "@/components/asset-card";
+import { MobileTapScale } from "@/components/mobile-tap-scale";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
@@ -3804,41 +3805,42 @@ export default function Page() {
                             ? counterpartiesById.get(item.counterparty_id) ?? null
                             : null;
                           return (
-                            <div
-                              key={item.id}
-                              className="rounded-lg overflow-hidden border-0 outline-none shadow-lg p-4"
-                              style={{ backgroundColor: MODAL_BG }}
-                            >
-                              <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b-0">
-                                <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
-                                  <AssetCard
-                                    item={item}
-                                    layout="tableRow"
-                                    accountingStartDate={accountingStartDate}
-                                    rate={rate}
-                                    rubEquivalent={rubEquivalent}
-                                    showRubEquivalent={isDesktop}
-                                    primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
-                                    counterparty={counterparty}
-                                    moexMarketPrice={
-                                      MOEX_TYPE_CODES.includes(item.type_code)
-                                        ? moexMarketPrices.get(item.id) ?? null
-                                        : null
-                                    }
-                                    onEdit={(item) => openEditModal(item)}
-                                    onDelete={(item) => onArchive(item)}
-                                    onArchive={(item) => onArchive(item)}
-                                    onClose={(item) => onClose(item)}
-                                    onBuySell={(item) => setBuySellAsset(item)}
-                                    getItemDisplayBalanceCents={getItemDisplayBalanceCents}
-                                    onNavigate={(it) => router.push(`/assets/${it.id}`)}
-                                    dailyPrimaryValueRubCents={itemDailyPrimaryValueByItemId.get(item.id)}
-                                    totalIncomeCents={itemIncomeExpenseCentsByItemId.get(item.id)?.incomeCents}
-                                    totalExpenseCents={itemIncomeExpenseCentsByItemId.get(item.id)?.expenseCents}
-                                  />
-                                </TableBody>
-                              </Table>
-                            </div>
+                            <MobileTapScale key={item.id} className="w-full">
+                              <div
+                                className="rounded-lg overflow-hidden border-0 outline-none shadow-lg p-4"
+                                style={{ backgroundColor: MODAL_BG }}
+                              >
+                                <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b-0">
+                                  <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
+                                    <AssetCard
+                                      item={item}
+                                      layout="tableRow"
+                                      accountingStartDate={accountingStartDate}
+                                      rate={rate}
+                                      rubEquivalent={rubEquivalent}
+                                      showRubEquivalent={isDesktop}
+                                      primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
+                                      counterparty={counterparty}
+                                      moexMarketPrice={
+                                        MOEX_TYPE_CODES.includes(item.type_code)
+                                          ? moexMarketPrices.get(item.id) ?? null
+                                          : null
+                                      }
+                                      onEdit={(item) => openEditModal(item)}
+                                      onDelete={(item) => onArchive(item)}
+                                      onArchive={(item) => onArchive(item)}
+                                      onClose={(item) => onClose(item)}
+                                      onBuySell={(item) => setBuySellAsset(item)}
+                                      getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                                      onNavigate={(it) => router.push(`/assets/${it.id}`)}
+                                      dailyPrimaryValueRubCents={itemDailyPrimaryValueByItemId.get(item.id)}
+                                      totalIncomeCents={itemIncomeExpenseCentsByItemId.get(item.id)?.incomeCents}
+                                      totalExpenseCents={itemIncomeExpenseCentsByItemId.get(item.id)?.expenseCents}
+                                    />
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </MobileTapScale>
                           );
                         })}
                       </div>

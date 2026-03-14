@@ -6,6 +6,7 @@ import { ChevronLeft, ArrowLeftRight, Coins, HandCoins, Receipt, QrCode, Banknot
 import { cn } from "@/lib/utils";
 import { MODAL_BG, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 import { BLUE_GRADIENT } from "@/lib/gradients";
+import { MobileTapScale } from "@/components/mobile-tap-scale";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { FormField, TextField, DateField, SelectField } from "@/components/ui/form-field";
@@ -541,84 +542,91 @@ export function MobileAddTransactionWizard({
             style={{ padding: "0 24px 24px", gap: 10 }}
           >
             {/* Простая транзакция — широкая кнопка с градиентом */}
-            <button
-              type="button"
-              className="flex flex-row items-center gap-2.5 w-full rounded-[9px] transition-opacity active:opacity-90 text-left"
-              style={{
-                padding: "15px 24px",
-                minHeight: 100,
-                background: "linear-gradient(264.49deg, #483BA6 -2.6%, #7F5CFF 57.34%, #7F5CFF 80.32%, #9487F3 101.93%)",
-              }}
-              onClick={handleSelectSimple}
-            >
-              <div className="flex shrink-0 items-center justify-center w-[56px] h-[56px]">
-                <ArrowLeftRight className="w-[36px] h-[36px]" style={{ color: "rgba(255, 255, 255, 0.85)" }} strokeWidth={2} />
-              </div>
-              <div className="flex flex-col justify-center gap-2.5 flex-1 min-w-0">
-                <span className="text-lg leading-5 font-normal" style={{ color: "rgba(255, 255, 255, 0.85)" }}>
-                  Простая транзакция
-                </span>
-                <span className="text-sm leading-4 font-normal" style={{ color: "rgba(197, 191, 241, 0.6)" }}>
-                  Доход / расход / перевод
-                </span>
-              </div>
-            </button>
+            <MobileTapScale className="w-full">
+              <button
+                type="button"
+                className="flex flex-row items-center gap-2.5 w-full rounded-[9px] transition-opacity active:opacity-90 text-left"
+                style={{
+                  padding: "15px 24px",
+                  minHeight: 100,
+                  background: "linear-gradient(264.49deg, #483BA6 -2.6%, #7F5CFF 57.34%, #7F5CFF 80.32%, #9487F3 101.93%)",
+                }}
+                onClick={handleSelectSimple}
+              >
+                <div className="flex shrink-0 items-center justify-center w-[56px] h-[56px]">
+                  <ArrowLeftRight className="w-[36px] h-[36px]" style={{ color: "rgba(255, 255, 255, 0.85)" }} strokeWidth={2} />
+                </div>
+                <div className="flex flex-col justify-center gap-2.5 flex-1 min-w-0">
+                  <span className="text-lg leading-5 font-normal" style={{ color: "rgba(255, 255, 255, 0.85)" }}>
+                    Простая транзакция
+                  </span>
+                  <span className="text-sm leading-4 font-normal" style={{ color: "rgba(197, 191, 241, 0.6)" }}>
+                    Доход / расход / перевод
+                  </span>
+                </div>
+              </button>
+            </MobileTapScale>
 
             {/* Погашение кредита и Долги — два блока в ряд */}
             <div className="flex flex-row items-stretch gap-2.5 w-full" style={{ gap: 10 }}>
-              <button
-                type="button"
-                className="flex flex-1 flex-row items-center justify-center gap-2.5 rounded-[9px] transition-opacity active:opacity-90 min-h-[100px] text-left"
-                style={{
-                  padding: "15px 16px",
-                  background: "rgba(93, 95, 215, 0.22)",
-                }}
-                onClick={handleSelectLoanRepayment}
-              >
-                <div className="flex shrink-0 items-center justify-center w-[40px] h-[40px]">
-                  <Coins className="w-[26px] h-[26px]" style={{ color: "rgba(255, 255, 255, 0.85)" }} strokeWidth={1.5} />
-                </div>
-                <span className="text-base leading-[18px] font-normal flex-1" style={{ color: "rgba(255, 255, 255, 0.85)" }}>
-                  Погашение кредита
-                </span>
-              </button>
-              <button
-                type="button"
-                className="flex flex-1 flex-row items-center justify-center gap-2.5 rounded-[9px] transition-opacity active:opacity-90 min-h-[100px] text-left"
-                style={{
-                  padding: "15px 16px",
-                  background: "rgba(93, 95, 215, 0.22)",
-                }}
-                onClick={handleSelectDebt}
-              >
-                <div className="flex shrink-0 items-center justify-center w-[40px] h-[40px]">
-                  <HandCoins className="w-[26px] h-[26px]" style={{ color: "rgba(255, 255, 255, 0.85)" }} strokeWidth={1.5} />
-                </div>
-                <span className="text-base leading-[18px] font-normal flex-1" style={{ color: "rgba(255, 255, 255, 0.85)" }}>
-                  Долги
-                </span>
-              </button>
+              <MobileTapScale className="flex-1 min-w-0">
+                <button
+                  type="button"
+                  className="flex flex-1 flex-row items-center justify-center gap-2.5 rounded-[9px] transition-opacity active:opacity-90 min-h-[100px] text-left w-full"
+                  style={{
+                    padding: "15px 16px",
+                    background: "rgba(93, 95, 215, 0.22)",
+                  }}
+                  onClick={handleSelectLoanRepayment}
+                >
+                  <div className="flex shrink-0 items-center justify-center w-[40px] h-[40px]">
+                    <Coins className="w-[26px] h-[26px]" style={{ color: "rgba(255, 255, 255, 0.85)" }} strokeWidth={1.5} />
+                  </div>
+                  <span className="text-base leading-[18px] font-normal flex-1" style={{ color: "rgba(255, 255, 255, 0.85)" }}>
+                    Погашение кредита
+                  </span>
+                </button>
+              </MobileTapScale>
+              <MobileTapScale className="flex-1 min-w-0">
+                <button
+                  type="button"
+                  className="flex flex-1 flex-row items-center justify-center gap-2.5 rounded-[9px] transition-opacity active:opacity-90 min-h-[100px] text-left w-full"
+                  style={{
+                    padding: "15px 16px",
+                    background: "rgba(93, 95, 215, 0.22)",
+                  }}
+                  onClick={handleSelectDebt}
+                >
+                  <div className="flex shrink-0 items-center justify-center w-[40px] h-[40px]">
+                    <HandCoins className="w-[26px] h-[26px]" style={{ color: "rgba(255, 255, 255, 0.85)" }} strokeWidth={1.5} />
+                  </div>
+                  <span className="text-base leading-[18px] font-normal flex-1" style={{ color: "rgba(255, 255, 255, 0.85)" }}>
+                    Долги
+                  </span>
+                </button>
+              </MobileTapScale>
             </div>
 
             {/* Сканировать чек — широкая кнопка с градиентом (увеличенный отступ сверху) */}
-            <button
-              type="button"
-              className="flex flex-row items-center gap-2.5 w-full rounded-[9px] transition-opacity active:opacity-90 text-left"
-              style={{
-                padding: "15px 24px",
-                minHeight: 100,
-                marginTop: 32,
-                background: BLUE_GRADIENT,
-              }}
-              onClick={handleSelectReceipt}
-            >
-              <div className="flex shrink-0 items-center justify-center w-[56px] h-[56px]">
-                <QrCode className="w-[36px] h-[36px]" style={{ color: "rgba(255, 255, 255, 0.85)" }} strokeWidth={2} />
-              </div>
-              <span className="text-lg leading-5 font-normal flex-1" style={{ color: "rgba(255, 255, 255, 0.85)" }}>
-                Сканировать чек
-              </span>
-            </button>
+            <MobileTapScale className="w-full" style={{ marginTop: 32 }}>
+              <button
+                type="button"
+                className="flex flex-row items-center gap-2.5 w-full rounded-[9px] transition-opacity active:opacity-90 text-left"
+                style={{
+                  padding: "15px 24px",
+                  minHeight: 100,
+                  background: BLUE_GRADIENT,
+                }}
+                onClick={handleSelectReceipt}
+              >
+                <div className="flex shrink-0 items-center justify-center w-[56px] h-[56px]">
+                  <QrCode className="w-[36px] h-[36px]" style={{ color: "rgba(255, 255, 255, 0.85)" }} strokeWidth={2} />
+                </div>
+                <span className="text-lg leading-5 font-normal flex-1" style={{ color: "rgba(255, 255, 255, 0.85)" }}>
+                  Сканировать чек
+                </span>
+              </button>
+            </MobileTapScale>
           </div>
         )}
 

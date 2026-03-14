@@ -96,7 +96,6 @@ import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
 import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
 import { MobileBottomSheet } from "@/components/mobile-bottom-sheet";
-import { MobileTapScale } from "@/components/mobile-tap-scale";
 import {
   Dialog,
   DialogContent,
@@ -2707,13 +2706,13 @@ export default function AssetDetailPage() {
   };
 
   return (
-    <main className={`min-h-screen py-8 box-border ${CONTENT_WIDTH_CLASS} ${isDesktop ? "px-8" : "px-0 max-w-none"} ${!isDesktop ? "w-full min-w-0" : ""}`}>
+    <main className={`min-h-screen box-border ${CONTENT_WIDTH_CLASS} ${isDesktop ? "px-8 py-8" : "px-0 max-w-none pt-0 pb-8"} ${!isDesktop ? "w-full min-w-0" : ""}`}>
       <div className={`flex flex-col gap-6 ${!isDesktop ? "w-full min-w-0" : "w-full"}`}>
-        {/* Мобильная шапка: градиент с контентом (при прокрутке уезжает вверх) */}
+        {/* Мобильная шапка: градиент в safe area и контент (при прокрутке уезжает вверх) */}
         {!isDesktop && (
           <div
             className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
-            style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
+            style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
           >
             <style dangerouslySetInnerHTML={{ __html: `
               @keyframes asset-header-gradient-shift {
@@ -2721,10 +2720,12 @@ export default function AssetDetailPage() {
                 50% { background-position: 25% 15%; }
               }
             ` }} />
-            {/* Слой градиента: тянется под следующий блок и плавно исчезает маской; на мобильной — медленно переливается */}
+            {/* Слой градиента: от верха экрана (включая safe area), плавно исчезает маской */}
             <div
-              className="absolute top-0 left-0 right-0 h-[75vh] z-0 pointer-events-none"
+              className="absolute left-0 right-0 z-0 pointer-events-none"
               style={{
+                top: 0,
+                height: "calc(75vh + env(safe-area-inset-top, 0px))",
                 background: ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
                 backgroundSize: "200% 200%",
                 backgroundPosition: "0% 0%",
@@ -2909,65 +2910,62 @@ export default function AssetDetailPage() {
                         >
                         <div className="shrink-0 w-4 min-w-4" aria-hidden />
                         {primaryRow && (
-                          <MobileTapScale className="shrink-0 w-[min(85vw,320px)] snap-start snap-always">
-                            <div
-                              className="rounded-[9px] p-[2px] overflow-hidden cursor-pointer active:opacity-95"
-                              style={{ backgroundImage: PINK_GRADIENT }}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => openCostOverlay(kindToKey(primaryRow.kind))}
-                              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(primaryRow.kind)); } }}
-                            >
-                              <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3" style={{ backgroundColor: "#25243F" }}>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 mb-1 min-w-0">
-                                    <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
-                                    {mobilePrimaryGrowthPercent != null && (
-                                      <span
-                                        className="shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums"
-                                        style={{
-                                          borderColor: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
-                                          backgroundColor: mobilePrimaryGrowthPercent > 0 ? "rgba(34, 197, 94, 0.15)" : mobilePrimaryGrowthPercent < 0 ? "rgba(239, 68, 68, 0.15)" : "transparent",
-                                          color: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
-                                        }}
-                                      >
-                                        {mobilePrimaryGrowthPercent > 0 ? "+" : ""}{mobilePrimaryGrowthPercent.toFixed(1)}%
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    {primaryRow.valueCents != null ? (
-                                      <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.875rem", fontWeight: 500 }} />
-                                    ) : (
-                                      <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
-                                    )}
-                                  </div>
+                          <div
+                            className="shrink-0 w-[min(85vw,320px)] snap-start snap-always rounded-[9px] p-[2px] overflow-hidden cursor-pointer active:opacity-95"
+                            style={{ backgroundImage: PINK_GRADIENT }}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openCostOverlay(kindToKey(primaryRow.kind))}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(primaryRow.kind)); } }}
+                          >
+                            <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3" style={{ backgroundColor: "#25243F" }}>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 mb-1 min-w-0">
+                                  <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                                  {mobilePrimaryGrowthPercent != null && (
+                                    <span
+                                      className="shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums"
+                                      style={{
+                                        borderColor: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
+                                        backgroundColor: mobilePrimaryGrowthPercent > 0 ? "rgba(34, 197, 94, 0.15)" : mobilePrimaryGrowthPercent < 0 ? "rgba(239, 68, 68, 0.15)" : "transparent",
+                                        color: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
+                                      }}
+                                    >
+                                      {mobilePrimaryGrowthPercent > 0 ? "+" : ""}{mobilePrimaryGrowthPercent.toFixed(1)}%
+                                    </span>
+                                  )}
                                 </div>
-                                {primaryValueMiniChartSeries.length > 1 && (
-                                  <AssetCardMiniChart series={primaryValueMiniChartSeries} itemId={item.id} strokeColor={ACCENT} />
-                                )}
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {primaryRow.valueCents != null ? (
+                                    <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.875rem", fontWeight: 500 }} />
+                                  ) : (
+                                    <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          </MobileTapScale>
-                        )}
-                        {otherRows.map((row) => (
-                          <MobileTapScale key={row.kind} className="shrink-0 w-[260px] snap-start snap-always">
-                            <div
-                              className="rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px] cursor-pointer active:opacity-95"
-                              style={{ backgroundColor: "#25243F" }}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => openCostOverlay(kindToKey(row.kind))}
-                              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(row.kind)); } }}
-                            >
-                              <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
-                              {row.valueCents != null ? (
-                                <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "0.875rem", fontWeight: 500 }} />
-                              ) : (
-                                <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                              {primaryValueMiniChartSeries.length > 1 && (
+                                <AssetCardMiniChart series={primaryValueMiniChartSeries} itemId={item.id} strokeColor={ACCENT} />
                               )}
                             </div>
-                          </MobileTapScale>
+                          </div>
+                        )}
+                        {otherRows.map((row) => (
+                          <div
+                            key={row.kind}
+                            className="shrink-0 w-[260px] snap-start snap-always rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px] cursor-pointer active:opacity-95"
+                            style={{ backgroundColor: "#25243F" }}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openCostOverlay(kindToKey(row.kind))}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(row.kind)); } }}
+                          >
+                            <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
+                            {row.valueCents != null ? (
+                              <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "0.875rem", fontWeight: 500 }} />
+                            ) : (
+                              <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                            )}
+                          </div>
                         ))}
                         <div className="shrink-0 w-4 min-w-4" aria-hidden />
                         </div>

@@ -152,10 +152,10 @@ export function MobileBottomSheet({
           <div
             ref={sheetRef}
             className={cn(
-              "flex flex-col w-full rounded-t-2xl shadow-[0_-4px_24px_rgba(0,0,0,0.4)] transition-transform duration-300 ease-out",
+              "flex flex-col w-full rounded-t-2xl transition-transform duration-300 ease-out",
               panelClassName
             )}
-            style={{ minHeight: "80dvh", backgroundColor: SHEET_PANEL_BG }}
+            style={{ minHeight: "100dvh", backgroundColor: SHEET_PANEL_BG }}
           >
             <div
               className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10 touch-none cursor-grab active:cursor-grabbing"

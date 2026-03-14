@@ -1,5 +1,9 @@
 from contextlib import asynccontextmanager
 import logging
+
+import httpx
+from telegram.error import TimedOut
+
 from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -108,8 +112,14 @@ from counterparty_settlements import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # startup
-    await telegram_run_bot()
-    telegram_start_scheduler()
+    try:
+        await telegram_run_bot()
+        telegram_start_scheduler()
+    except (TimedOut, httpx.ConnectTimeout, httpx.ConnectError) as e:
+        logging.getLogger(__name__).warning(
+            "Telegram bot failed to start (network error), API will run without bot: %s",
+            e,
+        )
     yield
     # shutdown
     await telegram_stop_bot()

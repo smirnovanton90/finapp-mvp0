@@ -84,7 +84,7 @@ import {
 } from "@/lib/asset-item-form-constants";
 import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
 import { formatTimeInput } from "@/lib/format-time";
-import { PINK_GRADIENT, ASSET_DETAIL_HEADER_GRADIENT } from "@/lib/gradients";
+import { PINK_GRADIENT, ASSET_DETAIL_HEADER_GRADIENT_MOBILE } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
 import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip";
@@ -2714,11 +2714,20 @@ export default function AssetDetailPage() {
             className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
             style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
           >
-            {/* Слой градиента: тянется под следующий блок и плавно исчезает маской */}
+            <style dangerouslySetInnerHTML={{ __html: `
+              @keyframes asset-header-gradient-shift {
+                0%, 100% { background-position: 0% 0%; }
+                50% { background-position: 25% 15%; }
+              }
+            ` }} />
+            {/* Слой градиента: тянется под следующий блок и плавно исчезает маской; на мобильной — медленно переливается */}
             <div
               className="absolute top-0 left-0 right-0 h-[75vh] z-0 pointer-events-none"
               style={{
-                background: ASSET_DETAIL_HEADER_GRADIENT,
+                background: ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
+                backgroundSize: "200% 200%",
+                backgroundPosition: "0% 0%",
+                animation: "asset-header-gradient-shift 18s ease-in-out infinite",
                 WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 28%, transparent 100%)",
                 maskImage: "linear-gradient(to bottom, black 0%, black 28%, transparent 100%)",
               }}

@@ -41,3 +41,10 @@ export const ASSET_DETAIL_HEADER_GRADIENT =
   "radial-gradient(ellipse 90% 70% at 10% 90%, rgba(255, 180, 100, 0.3) 0%, rgba(255, 140, 60, 0.1) 45%, transparent 70%)," +
   "radial-gradient(ellipse 140% 120% at 50% 50%, rgba(106, 13, 173, 0.5) 0%, rgba(44, 11, 79, 0.85) 60%)," +
   "linear-gradient(180deg, #0a0612 0%, #1a0d2e 35%, #2C0B4F 100%)";
+
+/** Более яркий вариант градиента шапки страницы актива — только для мобильной вёрстки. */
+export const ASSET_DETAIL_HEADER_GRADIENT_MOBILE =
+  "radial-gradient(ellipse 100% 80% at 90% 10%, rgba(255, 120, 90, 0.65) 0%, rgba(255, 90, 70, 0.25) 40%, transparent 70%)," +
+  "radial-gradient(ellipse 90% 70% at 10% 90%, rgba(255, 200, 120, 0.5) 0%, rgba(255, 160, 80, 0.2) 45%, transparent 70%)," +
+  "radial-gradient(ellipse 140% 120% at 50% 50%, rgba(126, 40, 200, 0.6) 0%, rgba(60, 20, 110, 0.9) 60%)," +
+  "linear-gradient(180deg, #0d0818 0%, #221038 35%, #3d1560 100%)";

@@ -138,6 +138,7 @@ import {
 } from "@/components/ui/select";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { EmptyState } from "@/components/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { MobileAddTransactionSheet } from "@/components/mobile-add-transaction-sheet";
 import { MobileAddTransactionWizard } from "@/components/mobile-add-transaction-wizard";
@@ -7343,7 +7344,20 @@ function TransactionsView({
                   </div>
                 )}
               </div>
-            {mergedRows.length === 0 ? (
+            {isInitialLoading && !isDesktop ? (
+              <div className="w-screen relative left-1/2 -translate-x-1/2 max-w-none space-y-6 px-4">
+                {[1, 2, 3].map((sectionIdx) => (
+                  <div key={sectionIdx}>
+                    <Skeleton className="h-6 w-28 mb-2 rounded-[9px]" />
+                    <div className="space-y-2">
+                      {[1, 2, 3, 4].map((cardIdx) => (
+                        <Skeleton key={cardIdx} className="h-20 w-full rounded-lg" />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : mergedRows.length === 0 ? (
               <EmptyState />
             ) : !isDesktop ? (
               /* Мобильная верстка: карточки от края до края экрана */

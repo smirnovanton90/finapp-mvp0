@@ -3,7 +3,6 @@
 import React, { useState, useCallback } from "react";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
-
 const PRESS_SCALE = 0.97;
 const TRANSITION_MS = 80;
 

@@ -21,7 +21,6 @@ import {
   PiggyBank,
   Plus,
   Receipt,
-  Search,
   Trash2,
   TrendingUp,
   Users,
@@ -30,7 +29,6 @@ import {
   Info,
   Upload,
   Camera,
-  X,
 } from "lucide-react";
 
 import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
@@ -49,6 +47,8 @@ import { useOnboarding } from "@/components/onboarding-context";
 import { FilterSection } from "@/components/filter-panel";
 import { AssetCard } from "@/components/asset-card";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
+import { MobileSearchField } from "@/components/mobile-search-field";
+import { Skeleton } from "@/components/ui/skeleton";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
@@ -650,7 +650,6 @@ export default function Page() {
   const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set(["active"]));
   const [filterName, setFilterName] = useState("");
   const [mobileAssetsSearch, setMobileAssetsSearch] = useState("");
-  const [mobileSearchFocused, setMobileSearchFocused] = useState(false);
   const [filterAmountFrom, setFilterAmountFrom] = useState("");
   const [filterAmountTo, setFilterAmountTo] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
@@ -3597,9 +3596,38 @@ export default function Page() {
       <div className="flex-1 min-w-0">
         <div className={CONTENT_WIDTH_CLASS} style={{ paddingTop: "30px" }}>
             {loading ? (
-              <div className="flex items-center justify-center py-16" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                Загрузка…
-              </div>
+              <>
+                {/* На мобильной при загрузке сразу показываем поле поиска и скелетоны (без экрана «Загрузка…»). На десктопе этот блок скрыт через CSS. */}
+                <div className="relative flex flex-col gap-4 md:hidden">
+                  <div className="sticky top-0 z-10 -mx-4 px-4 py-4" style={{ backgroundColor: "var(--app-bg, #000)" }}>
+                    <MobileSearchField
+                      value={mobileAssetsSearch}
+                      onChange={setMobileAssetsSearch}
+                      placeholder="Поиск"
+                      aria-label="Поиск активов и обязательств"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="space-y-8">
+                    {[1, 2].map((i) => (
+                      <div key={i}>
+                        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                          <Skeleton className="h-6 w-32 rounded-[9px]" />
+                          <Skeleton className="h-6 w-24 rounded-[9px]" />
+                        </div>
+                        <div className="space-y-3">
+                          {[1, 2, 3].map((j) => (
+                            <Skeleton key={j} className="h-[72px] w-full rounded-lg" />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="hidden md:flex items-center justify-center py-16" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                  Загрузка…
+                </div>
+              </>
             ) : visibleItems.length === 0 ? (
               isDesktop ? (
                 <div className="flex flex-col gap-4">
@@ -3762,50 +3790,14 @@ export default function Page() {
             ) : (
               /* Мобильная: поле поиска (при потягивании вниз видно) + карточки активов */
               <div className="relative flex flex-col gap-4">
-                <div className="sticky top-0 z-10 -mx-4 px-4 pt-0 pb-1" style={{ backgroundColor: "var(--app-bg, #000)" }}>
-                  <div
-                    className="relative flex items-center rounded-lg transition-[background-color,box-shadow] duration-200"
-                    style={{
-                      backgroundColor:
-                        mobileSearchFocused || mobileAssetsSearch.length > 0
-                          ? "rgba(197, 191, 241, 0.32)"
-                          : "rgba(197, 191, 241, 0.18)",
-                      boxShadow: mobileSearchFocused
-                        ? `inset 0 -2px 0 0 ${ACCENT2}, 0 8px 25px -8px ${ACCENT2}`
-                        : "none",
-                    }}
-                  >
-                    <Search
-                      className="absolute left-3 h-4 w-4 shrink-0 pointer-events-none transition-colors duration-200"
-                      style={{ color: mobileSearchFocused ? ACCENT : PLACEHOLDER_COLOR_DARK }}
-                      aria-hidden
-                    />
-                    <Input
-                      type="text"
-                      placeholder="Поиск"
-                      value={mobileAssetsSearch}
-                      onChange={(e) => setMobileAssetsSearch(e.target.value)}
-                      onFocus={() => setMobileSearchFocused(true)}
-                      onBlur={() => setMobileSearchFocused(false)}
-                      className="w-full pl-10 pr-10 py-2 text-base font-normal border-0 shadow-none outline-none focus-visible:ring-0 focus-visible:border-0 rounded-lg placeholder:text-[rgba(197,191,241,0.6)]"
-                      style={{
-                        color: ACTIVE_TEXT_DARK,
-                        backgroundColor: "transparent",
-                      }}
-                      aria-label="Поиск активов и обязательств"
-                    />
-                    {mobileAssetsSearch.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setMobileAssetsSearch("")}
-                        className="absolute right-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-md touch-manipulation transition-colors duration-200"
-                        style={{ color: mobileSearchFocused ? ACCENT : PLACEHOLDER_COLOR_DARK }}
-                        aria-label="Очистить поиск"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
+                <div className="sticky top-0 z-10 -mx-4 px-4 py-4" style={{ backgroundColor: "var(--app-bg, #000)" }}>
+                  <MobileSearchField
+                    value={mobileAssetsSearch}
+                    onChange={setMobileAssetsSearch}
+                    placeholder="Поиск"
+                    aria-label="Поиск активов и обязательств"
+                    className="w-full"
+                  />
                 </div>
                 <div className="space-y-8">
                   {mobileOrderedSectionsWithItems.map(({ section, items, totalRubCents }) => (

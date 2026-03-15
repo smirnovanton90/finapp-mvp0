@@ -57,12 +57,12 @@ export function MobileFloatingBar() {
   return (
     <nav
       className={cn(
-        "fixed bottom-0 left-0 right-0 z-30 flex items-stretch gap-1 px-4 pb-[env(safe-area-inset-bottom)] pt-3",
+        "fixed bottom-0 left-0 right-0 z-30 flex min-h-[72px] flex-col justify-end gap-1 px-4 pb-[env(safe-area-inset-bottom)] pt-3",
         "bg-sidebar/95 backdrop-blur-sm border-t border-sidebar-border"
       )}
       aria-label="Основная навигация"
     >
-      <div className="flex flex-1 items-stretch rounded-xl">
+      <div className="flex items-stretch rounded-xl">
         <NavButton
           href={ASSETS_HREF}
           icon={Wallet}

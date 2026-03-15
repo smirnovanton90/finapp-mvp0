@@ -111,6 +111,7 @@ import { CardIcon } from "@/components/card-icon";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { useSidebar } from "@/components/ui/sidebar-context";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   toTxDateKey,
   getTxDeltaForItem,
@@ -327,12 +328,12 @@ export default function AssetDetailPage() {
     setError(null);
     setQuantityHistoryError(null);
     try {
-      const [itemRes, costsRes, marketRes] = await Promise.all([
-        fetchItem(id),
+      const itemRes = await fetchItem(id);
+      setItem(itemRes);
+      const [costsRes, marketRes] = await Promise.all([
         fetchItemCosts(id),
         fetchItemMarketValues(id),
       ]);
-      setItem(itemRes);
       setCosts(costsRes);
       setMarketValues(marketRes);
       if ((itemRes.primary_value_kind ?? "BALANCE") === "BALANCE") {
@@ -2472,7 +2473,11 @@ export default function AssetDetailPage() {
           </div>
         ) : null}
         {loadingCostHistory ? (
-          <p className={`text-sm ${isMobileOverlay ? "px-4" : ""}`} style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+          !isDesktop ? (
+            <Skeleton className={`w-full ${isMobileOverlay ? "h-[260px]" : "h-[200px]"} rounded-[9px]`} />
+          ) : (
+            <p className={`text-sm ${isMobileOverlay ? "px-4" : ""}`} style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+          )
         ) : costChartSeries.length === 0 ? (
           <p className={`text-sm ${isMobileOverlay ? "px-4" : ""}`} style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет данных за период.</p>
         ) : costChartGeometry ? (
@@ -2808,37 +2813,40 @@ export default function AssetDetailPage() {
               {itemPhotoError && (
                 <p className="text-xs text-center" style={{ color: "#FB4C4F" }}>{itemPhotoError}</p>
               )}
-              <div className="flex items-center gap-2 flex-wrap justify-center max-w-full">
-                <h2 className="text-3xl font-medium text-center break-words" style={{ color: ACTIVE_TEXT_DARK }}>
-                  {item.name}
-                </h2>
-                {item.currency_code && (
-                  <CurrencyChip code={item.currency_code} />
-                )}
-              </div>
-              <div className="flex items-center gap-4 flex-wrap justify-center max-w-full">
-                <span className="text-sm font-normal text-white/80">
+              <div className="flex flex-col items-center gap-1 max-w-full">
+                <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                   {getItemTypeLabel(item)}
                 </span>
+                <div className="flex items-center gap-2 flex-wrap justify-center max-w-full">
+                  <h2 className="text-3xl font-medium text-center break-words" style={{ color: ACTIVE_TEXT_DARK }}>
+                    {item.name}
+                  </h2>
+                  {item.currency_code && (
+                    <CurrencyChip code={item.currency_code} />
+                  )}
+                </div>
+                {item.counterparty_id && !itemCounterparty && (
+                  <div className="flex items-center gap-1.5">
+                    <Skeleton className="h-5 w-5 shrink-0 rounded-full" circle />
+                    <Skeleton className="h-4 w-24 rounded-[9px]" />
+                  </div>
+                )}
                 {itemCounterparty && CounterpartyFallbackIcon && (
-                  <>
-                    <span className="text-sm text-white/80">в</span>
-                    <div className="flex items-center gap-1.5">
-                      <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">
-                        <CardIcon
-                          src={counterpartyCurrentSrc && !showCounterpartyIcon ? counterpartyCurrentSrc : null}
-                          alt={buildCounterpartyDisplayName(itemCounterparty)}
-                          fallbackIcon={CounterpartyFallbackIcon}
-                          size={20}
-                          shadow={false}
-                          objectFit="contain"
-                          fallbackIconColor="rgba(255,255,255,0.7)"
-                          onError={counterpartyOnError}
-                        />
-                      </div>
-                      <span className="text-sm text-white/80">{buildCounterpartyDisplayName(itemCounterparty)}</span>
+                  <div className="flex items-center gap-1.5">
+                    <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">
+                      <CardIcon
+                        src={counterpartyCurrentSrc && !showCounterpartyIcon ? counterpartyCurrentSrc : null}
+                        alt={buildCounterpartyDisplayName(itemCounterparty)}
+                        fallbackIcon={CounterpartyFallbackIcon}
+                        size={20}
+                        shadow={false}
+                        objectFit="contain"
+                        fallbackIconColor="rgba(255,255,255,0.7)"
+                        onError={counterpartyOnError}
+                      />
                     </div>
-                  </>
+                    <span className="text-sm text-white/80">{buildCounterpartyDisplayName(itemCounterparty)}</span>
+                  </div>
                 )}
               </div>
               {item.synonyms && item.synonyms.length > 0 && (
@@ -2858,7 +2866,18 @@ export default function AssetDetailPage() {
                   ))}
                 </div>
               )}
-              {costs && (() => {
+              {!costs && !isDesktop ? (
+                <div
+                  className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  style={{ WebkitOverflowScrolling: "touch" }}
+                >
+                  <div className="shrink-0 w-4 min-w-4" aria-hidden />
+                  <Skeleton className="shrink-0 w-[min(85vw,320px)] h-[72px] rounded-[9px]" />
+                  <Skeleton className="shrink-0 w-[min(85vw,320px)] h-[72px] rounded-[9px]" />
+                  <Skeleton className="shrink-0 w-[min(85vw,320px)] h-[72px] rounded-[9px]" />
+                  <div className="shrink-0 w-4 min-w-4" aria-hidden />
+                </div>
+              ) : costs ? (() => {
                 const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
                 const kindToKey = (k: PrimaryValueKind): "balance" | "market" | "acquisition" | "invested" =>
                   k === "MARKET" ? "market" : k === "ACQUISITION" ? "acquisition" : k === "INVESTED" ? "invested" : "balance";
@@ -2936,7 +2955,9 @@ export default function AssetDetailPage() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 mb-1 min-w-0">
                                   <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
-                                  {mobilePrimaryGrowthPercent != null && (
+                                  {!isDesktop && loadingCostHistory ? (
+                                    <Skeleton className="h-5 w-14 shrink-0 rounded-md" />
+                                  ) : mobilePrimaryGrowthPercent != null ? (
                                     <span
                                       className="shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums"
                                       style={{
@@ -2947,7 +2968,7 @@ export default function AssetDetailPage() {
                                     >
                                       {mobilePrimaryGrowthPercent > 0 ? "+" : ""}{mobilePrimaryGrowthPercent.toFixed(1)}%
                                     </span>
-                                  )}
+                                  ) : null}
                                 </div>
                                 <div className="flex items-center gap-2 min-w-0">
                                   {primaryRow.valueCents != null ? (
@@ -2957,9 +2978,11 @@ export default function AssetDetailPage() {
                                   )}
                                 </div>
                               </div>
-                              {primaryValueMiniChartSeries.length > 1 && (
+                              {!isDesktop && loadingCostHistory ? (
+                                <Skeleton className="h-10 w-16 shrink-0 rounded-[9px]" />
+                              ) : primaryValueMiniChartSeries.length > 1 ? (
                                 <AssetCardMiniChart series={primaryValueMiniChartSeries} itemId={item.id} strokeColor={ACCENT} />
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         )}
@@ -2987,7 +3010,7 @@ export default function AssetDetailPage() {
                     )}
                   </>
                 );
-              })()}
+              })() : null}
             </div>
             </div>
           </div>
@@ -3317,7 +3340,16 @@ export default function AssetDetailPage() {
                         {quantityHistoryError ? (
                           <p className="text-sm text-red-500 mt-4">{quantityHistoryError}</p>
                         ) : loadingQuantityHistory ? (
-                          <p className="text-sm mt-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+                          !isDesktop ? (
+                            <div className="mt-4 space-y-2">
+                              <Skeleton className="h-4 w-full rounded-[9px]" />
+                              <Skeleton className="h-4 w-[85%] rounded-[9px]" />
+                              <Skeleton className="h-4 w-full rounded-[9px]" />
+                              <Skeleton className="h-4 w-[75%] rounded-[9px]" />
+                            </div>
+                          ) : (
+                            <p className="text-sm mt-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+                          )
                         ) : (
                           <>
                             <div className="mt-3">
@@ -3630,7 +3662,15 @@ export default function AssetDetailPage() {
                         {isExpanded && (
                           <div className="p-4 pt-0" style={{ backgroundColor: "transparent" }}>
                             {loadingDynamics ? (
-                              <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+                              !isDesktop ? (
+                                <div className="space-y-2">
+                                  <Skeleton className="h-4 w-full rounded-[9px]" />
+                                  <Skeleton className="h-4 w-[83%] rounded-[9px]" />
+                                  <Skeleton className="h-4 w-full rounded-[9px]" />
+                                </div>
+                              ) : (
+                                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Загрузка...</p>
+                              )
                             ) : txs.length === 0 ? (
                               <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                                 {key === "income" ? "Нет доходов по активу." : "Нет расходов по активу."}

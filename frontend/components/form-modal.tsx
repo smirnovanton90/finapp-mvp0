@@ -50,6 +50,18 @@ const sizeStyles: Record<FormModalSize, string> = {
   medium: "sm:max-w-[600px]",
 };
 
+const AUTH_PRIMARY_BUTTON_STYLE: React.CSSProperties = {
+  "--auth-primary-bg":
+    "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+  "--auth-primary-bg-hover":
+    "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+} as React.CSSProperties;
+
+const GLASS_BUTTON_STYLE: React.CSSProperties = {
+  "--glass-bg": "rgba(108, 93, 215, 0.22)",
+  "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+} as React.CSSProperties;
+
 export function FormModal({
   open,
   onOpenChange,
@@ -99,14 +111,7 @@ export function FormModal({
             variant="authPrimary"
             disabled={loading || disabled}
             className="rounded-lg border-0 text-sm shrink-0"
-            style={
-              {
-                "--auth-primary-bg":
-                  "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-                "--auth-primary-bg-hover":
-                  "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
-              } as React.CSSProperties
-            }
+            style={AUTH_PRIMARY_BUTTON_STYLE}
           >
             {submitLabel}
           </Button>
@@ -189,12 +194,7 @@ export function FormModal({
                   type="button"
                   variant="glass"
                   className="rounded-lg border-0"
-                  style={
-                    {
-                      "--glass-bg": "rgba(108, 93, 215, 0.22)",
-                      "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
-                    } as React.CSSProperties
-                  }
+                  style={GLASS_BUTTON_STYLE}
                   onClick={onCancel}
                 >
                   {cancelLabel}
@@ -204,14 +204,7 @@ export function FormModal({
                   variant="authPrimary"
                   disabled={loading || disabled}
                   className="rounded-lg border-0"
-                  style={
-                    {
-                      "--auth-primary-bg":
-                        "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
-                      "--auth-primary-bg-hover":
-                        "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
-                    } as React.CSSProperties
-                  }
+                  style={AUTH_PRIMARY_BUTTON_STYLE}
                 >
                   {submitLabel}
                 </Button>

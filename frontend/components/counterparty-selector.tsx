@@ -199,7 +199,9 @@ export function CounterpartySelector({
   useLayoutEffect(() => {
     if (!open) return;
     updateDropdownPosition();
-  }, [open, updateDropdownPosition, filteredCounterparties.length, selectedCounterparties.length]);
+    // Не зависяем от filteredCounterparties.length / selectedCounterparties.length, чтобы не вызывать
+    // setDropdownStyle при каждом вводе символа — это убирает лишние ре-рендеры и потерю фокуса в модалке.
+  }, [open, updateDropdownPosition]);
 
   useEffect(() => {
     if (!open) return;

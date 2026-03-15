@@ -4,8 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronDown, ArrowLeftRight, ArrowRight, Building2, Coins, HandCoins, Receipt, QrCode, Banknote, Calendar, Wallet, Tag, User, MessageSquare, Link2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { MODAL_BG, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, GREEN, GREEN_TRANSACTION, RED, ACCENT2 } from "@/lib/colors";
-import { BLUE_GRADIENT } from "@/lib/gradients";
+import { MODAL_BG, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, GREEN, GREEN_TRANSACTION, RED, ACCENT2, ACCENT, BACKGROUND_DT } from "@/lib/colors";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -590,6 +589,15 @@ export function MobileAddTransactionWizard({
     };
   }, [open]);
 
+  const [typeSelectionRevealed, setTypeSelectionRevealed] = useState(false);
+  useEffect(() => {
+    if (open && flowType === null && step === 0) {
+      const t = requestAnimationFrame(() => setTypeSelectionRevealed(true));
+      return () => cancelAnimationFrame(t);
+    }
+    setTypeSelectionRevealed(false);
+  }, [open, flowType, step]);
+
   if (!open) return null;
 
   const isTypeSelection = flowType === null && step === 0;
@@ -598,7 +606,7 @@ export function MobileAddTransactionWizard({
     <div
       className="fixed inset-0 flex flex-col"
       style={{
-        backgroundColor: isTypeSelection ? "#191732" : MODAL_BG,
+        backgroundColor: isTypeSelection ? ACCENT : MODAL_BG,
         zIndex: 100,
         minHeight: "100dvh",
         paddingTop: "env(safe-area-inset-top, 0px)",
@@ -651,10 +659,10 @@ export function MobileAddTransactionWizard({
 
         {isTypeSelection && (
           <div
-            className="flex flex-col justify-center px-6 pb-6 flex-1 min-h-0"
-            style={{ padding: "0 24px 24px", gap: 10 }}
+            className="flex flex-col justify-center px-6 pb-6 flex-1 min-h-0 transition-opacity duration-200 ease-out"
+            style={{ padding: "0 24px 24px", gap: 10, opacity: typeSelectionRevealed ? 1 : 0 }}
           >
-            {/* Простая транзакция — широкая кнопка с градиентом */}
+            {/* Простая транзакция — широкая кнопка с заливкой BACKGROUND_DT */}
             <MobileTapScale className="w-full">
               <button
                 type="button"
@@ -662,7 +670,7 @@ export function MobileAddTransactionWizard({
                 style={{
                   padding: "15px 24px",
                   minHeight: 100,
-                  background: "linear-gradient(264.49deg, #483BA6 -2.6%, #7F5CFF 57.34%, #7F5CFF 80.32%, #9487F3 101.93%)",
+                  backgroundColor: BACKGROUND_DT,
                 }}
                 onClick={handleSelectSimple}
               >
@@ -688,7 +696,7 @@ export function MobileAddTransactionWizard({
                   className="flex flex-1 flex-row items-center justify-center gap-2.5 rounded-[9px] transition-opacity active:opacity-90 min-h-[100px] text-left w-full"
                   style={{
                     padding: "15px 16px",
-                    background: "rgba(93, 95, 215, 0.22)",
+                    backgroundColor: MODAL_BG,
                   }}
                   onClick={handleSelectLoanRepayment}
                 >
@@ -706,7 +714,7 @@ export function MobileAddTransactionWizard({
                   className="flex flex-1 flex-row items-center justify-center gap-2.5 rounded-[9px] transition-opacity active:opacity-90 min-h-[100px] text-left w-full"
                   style={{
                     padding: "15px 16px",
-                    background: "rgba(93, 95, 215, 0.22)",
+                    backgroundColor: MODAL_BG,
                   }}
                   onClick={handleSelectDebt}
                 >
@@ -720,7 +728,7 @@ export function MobileAddTransactionWizard({
               </MobileTapScale>
             </div>
 
-            {/* Сканировать чек — широкая кнопка с градиентом (увеличенный отступ сверху) */}
+            {/* Сканировать чек — широкая кнопка с заливкой BACKGROUND_DT (увеличенный отступ сверху) */}
             <MobileTapScale className="w-full" style={{ marginTop: 32 }}>
               <button
                 type="button"
@@ -728,7 +736,7 @@ export function MobileAddTransactionWizard({
                 style={{
                   padding: "15px 24px",
                   minHeight: 100,
-                  background: BLUE_GRADIENT,
+                  backgroundColor: BACKGROUND_DT,
                 }}
                 onClick={handleSelectReceipt}
               >

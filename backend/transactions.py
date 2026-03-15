@@ -491,11 +491,12 @@ def create_debts_transaction(
     if data.transaction_counterparty_id is not None:
         resolve_counterparty(db, user, data.transaction_counterparty_id)
 
+    # TRANSFER does not allow counterparty_id in TransactionCreate; it is only resolved for validation
     payload = TransactionCreate(
         transaction_date=data.transaction_date,
         primary_item_id=primary_item_id,
         counterparty_item_id=counterparty_item_id,
-        counterparty_id=tx_counterparty_id,
+        counterparty_id=None,
         amount_primary_minor=data.amount_primary_minor,
         amount_counterparty=data.amount_counterparty,
         primary_quantity_lots=None,

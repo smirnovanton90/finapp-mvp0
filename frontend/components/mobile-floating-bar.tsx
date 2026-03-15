@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRef } from "react";
 import { Wallet, ArrowLeftRight, Plus } from "lucide-react";
 import { useSidebar } from "@/components/ui/sidebar-context";
+import { useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { cn } from "@/lib/utils";
 import { ACCENT, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
@@ -45,6 +47,8 @@ function NavButton({
 export function MobileFloatingBar() {
   const pathname = usePathname();
   const { isDesktop } = useSidebar();
+  const mobileWizard = useMobileWizardOpen();
+  const addButtonRef = useRef<HTMLAnchorElement | HTMLButtonElement>(null);
 
   if (isDesktop) return null;
 
@@ -53,9 +57,29 @@ export function MobileFloatingBar() {
   const isTransactions =
     pathname === TRANSACTIONS_HREF ||
     (pathname?.startsWith(TRANSACTIONS_HREF + "/") ?? false);
-  /** На экране Активы "+" добавляет актив, иначе — транзакцию. */
+  /** На экране Активы "+" добавляет актив, иначе — транзакцию. На экране Транзакции — анимация расширения кнопки. */
   const addHref = pathname === ASSETS_HREF ? ADD_ASSET_HREF : ADD_TRANSACTION_HREF;
   const addLabel = pathname === ASSETS_HREF ? "Добавить актив" : "Добавить транзакцию";
+  const useExpandAnimation = isTransactions && mobileWizard?.setExpandOrigin;
+
+  const handleAddClick = (e: React.MouseEvent) => {
+    if (!useExpandAnimation || !mobileWizard?.setExpandOrigin) return;
+    e.preventDefault();
+    const target = addButtonRef.current;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    mobileWizard.setExpandOrigin({
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  };
+
+  const addButtonClass = cn(
+    "flex shrink-0 items-center justify-center rounded-full -my-1 mx-1",
+    "h-12 w-12 shadow-md transition-colors hover:opacity-90"
+  );
 
   return (
     <nav
@@ -73,17 +97,28 @@ export function MobileFloatingBar() {
           active={!!isAssets}
         />
         <MobileTapScale>
-          <Link
-            href={addHref}
-            aria-label={addLabel}
-            className={cn(
-              "flex shrink-0 items-center justify-center rounded-full -my-1 mx-1",
-              "h-12 w-12 shadow-md transition-colors hover:opacity-90"
-            )}
-            style={{ backgroundColor: ACCENT }}
-          >
-            <Plus className="size-6" strokeWidth={2.5} style={{ color: "white", opacity: 0.85 }} />
-          </Link>
+          {useExpandAnimation ? (
+            <button
+              ref={addButtonRef as React.RefObject<HTMLButtonElement>}
+              type="button"
+              aria-label={addLabel}
+              className={addButtonClass}
+              style={{ backgroundColor: ACCENT }}
+              onClick={handleAddClick}
+            >
+              <Plus className="size-6" strokeWidth={2.5} style={{ color: "white", opacity: 0.85 }} />
+            </button>
+          ) : (
+            <Link
+              ref={addButtonRef as React.RefObject<HTMLAnchorElement>}
+              href={addHref}
+              aria-label={addLabel}
+              className={addButtonClass}
+              style={{ backgroundColor: ACCENT }}
+            >
+              <Plus className="size-6" strokeWidth={2.5} style={{ color: "white", opacity: 0.85 }} />
+            </Link>
+          )}
         </MobileTapScale>
         <NavButton
           href={TRANSACTIONS_HREF}

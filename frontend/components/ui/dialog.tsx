@@ -58,7 +58,7 @@ const DialogContent = React.forwardRef<
     /** Заголовок для скринридеров (обязателен для доступности). Скрыт визуально. */
     title?: string;
   }
->(({ className, children, showCloseButton = true, overlayClassName, containerClassName, title = "Диалог", onPointerDownOutside, onInteractOutside, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, overlayClassName, containerClassName, title = "Диалог", onPointerDownOutside, onInteractOutside, onFocusOutside, ...props }, ref) => {
   const selectorPortalRef = React.useRef<HTMLDivElement>(null);
   const handlePointerDownOutside = (e: Event) => {
     if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
@@ -71,6 +71,14 @@ const DialogContent = React.forwardRef<
       e.preventDefault();
     }
     onInteractOutside?.(e as never);
+  };
+  const handleFocusOutside = (e: Event) => {
+    const ev = e as FocusEvent;
+    const relatedTarget = ev.relatedTarget as Node | null;
+    if (relatedTarget && (relatedTarget as HTMLElement).closest?.("[data-selector-dropdown]")) {
+      e.preventDefault();
+    }
+    onFocusOutside?.(e as never);
   };
   return (
     <DialogPortal data-slot="dialog-portal">
@@ -88,6 +96,7 @@ const DialogContent = React.forwardRef<
             {...props}
             onPointerDownOutside={handlePointerDownOutside}
             onInteractOutside={handleInteractOutside}
+            onFocusOutside={handleFocusOutside}
           >
             <SelectorDropdownPortalProvider value={selectorPortalRef}>
               <DialogPrimitive.Title className="sr-only">

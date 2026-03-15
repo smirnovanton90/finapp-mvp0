@@ -2882,6 +2882,48 @@ function TransactionsView({
         it.archived_at == null
     );
   }, [itemsForSelector, currentDebtCounterpartyId]);
+
+  const onCounterpartyChangeMain = useCallback((ids: number[]) => {
+    setCounterpartyId(ids[0] ?? null);
+  }, []);
+  const onAddCounterpartyMain = useCallback(() => {
+    setCreateCounterpartyTarget("main");
+    setCreateCounterpartyOpen(true);
+  }, []);
+  const onDebtPayForCounterpartyChange = useCallback((ids: number[]) => {
+    setDebtPayForCounterpartyId(ids[0] ?? null);
+    setDebtSettlementMode("existing");
+    setDebtSettlementItemId(null);
+    setDebtSettlementNewName("");
+  }, []);
+  const onAddCounterpartyDebtPayFor = useCallback(() => {
+    setCreateCounterpartyTarget("debtPayFor");
+    setCreateCounterpartyOpen(true);
+  }, []);
+  const onWherePaidCounterpartyChange = useCallback((ids: number[]) => {
+    setWherePaidCounterpartyId(ids[0] ?? null);
+  }, []);
+  const onAddCounterpartyWherePaid = useCallback(() => {
+    setCreateCounterpartyTarget("wherePaid");
+    setCreateCounterpartyOpen(true);
+  }, []);
+  const onCounterpartyChangeWithDebtReset = useCallback(
+    (ids: number[]) => {
+      setCounterpartyId(ids[0] ?? null);
+      if (
+        formMode === "DEBTS" &&
+        (debtDirection === "I_PAID" ||
+          debtDirection === "THEY_PAID" ||
+          debtDirection === "THEY_PAID_FOR_ME")
+      ) {
+        setDebtSettlementMode("existing");
+        setDebtSettlementItemId(null);
+        setDebtSettlementNewName("");
+      }
+    },
+    [formMode, debtDirection]
+  );
+
   const primaryCurrencyCode = primaryItemId
     ? getEffectiveItemMeta(primaryItemId)?.currencyCode ?? null
     : null;
@@ -6329,14 +6371,14 @@ function TransactionsView({
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={counterpartyId ? [counterpartyId] : []}
-                            onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                            onChange={onCounterpartyChangeMain}
                             selectionMode="single"
                             placeholder={!isDesktop ? "Где платите" : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
-                            onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
+                            onAddCounterparty={onAddCounterpartyMain}
                           />
                         </FormField>
                         <FormField
@@ -6347,19 +6389,14 @@ function TransactionsView({
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={debtPayForCounterpartyId ? [debtPayForCounterpartyId] : []}
-                            onChange={(ids) => {
-                              setDebtPayForCounterpartyId(ids[0] ?? null);
-                              setDebtSettlementMode("existing");
-                              setDebtSettlementItemId(null);
-                              setDebtSettlementNewName("");
-                            }}
+                            onChange={onDebtPayForCounterpartyChange}
                             selectionMode="single"
                             placeholder={!isDesktop ? "За кого платите" : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
-                            onAddCounterparty={() => { setCreateCounterpartyTarget("debtPayFor"); setCreateCounterpartyOpen(true); }}
+                            onAddCounterparty={onAddCounterpartyDebtPayFor}
                           />
                         </FormField>
                       </div>
@@ -6375,14 +6412,14 @@ function TransactionsView({
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={counterpartyId ? [counterpartyId] : []}
-                            onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+                            onChange={onCounterpartyChangeMain}
                             selectionMode="single"
                             placeholder={!isDesktop ? "Кто платит" : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
-                            onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
+                            onAddCounterparty={onAddCounterpartyMain}
                           />
                         </FormField>
                         <FormField
@@ -6393,14 +6430,14 @@ function TransactionsView({
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={wherePaidCounterpartyId ? [wherePaidCounterpartyId] : []}
-                            onChange={(ids) => setWherePaidCounterpartyId(ids[0] ?? null)}
+                            onChange={onWherePaidCounterpartyChange}
                             selectionMode="single"
                             placeholder={!isDesktop ? "Где платит" : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
-                            onAddCounterparty={() => { setCreateCounterpartyTarget("wherePaid"); setCreateCounterpartyOpen(true); }}
+                            onAddCounterparty={onAddCounterpartyWherePaid}
                           />
                         </FormField>
                       </div>
@@ -6422,21 +6459,14 @@ function TransactionsView({
                           <CounterpartySelector
                             counterparties={selectableCounterparties}
                             selectedIds={counterpartyId ? [counterpartyId] : []}
-                            onChange={(ids) => {
-                              setCounterpartyId(ids[0] ?? null);
-                              if (isDebts && (debtDirection === "I_PAID" || debtDirection === "THEY_PAID" || debtDirection === "THEY_PAID_FOR_ME")) {
-                                setDebtSettlementMode("existing");
-                                setDebtSettlementItemId(null);
-                                setDebtSettlementNewName("");
-                              }
-                            }}
+                            onChange={onCounterpartyChangeWithDebtReset}
                             selectionMode="single"
                             placeholder={!isDesktop ? (isDebts ? (debtDirection === "I_PAID" ? "Кому платите" : "Кто платит") : "Контрагент") : "Начните вводить название"}
                             industries={industries}
                             disabled={counterpartyLoading}
                             counterpartyCounts={counterpartyTxCounts}
                             apiBase={API_BASE}
-                            onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
+                            onAddCounterparty={onAddCounterpartyMain}
                           />
                           {receiptMessage && (
                             <div className="flex flex-wrap items-center gap-2">

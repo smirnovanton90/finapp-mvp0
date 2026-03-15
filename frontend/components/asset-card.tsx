@@ -480,7 +480,7 @@ export function AssetCard({
             {showRubEquivalent ? (
               <>
                 <span className="inline-flex items-center gap-1.5 flex-wrap">
-                  <span className="text-lg font-semibold tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
+                  <span className="text-xl font-semibold tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
                     {rubEquivalent != null
                       ? isAsset
                         ? hasNegativeBalance
@@ -489,10 +489,10 @@ export function AssetCard({
                         : `-${formatAmount(Math.abs(rubEquivalent))}`
                       : "-"}
                   </span>
-                  <CurrencyChip code="RUB" className="text-xs" />
+                  <CurrencyChip code="RUB" className="text-sm" />
                 </span>
                 {currencyCode && currencyCode !== "RUB" && (
-                  <span className="inline-flex items-center gap-1.5 flex-wrap text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                  <span className="inline-flex items-center gap-1.5 flex-wrap text-base" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                     <span className="tabular-nums">
                       {isAsset
                         ? hasNegativeBalance
@@ -500,47 +500,28 @@ export function AssetCard({
                           : formatAmount(displayBalanceCents)
                         : `-${formatAmount(Math.abs(displayBalanceCents))}`}
                     </span>
-                    <CurrencyChip code={currencyCode} className="text-[10px]" />
+                    <CurrencyChip code={currencyCode} className="text-sm" />
                   </span>
                 )}
               </>
             ) : (
               <span className="inline-flex items-center gap-1.5 flex-wrap">
-                <span className="text-lg font-semibold tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
+                <span className="text-xl font-semibold tabular-nums" style={{ color: isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
                   {isAsset
                     ? hasNegativeBalance
                       ? `-${formatAmount(Math.abs(displayBalanceCents))}`
                       : formatAmount(displayBalanceCents)
                     : `-${formatAmount(Math.abs(displayBalanceCents))}`}
                 </span>
-                <CurrencyChip code={currencyCode || "RUB"} className="text-xs" />
+                <CurrencyChip code={currencyCode || "RUB"} className="text-sm" />
               </span>
             )}
             <span
-              className="text-sm font-normal break-words whitespace-normal line-clamp-2"
+              className="text-base font-normal break-words whitespace-normal line-clamp-2"
               style={{ color: PLACEHOLDER_COLOR_DARK }}
             >
               {item.name}
             </span>
-            {(item.primary_value_kind ?? "BALANCE") !== "BALANCE" &&
-              (totalIncomeCents != null || totalExpenseCents != null) &&
-              (totalIncomeCents !== 0 || totalExpenseCents !== 0) && (
-                <span
-                  className="text-xs font-normal flex flex-wrap items-center gap-x-3 gap-y-0.5"
-                  style={{ color: PLACEHOLDER_COLOR_DARK }}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    <span>Доходы:</span>
-                    <span className="tabular-nums">{formatAmount(totalIncomeCents ?? 0)}</span>
-                    <CurrencyChip code={currencyCode || "RUB"} className="text-[10px]" />
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span>Расходы:</span>
-                    <span className="tabular-nums">{formatAmount(totalExpenseCents ?? 0)}</span>
-                    <CurrencyChip code={currencyCode || "RUB"} className="text-[10px]" />
-                  </span>
-                </span>
-              )}
           </div>
         </TableCell>
         {dailyPrimaryValueRubCents != null && (

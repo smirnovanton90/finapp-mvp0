@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -1135,6 +1135,16 @@ export default function AssetDetailPage() {
     : null;
 
   const { isDesktop } = useSidebar();
+
+  // Сброс скролла при открытии страницы (после отрисовки), чтобы контент не оставался «под верхним краем».
+  useLayoutEffect(() => {
+    if (isDesktop) return;
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector("[data-app-scroll-container]");
+      if (el && "scrollTo" in el) (el as HTMLElement).scrollTo(0, 0);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [isDesktop]);
 
   // На мобильной — динамика по выбранному периоду (Н/М/Г) для блоков под графиком в шторке.
   const dynamicsByModeMobilePeriod = useMemo(() => {
@@ -2707,11 +2717,16 @@ export default function AssetDetailPage() {
 
   return (
     <main className={`min-h-screen box-border ${CONTENT_WIDTH_CLASS} ${isDesktop ? "px-8 py-8" : "px-0 max-w-none pt-0 pb-3"} ${!isDesktop ? "w-full min-w-0" : ""}`}>
+      <div className={cn(!isDesktop && "w-full min-w-0")}>
       <div className={`flex flex-col gap-6 ${!isDesktop ? "w-full min-w-0" : "w-full"}`}>
-        {/* Мобильная шапка: градиент в safe area и контент (при прокрутке уезжает вверх) */}
+        {/* Мобильная шапка: градиент от верха экрана (перекрывает корневой safe-area), отступ до кнопок — внутри блока */}
         {!isDesktop && (
           <div
-            className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)] pt-20"
+            className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
+            style={{
+              marginTop: "calc(-1 * env(safe-area-inset-top, 0px))",
+              paddingTop: "calc(env(safe-area-inset-top, 0px) + 56px)",
+            }}
           >
             <style dangerouslySetInnerHTML={{ __html: `
               @keyframes asset-header-gradient-shift {
@@ -3942,6 +3957,7 @@ export default function AssetDetailPage() {
           </DialogContent>
         </Dialog>
         </div>
+      </div>
       </div>
 
       {typeof document !== "undefined" && !isDesktop && mobileCostOverlayKey && createPortal(

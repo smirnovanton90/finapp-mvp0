@@ -21,6 +21,7 @@ import {
   PiggyBank,
   Plus,
   Receipt,
+  Search,
   Trash2,
   TrendingUp,
   Users,
@@ -29,6 +30,7 @@ import {
   Info,
   Upload,
   Camera,
+  X,
 } from "lucide-react";
 
 import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
@@ -648,6 +650,7 @@ export default function Page() {
   const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set(["active"]));
   const [filterName, setFilterName] = useState("");
   const [mobileAssetsSearch, setMobileAssetsSearch] = useState("");
+  const [mobileSearchFocused, setMobileSearchFocused] = useState(false);
   const [filterAmountFrom, setFilterAmountFrom] = useState("");
   const [filterAmountTo, setFilterAmountTo] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
@@ -3760,33 +3763,64 @@ export default function Page() {
               /* Мобильная: поле поиска (при потягивании вниз видно) + карточки активов */
               <div className="relative flex flex-col gap-4">
                 <div className="sticky top-0 z-10 -mx-4 px-4 pt-0 pb-1" style={{ backgroundColor: "var(--app-bg, #000)" }}>
-                  <Input
-                    type="text"
-                    placeholder="Поиск по названию, контрагенту, валюте"
-                    value={mobileAssetsSearch}
-                    onChange={(e) => setMobileAssetsSearch(e.target.value)}
-                    className="w-full text-sm font-normal border-0 shadow-none outline-none focus-visible:ring-0 focus-visible:border-0 placeholder:opacity-70 rounded-lg"
+                  <div
+                    className="relative flex items-center rounded-lg transition-[background-color,box-shadow] duration-200"
                     style={{
-                      color: PLACEHOLDER_COLOR_DARK,
-                      backgroundColor: "rgba(197, 191, 241, 0.18)",
+                      backgroundColor:
+                        mobileSearchFocused || mobileAssetsSearch.length > 0
+                          ? "rgba(197, 191, 241, 0.32)"
+                          : "rgba(197, 191, 241, 0.18)",
+                      boxShadow: mobileSearchFocused
+                        ? `inset 0 -2px 0 0 ${ACCENT2}, 0 8px 25px -8px ${ACCENT2}`
+                        : "none",
                     }}
-                    aria-label="Поиск активов и обязательств"
-                  />
+                  >
+                    <Search
+                      className="absolute left-3 h-4 w-4 shrink-0 pointer-events-none transition-colors duration-200"
+                      style={{ color: mobileSearchFocused ? ACCENT : PLACEHOLDER_COLOR_DARK }}
+                      aria-hidden
+                    />
+                    <Input
+                      type="text"
+                      placeholder="Поиск"
+                      value={mobileAssetsSearch}
+                      onChange={(e) => setMobileAssetsSearch(e.target.value)}
+                      onFocus={() => setMobileSearchFocused(true)}
+                      onBlur={() => setMobileSearchFocused(false)}
+                      className="w-full pl-10 pr-10 py-2 text-base font-normal border-0 shadow-none outline-none focus-visible:ring-0 focus-visible:border-0 rounded-lg placeholder:text-[rgba(197,191,241,0.6)]"
+                      style={{
+                        color: ACTIVE_TEXT_DARK,
+                        backgroundColor: "transparent",
+                      }}
+                      aria-label="Поиск активов и обязательств"
+                    />
+                    {mobileAssetsSearch.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setMobileAssetsSearch("")}
+                        className="absolute right-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-md touch-manipulation transition-colors duration-200"
+                        style={{ color: mobileSearchFocused ? ACCENT : PLACEHOLDER_COLOR_DARK }}
+                        aria-label="Очистить поиск"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-8">
                   {mobileOrderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
                     <div key={section.id}>
                       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
                         <h2
-                          className="text-lg font-semibold"
+                          className="text-xl font-semibold"
                           style={{ color: ACTIVE_TEXT_DARK }}
                         >
                           {section.label}
                         </h2>
                         <span className="inline-flex items-center gap-1.5">
-                          <CurrencyChip code="RUB" className="text-xs" />
+                          <CurrencyChip code="RUB" className="text-sm" />
                           <span
-                            className="text-lg font-semibold tabular-nums"
+                            className="text-xl font-semibold tabular-nums"
                             style={{ color: ACTIVE_TEXT_DARK }}
                           >
                             {section.kind === "LIABILITY"

@@ -366,3 +366,28 @@ html.dark::-webkit-scrollbar-thumb {
 html.dark::-webkit-scrollbar-thumb:hover {
   background: rgba(93, 95, 215, 0.65);
 }
+
+/* Только мобильная вёрстка: запрет выделения текста на элементах интерфейса */
+@media (max-width: 767px) {
+  body {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+  /* В полях ввода и контенте с contenteditable выделение разрешаем */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+  }
+  /* Курсор (каретка) в полях ввода — accent */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    caret-color: #7F5CFF;
+  }
+}

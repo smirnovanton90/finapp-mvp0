@@ -156,8 +156,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             className={cn(
               "flex-1 transition-all duration-300 @container",
               !isSpecialPage && "min-h-screen flex items-center",
-              !isDesktop && "px-4 pb-6 overflow-y-auto min-h-0",
-              !isDesktop && isAssetDetailPage && "pt-0"
+              !isDesktop && "px-4 pb-6 overflow-y-auto min-h-0"
             )}
             style={
               !isDesktop
@@ -168,6 +167,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                   }
                 : { marginLeft: contentMarginLeft }
             }
+            {...(!isDesktop && { "data-app-scroll-container": true })}
           >
             {isSpecialPage || isAssetDetailPage ? (
               <div className="w-full min-w-0">

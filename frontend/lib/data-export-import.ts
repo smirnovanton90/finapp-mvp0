@@ -1136,8 +1136,20 @@ export async function runImport(
     const sortedItems = [...itemRows].sort((a, b) => {
       const aOpen = num(a.opening_counterparty_item_id);
       const bOpen = num(b.opening_counterparty_item_id);
-      const aDependsOnB = aOpen !== null && aOpen === num(b.id);
-      const bDependsOnA = bOpen !== null && bOpen === num(a.id);
+      const aCardAcc = num(a.card_account_id);
+      const bCardAcc = num(b.card_account_id);
+      const aPayoutAcc = num(a.interest_payout_account_id);
+      const bPayoutAcc = num(b.interest_payout_account_id);
+      const bId = num(b.id);
+      const aId = num(a.id);
+      const aDependsOnB =
+        (aOpen !== null && aOpen === bId) ||
+        (aCardAcc !== null && aCardAcc === bId) ||
+        (aPayoutAcc !== null && aPayoutAcc === bId);
+      const bDependsOnA =
+        (bOpen !== null && bOpen === aId) ||
+        (bCardAcc !== null && bCardAcc === aId) ||
+        (bPayoutAcc !== null && bPayoutAcc === aId);
       if (aDependsOnB) return 1;
       if (bDependsOnA) return -1;
       return 0;
@@ -1185,7 +1197,10 @@ export async function runImport(
         account_last7: str(row.account_last7) || null,
         contract_number: str(row.contract_number) || null,
         card_last4: str(row.card_last4) || null,
-        card_account_id: num(row.card_account_id) ?? null,
+        card_account_id: (() => {
+          const old = num(row.card_account_id);
+          return old != null && itemIdMap.has(old) ? itemIdMap.get(old)! : null;
+        })(),
         card_kind: (str(row.card_kind) || null) as CardKind | null,
         credit_limit: num(row.credit_limit) ?? null,
         deposit_term_days: num(row.deposit_term_days) ?? null,
@@ -1197,7 +1212,10 @@ export async function runImport(
                 | "MONTHLY"
                 | null,
               interest_capitalization: row.interest_capitalization === "true",
-              interest_payout_account_id: num(row.interest_payout_account_id) ?? null,
+              interest_payout_account_id: (() => {
+                const old = num(row.interest_payout_account_id);
+                return old != null && itemIdMap.has(old) ? itemIdMap.get(old)! : null;
+              })(),
             }
           : {}),
         instrument_id: str(row.instrument_id) || null,

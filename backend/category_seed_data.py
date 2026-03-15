@@ -324,7 +324,7 @@ CATEGORY_SEED: list[dict] = [
         ],
     },
     {"name": "Парфюмерия", "scope": "EXPENSE"},
-    {"name": "Tax-free", "scope": "EXPENSE"},
+    {"name": "Tax-free", "scope": "INCOME"},
     {
         "name": "Вредные привычки",
         "scope": "EXPENSE",

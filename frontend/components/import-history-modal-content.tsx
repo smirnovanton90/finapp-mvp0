@@ -146,10 +146,6 @@ const FREE_FORMAT: SourceCard[] = [
   { key: "own", title: "Своя выписка", description: "Таблица Excel или CSV с маппингом столбцов" },
 ];
 
-const PROSTOFIN: SourceCard[] = [
-  { key: "file", title: "Данные ПРОСТОФИН", description: "Восстановление из ранее экспортированного файла .csv" },
-];
-
 export function ImportHistoryModalContent({
   selectedSource,
   onSelectSource,
@@ -233,15 +229,8 @@ export function ImportHistoryModalContent({
         <p className="w-full" style={SECTION_HEADER_STYLE}>
           Свободный формат
         </p>
-        <div className="w-full mb-1">
-          {renderSectionRow(FREE_FORMAT)}
-        </div>
-
-        <p className="w-full" style={SECTION_HEADER_STYLE}>
-          Данные ПРОСТОФИН
-        </p>
         <div className="w-full mb-3">
-          {renderSectionRow(PROSTOFIN)}
+          {renderSectionRow(FREE_FORMAT)}
         </div>
       </div>
 

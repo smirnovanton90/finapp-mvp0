@@ -5,6 +5,7 @@
  */
 
 import {
+  fetchUserMe,
   fetchItems,
   fetchCounterparties,
   fetchCategories,
@@ -12,6 +13,7 @@ import {
   fetchTransactionChains,
   fetchGoals,
   fetchBalanceCheckpointsForItems,
+  setAccountingStartDate,
   createCounterparty,
   createCategory,
   createItem,
@@ -40,6 +42,7 @@ import {
   type GoalPeriod,
 } from "@/lib/api";
 
+const SECTION_ACCOUNTING_START_DATE = "[ACCOUNTING_START_DATE]";
 const SECTION_COUNTERPARTIES = "[COUNTERPARTIES]";
 const SECTION_CATEGORIES = "[CATEGORIES]";
 const SECTION_ITEMS = "[ITEMS]";
@@ -338,6 +341,7 @@ export type ExportDataResult = {
 /** Собрать все данные и вернуть CSV-строку для скачивания. */
 export async function buildExportCsv(): Promise<ExportDataResult> {
   const [
+    me,
     items,
     counterparties,
     categoriesTree,
@@ -346,6 +350,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
     goals,
     checkpointsWithItems,
   ] = await Promise.all([
+    fetchUserMe(),
     fetchItems({ includeArchived: true, includeClosed: true }),
     fetchCounterparties({ include_deleted: true }),
     fetchCategories({ includeArchived: true }),
@@ -384,6 +389,13 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
 
   const lines: string[] = [];
   lines.push(UTF8_BOM);
+
+  // Дата начала учёта (восстанавливается при импорте из резервной копии)
+  if (me.accounting_start_date) {
+    lines.push(SECTION_ACCOUNTING_START_DATE);
+    lines.push(me.accounting_start_date);
+    lines.push("");
+  }
 
   // COUNTERPARTIES (все добавленные пользователем + все, на кого ссылаются активы/цепочки/транзакции)
   lines.push(SECTION_COUNTERPARTIES);
@@ -656,6 +668,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
 }
 
 export type ParsedExport = {
+  accounting_start_date?: string | null;
   counterparties: Array<Record<string, string>>;
   categories: Array<Record<string, string>>;
   items: Array<Record<string, string>>;
@@ -738,6 +751,15 @@ export function parseExportCsv(csvText: string): ParsedExport {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
+    if (line === SECTION_ACCOUNTING_START_DATE) {
+      i += 1;
+      const dateLine = lines[i]?.trim();
+      if (dateLine && /^\d{4}-\d{2}-\d{2}$/.test(dateLine)) {
+        result.accounting_start_date = dateLine;
+      }
+      i += 1;
+      continue;
+    }
     if (line === SECTION_COUNTERPARTIES) {
       i += 1;
       const { rows, nextIndex } = parseCsvSection(lines, i);
@@ -1314,6 +1336,24 @@ export async function runImport(
         counts.balanceCheckpoints += 1;
       } catch {
         // пропускаем при ошибке (например, актив не балансовый)
+      }
+    }
+
+    // Дата начала учёта из файла (восстановление из резервной копии)
+    let dateToSet = data.accounting_start_date?.trim() || null;
+    if (!dateToSet && data.transactions?.length > 0) {
+      const dates = data.transactions
+        .map((r) => (r.transaction_date ?? "").slice(0, 10))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+      if (dates.length > 0) dateToSet = dates.sort()[0];
+    }
+    if (dateToSet) {
+      try {
+        await setAccountingStartDate({ accounting_start_date: dateToSet });
+      } catch (dateErr) {
+        const msg = dateErr instanceof Error ? dateErr.message : String(dateErr);
+        report("Ошибка", 0, 0, `Не удалось установить дату начала учёта: ${msg}`);
+        return { success: false, error: `Дата начала учёта: ${msg}` };
       }
     }
 

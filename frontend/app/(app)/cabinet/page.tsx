@@ -21,12 +21,8 @@ import {
 } from "@/lib/api";
 import { useTheme } from "@/components/theme-provider";
 import { useAccountingStart } from "@/components/accounting-start-context";
-import {
-  ImportHistoryModalContent,
-  type ImportSourceKey,
-} from "@/components/import-history-modal-content";
-import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { RestoreFromBackupModal } from "@/components/restore-from-backup-modal";
 import { buildExportCsv } from "@/lib/data-export-import";
 import {
   MODAL_BG,
@@ -91,9 +87,7 @@ export default function CabinetPage() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [importModalOpen, setImportModalOpen] = useState(false);
-  const [importServiceModalOpen, setImportServiceModalOpen] = useState(false);
-  const [importSource, setImportSource] = useState<ImportSourceKey>(null);
+  const [restoreModalOpen, setRestoreModalOpen] = useState(false);
 
   const [exporting, setExporting] = useState(false);
 
@@ -682,9 +676,9 @@ export default function CabinetPage() {
                       "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
                   } as React.CSSProperties
                 }
-                onClick={() => setImportModalOpen(true)}
+                onClick={() => setRestoreModalOpen(true)}
               >
-                Импорт
+                Восстановление из резервной копии
               </Button>
               <Button
                 type="button"
@@ -786,33 +780,16 @@ export default function CabinetPage() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
-          <DialogContent
-            showCloseButton={true}
-            title="Импорт"
-            className={cn(
-              "w-full max-w-[calc(100%-2rem)] sm:max-w-xl md:max-w-2xl lg:max-w-4xl xl:max-w-5xl h-[920px] max-h-[min(920px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
-              "bg-black border-0 rounded-[9px]"
-            )}
-          >
-            <ImportHistoryModalContent
-              selectedSource={importSource}
-              onSelectSource={setImportSource}
-              onLater={() => setImportModalOpen(false)}
-              onStartImport={() => {
-                if (importSource) {
-                  setImportModalOpen(false);
-                  setImportServiceModalOpen(true);
-                }
-              }}
-            />
-          </DialogContent>
-        </Dialog>
-
-        <ImportAccountsOperationsModal
-          open={importServiceModalOpen}
-          onOpenChange={setImportServiceModalOpen}
-          importSource={importSource ?? undefined}
+        <RestoreFromBackupModal
+          open={restoreModalOpen}
+          onOpenChange={setRestoreModalOpen}
+          onSuccess={async () => {
+            setDateSetupComplete(true);
+            await refreshAccountingStart();
+            setProfile(null);
+            loadProfile();
+            loadTelegramStatus();
+          }}
         />
 
         {/* Информация */}

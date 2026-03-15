@@ -1446,7 +1446,7 @@ export function MobileAddTransactionWizard({
               />
               </MobileTapScale>
             </FormField>
-            {relatedItemId != null && direction !== "TRANSFER" && (
+            {relatedItemId != null && (
               <FormField label="Тип привязки" inlineLabel>
                 <MobileTapScale className="block w-full">
                   <SegmentedSelector

@@ -57,6 +57,7 @@ from schemas import (
     AccountingStartDateUpdate,
     ItemCloseRequest,
     ItemClosedAtUpdate,
+    ItemArchivedAtUpdate,
     ItemMarketValueCreate,
     ItemMarketValueOut,
     ItemCostsOut,
@@ -2244,6 +2245,31 @@ def archive_item(
     _apply_item_photo_url(item)
     return item
 
+
+@app.patch("/items/{item_id}/archived_at", response_model=ItemOut)
+def update_item_archived_at(
+    item_id: int,
+    payload: ItemArchivedAtUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Установить или обновить дату архивации актива/обязательства (в т.ч. при восстановлении из бэкапа)."""
+    item = db.get(Item, item_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if item.type_code == COUNTERPARTY_SETTLEMENTS_TYPE:
+        raise HTTPException(
+            status_code=400,
+            detail="Архивация актива «Взаиморасчёты» недоступна.",
+        )
+    archived_dt = datetime.combine(payload.archived_date, time.min, tzinfo=timezone.utc)
+    item.archived_at = archived_dt
+    db.commit()
+    db.refresh(item)
+    _apply_item_photo_url(item)
+    return item
+
+
 @app.patch("/items/{item_id}/close", response_model=ItemOut)
 def close_item(
     item_id: int,
@@ -2437,18 +2463,16 @@ def update_item_closed_at(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Обновить дату закрытия у уже закрытого актива/обязательства."""
+    """Обновить дату закрытия у уже закрытого актива/обязательства. При закрытом активе — только дата. При открытом — установить дату закрытия (для восстановления из бэкапа)."""
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
-    if item.closed_at is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Актив не закрыт. Редактирование даты закрытия доступно только для закрытых активов.",
-        )
-    # Полночь UTC, чтобы календарная дата отображалась без сдвига по поясу
     closed_dt = datetime.combine(payload.closing_date, time.min, tzinfo=timezone.utc)
-    item.closed_at = closed_dt
+    if item.closed_at is None:
+        # Восстановление из бэкапа: просто выставляем дату закрытия без проверки баланса
+        item.closed_at = closed_dt
+    else:
+        item.closed_at = closed_dt
     db.commit()
     db.refresh(item)
     _apply_item_photo_url(item)
@@ -3450,10 +3474,12 @@ def delete_balance_checkpoint(
 @app.get("/balance-checkpoints", response_model=list[BalanceCheckpointWithItemOut])
 def list_balance_checkpoints_for_items(
     item_ids: str | None = None,
+    include_closed: bool = False,
+    include_archived: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Список КТ по выбранным активам (для страницы транзакций). item_ids — comma-separated; пусто = все BALANCE-активы пользователя."""
+    """Список КТ по выбранным активам (для страницы транзакций). item_ids — comma-separated; пусто = все BALANCE-активы пользователя. include_closed/include_archived — для экспорта в бэкап."""
     if item_ids:
         id_list = [int(x.strip()) for x in item_ids.split(",") if x.strip()]
         if not id_list:
@@ -3461,16 +3487,16 @@ def list_balance_checkpoints_for_items(
         items = db.query(Item).filter(Item.id.in_(id_list), Item.user_id == user.id).all()
         allowed_ids = {i.id for i in items}
     else:
-        items = (
+        stmt = (
             db.query(Item)
-            .filter(
-                Item.user_id == user.id,
-                Item.archived_at.is_(None),
-                Item.closed_at.is_(None),
-            )
+            .filter(Item.user_id == user.id)
             .filter(or_(Item.primary_value_kind.is_(None), Item.primary_value_kind == "BALANCE"))
-            .all()
         )
+        if not include_archived:
+            stmt = stmt.where(Item.archived_at.is_(None))
+        if not include_closed:
+            stmt = stmt.where(Item.closed_at.is_(None))
+        items = stmt.all()
         allowed_ids = {i.id for i in items}
     if not allowed_ids:
         return []

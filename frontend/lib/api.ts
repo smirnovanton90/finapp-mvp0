@@ -1269,7 +1269,21 @@ export async function updateItemClosedAt(
 ): Promise<ItemOut> {
   const res = await authFetch(`${API_BASE}/items/${id}/closed_at`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ closing_date }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return mapItemFromApi(await res.json());
+}
+
+export async function updateItemArchivedAt(
+  id: number,
+  archived_date: string
+): Promise<ItemOut> {
+  const res = await authFetch(`${API_BASE}/items/${id}/archived_at`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archived_date }),
   });
   if (!res.ok) throw new Error(await readError(res));
   return mapItemFromApi(await res.json());
@@ -1458,12 +1472,14 @@ export async function deleteBalanceCheckpoint(
 }
 
 export async function fetchBalanceCheckpointsForItems(
-  itemIds?: number[]
+  itemIds?: number[],
+  options?: { includeClosed?: boolean; includeArchived?: boolean }
 ): Promise<BalanceCheckpointWithItemOut[]> {
-  const q =
-    itemIds != null && itemIds.length > 0
-      ? `?item_ids=${itemIds.join(",")}`
-      : "";
+  const params = new URLSearchParams();
+  if (itemIds != null && itemIds.length > 0) params.set("item_ids", itemIds.join(","));
+  if (options?.includeClosed) params.set("include_closed", "true");
+  if (options?.includeArchived) params.set("include_archived", "true");
+  const q = params.toString() ? `?${params.toString()}` : "";
   const res = await authFetch(`${API_BASE}/balance-checkpoints${q}`);
   if (!res.ok) throw new Error(await readError(res));
   return res.json();

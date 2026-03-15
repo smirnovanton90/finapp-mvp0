@@ -580,7 +580,7 @@ def _create_deposit_closing_transaction(
     end_date: date,
     interest_amounts: list[int],
 ) -> None:
-    """Одна плановая транзакция закрытия вклада на дату окончания (без цепочки). Сумма = тело вклада + все плановые проценты при капитализации. Счёт перевода — счёт, с которого открывался вклад."""
+    """Одна плановая транзакция закрытия вклада на дату окончания (без цепочки). Сумма = тело вклада + все плановые проценты при капитализации. Счёт перевода — счёт, с которого открывался вклад. Если счёт не указан — создаём расход «Прочие расходы», чтобы не создавать невалидный TRANSFER без counterparty_item_id."""
     closing_amount = item.initial_balance_minor or 0
     if item.interest_capitalization and interest_amounts:
         closing_amount += sum(interest_amounts)
@@ -594,27 +594,54 @@ def _create_deposit_closing_transaction(
         counterparty_item_id = side.effective_item.id
         counterparty_card_item_id = side.card_item.id if side.card_item else None
 
-    tx = Transaction(
-        user_id=user.id,
-        chain_id=None,
-        transaction_date=datetime.combine(end_date, datetime.min.time()),
-        primary_item_id=item.id,
-        primary_card_item_id=None,
-        counterparty_item_id=counterparty_item_id,
-        counterparty_card_item_id=counterparty_card_item_id,
-        counterparty_id=item.counterparty_id,
-        amount_primary_minor=closing_amount,
-        amount_counterparty=closing_amount,
-        direction="TRANSFER",
-        transaction_type="PLANNED",
-        status="CONFIRMED",
-        category_id=None,
-        comment=_build_item_comment(item, "CLOSE"),
-        related_item_id=item.id,
-        asset_link_type=None,
-        source="AUTO_ITEM_CLOSING",
-    )
-    db.add(tx)
+    # Плановые транзакции перевода при закрытии вклада создаём только при указанном счёте перевода (opening_counterparty_item_id).
+    # Иначе создаём плановый расход, чтобы не создавать невалидный TRANSFER без counterparty_item_id.
+    if counterparty_item_id is not None:
+        tx = Transaction(
+            user_id=user.id,
+            chain_id=None,
+            transaction_date=datetime.combine(end_date, datetime.min.time()),
+            primary_item_id=item.id,
+            primary_card_item_id=None,
+            counterparty_item_id=counterparty_item_id,
+            counterparty_card_item_id=counterparty_card_item_id,
+            counterparty_id=item.counterparty_id,
+            amount_primary_minor=closing_amount,
+            amount_counterparty=closing_amount,
+            direction="TRANSFER",
+            transaction_type="PLANNED",
+            status="CONFIRMED",
+            category_id=None,
+            comment=_build_item_comment(item, "CLOSE"),
+            related_item_id=item.id,
+            asset_link_type=None,
+            source="AUTO_ITEM_CLOSING",
+        )
+        db.add(tx)
+    else:
+        # Вклад без счёта перевода при закрытии — плановая транзакция как расход (чтобы не создавать TRANSFER без counterparty_item_id)
+        category = _resolve_category_by_name(db, user, "Прочие расходы")
+        tx = Transaction(
+            user_id=user.id,
+            chain_id=None,
+            transaction_date=datetime.combine(end_date, datetime.min.time()),
+            primary_item_id=item.id,
+            primary_card_item_id=None,
+            counterparty_item_id=None,
+            counterparty_card_item_id=None,
+            counterparty_id=item.counterparty_id,
+            amount_primary_minor=closing_amount,
+            amount_counterparty=None,
+            direction="EXPENSE",
+            transaction_type="PLANNED",
+            status="CONFIRMED",
+            category_id=category.id,
+            comment=_build_item_comment(item, "CLOSE"),
+            related_item_id=item.id,
+            asset_link_type=None,
+            source="AUTO_ITEM_CLOSING",
+        )
+        db.add(tx)
 
 
 def _create_bond_coupon_chain(
@@ -1211,7 +1238,7 @@ def _create_chain_with_transactions(
         counterparty_item_id=counterparty_item.id if counterparty_item else None,
         counterparty_card_item_id=counterparty_card_item.id if counterparty_card_item else None,
         counterparty_id=counterparty_id,
-        amount_primary_minor=amount_min,
+        amount_rub=amount_min,
         amount_counterparty=amount_min if direction == "TRANSFER" else None,
         amount_is_variable=is_variable,
         amount_min_rub=amount_min,

@@ -13,14 +13,18 @@ import {
   fetchTransactionChains,
   fetchGoals,
   fetchBalanceCheckpointsForItems,
+  fetchItemMarketValues,
   setAccountingStartDate,
   createCounterparty,
   createCategory,
   createItem,
+  updateItemClosedAt,
+  updateItemArchivedAt,
   createTransactionChain,
   createTransaction,
   createGoal,
   createBalanceCheckpoint,
+  createItemMarketValue,
   type ItemOut,
   type CounterpartyOut,
   type CategoryNode,
@@ -46,6 +50,7 @@ const SECTION_ACCOUNTING_START_DATE = "[ACCOUNTING_START_DATE]";
 const SECTION_COUNTERPARTIES = "[COUNTERPARTIES]";
 const SECTION_CATEGORIES = "[CATEGORIES]";
 const SECTION_ITEMS = "[ITEMS]";
+const SECTION_ITEM_MARKET_VALUES = "[ITEM_MARKET_VALUES]";
 const SECTION_TRANSACTION_CHAINS = "[TRANSACTION_CHAINS]";
 const SECTION_TRANSACTIONS = "[TRANSACTIONS]";
 const SECTION_GOALS = "[GOALS]";
@@ -357,7 +362,10 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
     fetchAllTransactions(),
     fetchTransactionChains(),
     fetchGoals({ include_deleted: true }),
-    fetchBalanceCheckpointsForItems(),
+    fetchBalanceCheckpointsForItems(undefined, {
+      includeClosed: true,
+      includeArchived: true,
+    }),
   ]);
 
   const userCounterparties = counterparties.filter((c) => c.owner_user_id != null);
@@ -386,6 +394,21 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
   );
   const sortedCategories = sortCategoriesForImport(categoriesToExport);
   const categoryFullPathById = buildCategoryFullPathMap(sortedCategories);
+
+  const marketValuesArrays = await Promise.all(
+    items.map((i) => fetchItemMarketValues(i.id))
+  );
+  const marketValues: { item_id: number; value_date: string; value_rub: number; value_currency_cents?: number | null }[] = [];
+  marketValuesArrays.forEach((list, idx) => {
+    for (const mv of list) {
+      marketValues.push({
+        item_id: items[idx].id,
+        value_date: typeof mv.value_date === "string" ? mv.value_date.slice(0, 10) : mv.value_date,
+        value_rub: mv.value_rub,
+        value_currency_cents: mv.value_currency_cents ?? undefined,
+      });
+    }
+  });
 
   const lines: string[] = [];
   lines.push(UTF8_BOM);
@@ -486,8 +509,12 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
     "quantity_units",
     "initial_balance_minor",
     "plan_settings_json",
+    "closed_at",
+    "archived_at",
   ];
   lines.push(csvRow(itemHeaders));
+  const dateOnly = (d: string | Date | null | undefined): string =>
+    d ? (typeof d === "string" ? d : (d as Date).toISOString().slice(0, 10)) : "";
   for (const i of items) {
     lines.push(
       csvRow([
@@ -520,6 +547,23 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
         i.quantity_units ?? "",
         i.initial_balance_minor,
         i.plan_settings ? JSON.stringify(i.plan_settings) : "",
+        dateOnly(i.closed_at ?? undefined),
+        dateOnly(i.archived_at ?? undefined),
+      ])
+    );
+  }
+  lines.push("");
+
+  // ITEM_MARKET_VALUES (данные по рыночной стоимости по датам)
+  lines.push(SECTION_ITEM_MARKET_VALUES);
+  lines.push(csvRow(["item_id", "value_date", "value_rub", "value_currency_cents"]));
+  for (const mv of marketValues) {
+    lines.push(
+      csvRow([
+        mv.item_id,
+        mv.value_date,
+        mv.value_rub,
+        mv.value_currency_cents ?? "",
       ])
     );
   }
@@ -600,12 +644,17 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
     ])
   );
   for (const t of transactions) {
+    // Для переводов при экспорте выгружаем контрагентский счёт: приоритет counterparty_item_id, иначе counterparty_card_item_id (в интерфейсе может отображаться карта)
+    const exportCounterpartyItemId =
+      t.direction === "TRANSFER"
+        ? (t.counterparty_item_id ?? t.counterparty_card_item_id ?? "")
+        : (t.counterparty_item_id ?? "");
     lines.push(
       csvRow([
         t.id,
         t.transaction_date,
         t.primary_item_id,
-        t.counterparty_item_id ?? "",
+        exportCounterpartyItemId,
         t.counterparty_id ?? "",
         t.amount,
         t.amount_counterparty ?? "",
@@ -672,11 +721,73 @@ export type ParsedExport = {
   counterparties: Array<Record<string, string>>;
   categories: Array<Record<string, string>>;
   items: Array<Record<string, string>>;
+  itemMarketValues: Array<Record<string, string>>;
   transactionChains: Array<Record<string, string>>;
   transactions: Array<Record<string, string>>;
   goals: Array<Record<string, string>>;
   balanceCheckpoints: Array<Record<string, string>>;
 };
+
+export type InvalidTransferItem = {
+  type: "transaction" | "chain";
+  /** Порядковый номер в файле (1-based). */
+  index: number;
+  name?: string;
+  date?: string;
+  amount?: number;
+  comment?: string;
+};
+
+export type ValidateExportResult =
+  | { valid: true }
+  | { valid: false; invalidTransfers: InvalidTransferItem[] };
+
+/**
+ * Проверка перед импортом: в файле не должно быть переводов (TRANSFER) без связанного актива
+ * (counterparty_item_id отсутствует или не входит в список активов в файле).
+ */
+export function validateExportForImport(data: ParsedExport): ValidateExportResult {
+  const itemIds = new Set(
+    data.items.map((i) => num(i.id)).filter((x): x is number => x != null)
+  );
+  const invalidTransfers: InvalidTransferItem[] = [];
+
+  for (let i = 0; i < data.transactionChains.length; i++) {
+    const row = data.transactionChains[i];
+    const direction = (row?.direction ?? "").trim().toUpperCase();
+    if (direction !== "TRANSFER") continue;
+    const cpId = num(row?.counterparty_item_id ?? "");
+    if (cpId == null || !itemIds.has(cpId)) {
+      invalidTransfers.push({
+        type: "chain",
+        index: i + 1,
+        name: (row?.name ?? "").trim() || "Цепочка",
+      });
+    }
+  }
+
+  const OPENING_PREFIX = "Открытие: ";
+  for (let i = 0; i < data.transactions.length; i++) {
+    const row = data.transactions[i];
+    const comment = (row?.comment ?? "").trim();
+    if (comment.startsWith(OPENING_PREFIX)) continue;
+    const direction = (row?.direction ?? "").trim().toUpperCase();
+    if (direction !== "TRANSFER") continue;
+    const cpId = num(row?.counterparty_item_id ?? "");
+    if (cpId == null || !itemIds.has(cpId)) {
+      invalidTransfers.push({
+        type: "transaction",
+        index: i + 1,
+        date: (row?.transaction_date ?? "").slice(0, 10),
+        amount: num(row?.amount ?? "") ?? undefined,
+        comment: comment.slice(0, 80) + (comment.length > 80 ? "…" : ""),
+      });
+    }
+  }
+
+  if (invalidTransfers.length === 0) return { valid: true };
+  return { valid: false, invalidTransfers };
+}
 
 function parseCsvSection(
   lines: string[],
@@ -743,6 +854,7 @@ export function parseExportCsv(csvText: string): ParsedExport {
     counterparties: [],
     categories: [],
     items: [],
+    itemMarketValues: [],
     transactionChains: [],
     transactions: [],
     goals: [],
@@ -778,6 +890,13 @@ export function parseExportCsv(csvText: string): ParsedExport {
       i += 1;
       const { rows, nextIndex } = parseCsvSection(lines, i);
       result.items = rows;
+      i = nextIndex;
+      continue;
+    }
+    if (line === SECTION_ITEM_MARKET_VALUES) {
+      i += 1;
+      const { rows, nextIndex } = parseCsvSection(lines, i);
+      result.itemMarketValues = rows;
       i = nextIndex;
       continue;
     }
@@ -928,6 +1047,7 @@ export type ImportResult = {
     counterparties: number;
     categories: number;
     items: number;
+    itemMarketValues: number;
     transactionChains: number;
     transactions: number;
     goals: number;
@@ -953,6 +1073,7 @@ export async function runImport(
     counterparties: 0,
     categories: 0,
     items: 0,
+    itemMarketValues: 0,
     transactionChains: 0,
     transactions: 0,
     goals: 0,
@@ -1234,6 +1355,22 @@ export async function runImport(
       }
       const created = await createItem(payload);
       itemIdMap.set(oldId, created.id);
+      const closedAtRaw = str(row.closed_at).trim().slice(0, 10);
+      const archivedAtRaw = str(row.archived_at).trim().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(closedAtRaw)) {
+        try {
+          await updateItemClosedAt(created.id, closedAtRaw);
+        } catch {
+          // игнорируем ошибку (например, ограничения бэкенда)
+        }
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(archivedAtRaw)) {
+        try {
+          await updateItemArchivedAt(created.id, archivedAtRaw);
+        } catch {
+          // игнорируем ошибку (например, «Взаиморасчёты»)
+        }
+      }
       existingItemsFlat.push({
         id: created.id,
         kind: created.kind,
@@ -1245,7 +1382,27 @@ export async function runImport(
       counts.items += 1;
     }
 
-    // 4. Цепочки транзакций
+    // 4. Данные по рыночной стоимости (item_market_values)
+    const totalMv = data.itemMarketValues?.length ?? 0;
+    for (let i = 0; i < totalMv; i++) {
+      const row = data.itemMarketValues[i];
+      report("Рыночные стоимости", i + 1, totalMv);
+      const oldItemId = num(row.item_id);
+      const valueDate = str(row.value_date).trim().slice(0, 10);
+      const valueRub = num(row.value_rub);
+      const valueCurrencyCents = num(row.value_currency_cents);
+      if (oldItemId == null || !itemIdMap.has(oldItemId) || !/^\d{4}-\d{2}-\d{2}$/.test(valueDate)) continue;
+      if (valueRub == null && valueCurrencyCents == null) continue;
+      const newItemId = itemIdMap.get(oldItemId)!;
+      await createItemMarketValue(newItemId, {
+        value_date: valueDate,
+        value_rub: valueRub ?? undefined,
+        value_currency_cents: valueCurrencyCents ?? undefined,
+      });
+      counts.itemMarketValues += 1;
+    }
+
+    // 5. Цепочки транзакций
     const totalChains = data.transactionChains.length;
     for (let i = 0; i < totalChains; i++) {
       const row = data.transactionChains[i];
@@ -1258,6 +1415,19 @@ export async function runImport(
       const categoryId = num(row.category_id);
       const relatedItemId = num(row.related_item_id);
       if (primaryItemId == null || !itemIdMap.has(primaryItemId)) continue;
+      const direction = (str(row.direction) || "EXPENSE") as TransactionDirection;
+      const resolvedCounterpartyItemId =
+        counterpartyItemId != null && itemIdMap.has(counterpartyItemId)
+          ? itemIdMap.get(counterpartyItemId)!
+          : null;
+      const chainName = str(row.name) || "Цепочка";
+      const chainRowInfo = `цепочка «${chainName}», строка цепочек ${i + 1} из ${totalChains}`;
+      if (direction === "TRANSFER" && resolvedCounterpartyItemId == null) {
+        throw new Error(
+          `counterparty_item_id is required for TRANSFER (${chainRowInfo}). Укажите контрагентский счёт или удалите цепочку из файла.`
+        );
+      }
+      // Для переводов не импортируем атрибуты, запрещённые для TRANSFER (counterparty_id, category_id, related_item_id)
       const payload: TransactionChainCreate = {
         name: str(row.name) || "Цепочка",
         start_date: str(row.start_date) || new Date().toISOString().slice(0, 10),
@@ -1268,29 +1438,45 @@ export async function runImport(
         monthly_rule: (str(row.monthly_rule) || null) as TransactionChainCreate["monthly_rule"],
         interval_days: num(row.interval_days) ?? null,
         primary_item_id: itemIdMap.get(primaryItemId)!,
-        counterparty_item_id:
-          counterpartyItemId != null && itemIdMap.has(counterpartyItemId)
-            ? itemIdMap.get(counterpartyItemId)!
-            : null,
+        counterparty_item_id: resolvedCounterpartyItemId,
         counterparty_id:
-          counterpartyId != null && counterpartyIdMap.has(counterpartyId)
-            ? counterpartyIdMap.get(counterpartyId)!
-            : null,
+          direction === "TRANSFER"
+            ? null
+            : counterpartyId != null && counterpartyIdMap.has(counterpartyId)
+              ? counterpartyIdMap.get(counterpartyId)!
+              : null,
         amount: num(row.amount) ?? 0,
         amount_counterparty: num(row.amount_counterparty) ?? null,
-        direction: (str(row.direction) || "EXPENSE") as TransactionDirection,
+        direction,
         category_id:
-          categoryId != null && categoryIdMap.has(categoryId) ? categoryIdMap.get(categoryId)! : null,
+          direction === "TRANSFER"
+            ? null
+            : categoryId != null && categoryIdMap.has(categoryId)
+              ? categoryIdMap.get(categoryId)!
+              : null,
         comment: str(row.comment) || null,
         related_item_id:
-          relatedItemId != null && itemIdMap.has(relatedItemId) ? itemIdMap.get(relatedItemId)! : null,
+          direction === "TRANSFER"
+            ? null
+            : relatedItemId != null && itemIdMap.has(relatedItemId)
+              ? itemIdMap.get(relatedItemId)!
+              : null,
       };
-      const created = await createTransactionChain(payload);
-      chainIdMap.set(oldId, created.id);
-      counts.transactionChains += 1;
+      try {
+        const created = await createTransactionChain(payload);
+        chainIdMap.set(oldId, created.id);
+        counts.transactionChains += 1;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          msg.includes("counterparty_item_id") || msg.includes("TRANSFER")
+            ? `${msg} (${chainRowInfo})`
+            : msg
+        );
+      }
     }
 
-    // 5. Транзакции (сортируем по дате и внутри дня: доходы → переводы → расходы; внутри переводов — сначала НА счёт, потом СО счёта)
+    // 6. Транзакции (сортируем по дате и внутри дня: доходы → переводы → расходы; внутри переводов — сначала НА счёт, потом СО счёта)
     // Транзакции открытия по обязательствам/активам не импортируем — бэкенд создаёт их при создании позиции (createItem).
     const OPENING_COMMENT_PREFIX = "Открытие: ";
     const sortedTransactions = sortTransactionsForImport(data.transactions, data.items);
@@ -1306,6 +1492,10 @@ export async function runImport(
       const categoryId = num(row.category_id);
       const relatedItemId = num(row.related_item_id);
       if (primaryItemId == null || !itemIdMap.has(primaryItemId)) continue;
+      const resolvedCounterpartyItemId =
+        counterpartyItemId != null && itemIdMap.has(counterpartyItemId)
+          ? itemIdMap.get(counterpartyItemId)!
+          : null;
       const resolvedRelatedItemId =
         relatedItemId != null && itemIdMap.has(relatedItemId) ? itemIdMap.get(relatedItemId)! : null;
       const assetLinkTypeRaw = str(row.asset_link_type);
@@ -1313,20 +1503,26 @@ export async function runImport(
         ? (assetLinkTypeRaw as TransactionCreate["asset_link_type"])
         : undefined;
       const direction = (str(row.direction) || "EXPENSE") as TransactionDirection;
+      const txDate = str(row.transaction_date) || new Date().toISOString().slice(0, 10);
+      const amount = num(row.amount) ?? 0;
+      const txRowInfo = `транзакция ${i + 1} из ${totalTx}, дата ${txDate}, сумма ${amount}${comment ? `, комментарий: ${comment.slice(0, 50)}${comment.length > 50 ? "…" : ""}` : ""}`;
+      if (direction === "TRANSFER" && resolvedCounterpartyItemId == null) {
+        throw new Error(
+          `counterparty_item_id is required for TRANSFER (${txRowInfo}). Для перевода должен быть указан контрагентский счёт в файле и он должен быть импортирован.`
+        );
+      }
+      // Для переводов не импортируем атрибуты, запрещённые для TRANSFER (counterparty_id, category_id, related_item_id, asset_link_type)
       const payload: TransactionCreate = {
-        transaction_date: str(row.transaction_date) || new Date().toISOString().slice(0, 10),
+        transaction_date: txDate,
         primary_item_id: itemIdMap.get(primaryItemId)!,
-        counterparty_item_id:
-          counterpartyItemId != null && itemIdMap.has(counterpartyItemId)
-            ? itemIdMap.get(counterpartyItemId)!
-            : null,
+        counterparty_item_id: resolvedCounterpartyItemId,
         counterparty_id:
           direction === "TRANSFER"
             ? null
             : counterpartyId != null && counterpartyIdMap.has(counterpartyId)
               ? counterpartyIdMap.get(counterpartyId)!
               : null,
-        amount: num(row.amount) ?? 0,
+        amount,
         amount_counterparty: num(row.amount_counterparty) ?? null,
         primary_quantity_lots: num(row.primary_quantity_lots) ?? null,
         counterparty_quantity_lots: num(row.counterparty_quantity_lots) ?? null,
@@ -1336,7 +1532,11 @@ export async function runImport(
         transaction_type: (str(row.transaction_type) || "ACTUAL") as TransactionType,
         status: "UNCONFIRMED",
         category_id:
-          categoryId != null && categoryIdMap.has(categoryId) ? categoryIdMap.get(categoryId)! : null,
+          direction === "TRANSFER"
+            ? null
+            : categoryId != null && categoryIdMap.has(categoryId)
+              ? categoryIdMap.get(categoryId)!
+              : null,
         comment: str(row.comment) || null,
         related_item_id: direction === "TRANSFER" ? null : resolvedRelatedItemId,
         asset_link_type:
@@ -1346,11 +1546,22 @@ export async function runImport(
               ? assetLinkType
               : undefined,
       };
-      await createTransaction(payload);
-      counts.transactions += 1;
+      try {
+        await createTransaction(payload);
+        counts.transactions += 1;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          msg.includes("counterparty_item_id") ||
+            msg.includes("TRANSFER") ||
+            msg.includes("Transfer")
+            ? `${msg} (${txRowInfo})`
+            : msg
+        );
+      }
     }
 
-    // 6. Цели
+    // 7. Цели
     const totalGoals = data.goals.length;
     for (let i = 0; i < totalGoals; i++) {
       const row = data.goals[i];
@@ -1369,7 +1580,7 @@ export async function runImport(
       counts.goals += 1;
     }
 
-    // 7. Контрольные точки (только для актива, который импортирован или сопоставлен)
+    // 8. Контрольные точки (только для актива, который импортирован или сопоставлен)
     const totalCheckpoints = data.balanceCheckpoints?.length ?? 0;
     for (let i = 0; i < totalCheckpoints; i++) {
       const row = data.balanceCheckpoints[i];

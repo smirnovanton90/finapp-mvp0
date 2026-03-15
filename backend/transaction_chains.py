@@ -256,7 +256,9 @@ def create_transaction_chain(
         data.interval_days,
     )
     if not schedule_dates:
-        raise HTTPException(status_code=400, detail="No dates generated for chain")
+        # Деградированный период (например, один месяц, день платежа уже прошёл):
+        # создаём цепочку с одной датой — start_date (типично при восстановлении из бэкапа).
+        schedule_dates = [data.start_date]
 
     if data.related_item_id is not None:
         load_item_for_related(db, user, data.related_item_id, False, "related_item")
@@ -283,7 +285,7 @@ def create_transaction_chain(
             counter_side.card_item.id if counter_side and counter_side.card_item else None
         ),
         counterparty_id=data.counterparty_id,
-        amount_primary_minor=data.amount_primary_minor,
+        amount_rub=data.amount_primary_minor,
         amount_counterparty=amount_counterparty if data.direction == "TRANSFER" else None,
         amount_is_variable=False,
         amount_min_rub=None,

@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, date
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
-from typing import Literal
+from typing import Any, Literal
 
 ItemKind = Literal["ASSET", "LIABILITY"]
 ItemHistoryStatus = Literal["NEW", "HISTORICAL"]
@@ -137,6 +137,11 @@ class ItemCloseRequest(BaseModel):
 class ItemClosedAtUpdate(BaseModel):
     """Обновление даты закрытия (только для уже закрытых активов)."""
     closing_date: date
+
+
+class ItemArchivedAtUpdate(BaseModel):
+    """Установка даты архивации (для восстановления из бэкапа)."""
+    archived_date: date
 
 
 class OnboardingStateOut(BaseModel):
@@ -619,8 +624,6 @@ class TransactionBase(BaseModel):
                 raise ValueError("related_item_id is not allowed for TRANSFER")
         return self
 
-    # No asset_link_type vs direction validation here: used for response (TransactionOut)
-    # where legacy data may have any stored values. Validation only in TransactionCreate.
 
 class TransactionCreate(TransactionBase):
     status: TransactionStatus | None = None
@@ -628,7 +631,16 @@ class TransactionCreate(TransactionBase):
     is_split_parent: bool = False
 
     @model_validator(mode="after")
-    def validate_asset_link_input(self) -> "TransactionCreate":
+    def validate_direction_and_asset_link(self) -> "TransactionCreate":
+        if self.direction == "TRANSFER":
+            if self.category_id is not None:
+                raise ValueError("category_id is not allowed for TRANSFER")
+            if self.counterparty_id is not None:
+                raise ValueError("counterparty_id is not allowed for TRANSFER")
+            if self.related_item_id is not None:
+                raise ValueError("related_item_id is not allowed for TRANSFER")
+            if self.asset_link_type is not None:
+                raise ValueError("asset_link_type is not allowed for TRANSFER")
         if self.asset_link_type is not None:
             if self.related_item_id is None:
                 raise ValueError("related_item_id is required when asset_link_type is set")
@@ -647,8 +659,6 @@ class TransactionCreate(TransactionBase):
                 raise ValueError(
                     "asset_link_type for INCOME must be ASSET_SALE or ASSET_INCOME"
                 )
-            if self.direction == "TRANSFER":
-                raise ValueError("asset_link_type is not allowed for TRANSFER")
         return self
 
 
@@ -711,6 +721,32 @@ class TransactionOut(TransactionBase):
     source: str | None = None
     parent_transaction_id: int | None = None
     is_split_parent: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_transfer_for_response(cls, data: Any) -> Any:
+        """В ответе API у переводов обнуляем поля, запрещённые для TRANSFER (legacy/импорт)."""
+        if data is None:
+            return data
+        direction = (
+            getattr(data, "direction", None)
+            if not isinstance(data, dict)
+            else data.get("direction")
+        )
+        if direction != "TRANSFER":
+            return data
+        if isinstance(data, dict):
+            return {
+                **data,
+                "counterparty_id": None,
+                "category_id": None,
+                "related_item_id": None,
+            }
+        d = {f: getattr(data, f, None) for f in cls.model_fields}
+        d["counterparty_id"] = None
+        d["category_id"] = None
+        d["related_item_id"] = None
+        return d
 
     class Config:
         from_attributes = True

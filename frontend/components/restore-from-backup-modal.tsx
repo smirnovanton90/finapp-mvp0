@@ -5,8 +5,14 @@ import { FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { resetAllUserData } from "@/lib/api";
-import { parseExportCsv, runImport, type ParsedExport } from "@/lib/data-export-import";
-import { ACTIVE_TEXT_DARK, MODAL_BG } from "@/lib/colors";
+import {
+  parseExportCsv,
+  runImport,
+  validateExportForImport,
+  type ParsedExport,
+} from "@/lib/data-export-import";
+import { ACTIVE_TEXT_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
+import { PINK_GRADIENT } from "@/lib/gradients";
 import { cn } from "@/lib/utils";
 
 export type RestoreFromBackupModalProps = {
@@ -16,6 +22,56 @@ export type RestoreFromBackupModalProps = {
   onSuccess?: () => void;
 };
 
+const RESTORE_ENTITY_ORDER: { key: string; label: string }[] = [
+  { key: "date", label: "Дата начала учёта" },
+  { key: "counterparties", label: "Контрагенты" },
+  { key: "categories", label: "Категории" },
+  { key: "items", label: "Активы и обязательства" },
+  { key: "marketValues", label: "Рыночные стоимости" },
+  { key: "chains", label: "Цепочки транзакций" },
+  { key: "transactions", label: "Транзакции" },
+  { key: "goals", label: "Цели" },
+  { key: "checkpoints", label: "Контрольные точки" },
+];
+
+const STAGE_TO_KEY: Record<string, string> = {
+  "Установка даты начала учёта": "date",
+  "Контрагенты": "counterparties",
+  "Категории": "categories",
+  "Активы и обязательства": "items",
+  "Рыночные стоимости": "marketValues",
+  "Цепочки транзакций": "chains",
+  "Транзакции": "transactions",
+  "Цели": "goals",
+  "Контрольные точки": "checkpoints",
+  "Готово": "done",
+};
+
+function getEntityCount(data: ParsedExport, key: string): number {
+  switch (key) {
+    case "date":
+      return data.accounting_start_date?.trim() ? 1 : 0;
+    case "counterparties":
+      return data.counterparties.length;
+    case "categories":
+      return data.categories.length;
+    case "items":
+      return data.items.length;
+    case "marketValues":
+      return data.itemMarketValues?.length ?? 0;
+    case "chains":
+      return data.transactionChains.length;
+    case "transactions":
+      return data.transactions.length;
+    case "goals":
+      return data.goals.length;
+    case "checkpoints":
+      return data.balanceCheckpoints?.length ?? 0;
+    default:
+      return 0;
+  }
+}
+
 function hasExportData(data: ParsedExport): boolean {
   return (
     data.transactions.length > 0 ||
@@ -24,20 +80,29 @@ function hasExportData(data: ParsedExport): boolean {
     data.categories.length > 0 ||
     data.goals.length > 0 ||
     (data.balanceCheckpoints?.length ?? 0) > 0 ||
-    data.transactionChains.length > 0
+    data.transactionChains.length > 0 ||
+    (data.itemMarketValues?.length ?? 0) > 0 ||
+    !!(data.accounting_start_date?.trim())
   );
 }
 
 function formatCounts(data: ParsedExport): string {
-  const parts: string[] = [];
-  if (data.counterparties.length) parts.push(`контрагентов: ${data.counterparties.length}`);
-  if (data.categories.length) parts.push(`категорий: ${data.categories.length}`);
-  if (data.items.length) parts.push(`активов: ${data.items.length}`);
-  if (data.transactionChains.length) parts.push(`цепочек: ${data.transactionChains.length}`);
-  if (data.transactions.length) parts.push(`транзакций: ${data.transactions.length}`);
-  if (data.goals.length) parts.push(`целей: ${data.goals.length}`);
-  if ((data.balanceCheckpoints?.length ?? 0) > 0)
-    parts.push(`контрольных точек: ${data.balanceCheckpoints!.length}`);
+  const parts = RESTORE_ENTITY_ORDER.map((entity) => {
+    const n = getEntityCount(data, entity.key);
+    if (n === 0) return null;
+    const labels: Record<string, string> = {
+      date: "дата начала учёта",
+      counterparties: "контрагентов",
+      categories: "категорий",
+      items: "активов",
+      marketValues: "рыночных стоимостей",
+      chains: "цепочек",
+      transactions: "транзакций",
+      goals: "целей",
+      checkpoints: "контрольных точек",
+    };
+    return `${labels[entity.key] ?? entity.key}: ${n}`;
+  }).filter(Boolean);
   return parts.length > 0 ? parts.join(", ") : "нет данных";
 }
 
@@ -52,7 +117,7 @@ export function RestoreFromBackupModal({
   const [parseError, setParseError] = React.useState<string | null>(null);
   const [restoring, setRestoring] = React.useState(false);
   const [restoreError, setRestoreError] = React.useState<string | null>(null);
-  const [importStage, setImportStage] = React.useState<string | null>(null);
+  const [importStageKey, setImportStageKey] = React.useState<string | null>(null);
   const [importCurrent, setImportCurrent] = React.useState(0);
   const [importTotal, setImportTotal] = React.useState(0);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -63,7 +128,7 @@ export function RestoreFromBackupModal({
     setParsedData(null);
     setParseError(null);
     setRestoreError(null);
-    setImportStage(null);
+    setImportStageKey(null);
     setImportCurrent(0);
     setImportTotal(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -119,9 +184,26 @@ export function RestoreFromBackupModal({
 
   const handleRestore = async () => {
     if (!parsedData) return;
+    const validation = validateExportForImport(parsedData);
+    if (!validation.valid) {
+      const lines = validation.invalidTransfers.map((item) => {
+        if (item.type === "chain") {
+          return `• Цепочка «${item.name ?? "Цепочка"}» (строка цепочек ${item.index})`;
+        }
+        const parts = [`• Транзакция ${item.index}`];
+        if (item.date) parts.push(`дата ${item.date}`);
+        if (item.amount != null) parts.push(`сумма ${item.amount}`);
+        if (item.comment) parts.push(`комментарий: ${item.comment}`);
+        return parts.join(", ");
+      });
+      setRestoreError(
+        `В файле есть переводы без связанного актива (счёт «Куда» отсутствует или не входит в файл). Исправьте файл или удалите эти записи.\n\n${lines.join("\n")}`
+      );
+      return;
+    }
     setRestoring(true);
     setRestoreError(null);
-    setImportStage(null);
+    setImportStageKey(null);
     setImportCurrent(0);
     setImportTotal(0);
     try {
@@ -130,7 +212,8 @@ export function RestoreFromBackupModal({
         sessionStorage.removeItem("finapp-date-setup-complete");
       }
       const result = await runImport(parsedData, (p) => {
-        setImportStage(p.stage);
+        const key = STAGE_TO_KEY[p.stage] ?? null;
+        setImportStageKey(key === "done" ? null : key);
         setImportCurrent(p.current);
         setImportTotal(p.total);
       });
@@ -163,10 +246,18 @@ export function RestoreFromBackupModal({
       <DialogContent
         showCloseButton={!restoring}
         title={step === 1 ? "Восстановление из резервной копии" : "Подтверждение восстановления"}
-        className={cn("border-0 rounded-[9px] max-w-md")}
-        style={{ backgroundColor: MODAL_BG }}
+        className={cn(
+          "w-full max-w-[calc(100%-2rem)] h-[920px] max-h-[min(920px,100dvh)] p-0 gap-0 overflow-hidden flex flex-col",
+          "border-0 rounded-[9px]"
+        )}
+        style={{
+          backgroundColor: MODAL_BG,
+          width: 1000,
+          maxWidth: "min(1000px, calc(100vw - 2rem))",
+        }}
       >
-        <div className="space-y-4" style={{ color: ACTIVE_TEXT_DARK }}>
+        <div className="flex flex-col w-full h-full min-h-0 overflow-auto px-6 pt-4 pb-6">
+          <div className="space-y-4" style={{ color: ACTIVE_TEXT_DARK }}>
           {step === 1 ? (
             <>
               <p className="text-sm">
@@ -214,17 +305,86 @@ export function RestoreFromBackupModal({
                 Продолжить?
               </p>
               {parsedData && (
-                <p className="text-xs opacity-80">
-                  Файл: {selectedFile?.name}. {formatCounts(parsedData)}
-                </p>
-              )}
-              {restoring && importStage != null && (
-                <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
-                  Импорт: {importStage} — {importCurrent} / {importTotal}
-                </p>
+                <>
+                  <p className="text-xs opacity-80 mb-2">
+                    Файл: {selectedFile?.name}
+                  </p>
+                  <p
+                    className="mb-3 text-center"
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 400,
+                      color: ACTIVE_TEXT_DARK,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {restoring ? "Импорт…" : "Будут импортированы"}
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {RESTORE_ENTITY_ORDER.map((entity, index) => {
+                      const count = getEntityCount(parsedData, entity.key);
+                      const currentIndex =
+                        importStageKey != null
+                          ? RESTORE_ENTITY_ORDER.findIndex((e) => e.key === importStageKey)
+                          : -1;
+                      const isComplete =
+                        restoring && (currentIndex < 0 || index < currentIndex);
+                      const isActive =
+                        restoring && currentIndex >= 0 && index === currentIndex;
+                      const progress =
+                        isComplete
+                          ? 1
+                          : isActive && importTotal > 0
+                            ? Math.min(importCurrent / importTotal, 1)
+                            : 0;
+                      const showBar = restoring;
+                      return (
+                        <div
+                          key={entity.key}
+                          className="rounded-lg p-4 flex flex-col"
+                          style={{ backgroundColor: BACKGROUND_DT }}
+                        >
+                          <span
+                            className="mb-1 text-sm font-medium"
+                            style={{ color: ACTIVE_TEXT_DARK, fontSize: 14 }}
+                          >
+                            {entity.label}
+                          </span>
+                          <span
+                            className="font-semibold"
+                            style={{
+                              fontSize: 36,
+                              fontWeight: 600,
+                              background: PINK_GRADIENT,
+                              WebkitBackgroundClip: "text",
+                              WebkitTextFillColor: "transparent",
+                              backgroundClip: "text",
+                            }}
+                          >
+                            {count}
+                          </span>
+                          {showBar && (
+                            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
+                              <div
+                                className="h-full rounded-full transition-[width]"
+                                style={{
+                                  width: `${progress * 100}%`,
+                                  backgroundColor: "#6C5DD7",
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
               {restoreError && (
-                <p className="text-sm" style={{ color: "#FB4C4F" }}>
+                <p
+                  className="text-sm mt-3 overflow-auto max-h-48 whitespace-pre-line"
+                  style={{ color: "#FB4C4F" }}
+                >
                   {restoreError}
                 </p>
               )}
@@ -285,6 +445,7 @@ export function RestoreFromBackupModal({
               </Button>
             </>
           )}
+        </div>
         </div>
       </DialogContent>
     </Dialog>

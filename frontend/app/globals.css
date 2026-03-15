@@ -425,4 +425,12 @@ html.dark::-webkit-scrollbar-thumb:hover {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
+  /* Визард добавления транзакции: плавное появление шага */
+  @keyframes wizard-step-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .wizard-step-enter {
+    animation: wizard-step-in 0.35s ease-out forwards;
+  }
 }

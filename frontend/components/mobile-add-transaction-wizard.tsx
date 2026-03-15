@@ -2,9 +2,9 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ArrowLeftRight, Coins, HandCoins, Receipt, QrCode, Banknote, Calendar, Wallet, Tag, User, MessageSquare, Link2, X } from "lucide-react";
+import { ChevronLeft, ChevronDown, ArrowLeftRight, ArrowRight, Building2, Coins, HandCoins, Receipt, QrCode, Banknote, Calendar, Wallet, Tag, User, MessageSquare, Link2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { MODAL_BG, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
+import { MODAL_BG, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, GREEN, GREEN_TRANSACTION, RED, ACCENT2 } from "@/lib/colors";
 import { BLUE_GRADIENT } from "@/lib/gradients";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,13 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
-import { WizardStepIndicator } from "@/components/wizard-step-indicator";
+import { CurrencyChip } from "@/components/currency-chip";
+import { CardIcon } from "@/components/card-icon";
+import { AssetItemIcon } from "@/components/asset-item-icon";
 import { buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
+import { useCategoryImage } from "@/hooks/use-category-icon";
+import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
+import { transferIconPath } from "@/lib/image-paths";
 import type { CategoryNode } from "@/lib/categories";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { getEffectiveItemKind, getItemPrimaryValueCents } from "@/lib/item-utils";
@@ -53,6 +58,12 @@ function isMoexItem(item?: ItemOut | null) {
 function isCryptoItem(item?: ItemOut | null) {
   if (!item) return false;
   return item.type_code === "crypto";
+}
+
+function buildCounterpartyName(cp: CounterpartyOut) {
+  if (cp.entity_type !== "PERSON") return cp.name;
+  const parts = [cp.last_name, cp.first_name, cp.middle_name].filter(Boolean);
+  return parts.join(" ") || cp.name;
 }
 
 export type WizardFlowType = "SIMPLE" | "LOAN_REPAYMENT" | "DEBTS" | "RECEIPT";
@@ -112,6 +123,35 @@ export function MobileAddTransactionWizard({
   const [counterpartyQuantityLots, setCounterpartyQuantityLots] = useState("");
   const [primaryQuantityUnitsStr, setPrimaryQuantityUnitsStr] = useState("");
   const [counterpartyQuantityUnitsStr, setCounterpartyQuantityUnitsStr] = useState("");
+
+  const prevOpenRef = React.useRef(false);
+  useEffect(() => {
+    if (open && !prevOpenRef.current) {
+      setFlowType(null);
+      setStep(0);
+      setFormError(null);
+      setAmountStr("");
+      setAmountCounterpartyStr("");
+      setDate(new Date().toISOString().slice(0, 10));
+      setTime("");
+      setDirection("EXPENSE");
+      setFormTransactionType("ACTUAL");
+      setPrimaryItemId(null);
+      setCounterpartyItemId(null);
+      setCounterpartyId(null);
+      setSelectedCategoryPath(null);
+      setComment("");
+      setRelatedItemId(null);
+      setAssetLinkType(null);
+      setSplitEnabled(false);
+      setSplitParts([]);
+      setPrimaryQuantityLots("");
+      setCounterpartyQuantityLots("");
+      setPrimaryQuantityUnitsStr("");
+      setCounterpartyQuantityUnitsStr("");
+    }
+    prevOpenRef.current = open;
+  }, [open]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const categoryLookup = useMemo(() => buildCategoryLookup(categoryNodes), [categoryNodes]);
@@ -223,6 +263,23 @@ export function MobileAddTransactionWizard({
     [itemsForSelector, primaryItemId, counterpartyItemId]
   );
 
+  const previewCategoryId = resolveCategoryId(cat1, cat2, cat3);
+  const previewCounterparty = counterpartyId != null ? counterpartiesById.get(counterpartyId) ?? null : null;
+  const {
+    imageSrc: categoryImageSrc,
+    onError: categoryImageOnError,
+    showFallbackIcon: categoryShowFallbackIcon,
+    CategoryIcon: CategoryIconFallback,
+    setCategoryIconFormat,
+  } = useCategoryImage(previewCategoryId, categoryLookup, API_BASE);
+  const {
+    currentSrc: counterpartyLogoUrl,
+    onError: counterpartyLogoOnError,
+    showFallbackIcon: counterpartyShowFallbackIcon,
+  } = useCounterpartyImage(previewCounterparty, API_BASE);
+  const [transferIconFormat, setTransferIconFormat] = useState<"png" | null>("png");
+  const transferIcon3dPath = transferIconPath(transferIconFormat);
+
   const resetToTypeSelection = useCallback(() => {
     setFlowType(null);
     setStep(0);
@@ -253,9 +310,8 @@ export function MobileAddTransactionWizard({
   }, [handleClose, onSelectDebt]);
 
   const handleSelectReceipt = useCallback(() => {
-    handleClose();
     onSelectReceipt();
-  }, [handleClose, onSelectReceipt]);
+  }, [onSelectReceipt]);
 
   const goNext = useCallback(() => {
     setFormError(null);
@@ -274,7 +330,14 @@ export function MobileAddTransactionWizard({
   const canGoNext = useCallback(() => {
     if (flowType !== "SIMPLE") return true;
     switch (step) {
-      case 1: {
+      case 1:
+      case 2:
+      case 3:
+        return true;
+      case 4:
+        if (isTransfer) return !!primaryItemId && !!counterpartyItemId && primaryItemId !== counterpartyItemId;
+        return !!primaryItemId;
+      case 5: {
         const cents = parseRubToCents(normalizeRubOnBlur(amountStr));
         if (isCrossCurrencyTransfer) {
           const cpCents = parseRubToCents(normalizeRubOnBlur(amountCounterpartyStr));
@@ -282,14 +345,6 @@ export function MobileAddTransactionWizard({
         }
         return Number.isFinite(cents) && cents > 0;
       }
-      case 2:
-        return !!date;
-      case 3:
-      case 4:
-        return true;
-      case 5:
-        if (isTransfer) return !!primaryItemId && !!counterpartyItemId && primaryItemId !== counterpartyItemId;
-        return !!primaryItemId;
       case 6:
         if (isTransfer) return true;
         return !!resolveCategoryId(cat1, cat2, cat3);
@@ -329,11 +384,11 @@ export function MobileAddTransactionWizard({
   ]);
 
   const stepTitles: Record<number, string> = {
-    1: "Сумма",
-    2: "Дата и время",
-    3: "Характер",
-    4: "Тип",
-    5: "Актив",
+    1: "Тип транзакции",
+    2: "Направление",
+    3: "Дата и время",
+    4: "Актив",
+    5: "Сумма",
     6: "Категория",
     7: "Контрагент",
     8: "Комментарий",
@@ -471,9 +526,8 @@ export function MobileAddTransactionWizard({
     if (flowType !== "SIMPLE") return;
     if (step < SIMPLE_WIZARD_STEPS) {
       if (!canGoNext()) {
-        if (step === 1) setFormError("Введите сумму.");
-        else if (step === 2) setFormError("Укажите дату.");
-        else if (step === 5) setFormError(isTransfer ? "Выберите откуда и куда." : "Выберите актив.");
+        if (step === 4) setFormError(isTransfer ? "Выберите откуда и куда." : "Выберите актив.");
+        else if (step === 5) setFormError("Введите сумму.");
         else if (step === 6 && !isTransfer) setFormError("Выберите категорию.");
         return;
       }
@@ -483,8 +537,39 @@ export function MobileAddTransactionWizard({
     }
   }, [flowType, step, canGoNext, goNext, handleSubmit, isTransfer]);
 
+  const tryAutoAdvance = useCallback(() => {
+    setTimeout(() => {
+      if (flowType === "SIMPLE" && step < SIMPLE_WIZARD_STEPS && canGoNext()) goNext();
+    }, 0);
+  }, [flowType, step, canGoNext, goNext]);
+
+  const tryAutoAdvanceRef = React.useRef(tryAutoAdvance);
+  tryAutoAdvanceRef.current = tryAutoAdvance;
+
+  const handleAdvanceFromStep = useCallback(() => {
+    setFormError(null);
+    if (!canGoNext()) {
+      if (step === 4) setFormError(isTransfer ? "Выберите откуда и куда." : "Выберите актив.");
+      else if (step === 5) setFormError("Введите сумму.");
+      else if (step === 6 && !isTransfer) setFormError("Выберите категорию.");
+      return;
+    }
+    goNext();
+  }, [step, canGoNext, goNext, isTransfer]);
+
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  const stepRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+  const prevStepRef = React.useRef(0);
+  useEffect(() => {
+    if (flowType !== "SIMPLE" || step < 1) return;
+    if (step > prevStepRef.current) {
+      const el = stepRefs.current[step - 1];
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    prevStepRef.current = step;
+  }, [flowType, step]);
 
   // Только для мобильной: при открытом визарде блокируем скролл страницы (в т.ч. iOS)
   useEffect(() => {
@@ -508,8 +593,6 @@ export function MobileAddTransactionWizard({
   if (!open) return null;
 
   const isTypeSelection = flowType === null && step === 0;
-  const showStepIndicator = flowType === "SIMPLE" && step >= 1;
-  const isLastStep = flowType === "SIMPLE" && step === SIMPLE_WIZARD_STEPS;
 
   const wizardContent = (
     <div
@@ -523,7 +606,15 @@ export function MobileAddTransactionWizard({
       aria-modal
       aria-label={isTypeSelection ? "Добавить транзакцию" : `Добавить транзакцию — ${stepTitles[step] ?? ""}`}
     >
-      <header className="shrink-0 flex items-center justify-end gap-2 px-3 py-2">
+      <header className="shrink-0 flex items-center justify-between gap-2 px-3 py-2">
+        {!isTypeSelection ? (
+          <div className="flex items-center gap-2 min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>
+            <ArrowLeftRight className="h-5 w-5 shrink-0" strokeWidth={1.5} />
+            <span className="text-base font-medium truncate">Новая транзакция</span>
+          </div>
+        ) : (
+          <span />
+        )}
         <IconButton
           type="button"
           aria-label="Закрыть"
@@ -535,7 +626,10 @@ export function MobileAddTransactionWizard({
       </header>
 
       <div
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pt-4 flex flex-col gap-4"
+        className={cn(
+          "flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pt-4 flex flex-col gap-8",
+          flowType === "SIMPLE" && "[&_input]:text-base [&_input::placeholder]:text-base [&_button]:text-base"
+        )}
         style={{
           WebkitOverflowScrolling: "touch",
           touchAction: "pan-y",
@@ -649,97 +743,131 @@ export function MobileAddTransactionWizard({
           </div>
         )}
 
-        {flowType === "SIMPLE" && step === 1 && (
-          <div className="grid gap-4">
-            <FormField label="Сумма" inlineLabel icon={<Banknote className="h-5 w-5" />}>
-              <TextField
-                label=""
-                currencyCode={primaryCurrencyCode ?? undefined}
-                value={amountStr}
-                onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
-                onBlur={() => setAmountStr((prev) => normalizeRubOnBlur(prev))}
-                inputMode="decimal"
-                placeholder="Сумма"
+        {flowType === "SIMPLE" && step >= 1 && (
+          <div ref={(el) => { stepRefs.current[0] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>Какую транзакцию хотите добавить?</p>
+            <FormField label="" inlineLabel>
+              <MobileTapScale className="block w-full">
+                <SegmentedSelector
+                  options={[
+                    { value: "ACTUAL", label: "Фактическая", colorScheme: "purple" },
+                    { value: "PLANNED", label: "Плановая", colorScheme: "orange" },
+                  ]}
+                value={formTransactionType}
+                onChange={(v) => {
+                  setFormTransactionType(v as TransactionOut["transaction_type"]);
+                  if (step === 1) tryAutoAdvanceRef.current();
+                }}
               />
+              </MobileTapScale>
             </FormField>
-            {isCrossCurrencyTransfer && (
-              <FormField label="Сумма поступления" inlineLabel icon={<Banknote className="h-5 w-5" />}>
-                <TextField
-                  label=""
-                  currencyCode={counterpartyCurrencyCode ?? undefined}
-                  value={amountCounterpartyStr}
-                  onChange={(e) => setAmountCounterpartyStr(formatRubInput(e.target.value))}
-                  onBlur={() => setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev))}
-                  inputMode="decimal"
-                  placeholder="Сумма поступления"
-                />
-              </FormField>
+            {step === 1 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
             )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step === 2 && (
-          <FormField label="Дата и время" required inlineLabel icon={<Calendar className="h-5 w-5" />}>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
-                <AuthInput type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full" placeholder="Дата" />
+        {flowType === "SIMPLE" && step >= 2 && (
+          <div ref={(el) => { stepRefs.current[1] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>Это доход, расход или перевод?</p>
+            <FormField label="" inlineLabel>
+              <MobileTapScale className="block w-full">
+                <SegmentedSelector
+                  options={[
+                    { value: "INCOME", label: "Доход", colorScheme: "green" },
+                    { value: "EXPENSE", label: "Расход", colorScheme: "red" },
+                    { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
+                  ]}
+                value={direction}
+                onChange={(v) => {
+                  setDirection(v as "INCOME" | "EXPENSE" | "TRANSFER");
+                  setCounterpartyItemId(null);
+                  applyCategorySelection("", "", "");
+                  if (step === 2) tryAutoAdvanceRef.current();
+                }}
+              />
+              </MobileTapScale>
+            </FormField>
+            {step === 2 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
               </div>
-              <div className="relative flex items-center min-h-[40px] shrink-0 w-[6rem]">
-                <AuthInput
-                  type="text"
-                  inputMode="numeric"
-                  value={time}
-                  onChange={(e) => setTime(formatTimeInput(e.target.value))}
-                  placeholder="00:00"
-                  maxLength={5}
-                  autoComplete="off"
-                  className="w-full"
-                />
+            )}
+          </div>
+        )}
+
+        {flowType === "SIMPLE" && step >= 3 && (
+          <div ref={(el) => { stepRefs.current[2] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Calendar className="h-5 w-5 shrink-0" />
+              Выберите дату и время (по желанию)
+            </p>
+            <FormField label="" inlineLabel>
+              <MobileTapScale className="block w-full">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
+                  <AuthInput
+                    type="date"
+                    value={date}
+                    onChange={(e) => {
+                      setDate(e.target.value);
+                      if (step === 3) tryAutoAdvanceRef.current();
+                    }}
+                    onBlur={() => { if (step === 3) tryAutoAdvanceRef.current(); }}
+                    className="w-full"
+                    placeholder="Дата"
+                  />
+                </div>
+                <div className="relative flex items-center min-h-[40px] shrink-0 w-[6rem]">
+                  <AuthInput
+                    type="text"
+                    inputMode="numeric"
+                    value={time}
+                    onChange={(e) => setTime(formatTimeInput(e.target.value))}
+                    onBlur={() => { if (step === 3) tryAutoAdvanceRef.current(); }}
+                    placeholder="00:00"
+                    maxLength={5}
+                    autoComplete="off"
+                    className="w-full"
+                  />
+                </div>
               </div>
-            </div>
-          </FormField>
+              </MobileTapScale>
+            </FormField>
+            {step === 3 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
+            )}
+          </div>
         )}
 
-        {flowType === "SIMPLE" && step === 3 && (
-          <FormField label="Характер транзакции" inlineLabel>
-            <SegmentedSelector
-              options={[
-                { value: "INCOME", label: "Доход", colorScheme: "green" },
-                { value: "EXPENSE", label: "Расход", colorScheme: "red" },
-                { value: "TRANSFER", label: "Перевод", colorScheme: "purple" },
-              ]}
-              value={direction}
-              onChange={(v) => {
-                setDirection(v as "INCOME" | "EXPENSE" | "TRANSFER");
-                setCounterpartyItemId(null);
-                applyCategorySelection("", "", "");
-              }}
-            />
-          </FormField>
-        )}
-
-        {flowType === "SIMPLE" && step === 4 && (
-          <FormField label="Тип" inlineLabel>
-            <SegmentedSelector
-              options={[
-                { value: "ACTUAL", label: "Фактическая", colorScheme: "purple" },
-                { value: "PLANNED", label: "Плановая", colorScheme: "orange" },
-              ]}
-              value={formTransactionType}
-              onChange={(v) => setFormTransactionType(v as TransactionOut["transaction_type"])}
-            />
-          </FormField>
-        )}
-
-        {flowType === "SIMPLE" && step === 5 && (
+        {flowType === "SIMPLE" && step >= 4 && (
+          <div ref={(el) => { stepRefs.current[3] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Wallet className="h-5 w-5 shrink-0" />
+              {isTransfer ? "Откуда и куда" : "Актив / обязательство"}
+            </p>
           <div className="grid gap-4">
             {isTransfer ? (
               <>
-                <FormField label="Откуда" inlineLabel icon={<Wallet className="h-5 w-5" />}>
+                <FormField label="Откуда" inlineLabel>
+                  <MobileTapScale className="block w-full">
                   <ItemSelector
                     items={primarySelectItems}
                     selectedIds={primaryItemId ? [primaryItemId] : []}
-                    onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                    onChange={(ids) => {
+                      setPrimaryItemId(ids[0] ?? null);
+                      if (step === 4) tryAutoAdvanceRef.current();
+                    }}
                     selectionMode="single"
                     placeholder="Откуда"
                     getItemTypeLabel={getItemTypeLabel}
@@ -752,12 +880,17 @@ export function MobileAddTransactionWizard({
                     itemCounts={itemTxCounts}
                     disabled={false}
                   />
+                  </MobileTapScale>
                 </FormField>
-                <FormField label="Куда" inlineLabel icon={<Wallet className="h-5 w-5" />}>
+                <FormField label="Куда" inlineLabel>
+                  <MobileTapScale className="block w-full">
                   <ItemSelector
                     items={counterpartySelectItems.filter((it) => it.id !== primaryItemId)}
                     selectedIds={counterpartyItemId ? [counterpartyItemId] : []}
-                    onChange={(ids) => setCounterpartyItemId(ids[0] ?? null)}
+                    onChange={(ids) => {
+                      setCounterpartyItemId(ids[0] ?? null);
+                      if (step === 4) tryAutoAdvanceRef.current();
+                    }}
                     selectionMode="single"
                     placeholder="Куда"
                     getItemTypeLabel={getItemTypeLabel}
@@ -769,14 +902,19 @@ export function MobileAddTransactionWizard({
                     getItemBalance={getItemDisplayBalanceCents}
                     itemCounts={itemTxCounts}
                   />
+                  </MobileTapScale>
                 </FormField>
               </>
             ) : (
-              <FormField label="Актив / обязательство" inlineLabel icon={<Wallet className="h-5 w-5" />}>
+              <FormField label="" inlineLabel>
+                <MobileTapScale className="block w-full">
                 <ItemSelector
                   items={primarySelectItems}
                   selectedIds={primaryItemId ? [primaryItemId] : []}
-                  onChange={(ids) => setPrimaryItemId(ids[0] ?? null)}
+                  onChange={(ids) => {
+                    setPrimaryItemId(ids[0] ?? null);
+                    if (step === 4) tryAutoAdvanceRef.current();
+                  }}
                   selectionMode="single"
                   placeholder="Выберите"
                   getItemTypeLabel={getItemTypeLabel}
@@ -789,66 +927,190 @@ export function MobileAddTransactionWizard({
                   itemCounts={itemTxCounts}
                   disabled={false}
                 />
+                </MobileTapScale>
               </FormField>
             )}
             {primaryIsMoex && (
-              <TextField
-                label="Количество лотов"
-                value={primaryQuantityLots}
-                onChange={(e) => setPrimaryQuantityLots(e.target.value)}
-                inputMode="numeric"
-                placeholder="Например: 10"
-              />
+              <MobileTapScale className="block w-full">
+                <TextField
+                  label="Количество лотов"
+                  value={primaryQuantityLots}
+                  onChange={(e) => setPrimaryQuantityLots(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="Например: 10"
+                />
+              </MobileTapScale>
             )}
             {primaryIsCrypto && (
-              <TextField
-                label="Количество (единиц)"
-                value={primaryQuantityUnitsStr}
-                onChange={(e) => setPrimaryQuantityUnitsStr(e.target.value)}
-                inputMode="decimal"
-                placeholder="Например: 0.5"
-              />
+              <MobileTapScale className="block w-full">
+                <TextField
+                  label="Количество (единиц)"
+                  value={primaryQuantityUnitsStr}
+                  onChange={(e) => setPrimaryQuantityUnitsStr(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="Например: 0.5"
+                />
+              </MobileTapScale>
             )}
             {isTransfer && counterpartyIsMoex && (
-              <TextField
-                label="Количество лотов (куда)"
-                value={counterpartyQuantityLots}
-                onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
-                inputMode="numeric"
-                placeholder="Например: 10"
-              />
+              <MobileTapScale className="block w-full">
+                <TextField
+                  label="Количество лотов (куда)"
+                  value={counterpartyQuantityLots}
+                  onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="Например: 10"
+                />
+              </MobileTapScale>
             )}
             {isTransfer && counterpartyIsCrypto && (
-              <TextField
-                label="Количество (единиц) — куда"
-                value={counterpartyQuantityUnitsStr}
-                onChange={(e) => setCounterpartyQuantityUnitsStr(e.target.value)}
-                inputMode="decimal"
-                placeholder="Например: 0.5"
-              />
+              <MobileTapScale className="block w-full">
+                <TextField
+                  label="Количество (единиц) — куда"
+                  value={counterpartyQuantityUnitsStr}
+                  onChange={(e) => setCounterpartyQuantityUnitsStr(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="Например: 0.5"
+                />
+              </MobileTapScale>
+            )}
+          </div>
+            {step === 4 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
             )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step === 6 && (
-          <FormField label="Категория" inlineLabel icon={<Tag className="h-5 w-5" />}>
+        {flowType === "SIMPLE" && step >= 5 && (
+          <div ref={(el) => { stepRefs.current[4] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Banknote className="h-5 w-5 shrink-0" />
+              Сумма
+            </p>
+            <div className="grid gap-4">
+              <FormField label="" inlineLabel>
+                <MobileTapScale className="block w-full">
+                <div className="relative [&_input]:!text-base">
+                  <TextField
+                    label=""
+                    currencyCode={primaryCurrencyCode ?? undefined}
+                    value={amountStr}
+                    onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
+                    onBlur={() => {
+                      setAmountStr((prev) => normalizeRubOnBlur(prev));
+                      if (step === 5) tryAutoAdvanceRef.current();
+                    }}
+                    inputMode="decimal"
+                    placeholder="Сумма"
+                    className={amountStr ? "pr-10" : undefined}
+                  />
+                  {amountStr && (
+                    <button
+                      type="button"
+                      onClick={() => setAmountStr("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 shrink-0 items-center justify-center rounded-md touch-manipulation"
+                      style={{ color: PLACEHOLDER_COLOR_DARK }}
+                      aria-label="Очистить поле"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                </MobileTapScale>
+              </FormField>
+              {isCrossCurrencyTransfer && (
+                <FormField label="Сумма поступления" inlineLabel>
+                  <MobileTapScale className="block w-full">
+                  <div className="relative [&_input]:!text-base">
+                    <TextField
+                      label=""
+                      currencyCode={counterpartyCurrencyCode ?? undefined}
+                      value={amountCounterpartyStr}
+                      onChange={(e) => setAmountCounterpartyStr(formatRubInput(e.target.value))}
+                      onBlur={() => {
+                        setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev));
+                        if (step === 5) tryAutoAdvanceRef.current();
+                      }}
+                      inputMode="decimal"
+                      placeholder="Сумма поступления"
+                      className={amountCounterpartyStr ? "pr-10" : undefined}
+                    />
+                    {amountCounterpartyStr && (
+                      <button
+                        type="button"
+                        onClick={() => setAmountCounterpartyStr("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 shrink-0 items-center justify-center rounded-md touch-manipulation"
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                        aria-label="Очистить поле"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  </MobileTapScale>
+                </FormField>
+              )}
+            </div>
+            {step === 5 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
+            )}
+          </div>
+        )}
+
+        {flowType === "SIMPLE" && step >= 6 && (
+          <div ref={(el) => { stepRefs.current[5] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Tag className="h-5 w-5 shrink-0" />
+              Категория
+            </p>
+          <FormField label="" inlineLabel>
+            <MobileTapScale className="block w-full">
             <CategorySelector
               categoryNodes={categoryNodes}
               selectedPath={selectedCategoryPath}
-              onChange={(path) => (path ? applyCategorySelection(path.l1, path.l2, path.l3) : applyCategorySelection("", "", ""))}
+              onChange={(path) => {
+                path ? applyCategorySelection(path.l1, path.l2, path.l3) : applyCategorySelection("", "", "");
+                if (step === 6) tryAutoAdvanceRef.current();
+              }}
               placeholder="Категория"
               direction={isTransfer ? undefined : direction}
               disabled={false}
             />
+            </MobileTapScale>
           </FormField>
+            {step === 6 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
+            )}
+          </div>
         )}
 
-        {flowType === "SIMPLE" && step === 7 && (
-          <FormField label="Контрагент" inlineLabel icon={<User className="h-5 w-5" />}>
+        {flowType === "SIMPLE" && step >= 7 && (
+          <div ref={(el) => { stepRefs.current[6] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <User className="h-5 w-5 shrink-0" />
+              Контрагент
+            </p>
+          <FormField label="" inlineLabel>
+            <MobileTapScale className="block w-full">
             <CounterpartySelector
               counterparties={selectableCounterparties}
               selectedIds={counterpartyId ? [counterpartyId] : []}
-              onChange={(ids) => setCounterpartyId(ids[0] ?? null)}
+              onChange={(ids) => {
+                setCounterpartyId(ids[0] ?? null);
+                if (step === 7) tryAutoAdvanceRef.current();
+              }}
               selectionMode="single"
               placeholder="Контрагент"
               industries={industries}
@@ -856,20 +1118,56 @@ export function MobileAddTransactionWizard({
               counterpartyCounts={counterpartyTxCounts}
               apiBase={API_BASE}
             />
+            </MobileTapScale>
           </FormField>
+            {step === 7 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
+            )}
+          </div>
         )}
 
-        {flowType === "SIMPLE" && step === 8 && (
-          <FormField label="Комментарий" inlineLabel icon={<MessageSquare className="h-5 w-5" />}>
-            <div className="relative [&_div.relative.flex.items-center]:h-10 [&_input]:text-sm">
-              <AuthInput value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий" className="w-full" />
+        {flowType === "SIMPLE" && step >= 8 && (
+          <div ref={(el) => { stepRefs.current[7] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <MessageSquare className="h-5 w-5 shrink-0" />
+              Комментарий
+            </p>
+          <FormField label="" inlineLabel>
+            <MobileTapScale className="block w-full">
+            <div className="relative [&_div.relative.flex.items-center]:h-10">
+              <AuthInput
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                onBlur={() => { if (step === 8) tryAutoAdvanceRef.current(); }}
+                placeholder="Комментарий"
+                className="w-full text-base"
+              />
             </div>
+            </MobileTapScale>
           </FormField>
+            {step === 8 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
+            )}
+          </div>
         )}
 
-        {flowType === "SIMPLE" && step === 9 && (
+        {flowType === "SIMPLE" && step >= 9 && (
+          <div ref={(el) => { stepRefs.current[8] = el; }} className="wizard-step-enter">
+            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Link2 className="h-5 w-5 shrink-0" />
+              Связанный актив
+            </p>
           <div className="grid gap-4">
-            <FormField label="Связанный актив" inlineLabel icon={<Link2 className="h-5 w-5" />}>
+            <FormField label="" inlineLabel>
+              <MobileTapScale className="block w-full">
               <ItemSelector
                 items={itemsForRelatedSelector}
                 selectedIds={relatedItemId ? [relatedItemId] : []}
@@ -877,6 +1175,7 @@ export function MobileAddTransactionWizard({
                   const next = ids[0] ?? null;
                   setRelatedItemId(next);
                   if (next == null) setAssetLinkType(null);
+                  if (step === 9) tryAutoAdvanceRef.current();
                 }}
                 selectionMode="single"
                 placeholder="Выберите"
@@ -890,12 +1189,17 @@ export function MobileAddTransactionWizard({
                 itemCounts={itemTxCounts}
                 disabled={false}
               />
+              </MobileTapScale>
             </FormField>
             {relatedItemId != null && direction !== "TRANSFER" && (
-              <FormField label="Тип привязки" inlineLabel icon={<Link2 className="h-5 w-5" />}>
+              <FormField label="Тип привязки" inlineLabel>
+                <MobileTapScale className="block w-full">
                 <SelectField
                   value={assetLinkType ?? "__none"}
-                  onValueChange={(v) => setAssetLinkType(v === "__none" ? null : (v as AssetLinkType))}
+                  onValueChange={(v) => {
+                    setAssetLinkType(v === "__none" ? null : (v as AssetLinkType));
+                    if (step === 9) tryAutoAdvanceRef.current();
+                  }}
                   options={[
                     { value: "__none", label: "Не выбрано" },
                     ...(direction === "EXPENSE"
@@ -911,12 +1215,22 @@ export function MobileAddTransactionWizard({
                   ]}
                   placeholder="Тип привязки"
                 />
+                </MobileTapScale>
               </FormField>
+            )}
+          </div>
+            {step === 9 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
             )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step === 10 && (
+        {flowType === "SIMPLE" && step >= 10 && (
+          <div ref={(el) => { stepRefs.current[9] = el; }} className="wizard-step-enter">
           <div className="grid gap-4">
             <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
               Разделение транзакции по категориям (опционально)
@@ -947,42 +1261,46 @@ export function MobileAddTransactionWizard({
                       Часть {idx + 1}
                     </div>
                     <div className="grid gap-3">
-                      <TextField
-                        label=""
-                        currencyCode={primaryCurrencyCode ?? undefined}
-                        value={part.amountStr}
-                        onChange={(e) => {
-                          const next = [...splitParts];
-                          next[idx] = { ...next[idx], amountStr: formatRubInput(e.target.value) };
-                          setSplitParts(next);
-                        }}
-                        onBlur={() => {
-                          const next = [...splitParts];
-                          next[idx] = { ...next[idx], amountStr: normalizeRubOnBlur(next[idx].amountStr) };
-                          setSplitParts(next);
-                        }}
-                        inputMode="decimal"
-                        placeholder="Сумма"
-                      />
-                      <CategorySelector
-                        categoryNodes={categoryNodes}
-                        direction={direction === "TRANSFER" ? undefined : direction}
-                        selectedPath={
-                          part.categoryId != null
-                            ? (() => {
-                                const [l1, l2, l3] = getCategoryParts(part.categoryId);
-                                return { l1: l1 ?? "", l2: l2 ?? "", l3: l3 ?? "" };
-                              })()
-                            : null
-                        }
-                        onChange={(path) => {
-                          const next = [...splitParts];
-                          const id = path ? resolveCategoryId(path.l1, path.l2, path.l3) : null;
-                          next[idx] = { ...next[idx], categoryId: id ?? null };
-                          setSplitParts(next);
-                        }}
-                        placeholder="Категория"
-                      />
+                      <MobileTapScale className="block w-full">
+                        <TextField
+                          label=""
+                          currencyCode={primaryCurrencyCode ?? undefined}
+                          value={part.amountStr}
+                          onChange={(e) => {
+                            const next = [...splitParts];
+                            next[idx] = { ...next[idx], amountStr: formatRubInput(e.target.value) };
+                            setSplitParts(next);
+                          }}
+                          onBlur={() => {
+                            const next = [...splitParts];
+                            next[idx] = { ...next[idx], amountStr: normalizeRubOnBlur(next[idx].amountStr) };
+                            setSplitParts(next);
+                          }}
+                          inputMode="decimal"
+                          placeholder="Сумма"
+                        />
+                      </MobileTapScale>
+                      <MobileTapScale className="block w-full">
+                        <CategorySelector
+                          categoryNodes={categoryNodes}
+                          direction={direction === "TRANSFER" ? undefined : direction}
+                          selectedPath={
+                            part.categoryId != null
+                              ? (() => {
+                                  const [l1, l2, l3] = getCategoryParts(part.categoryId);
+                                  return { l1: l1 ?? "", l2: l2 ?? "", l3: l3 ?? "" };
+                                })()
+                              : null
+                          }
+                          onChange={(path) => {
+                            const next = [...splitParts];
+                            const id = path ? resolveCategoryId(path.l1, path.l2, path.l3) : null;
+                            next[idx] = { ...next[idx], categoryId: id ?? null };
+                            setSplitParts(next);
+                          }}
+                          placeholder="Категория"
+                        />
+                      </MobileTapScale>
                     </div>
                     {splitParts.length > 1 && (
                       <Button
@@ -1015,62 +1333,221 @@ export function MobileAddTransactionWizard({
               </div>
             )}
           </div>
+            {step === 10 && (
+              <div className="flex justify-center pt-6 pb-2">
+                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
+                  <ChevronDown className="size-5" />
+                </IconButton>
+              </div>
+            )}
+          </div>
         )}
 
-        {flowType === "SIMPLE" && step === 11 && (
-          <div className="grid gap-3 text-sm">
-            <p className="font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
-              Проверьте данные
+        {flowType === "SIMPLE" && step >= 11 && (
+          <div ref={(el) => { stepRefs.current[10] = el; }} className="wizard-step-enter">
+          <div className="flex flex-col gap-4">
+            <p className="font-medium text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+              Так транзакция будет отображаться в списке
             </p>
-            <div className="rounded-lg border border-sidebar-border p-3 space-y-2" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-              <p>Сумма: {primaryCurrencyCode ? `${primaryCurrencyCode} ` : ""}{amountStr || "—"}</p>
-              <p>Дата: {date || "—"} {time ? ` ${time}` : ""}</p>
-              <p>Направление: {direction === "INCOME" ? "Доход" : direction === "EXPENSE" ? "Расход" : "Перевод"}</p>
-              <p>Тип: {formTransactionType === "ACTUAL" ? "Фактическая" : "Плановая"}</p>
-              <p>Актив: {primaryItemId ? itemsById.get(primaryItemId)?.name ?? primaryItemId : "—"}</p>
-              {isTransfer && <p>Куда: {counterpartyItemId ? itemsById.get(counterpartyItemId)?.name ?? counterpartyItemId : "—"}</p>}
-              {!isTransfer && <p>Категория: {resolveCategoryId(cat1, cat2, cat3) ? [cat1, cat2, cat3].filter(Boolean).join(" / ") || "—" : "—"}</p>}
-              <p>Контрагент: {counterpartyId ? counterpartiesById.get(counterpartyId)?.name ?? counterpartyId : "—"}</p>
-              {comment && <p>Комментарий: {comment}</p>}
-              {relatedItemId && <p>Связанный актив: {itemsById.get(relatedItemId)?.name ?? relatedItemId}</p>}
-              {splitEnabled && <p>Разделение: по частям</p>}
-            </div>
+            {(() => {
+              const primaryAmountCents = Math.max(0, parseRubToCents(normalizeRubOnBlur(amountStr)) ?? 0);
+              const counterpartyAmountCents = isCrossCurrencyTransfer
+                ? Math.max(0, parseRubToCents(normalizeRubOnBlur(amountCounterpartyStr)) ?? 0)
+                : primaryAmountCents;
+              const currencyCode = primaryCurrencyCode ?? "RUB";
+              const rightCurrencyCode = counterpartyCurrencyCode ?? currencyCode;
+              const visibleCat = [cat1?.trim(), cat2?.trim(), cat3?.trim()].map((s) => (s && s !== "—" ? s : null));
+              const lastCatIndex = visibleCat[2] ? 2 : visibleCat[1] ? 1 : visibleCat[0] ? 0 : -1;
+              const displayCategoryLabel = lastCatIndex >= 0 ? visibleCat[lastCatIndex]! : (isTransfer ? "Перевод" : "—");
+              const textColor = ACTIVE_TEXT_DARK;
+              const isIncome = direction === "INCOME";
+              const row1HighlightColor = isIncome ? GREEN_TRANSACTION : isTransfer ? ACCENT2 : RED;
+              const row1Bg = MODAL_BG;
+              const amountColor = isTransfer ? RED : isIncome ? GREEN : RED;
+              const rightAmountColor = isTransfer ? GREEN : textColor;
+              const accountName = primaryItemId ? itemsById.get(primaryItemId)?.name ?? "—" : "—";
+              const accountToName = counterpartyItemId ? itemsById.get(counterpartyItemId)?.name ?? "—" : "—";
+              const counterpartyName = previewCounterparty ? buildCounterpartyName(previewCounterparty) : "—";
+              const commentText = comment?.trim() || null;
+              const primaryItem = primaryItemId ? itemsById.get(primaryItemId) ?? null : null;
+              const counterpartyItem = counterpartyItemId ? itemsById.get(counterpartyItemId) ?? null : null;
+              const primaryCounterparty = getItemCounterparty(primaryItemId);
+              const counterpartyItemCounterparty = getItemCounterparty(counterpartyItemId);
+              const CounterpartyFallbackIcon = previewCounterparty?.entity_type === "PERSON" ? User : Building2;
+              return (
+                <div className="flex flex-col gap-0 rounded-lg overflow-hidden min-w-0 w-full border border-border">
+                  <div className="flex items-stretch rounded-lg min-w-0 w-full">
+                    <div
+                      className="shrink-0 rounded-l-lg"
+                      style={{
+                        width: 10,
+                        backgroundColor: row1HighlightColor,
+                        boxShadow: `0 0 250px 50px ${row1HighlightColor}`,
+                      }}
+                    />
+                    <div
+                      className="flex items-center justify-between gap-2 flex-1 min-w-0 rounded-r-lg"
+                      style={{ padding: "10px 12px", backgroundColor: row1Bg }}
+                    >
+                      {isTransfer ? (
+                        <>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <CurrencyChip code={currencyCode} className="text-sm" />
+                            <span className="tabular-nums truncate" style={{ fontSize: 20, fontWeight: 600, color: amountColor }}>
+                              −{formatAmount(primaryAmountCents)}
+                            </span>
+                          </div>
+                          <div className="shrink-0" style={{ width: 28, height: 28 }}>
+                            <CardIcon
+                              src={transferIcon3dPath}
+                              alt=""
+                              size={28}
+                              shadow
+                              fallbackIcon={ArrowRight}
+                              fallbackIconColor={ACCENT2}
+                              onError={() => setTransferIconFormat(null)}
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 min-w-0 justify-end">
+                            <CurrencyChip code={rightCurrencyCode} className="text-sm" />
+                            <span className="tabular-nums truncate" style={{ fontSize: 20, fontWeight: 600, color: rightAmountColor }}>
+                              +{formatAmount(counterpartyAmountCents)}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2 min-w-0 shrink-0">
+                            <div className="shrink-0" style={{ width: 28, height: 28 }}>
+                              {categoryImageSrc && !categoryShowFallbackIcon ? (
+                                <CardIcon
+                                  src={categoryImageSrc}
+                                  alt=""
+                                  size={28}
+                                  shadow
+                                  fallbackIcon={CategoryIconFallback}
+                                  fallbackIconColor={ACCENT2}
+                                  onError={() => { categoryImageOnError(); setCategoryIconFormat(null); }}
+                                />
+                              ) : (
+                                <div className="flex items-center justify-center w-full h-full">
+                                  <CategoryIconFallback strokeWidth={1.5} style={{ width: 24, height: 24, color: ACCENT2 }} />
+                                </div>
+                              )}
+                            </div>
+                            <span className="truncate text-sm font-medium" style={{ color: textColor }}>
+                              {displayCategoryLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 min-w-0 justify-end">
+                            <CurrencyChip code={currencyCode} className="text-sm" />
+                            <span className="tabular-nums truncate" style={{ fontSize: 20, fontWeight: 600, color: amountColor }}>
+                              {isIncome ? "+" : "−"}
+                              {formatAmount(primaryAmountCents)}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div
+                    className="flex items-center justify-between gap-3 flex-wrap"
+                    style={{ padding: "8px 12px", paddingBottom: commentText ? 6 : 10, backgroundColor: row1Bg }}
+                  >
+                    <div className="flex items-center gap-2 min-w-0 max-w-[50%]">
+                      <div className="shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
+                        {primaryItem ? (
+                          <AssetItemIcon
+                            item={primaryItem}
+                            counterparty={primaryCounterparty}
+                            apiBase={API_BASE}
+                            size={20}
+                            fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                            alt=""
+                          />
+                        ) : (
+                          <Wallet className="h-5 w-5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                        )}
+                      </div>
+                      <span className="truncate text-sm" style={{ color: textColor }}>{accountName}</span>
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0 max-w-[50%]">
+                      {isTransfer ? (
+                        <>
+                          <span className="shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
+                            {counterpartyItem ? (
+                              <AssetItemIcon
+                                item={counterpartyItem}
+                                counterparty={counterpartyItemCounterparty}
+                                apiBase={API_BASE}
+                                size={20}
+                                fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                                alt=""
+                              />
+                            ) : (
+                              <Wallet className="h-5 w-5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                            )}
+                          </span>
+                          <span className="truncate text-sm" style={{ color: textColor }}>{accountToName}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
+                            {previewCounterparty ? (
+                              counterpartyLogoUrl && !counterpartyShowFallbackIcon ? (
+                                <CardIcon
+                                  src={counterpartyLogoUrl}
+                                  alt=""
+                                  size={20}
+                                  shadow={false}
+                                  objectFit="contain"
+                                  fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                                  onError={counterpartyLogoOnError}
+                                />
+                              ) : (
+                                <CardIcon
+                                  src={null}
+                                  alt=""
+                                  fallbackIcon={CounterpartyFallbackIcon}
+                                  size={20}
+                                  shadow={false}
+                                  fallbackIconColor={PLACEHOLDER_COLOR_DARK}
+                                />
+                              )
+                            ) : (
+                              <User className="h-5 w-5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                            )}
+                          </span>
+                          <span className="truncate text-sm" style={{ color: textColor }}>{counterpartyName}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {commentText && (
+                    <div className="flex items-start gap-2 min-w-0" style={{ paddingLeft: 12, paddingRight: 12, paddingBottom: 10, backgroundColor: row1Bg }}>
+                      <MessageSquare className="h-4 w-4 shrink-0 mt-0.5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+                      <span className="text-xs break-words min-w-0" style={{ color: PLACEHOLDER_COLOR_DARK }}>{commentText}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            {step === 11 && (
+              <Button
+                type="button"
+                variant="authPrimary"
+                disabled={submitting}
+                className="w-full rounded-lg border-0 text-sm py-3"
+                onClick={handleSubmit}
+                style={{ "--auth-primary-bg": "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #9487F3 100%)", "--auth-primary-bg-hover": "linear-gradient(315deg, #9487F3 0%, #6C5DD7 79%, #483BA6 100%)" } as React.CSSProperties}
+              >
+                {submitting ? "Создание…" : "Добавить"}
+              </Button>
+            )}
+          </div>
           </div>
         )}
       </div>
-
-      {/* Bottom bar: step indicator + buttons (не показываем на экране выбора типа) */}
-      {!isTypeSelection && (
-      <div
-        className="shrink-0 flex flex-col gap-3 px-4 pt-3 pb-[max(env(safe-area-inset-bottom), 12px)]"
-        style={{ backgroundColor: MODAL_BG }}
-      >
-        {showStepIndicator && (
-          <WizardStepIndicator
-            totalSteps={SIMPLE_WIZARD_STEPS}
-            currentStep={step}
-            aria-label={`Шаг ${step} из ${SIMPLE_WIZARD_STEPS}`}
-          />
-        )}
-        <div className="flex items-center gap-2">
-          {flowType === "SIMPLE" && step >= 1 && !isLastStep && (
-            <Button type="button" variant="glass" className="rounded-lg shrink-0" onClick={goBack} style={{ "--glass-bg": "rgba(108, 93, 215, 0.22)", "--glass-bg-hover": "rgba(108, 93, 215, 0.4)" } as React.CSSProperties}>
-              Назад
-            </Button>
-          )}
-          <Button
-              type="button"
-              variant="authPrimary"
-              disabled={submitting || (step < SIMPLE_WIZARD_STEPS && !canGoNext())}
-              className="flex-1 rounded-lg border-0 text-sm"
-              onClick={isLastStep ? handleSubmit : handleNextOrSubmit}
-              style={{ "--auth-primary-bg": "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #9487F3 100%)", "--auth-primary-bg-hover": "linear-gradient(315deg, #9487F3 0%, #6C5DD7 79%, #483BA6 100%)" } as React.CSSProperties}
-            >
-              {isLastStep ? (submitting ? "Создание…" : "Создать") : "Далее"}
-            </Button>
-        </div>
-      </div>
-      )}
     </div>
   );
 

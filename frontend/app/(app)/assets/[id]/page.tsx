@@ -2817,14 +2817,14 @@ export default function AssetDetailPage() {
                 <span className="text-sm font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                   {getItemTypeLabel(item)}
                 </span>
-                <div className="flex items-center gap-2 flex-wrap justify-center max-w-full">
-                  <h2 className="text-3xl font-medium text-center break-words" style={{ color: ACTIVE_TEXT_DARK }}>
-                    {item.name}
-                  </h2>
+                <h2 className="text-center max-w-full text-3xl font-medium break-words" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {item.name}
                   {item.currency_code && (
-                    <CurrencyChip code={item.currency_code} />
+                    <span className="inline-flex ml-2 align-baseline shrink-0">
+                      <CurrencyChip code={item.currency_code} />
+                    </span>
                   )}
-                </div>
+                </h2>
                 {item.counterparty_id && !itemCounterparty && (
                   <div className="flex items-center gap-1.5">
                     <Skeleton className="h-5 w-5 shrink-0 rounded-full" circle />
@@ -2868,7 +2868,7 @@ export default function AssetDetailPage() {
               )}
               {!costs && !isDesktop ? (
                 <div
-                  className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none pl-4 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   style={{ WebkitOverflowScrolling: "touch" }}
                 >
                   <div className="shrink-0 w-4 min-w-4" aria-hidden />
@@ -2938,7 +2938,7 @@ export default function AssetDetailPage() {
                     ) : (
                       <>
                         <div
-                          className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                          className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none pl-4 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                           style={{ WebkitOverflowScrolling: "touch" }}
                         >
                         <div className="shrink-0 w-4 min-w-4" aria-hidden />
@@ -2951,57 +2951,52 @@ export default function AssetDetailPage() {
                             onClick={() => openCostOverlay(kindToKey(primaryRow.kind))}
                             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(primaryRow.kind)); } }}
                           >
-                            <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3" style={{ backgroundColor: "#25243F" }}>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 mb-1 min-w-0">
-                                  <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
-                                  {!isDesktop && loadingCostHistory ? (
-                                    <Skeleton className="h-5 w-14 shrink-0 rounded-md" />
-                                  ) : mobilePrimaryGrowthPercent != null ? (
-                                    <span
-                                      className="shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums"
-                                      style={{
-                                        borderColor: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
-                                        backgroundColor: mobilePrimaryGrowthPercent > 0 ? "rgba(34, 197, 94, 0.15)" : mobilePrimaryGrowthPercent < 0 ? "rgba(239, 68, 68, 0.15)" : "transparent",
-                                        color: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
-                                      }}
-                                    >
-                                      {mobilePrimaryGrowthPercent > 0 ? "+" : ""}{mobilePrimaryGrowthPercent.toFixed(1)}%
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="flex items-center gap-2 min-w-0">
+                            <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex flex-col gap-1" style={{ backgroundColor: "#25243F" }}>
+                              <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                              <div className="flex items-center justify-between gap-2 min-w-0">
+                                <div className="min-w-0">
                                   {primaryRow.valueCents != null ? (
                                     <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.875rem", fontWeight: 500 }} />
                                   ) : (
                                     <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
                                   )}
                                 </div>
+                                {!isDesktop && loadingCostHistory ? (
+                                  <Skeleton className="h-6 w-14 shrink-0 rounded-md" />
+                                ) : mobilePrimaryGrowthPercent != null ? (
+                                  <span
+                                    className="shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums"
+                                    style={{
+                                      borderColor: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
+                                      backgroundColor: mobilePrimaryGrowthPercent > 0 ? "rgba(34, 197, 94, 0.15)" : mobilePrimaryGrowthPercent < 0 ? "rgba(239, 68, 68, 0.15)" : "transparent",
+                                      color: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
+                                    }}
+                                  >
+                                    {mobilePrimaryGrowthPercent > 0 ? "+" : ""}{mobilePrimaryGrowthPercent.toFixed(1)}%
+                                  </span>
+                                ) : null}
                               </div>
-                              {!isDesktop && loadingCostHistory ? (
-                                <Skeleton className="h-10 w-16 shrink-0 rounded-[9px]" />
-                              ) : primaryValueMiniChartSeries.length > 1 ? (
-                                <AssetCardMiniChart series={primaryValueMiniChartSeries} itemId={item.id} strokeColor={ACCENT} />
-                              ) : null}
                             </div>
                           </div>
                         )}
                         {otherRows.map((row) => (
                           <div
                             key={row.kind}
-                            className="shrink-0 w-[260px] snap-start snap-always rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px] cursor-pointer active:opacity-95"
+                            className="shrink-0 w-[min(85vw,320px)] snap-start snap-always rounded-[9px] px-4 py-3 flex flex-col gap-1 min-h-[72px] cursor-pointer active:opacity-95"
                             style={{ backgroundColor: "#25243F" }}
                             role="button"
                             tabIndex={0}
                             onClick={() => openCostOverlay(kindToKey(row.kind))}
                             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(row.kind)); } }}
                           >
-                            <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
-                            {row.valueCents != null ? (
-                              <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "0.875rem", fontWeight: 500 }} />
-                            ) : (
-                              <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
-                            )}
+                            <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
+                            <div className="flex items-center min-w-0">
+                              {row.valueCents != null ? (
+                                <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.875rem", fontWeight: 500 }} />
+                              ) : (
+                                <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                              )}
+                            </div>
                           </div>
                         ))}
                         <div className="shrink-0 w-4 min-w-4" aria-hidden />

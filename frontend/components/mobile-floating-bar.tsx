@@ -6,6 +6,7 @@ import { Wallet, ArrowLeftRight, Plus } from "lucide-react";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
 import { ACCENT, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
+import { MobileTapScale } from "@/components/mobile-tap-scale";
 
 const ASSETS_HREF = "/assets";
 const TRANSACTIONS_HREF = "/transactions";
@@ -24,18 +25,20 @@ function NavButton({
   active: boolean;
 }) {
   return (
-    <Link
-      href={href}
-      aria-label={label}
-      className={cn(
-        "flex flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-2 transition-colors",
-        "hover:bg-sidebar-accent/50"
-      )}
-      style={{ color: active ? ACCENT : PLACEHOLDER_COLOR_DARK }}
-    >
-      <Icon className="size-6" strokeWidth={1.5} />
-      <span className="text-[10px] font-medium leading-tight">{label}</span>
-    </Link>
+    <MobileTapScale className="flex flex-1 min-w-0">
+      <Link
+        href={href}
+        aria-label={label}
+        className={cn(
+          "flex flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-2 transition-colors min-w-0",
+          "hover:bg-sidebar-accent/50"
+        )}
+        style={{ color: active ? ACCENT : PLACEHOLDER_COLOR_DARK }}
+      >
+        <Icon className="size-6" strokeWidth={1.5} />
+        <span className="text-[10px] font-medium leading-tight">{label}</span>
+      </Link>
+    </MobileTapScale>
   );
 }
 
@@ -69,17 +72,19 @@ export function MobileFloatingBar() {
           label="Активы"
           active={!!isAssets}
         />
-        <Link
-          href={addHref}
-          aria-label={addLabel}
-          className={cn(
-            "flex shrink-0 items-center justify-center rounded-full -my-1 mx-1",
-            "h-12 w-12 shadow-md transition-colors hover:opacity-90"
-          )}
-          style={{ backgroundColor: ACCENT }}
-        >
-          <Plus className="size-6" strokeWidth={2.5} style={{ color: "white", opacity: 0.85 }} />
-        </Link>
+        <MobileTapScale>
+          <Link
+            href={addHref}
+            aria-label={addLabel}
+            className={cn(
+              "flex shrink-0 items-center justify-center rounded-full -my-1 mx-1",
+              "h-12 w-12 shadow-md transition-colors hover:opacity-90"
+            )}
+            style={{ backgroundColor: ACCENT }}
+          >
+            <Plus className="size-6" strokeWidth={2.5} style={{ color: "white", opacity: 0.85 }} />
+          </Link>
+        </MobileTapScale>
         <NavButton
           href={TRANSACTIONS_HREF}
           icon={ArrowLeftRight}

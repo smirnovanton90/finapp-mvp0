@@ -1,6 +1,10 @@
+"use client";
+
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
+import { MobileTapScale } from "@/components/mobile-tap-scale";
+import { useSidebar } from "@/components/ui/sidebar-context";
 import { cn } from "@/lib/utils";
 
 type IconButtonProps = React.ComponentProps<typeof Button>;
@@ -14,7 +18,8 @@ export function IconButton({
   children,
   ...rest
 }: IconButtonProps & { appearance?: "default" | "inactive" }) {
-  return (
+  const { isDesktop } = useSidebar();
+  const button = (
     <Button
       {...rest}
       variant={variant}
@@ -37,6 +42,8 @@ export function IconButton({
       {children}
     </Button>
   );
+  if (isDesktop) return button;
+  return <MobileTapScale>{button}</MobileTapScale>;
 }
 
 

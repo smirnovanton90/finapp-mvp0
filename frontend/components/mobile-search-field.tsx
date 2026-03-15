@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, forwardRef } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
-import { ACCENT, ACCENT2, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK } from "@/lib/colors";
+import { ACCENT_FILL_LIGHT, ACCENT_FILL_MEDIUM, PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, ACCENT } from "@/lib/colors";
 
 export interface MobileSearchFieldProps {
   /** Текущее значение поля. */
@@ -17,36 +17,42 @@ export interface MobileSearchFieldProps {
   "aria-label"?: string;
   /** Дополнительный класс для обёртки (MobileTapScale). */
   className?: string;
+  /** Не оборачивать в MobileTapScale (для использования внутри оверлея и т.п.). */
+  noTapScale?: boolean;
+}
+
+/** Стили поля поиска как у остальных полей: заливка ACCENT_FILL_LIGHT/ACCENT_FILL_MEDIUM, без обводки и подсветки. */
+export function getMobileSearchFieldStyle(focused: boolean, hasValue: boolean) {
+  const backgroundColor = focused || hasValue ? ACCENT_FILL_MEDIUM : ACCENT_FILL_LIGHT;
+  return { backgroundColor, boxShadow: "none" };
 }
 
 /**
  * Поле поиска для мобильной вёрстки: лупа слева, плейсхолдер, крестик сброса при вводе,
  * обводка и подсветка при фокусе, анимация при клике. Предназначено для переиспользования.
  */
-export function MobileSearchField({
-  value,
-  onChange,
-  placeholder = "Поиск",
-  "aria-label": ariaLabel = "Поиск",
-  className,
-}: MobileSearchFieldProps) {
-  const [focused, setFocused] = useState(false);
+export const MobileSearchField = forwardRef<HTMLInputElement, MobileSearchFieldProps>(
+  function MobileSearchField(
+    {
+      value,
+      onChange,
+      placeholder = "Поиск",
+      "aria-label": ariaLabel = "Поиск",
+      className,
+      noTapScale = false,
+    },
+    ref
+  ) {
+    const [focused, setFocused] = useState(false);
 
-  const hasValue = value.length > 0;
-  const bgOpacity = focused || hasValue ? "rgba(197, 191, 241, 0.32)" : "rgba(197, 191, 241, 0.18)";
-  const boxShadow = focused
-    ? `inset 0 -2px 0 0 ${ACCENT2}, 0 8px 25px -8px ${ACCENT2}`
-    : "none";
-  const iconColor = focused ? ACCENT : PLACEHOLDER_COLOR_DARK;
+    const hasValue = value.length > 0;
+    const style = getMobileSearchFieldStyle(focused, hasValue);
+    const iconColor = focused ? ACCENT : (hasValue ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK);
 
-  return (
-    <MobileTapScale className={className ?? "w-full"}>
+    const content = (
       <div
         className="relative flex items-center rounded-[9px] transition-[background-color,box-shadow] duration-200"
-        style={{
-          backgroundColor: bgOpacity,
-          boxShadow,
-        }}
+        style={style}
       >
         <Search
           className="absolute left-3 h-4 w-4 shrink-0 pointer-events-none transition-colors duration-200"
@@ -54,6 +60,7 @@ export function MobileSearchField({
           aria-hidden
         />
         <Input
+          ref={ref}
           type="text"
           placeholder={placeholder}
           value={value}
@@ -79,6 +86,15 @@ export function MobileSearchField({
           </button>
         )}
       </div>
-    </MobileTapScale>
-  );
-}
+    );
+
+    if (noTapScale) {
+      return <div className={className ?? "w-full"}>{content}</div>;
+    }
+    return (
+      <MobileTapScale className={className ?? "w-full"}>
+        {content}
+      </MobileTapScale>
+    );
+  }
+);

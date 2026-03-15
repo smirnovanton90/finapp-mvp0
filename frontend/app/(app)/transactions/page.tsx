@@ -3089,8 +3089,11 @@ function TransactionsView({
 
 
   const resetForm = () => {
-    setDate(new Date().toISOString().slice(0, 10));
-    setTime("");
+    const now = new Date();
+    setDate(now.toISOString().slice(0, 10));
+    setTime(
+      `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+    );
     setDirection("EXPENSE");
     setFormMode("STANDARD");
     setDebtDirection("I_PAID");
@@ -6662,22 +6665,20 @@ function TransactionsView({
                       </div>
                     ) : (
                       <div className="grid gap-2">
-                        {isDesktop && (
+                        {isDesktop && isTransfer && primaryItemId ? (
                           <div className="flex items-center justify-between">
-                            <Label>Сумма</Label>
-                            {isTransfer && primaryItemId && (
-                              <button
-                                type="button"
-                                onClick={handleFullAmountClick}
-                                className="text-sm font-medium text-violet-600 hover:underline"
-                              >
-                                Вся сумма
-                              </button>
-                            )}
+                            <Label style={{ color: ACTIVE_TEXT_DARK }}>Сумма</Label>
+                            <button
+                              type="button"
+                              onClick={handleFullAmountClick}
+                              className="text-sm font-medium text-violet-600 hover:underline"
+                            >
+                              Вся сумма
+                            </button>
                           </div>
-                        )}
+                        ) : null}
                         <FormField
-                          label="Сумма"
+                          label={isDesktop && isTransfer && primaryItemId ? "" : "Сумма"}
                           inlineLabel={!isDesktop}
                           icon={!isDesktop ? <Banknote className="h-5 w-5" /> : undefined}
                         >

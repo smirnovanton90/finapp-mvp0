@@ -961,6 +961,8 @@ export async function runImport(
 
   try {
     // 1. Контрагенты (если с такими реквизитами уже есть — используем существующего)
+    // Синонимы на бэкенде уникальны среди контрагентов: при импорте пропускаем уже «занятые» синонимы, чтобы не падать на дубликатах в файле.
+    const usedSynonyms = new Set<string>();
     const existingCounterparties = await fetchCounterparties({ include_deleted: false });
     const totalCp = data.counterparties.length;
     for (let i = 0; i < totalCp; i++) {
@@ -968,6 +970,12 @@ export async function runImport(
       const oldId = num(row.id);
       if (oldId == null) continue;
       report("Контрагенты", i + 1, totalCp);
+      const rawSynonyms = str(row.synonyms) ? str(row.synonyms).split(";").map((s) => s.trim()).filter(Boolean) : [];
+      const synonyms = rawSynonyms.filter((s) => {
+        if (usedSynonyms.has(s)) return false;
+        usedSynonyms.add(s);
+        return true;
+      });
       const entityType = (str(row.entity_type) || "PERSON") as "LEGAL" | "PERSON";
       const payload: CounterpartyCreate = {
         entity_type: entityType,
@@ -979,7 +987,7 @@ export async function runImport(
         first_name: str(row.first_name) || null,
         last_name: str(row.last_name) || null,
         middle_name: str(row.middle_name) || null,
-        synonyms: str(row.synonyms) ? str(row.synonyms).split(";").filter(Boolean) : [],
+        synonyms,
       };
       const existing = findExistingCounterparty(existingCounterparties, payload);
       if (existing) {
@@ -1003,6 +1011,13 @@ export async function runImport(
           } else {
             throw err;
           }
+        } else if (msg.includes("синоним") && synonyms.length > 0) {
+          // Один из синонимов уже используется другим контрагентом — создаём без синонимов
+          const payloadWithoutSynonyms: CounterpartyCreate = { ...payload, synonyms: [] };
+          const created = await createCounterparty(payloadWithoutSynonyms);
+          counterpartyIdMap.set(oldId, created.id);
+          existingCounterparties.push(created);
+          counts.counterparties += 1;
         } else {
           throw err;
         }

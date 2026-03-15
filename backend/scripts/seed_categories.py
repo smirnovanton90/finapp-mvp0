@@ -11,7 +11,7 @@ if os.path.basename(_backend_dir) == "backend" and _backend_dir not in sys.path:
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from category_seed_data import CATEGORY_ICON_BY_L1, CATEGORY_SEED
+from category_seed_data import CATEGORY_ICON_BY_L1, CATEGORY_ICON_BY_L2, CATEGORY_SEED
 from db import SessionLocal
 from models import Category, Goal, Transaction, TransactionChain, UserCategoryState
 
@@ -186,7 +186,11 @@ def seed_tree(session, items: list[dict], scope: str, parent_id: int | None) -> 
     for item in items:
         name = item["name"].strip()
         node_scope = item.get("scope", scope)
-        icon_name = normalize_icon(CATEGORY_ICON_BY_L1.get(name)) if parent_id is None else None
+        icon_name = (
+            normalize_icon(CATEGORY_ICON_BY_L1.get(name))
+            if parent_id is None
+            else normalize_icon(CATEGORY_ICON_BY_L2.get(name))
+        )
         category = upsert_category(
             session,
             name=name,

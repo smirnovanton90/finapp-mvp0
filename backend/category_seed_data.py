@@ -33,6 +33,14 @@ CATEGORY_ICON_BY_L1: dict[str, str] = {
     "Социальные выплаты": "Landmark",
     "Алименты полученные": "HandCoins",
     "Алименты оплаченные": "HandCoins",
+    "Парфюмерия": "Droplets",
+    "Tax-free": "CirclePercent",
+}
+
+# Иконки для дочерних категорий (L2). Ключ — имя дочерней категории.
+CATEGORY_ICON_BY_L2: dict[str, str] = {
+    "Возвраты": "Undo2",
+    "Достопримечательности": "Pyramid",
 }
 
 CATEGORY_SEED: list[dict] = [
@@ -110,6 +118,7 @@ CATEGORY_SEED: list[dict] = [
             {"name": "Доходы от актуализации счетов"},
             {"name": "Налоговые вычеты"},
             {"name": "Прочие доходы"},
+            {"name": "Возвраты"},
         ],
     },
     {
@@ -311,8 +320,11 @@ CATEGORY_SEED: list[dict] = [
         "children": [
             {"name": "Авиабилеты"},
             {"name": "Размещение"},
+            {"name": "Достопримечательности"},
         ],
     },
+    {"name": "Парфюмерия", "scope": "EXPENSE"},
+    {"name": "Tax-free", "scope": "EXPENSE"},
     {
         "name": "Вредные привычки",
         "scope": "EXPENSE",

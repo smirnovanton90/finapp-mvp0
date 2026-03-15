@@ -68,6 +68,11 @@ DEFAULT_COUNTERPARTIES: list[dict] = [
     {"name": "SPAR", "inn": "5258056945", "legal_form": "ООО", "full_name": "СПАР Миддл Волга", "industry": "Торговля"},
     {"name": "Яндекс Такси", "inn": "7704340310", "legal_form": "ООО", "full_name": "Яндекс.Такси", "industry": "Транспорт и логистика"},
     {"name": "Яндекс Еда", "inn": "9705114405", "legal_form": "ООО", "full_name": "ЯНДЕКС.ЕДА", "industry": "Торговля"},
+    {"name": "Вкусно - и точка", "inn": "7710044140", "legal_form": "ООО", "full_name": "Система ПБО", "industry": "Торговля"},
+    {"name": "Газпром Нефть", "inn": "5504036333", "legal_form": "ПАО", "full_name": "Газпром Нефть", "industry": "Энергетика и коммунальные услуги"},
+    {"name": "Роснефть", "inn": "7706107510", "legal_form": "ПАО", "full_name": "НК Роснефть", "industry": "Энергетика и коммунальные услуги"},
+    {"name": "Лукойл", "inn": "7708004767", "legal_form": "ПАО", "full_name": "Лукойл", "industry": "Энергетика и коммунальные услуги"},
+    {"name": "ЕАПТЕКА", "inn": "7704865540", "legal_form": "ПАО", "full_name": "ЕАПТЕКА", "industry": "Торговля"},
     # Банки (ранее bank_seed_data.BANKS_SEED_DATA)
     {"name": "Сбер", "inn": "7707083893", "legal_form": "ПАО", "full_name": "Сбербанк России", "industry": "Банки"},
     {"name": "ВТБ", "inn": "7702070139", "legal_form": "ПАО", "full_name": "Банк ВТБ", "industry": "Банки"},

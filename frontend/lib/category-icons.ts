@@ -17,10 +17,12 @@ import {
   Calculator,
   ChefHat,
   Cigarette,
+  CirclePercent,
   Coffee,
   Coins,
   CreditCard,
   Droplet,
+  Droplets,
   Dumbbell,
   Film,
   Gamepad2,
@@ -49,6 +51,7 @@ import {
   Phone,
   Pill,
   Pizza,
+  Pyramid,
   Receipt,
   Scissors,
   ShieldCheck,
@@ -65,6 +68,7 @@ import {
   Train,
   TrendingUp,
   Truck,
+  Undo2,
   Utensils,
   Tv,
   Wifi,
@@ -152,6 +156,10 @@ export const CATEGORY_ICON_BY_NAME: Record<string, CategoryIcon> = {
   Home,
   Laptop,
   MoreVertical,
+  Undo2,
+  Pyramid,
+  Droplets,
+  CirclePercent,
 };
 
 const CATEGORY_ICON_OPTION_NAMES = [
@@ -225,6 +233,10 @@ const CATEGORY_ICON_OPTION_NAMES = [
   "Home",
   "Laptop",
   "MoreVertical",
+  "Undo2",
+  "Pyramid",
+  "Droplets",
+  "CirclePercent",
 ] as const;
 
 export const CATEGORY_ICON_OPTIONS = CATEGORY_ICON_OPTION_NAMES.map((name) => ({
@@ -267,6 +279,8 @@ export const CATEGORY_ICON_BY_L1: Record<string, CategoryIcon> = {
   "Хозяйственные расходы": Home,
   "Прочие расходы": MoreVertical,
   "Комиссии": Receipt,
+  "Парфюмерия": Droplets,
+  "Tax-free": CirclePercent,
 };
 
 const CATEGORY_ICON_NAME_BY_COMPONENT = new Map<CategoryIcon, string>(

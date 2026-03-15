@@ -960,6 +960,25 @@ export async function runImport(
   };
 
   try {
+    // Дата начала учёта задаётся в начале импорта, чтобы бэкенд не возвращал "Accounting start date is not set" при создании активов/транзакций.
+    let dateToSet = data.accounting_start_date?.trim() || null;
+    if (!dateToSet && data.transactions?.length > 0) {
+      const dates = data.transactions
+        .map((r) => (r.transaction_date ?? "").slice(0, 10))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+      if (dates.length > 0) dateToSet = dates.sort()[0];
+    }
+    if (dateToSet) {
+      report("Установка даты начала учёта", 1, 1);
+      try {
+        await setAccountingStartDate({ accounting_start_date: dateToSet });
+      } catch (dateErr) {
+        const msg = dateErr instanceof Error ? dateErr.message : String(dateErr);
+        report("Ошибка", 0, 0, `Не удалось установить дату начала учёта: ${msg}`);
+        return { success: false, error: `Дата начала учёта: ${msg}` };
+      }
+    }
+
     // 1. Контрагенты (если с такими реквизитами уже есть — используем существующего)
     // Синонимы на бэкенде уникальны среди контрагентов: при импорте пропускаем уже «занятые» синонимы, чтобы не падать на дубликатах в файле.
     const usedSynonyms = new Set<string>();
@@ -1351,24 +1370,6 @@ export async function runImport(
         counts.balanceCheckpoints += 1;
       } catch {
         // пропускаем при ошибке (например, актив не балансовый)
-      }
-    }
-
-    // Дата начала учёта из файла (восстановление из резервной копии)
-    let dateToSet = data.accounting_start_date?.trim() || null;
-    if (!dateToSet && data.transactions?.length > 0) {
-      const dates = data.transactions
-        .map((r) => (r.transaction_date ?? "").slice(0, 10))
-        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
-      if (dates.length > 0) dateToSet = dates.sort()[0];
-    }
-    if (dateToSet) {
-      try {
-        await setAccountingStartDate({ accounting_start_date: dateToSet });
-      } catch (dateErr) {
-        const msg = dateErr instanceof Error ? dateErr.message : String(dateErr);
-        report("Ошибка", 0, 0, `Не удалось установить дату начала учёта: ${msg}`);
-        return { success: false, error: `Дата начала учёта: ${msg}` };
       }
     }
 

@@ -52,6 +52,9 @@ export function RestoreFromBackupModal({
   const [parseError, setParseError] = React.useState<string | null>(null);
   const [restoring, setRestoring] = React.useState(false);
   const [restoreError, setRestoreError] = React.useState<string | null>(null);
+  const [importStage, setImportStage] = React.useState<string | null>(null);
+  const [importCurrent, setImportCurrent] = React.useState(0);
+  const [importTotal, setImportTotal] = React.useState(0);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const resetState = React.useCallback(() => {
@@ -60,6 +63,9 @@ export function RestoreFromBackupModal({
     setParsedData(null);
     setParseError(null);
     setRestoreError(null);
+    setImportStage(null);
+    setImportCurrent(0);
+    setImportTotal(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
 
@@ -115,12 +121,19 @@ export function RestoreFromBackupModal({
     if (!parsedData) return;
     setRestoring(true);
     setRestoreError(null);
+    setImportStage(null);
+    setImportCurrent(0);
+    setImportTotal(0);
     try {
       await resetAllUserData();
       if (typeof sessionStorage !== "undefined") {
         sessionStorage.removeItem("finapp-date-setup-complete");
       }
-      const result = await runImport(parsedData);
+      const result = await runImport(parsedData, (p) => {
+        setImportStage(p.stage);
+        setImportCurrent(p.current);
+        setImportTotal(p.total);
+      });
       if (!result.success) {
         setRestoreError(result.error ?? "Ошибка импорта.");
         setRestoring(false);
@@ -203,6 +216,11 @@ export function RestoreFromBackupModal({
               {parsedData && (
                 <p className="text-xs opacity-80">
                   Файл: {selectedFile?.name}. {formatCounts(parsedData)}
+                </p>
+              )}
+              {restoring && importStage != null && (
+                <p className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                  Импорт: {importStage} — {importCurrent} / {importTotal}
                 </p>
               )}
               {restoreError && (

@@ -700,6 +700,7 @@ export function MobileAddTransactionWizard({
         backgroundColor: isTypeSelection ? ACCENT : MODAL_BG,
         zIndex: 100,
         minHeight: "100dvh",
+        marginTop: "calc(-1 * env(safe-area-inset-top, 0px))",
         paddingTop: "env(safe-area-inset-top, 0px)",
       }}
       aria-modal

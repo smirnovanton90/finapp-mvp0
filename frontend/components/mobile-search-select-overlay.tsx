@@ -97,10 +97,12 @@ export function MobileSearchSelectOverlay<T>({
   }, [disabled]);
 
   useEffect(() => {
-    if (open) {
-      const t = requestAnimationFrame(() => inputRef.current?.focus());
-      return () => cancelAnimationFrame(t);
-    }
+    if (!open) return;
+    // Небольшая задержка, чтобы оверлей успел смонтироваться в DOM — тогда фокус и клавиатура откроются надёжно на мобильных
+    const t = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
+    return () => clearTimeout(t);
   }, [open]);
 
   const handleSelect = useCallback(

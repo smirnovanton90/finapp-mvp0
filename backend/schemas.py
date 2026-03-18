@@ -771,6 +771,12 @@ class TransactionPageOut(BaseModel):
     next_cursor: str | None = None
     has_more: bool
 
+
+class TransactionCountsByDirectionOut(BaseModel):
+    income: int = 0
+    expense: int = 0
+    transfer: int = 0
+
 class TransactionStatusUpdate(BaseModel):
     status: TransactionStatus
 

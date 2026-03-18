@@ -2636,7 +2636,7 @@ export default function AssetDetailPage() {
         ) : null}
         {rowKey === "balance" && (
           <div className={`mt-3 flex justify-center ${isMobileOverlay ? "px-4" : ""}`}>
-            <Button type="button" className="rounded-[9px] border-0 flex justify-center transition-colors hover:opacity-90 text-sm font-normal" style={{ backgroundColor: ACCENT }} onClick={() => router.push(`/transactions?item_id=${item.id}`)}>
+            <Button type="button" className="rounded-[9px] border-0 flex justify-center transition-colors hover:opacity-90 text-sm font-normal" style={{ backgroundColor: ACCENT }} onClick={() => router.push(`/transactions?item_id=${item.id}&openFilters=1`)}>
               <ExternalLink className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
               <span style={{ color: "white", opacity: 0.85 }}>Просмотреть транзакции</span>
             </Button>

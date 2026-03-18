@@ -1727,9 +1727,11 @@ export function AddEditItemFormModal({
     } else {
       initialValueRubForPayload = cents;
     }
+    const allowNegativeBalance =
+      (showBankCardFields && isCreditCard) || primaryValueKind === "BALANCE";
     if (
       !Number.isFinite(initialValueRubForPayload) ||
-      (initialValueRubForPayload < 0 && !(showBankCardFields && isCreditCard))
+      (initialValueRubForPayload < 0 && !allowNegativeBalance)
     ) {
       setFormError("Сумма должна быть числом (например 1234,56)");
       return;

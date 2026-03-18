@@ -21,7 +21,7 @@ import {
   buildCounterpartySearchText,
   sortCounterpartiesByTransactionCount,
 } from "@/lib/counterparty-utils";
-import { CirclePlus } from "lucide-react";
+import { CirclePlus, CircleX } from "lucide-react";
 import { ACCENT_FILL_MEDIUM, ACTIVE_TEXT_DARK, DROPDOWN_BG, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { AuthInput } from "@/components/ui/auth-input";
 import { useSelectorDropdownPortalContainer } from "@/components/selector-dropdown-portal-context";
@@ -46,6 +46,10 @@ type CounterpartySelectorProps = {
   apiBase: string;
   /** When set, shows "Добавить" as first option; on click calls this and closes dropdown. */
   onAddCounterparty?: () => void;
+  /** When true, adds "Без контрагента" as first option in the dropdown. */
+  showMissingOption?: boolean;
+  missingOptionSelected?: boolean;
+  onMissingOptionChange?: (selected: boolean) => void;
 };
 
 const DEFAULT_EMPTY_MESSAGE = "Нет контрагентов.";
@@ -70,6 +74,9 @@ export function CounterpartySelector({
   counterpartyCounts,
   apiBase,
   onAddCounterparty,
+  showMissingOption = false,
+  missingOptionSelected = false,
+  onMissingOptionChange,
 }: CounterpartySelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -140,14 +147,17 @@ export function CounterpartySelector({
     [counterpartiesById, selectedIds]
   );
   const selectedLabel =
-    selectionMode === "single" && selectedCounterparties[0]
-      ? buildCounterpartyDisplayName(selectedCounterparties[0])
-      : "";
+    missingOptionSelected
+      ? "Без контрагента"
+      : selectionMode === "single" && selectedCounterparties[0]
+        ? buildCounterpartyDisplayName(selectedCounterparties[0])
+        : "";
   const inputValue = query || selectedLabel;
   const selectedCounterparty = selectionMode === "single" ? selectedCounterparties[0] : null;
 
   const applySelection = (id: number) => {
     if (disabled) return;
+    onMissingOptionChange?.(false);
     if (selectionMode === "single") {
       const next = selectedSet.has(id) ? [] : [id];
       onChange(next);
@@ -164,9 +174,18 @@ export function CounterpartySelector({
     setOpen(false);
     anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
   };
+  const selectMissingOption = () => {
+    if (disabled) return;
+    onChange([]);
+    onMissingOptionChange?.(true);
+    setQuery("");
+    setOpen(false);
+    anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
+  };
   const clearSelection = () => {
     if (disabled) return;
     onChange([]);
+    onMissingOptionChange?.(false);
     setQuery("");
     setOpen(false);
     anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
@@ -349,6 +368,30 @@ export function CounterpartySelector({
                     {clearLabel}
                   </button>
                 )}
+                {showMissingOption && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                    style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(108, 93, 215, 0.22)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      selectMissingOption();
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      selectMissingOption();
+                    }}
+                  >
+                    <CircleX className="h-4 w-4 shrink-0" aria-hidden />
+                    <span>Без контрагента</span>
+                  </button>
+                )}
                 {onAddCounterparty && (
                   <button
                     type="button"
@@ -474,8 +517,29 @@ export function CounterpartySelector({
             portalContainer ?? document.body
           )}
       </label>
-      {showChips && selectionMode === "multi" && selectedCounterparties.length > 0 && (
+      {showChips && selectionMode === "multi" && (missingOptionSelected || selectedCounterparties.length > 0) && (
         <div className="flex flex-wrap gap-2">
+          {missingOptionSelected && (
+            <div
+              className="flex items-center gap-2 rounded-[9px] border px-3 py-1 text-xs"
+              style={{ borderColor: ACCENT_FILL_MEDIUM, color: PLACEHOLDER_COLOR_DARK }}
+            >
+              <CircleX className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>Без контрагента</span>
+              <button
+                type="button"
+                className="transition-colors hover:opacity-80"
+                style={{ color: ACTIVE_TEXT_DARK }}
+                onClick={() => {
+                  onMissingOptionChange?.(false);
+                  onChange([]);
+                }}
+                aria-label="Удалить фильтр Без контрагента"
+              >
+                ×
+              </button>
+            </div>
+          )}
           {selectedCounterparties.map((counterparty) => {
             const isDeleted = Boolean(counterparty.deleted_at);
             return (

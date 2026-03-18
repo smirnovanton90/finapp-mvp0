@@ -467,6 +467,12 @@ export type TransactionPageOut = {
   has_more: boolean;
 };
 
+export type TransactionCountsByDirectionOut = {
+  income: number;
+  expense: number;
+  transfer: number;
+};
+
 export type FetchTransactionsPageParams = {
   limit?: number;
   cursor?: string | null;
@@ -482,8 +488,11 @@ export type FetchTransactionsPageParams = {
   currency_item_ids?: number[];
   category_ids?: number[];
   counterparty_ids?: number[];
+  counterparty_missing?: boolean;
+  chain_missing?: boolean;
   comment_query?: string;
   related_item_ids?: number[];
+  transfer_destination_item_ids?: number[];
   min_amount?: number;
   max_amount?: number;
 };
@@ -1499,12 +1508,19 @@ export async function deleteBalanceCheckpoint(
 
 export async function fetchBalanceCheckpointsForItems(
   itemIds?: number[],
-  options?: { includeClosed?: boolean; includeArchived?: boolean }
+  options?: {
+    includeClosed?: boolean;
+    includeArchived?: boolean;
+    date_from?: string;
+    date_to?: string;
+  }
 ): Promise<BalanceCheckpointWithItemOut[]> {
   const params = new URLSearchParams();
   if (itemIds != null && itemIds.length > 0) params.set("item_ids", itemIds.join(","));
   if (options?.includeClosed) params.set("include_closed", "true");
   if (options?.includeArchived) params.set("include_archived", "true");
+  if (options?.date_from) params.set("date_from", options.date_from);
+  if (options?.date_to) params.set("date_to", options.date_to);
   const q = params.toString() ? `?${params.toString()}` : "";
   const res = await authFetch(`${API_BASE}/balance-checkpoints${q}`);
   if (!res.ok) throw new Error(await readError(res));
@@ -1589,14 +1605,50 @@ export async function fetchTransactionsPage(
   options.counterparty_ids?.forEach((value) =>
     params.append("counterparty_ids", String(value))
   );
+  if (options.counterparty_missing) params.set("counterparty_missing", "true");
+  if (options.chain_missing) params.set("chain_missing", "true");
   options.related_item_ids?.forEach((value) =>
     params.append("related_item_ids", String(value))
+  );
+  options.transfer_destination_item_ids?.forEach((value) =>
+    params.append("transfer_destination_item_ids", String(value))
   );
   const qs = params.toString();
   const res = await authFetch(`${API_BASE}/transactions/page${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await readError(res));
   const raw = await res.json() as { items: unknown[]; next_cursor: string | null; has_more: boolean };
   return { next_cursor: raw.next_cursor, has_more: raw.has_more, items: raw.items.map(mapTransactionFromApi) };
+}
+
+export async function fetchTransactionCounts(
+  params: Omit<FetchTransactionsPageParams, "limit" | "cursor">
+): Promise<TransactionCountsByDirectionOut> {
+  const searchParams = new URLSearchParams();
+  if (params.include_deleted) searchParams.set("include_deleted", "true");
+  if (params.deleted_only) searchParams.set("deleted_only", "true");
+  if (params.date_from) searchParams.set("date_from", params.date_from);
+  if (params.date_to) searchParams.set("date_to", params.date_to);
+  params.status?.forEach((v) => searchParams.append("status", v));
+  params.direction?.forEach((v) => searchParams.append("direction", v));
+  params.transaction_type?.forEach((v) => searchParams.append("transaction_type", v));
+  params.item_ids?.forEach((v) => searchParams.append("item_ids", String(v)));
+  params.card_item_ids?.forEach((v) => searchParams.append("card_item_ids", String(v)));
+  params.currency_item_ids?.forEach((v) => searchParams.append("currency_item_ids", String(v)));
+  params.category_ids?.forEach((v) => searchParams.append("category_ids", String(v)));
+  params.counterparty_ids?.forEach((v) => searchParams.append("counterparty_ids", String(v)));
+  if (params.counterparty_missing) searchParams.set("counterparty_missing", "true");
+  if (params.chain_missing) searchParams.set("chain_missing", "true");
+  if (params.comment_query) searchParams.set("comment_query", params.comment_query);
+  params.related_item_ids?.forEach((v) => searchParams.append("related_item_ids", String(v)));
+  params.transfer_destination_item_ids?.forEach((v) =>
+    searchParams.append("transfer_destination_item_ids", String(v))
+  );
+  if (params.min_amount != null) searchParams.set("min_amount", String(params.min_amount));
+  if (params.max_amount != null) searchParams.set("max_amount", String(params.max_amount));
+  const qs = searchParams.toString();
+  const res = await authFetch(`${API_BASE}/transactions/counts${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json() as Promise<TransactionCountsByDirectionOut>;
 }
 
 export async function fetchDeletedTransactions(): Promise<TransactionOut[]> {

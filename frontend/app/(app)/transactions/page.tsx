@@ -31,6 +31,8 @@ import {
   GREEN,
   GREEN_TRANSACTION,
   RED,
+  RED_FILL,
+  GREEN_FILL,
   ACCENT2,
   MODAL_BG,
 } from "@/lib/colors";
@@ -158,6 +160,7 @@ import {
   fetchFxRatesBatch,
   fetchTransactions,
   fetchTransactionsPage,
+  fetchTransactionCounts,
   fetchTransactionChains,
   fetchBalanceCheckpointsForItems,
   recognizeReceipt,
@@ -180,6 +183,7 @@ import {
   AssetLinkType,
   TransactionSplitCreate,
   TransactionSplitPartCreate,
+  TransactionCountsByDirectionOut,
 } from "@/lib/api";
 import {
   formatRubInput,
@@ -2297,7 +2301,7 @@ function TransactionsView({
   const searchParams = useSearchParams();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
-  const { isCollapsed, filtersSlotId, isDesktop } = useSidebar();
+  const { isCollapsed, filtersSlotId, isDesktop, isFilterPanelCollapsed, toggleFilterPanel } = useSidebar();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
   const defaultShowPlannedRealized = isPlanningView;
@@ -2430,6 +2434,10 @@ function TransactionsView({
   const [selectedRelatedItemIds, setSelectedRelatedItemIds] = useState<Set<number>>(
     () => new Set()
   );
+  const [counterpartyMissing, setCounterpartyMissing] = useState(false);
+  const [chainMissing, setChainMissing] = useState(false);
+  const [selectedTransferDestinationItemIds, setSelectedTransferDestinationItemIds] =
+    useState<Set<number>>(() => new Set());
   const [amountFrom, setAmountFrom] = useState("");
   const [amountTo, setAmountTo] = useState("");
   const [selectedDirections, setSelectedDirections] = useState<
@@ -2514,6 +2522,11 @@ function TransactionsView({
   const txRequestIdRef = useRef(0);
   const onboardingAppliedRef = useRef<string | null>(null);
   const [checkpoints, setCheckpoints] = useState<BalanceCheckpointWithItemOut[]>([]);
+  const [countsByDirection, setCountsByDirection] = useState<TransactionCountsByDirectionOut | null>(
+    null
+  );
+  /** При включённых фильтрах: true = загружены все без пагинации (после нажатия «Отобразить все»). */
+  const [showAllFiltered, setShowAllFiltered] = useState(false);
 
   useEffect(() => {
     if (!isWizardOpen) {
@@ -3502,6 +3515,18 @@ function TransactionsView({
     }
   }, [pathname, searchParams, router, isDesktop, openCreateDialog]);
 
+  useEffect(() => {
+    if (pathname !== "/transactions") return;
+    if (searchParams.get("openFilters") !== "1") return;
+    if (isFilterPanelCollapsed) {
+      toggleFilterPanel();
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("openFilters");
+    const next = params.toString() ? `/transactions?${params}` : "/transactions";
+    router.replace(next);
+  }, [pathname, searchParams, router, isFilterPanelCollapsed, toggleFilterPanel]);
+
   const openEditDialog = (tx: TransactionCard, trigger?: HTMLElement | null) => {
     lastActiveElementRef.current =
       trigger ?? (document.activeElement as HTMLElement | null);
@@ -4248,6 +4273,10 @@ function TransactionsView({
     if (selectedRelatedItemIds.size === 0) return undefined;
     return Array.from(selectedRelatedItemIds);
   }, [selectedRelatedItemIds]);
+  const transferDestinationItemFilterIds = useMemo(() => {
+    if (selectedTransferDestinationItemIds.size === 0) return undefined;
+    return Array.from(selectedTransferDestinationItemIds);
+  }, [selectedTransferDestinationItemIds]);
   const commentQuery = useMemo(() => commentFilter.trim(), [commentFilter]);
   const minAmount = useMemo(() => parseAmountFilter(amountFrom), [amountFrom]);
   const maxAmount = useMemo(() => parseAmountFilter(amountTo), [amountTo]);
@@ -4273,9 +4302,12 @@ function TransactionsView({
         card_item_ids: cardItemFilterIds,
         currency_item_ids: currencyItemIds,
         category_ids: categoryFilterIds,
-        counterparty_ids: counterpartyFilterIds,
+        counterparty_ids: counterpartyMissing ? undefined : counterpartyFilterIds,
+        counterparty_missing: counterpartyMissing || undefined,
+        chain_missing: chainMissing || undefined,
         comment_query: commentQuery || undefined,
         related_item_ids: relatedItemFilterIds,
+        transfer_destination_item_ids: transferDestinationItemFilterIds,
         min_amount: minAmount ?? undefined,
         max_amount: maxAmount ?? undefined,
       },
@@ -4283,10 +4315,13 @@ function TransactionsView({
   }, [
     cardItemFilterIds,
     categoryFilterIds,
+    chainMissing,
     commentQuery,
-    relatedItemFilterIds,
-    currencyItemIds,
     counterpartyFilterIds,
+    counterpartyMissing,
+    relatedItemFilterIds,
+    transferDestinationItemFilterIds,
+    currencyItemIds,
     dateFrom,
     dateTo,
     deletedOnly,
@@ -4299,6 +4334,64 @@ function TransactionsView({
     showDeleted,
     statusFilter,
     transactionTypeFilter,
+  ]);
+
+  const hasAnyFilter = useMemo(() => {
+    if (dateFrom || dateTo) return true;
+    if (selectedDirections.size > 0) return true;
+    if (itemFilterIds.length > 0 || cardItemFilterIds.length > 0) return true;
+    if (currencyItemIds.length > 0) return true;
+    if (categoryFilterIds.length > 0) return true;
+    if (chainIdFilter != null) return true;
+    if (selectedCounterpartyIds.size > 0 || counterpartyMissing) return true;
+    if (selectedRelatedItemIds.size > 0 || selectedTransferDestinationItemIds.size > 0)
+      return true;
+    if (commentQuery) return true;
+    if (minAmount != null || maxAmount != null) return true;
+    if (!(showConfirmed && showUnconfirmed)) return true;
+    if (showActual !== initialShowActual) return true;
+    if (showPlanned !== (initialShowPlannedRealized || initialShowPlannedUnrealized))
+      return true;
+    if (
+      showPlanned &&
+      (showPlannedRealized !== initialShowPlannedRealized ||
+        showPlannedUnrealized !== initialShowPlannedUnrealized)
+    )
+      return true;
+    if (!showActive || showDeleted) return true;
+    if (isOverduePreset || isChainPreset) return true;
+    if (chainMissing) return true;
+    return false;
+  }, [
+    dateFrom,
+    dateTo,
+    selectedDirections.size,
+    itemFilterIds.length,
+    cardItemFilterIds.length,
+    currencyItemIds.length,
+    categoryFilterIds.length,
+    chainIdFilter,
+    selectedCounterpartyIds.size,
+    counterpartyMissing,
+    selectedRelatedItemIds.size,
+    selectedTransferDestinationItemIds.size,
+    commentQuery,
+    minAmount,
+    maxAmount,
+    showConfirmed,
+    showUnconfirmed,
+    showActual,
+    showPlanned,
+    showPlannedRealized,
+    showPlannedUnrealized,
+    showActive,
+    showDeleted,
+    initialShowActual,
+    initialShowPlannedRealized,
+    initialShowPlannedUnrealized,
+    isOverduePreset,
+    isChainPreset,
+    chainMissing,
   ]);
 
   const loadItems = useCallback(async () => {
@@ -4375,15 +4468,16 @@ function TransactionsView({
       }
       setError(null);
       try {
+        const useNoPagination = hasAnyFilter && showAllFiltered && !append;
         const page = await fetchTransactionsPage({
           ...txQuery.params,
-          limit: PAGE_SIZE,
-          cursor: cursor ?? undefined,
+          limit: useNoPagination ? 10000 : PAGE_SIZE,
+          cursor: useNoPagination ? undefined : (cursor ?? undefined),
         });
         if (requestId !== txRequestIdRef.current) return;
         setTxs((prev) => (append ? [...prev, ...page.items] : page.items));
-        setTxCursor(page.next_cursor);
-        setHasMoreTxs(page.has_more);
+        setTxCursor(useNoPagination ? null : page.next_cursor);
+        setHasMoreTxs(useNoPagination ? false : page.has_more);
       } catch (e: any) {
         if (requestId !== txRequestIdRef.current) return;
         setError(
@@ -4399,7 +4493,7 @@ function TransactionsView({
         }
       }
     },
-    [session, txQuery]
+    [session, txQuery, hasAnyFilter, showAllFiltered]
   );
 
   const refreshAfterMutation = useCallback(async () => {
@@ -4444,6 +4538,10 @@ function TransactionsView({
   }, [session, loadBanks, loadCounterparties, loadItems, loadItemTransactionCounts]);
 
   useEffect(() => {
+    setShowAllFiltered(false);
+  }, [txQuery]);
+
+  useEffect(() => {
     if (!session) return;
     setIsInitialLoading(true);
     const handle = setTimeout(() => {
@@ -4455,10 +4553,31 @@ function TransactionsView({
   }, [session, loadTransactions, txQuery]);
 
   useEffect(() => {
+    if (!session || !hasAnyFilter || txQuery.disabled) {
+      setCountsByDirection(null);
+      return;
+    }
+    let cancelled = false;
+    fetchTransactionCounts(txQuery.params)
+      .then((counts) => {
+        if (!cancelled) setCountsByDirection(counts);
+      })
+      .catch(() => {
+        if (!cancelled) setCountsByDirection(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, hasAnyFilter, txQuery.disabled, txQuery.params]);
+
+  useEffect(() => {
     if (!session) return;
     let cancelled = false;
     const ids = itemFilterIds.length > 0 ? itemFilterIds : undefined;
-    fetchBalanceCheckpointsForItems(ids)
+    const opts: { date_from?: string; date_to?: string } = {};
+    if (dateFrom) opts.date_from = dateFrom;
+    if (dateTo) opts.date_to = dateTo;
+    fetchBalanceCheckpointsForItems(ids, opts)
       .then((list) => {
         if (!cancelled) setCheckpoints(list);
       })
@@ -4468,7 +4587,7 @@ function TransactionsView({
     return () => {
       cancelled = true;
     };
-  }, [session, itemFilterIds]);
+  }, [session, itemFilterIds, dateFrom, dateTo]);
 
   useEffect(() => {
     const dates = new Set<string>();
@@ -4527,7 +4646,7 @@ function TransactionsView({
 
   const filteredTxs = useMemo(() => {
     const enriched = txs.map((tx) => ({ ...tx, isDeleted: Boolean(tx.deleted_at) }));
-    if (!chainIdFilter) return enriched;
+    if (chainMissing || !chainIdFilter) return enriched;
 
     const todayKey = new Date().toISOString().slice(0, 10);
     const mode = chainPresetFilter ?? "total";
@@ -4550,7 +4669,7 @@ function TransactionsView({
         if (mode === "upcoming") return dateKey >= todayKey;
         return true;
       });
-  }, [txs, chainIdFilter, chainPresetFilter]);
+  }, [txs, chainIdFilter, chainPresetFilter, chainMissing]);
 
   const sortedTxs = useMemo(() => {
     const list = [...filteredTxs];
@@ -4605,6 +4724,20 @@ function TransactionsView({
       )
       .sort((a, b) => a.id - b.id);
   }, [sortedTxs, editingTx?.id, editingTx?.is_split_parent]);
+  const checkpointsInWindow = useMemo(() => {
+    if (dateFrom || dateTo) return checkpoints;
+    const txDates = sortedTxs
+      .map((tx) => getDateKey(tx.transaction_date))
+      .filter((d): d is string => !!d);
+    if (txDates.length === 0) return [];
+    const minDate = txDates.reduce((a, b) => (a < b ? a : b));
+    const maxDate = txDates.reduce((a, b) => (a > b ? a : b));
+    return checkpoints.filter((cp) => {
+      const d = cp.checkpoint_at.slice(0, 10);
+      return d >= minDate && d <= maxDate;
+    });
+  }, [checkpoints, dateFrom, dateTo, sortedTxs]);
+
   type MergedRow =
     | { type: "date_header"; dateKey: string }
     | { type: "checkpoint_line"; dateKey: string; timeKey: string; checkpoints: BalanceCheckpointWithItemOut[] }
@@ -4616,14 +4749,14 @@ function TransactionsView({
       const d = getDateKey(tx.transaction_date);
       if (d) dateKeys.add(d);
     });
-    checkpoints.forEach((cp) => {
+    checkpointsInWindow.forEach((cp) => {
       dateKeys.add(cp.checkpoint_at.slice(0, 10));
     });
     const sortedDates = Array.from(dateKeys).sort((a, b) => b.localeCompare(a));
     const rows: MergedRow[] = [];
     for (const dateKey of sortedDates) {
       rows.push({ type: "date_header", dateKey });
-      const cpsOnDate = checkpoints.filter((c) => c.checkpoint_at.slice(0, 10) === dateKey);
+      const cpsOnDate = checkpointsInWindow.filter((c) => c.checkpoint_at.slice(0, 10) === dateKey);
       const byTime = new Map<string, BalanceCheckpointWithItemOut[]>();
       for (const cp of cpsOnDate) {
         const timeKey = cp.checkpoint_at.slice(11, 16) || "00:00";
@@ -4640,7 +4773,7 @@ function TransactionsView({
       }
     }
     return rows;
-  }, [sortedTxs, checkpoints]);
+  }, [sortedTxs, checkpointsInWindow]);
 
   /** Для мобильной верстки: транзакции по датам (без КТ — контрольные точки не показываем). */
   const mobileSections = useMemo(() => {
@@ -4662,9 +4795,12 @@ function TransactionsView({
       !!amountTo ||
       selectedCurrencyCodes.size > 0 ||
       selectedRelatedItemIds.size > 0 ||
+      selectedTransferDestinationItemIds.size > 0 ||
       selectedCategoryFilterKeys.size > 0 ||
       chainIdFilter != null ||
+      chainMissing ||
       selectedCounterpartyIds.size > 0 ||
+      counterpartyMissing ||
       commentFilter.trim() !== "" ||
       !(showConfirmed && showUnconfirmed) ||
       showActual !== initialShowActual ||
@@ -4681,9 +4817,12 @@ function TransactionsView({
     amountTo,
     selectedCurrencyCodes.size,
     selectedRelatedItemIds.size,
+    selectedTransferDestinationItemIds.size,
     selectedCategoryFilterKeys.size,
     chainIdFilter,
+    chainMissing,
     selectedCounterpartyIds.size,
+    counterpartyMissing,
     commentFilter,
     showConfirmed,
     showUnconfirmed,
@@ -4752,11 +4891,29 @@ function TransactionsView({
     (sortedTxs.length === 0 || readyRowCount >= sortedTxs.length);
 
   const handleLoadMore = useCallback(() => {
-    if (!hasMoreTxs || isLoadingMore || loading) return;
+    if ((hasAnyFilter && showAllFiltered) || !hasMoreTxs || isLoadingMore || loading) return;
     loadTransactions({ cursor: txCursor, append: true });
-  }, [hasMoreTxs, isLoadingMore, loading, loadTransactions, txCursor]);
+  }, [hasAnyFilter, showAllFiltered, hasMoreTxs, isLoadingMore, loading, loadTransactions, txCursor]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const lastActiveElementRef = useRef<HTMLElement | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isDesktop || (hasAnyFilter && showAllFiltered) || !hasMoreTxs) return;
+    const el = loadMoreSentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry?.isIntersecting && !isLoadingMore && !loading) {
+          handleLoadMore();
+        }
+      },
+      { rootMargin: "200px", threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isDesktop, hasAnyFilter, showAllFiltered, hasMoreTxs, isLoadingMore, loading, handleLoadMore]);
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -4818,6 +4975,7 @@ function TransactionsView({
   };
   const resetCounterpartyFilters = () => {
     setSelectedCounterpartyIds(new Set());
+    setCounterpartyMissing(false);
   };
   const toggleCurrencySelection = (value: string) => {
     setSelectedCurrencyCodes((prev) => {
@@ -5089,6 +5247,32 @@ function TransactionsView({
               </div>
           </FilterSection>
           <FilterSection
+            label="Куда переводится"
+            onReset={() => setSelectedTransferDestinationItemIds(new Set())}
+            showReset={selectedTransferDestinationItemIds.size > 0}
+          >
+              <div className="space-y-3">
+                <ItemSelector
+                  items={itemsForSelector}
+                  selectedIds={Array.from(selectedTransferDestinationItemIds)}
+                  onChange={(ids) => setSelectedTransferDestinationItemIds(new Set(ids))}
+                  selectionMode="multi"
+                  placeholder="Начните вводить название"
+                  emptyMessage="Нет активов или обязательств."
+                  noResultsMessage="Ничего не найдено"
+                  getItemTypeLabel={getItemTypeLabel}
+                  getItemKind={resolveItemEffectiveKind}
+                  getCounterpartyForItemId={getCounterpartyForItemId}
+                  apiBase={API_BASE}
+                  getBankLogoUrl={itemBankLogoUrl}
+                  getBankName={itemBankName}
+                  getItemBalance={getItemDisplayBalanceCents}
+                  itemCounts={itemTxCounts}
+                  ariaLabel="Куда переводится"
+                />
+              </div>
+          </FilterSection>
+          <FilterSection
             label="Категории"
             onReset={resetCategoryFilters}
             showReset={selectedCategoryFilterKeys.size > 0}
@@ -5109,18 +5293,20 @@ function TransactionsView({
             onReset={() => {
               setChainIdFilter(null);
               setChainPresetFilter(null);
+              setChainMissing(false);
               setChainFilterResetKey((k) => k + 1);
             }}
-            showReset={chainIdFilter != null}
+            showReset={chainIdFilter != null || chainMissing}
           >
               <div className="space-y-3">
                 <ChainSelector
                   chains={chains}
                   categoryNodes={categoryNodes}
-                  selectedChainId={chainIdFilter}
+                  selectedChainId={chainMissing ? null : chainIdFilter}
                   onChange={(id) => {
                     setChainIdFilter(id);
                     setChainPresetFilter(id != null ? "total" : null);
+                    if (id != null) setChainMissing(false);
                   }}
                   placeholder="Название цепочки или категория"
                   emptyMessage="Нет цепочек транзакций."
@@ -5128,25 +5314,34 @@ function TransactionsView({
                   resetSignal={chainFilterResetKey}
                   ariaLabel="Цепочка транзакций"
                   includeDeleted={false}
+                  showMissingOption={true}
+                  missingOptionSelected={chainMissing}
+                  onMissingOptionChange={setChainMissing}
                 />
               </div>
           </FilterSection>
           <FilterSection
             label="Контрагенты"
             onReset={resetCounterpartyFilters}
-            showReset={selectedCounterpartyIds.size > 0}
+            showReset={selectedCounterpartyIds.size > 0 || counterpartyMissing}
           >
               <div className="space-y-3">
                 <CounterpartySelector
                   counterparties={selectableCounterparties}
-                  selectedIds={Array.from(selectedCounterpartyIds)}
-                  onChange={(ids) => setSelectedCounterpartyIds(new Set(ids))}
+                  selectedIds={counterpartyMissing ? [] : Array.from(selectedCounterpartyIds)}
+                  onChange={(ids) => {
+                    setSelectedCounterpartyIds(new Set(ids));
+                    if (ids.length > 0) setCounterpartyMissing(false);
+                  }}
                   selectionMode="multi"
                   placeholder="Начните вводить название"
                   industries={industries}
                   counterpartyCounts={counterpartyTxCounts}
                   showChips={true}
                   apiBase={API_BASE}
+                  showMissingOption={true}
+                  missingOptionSelected={counterpartyMissing}
+                  onMissingOptionChange={setCounterpartyMissing}
                 />
               </div>
           </FilterSection>
@@ -7339,7 +7534,116 @@ function TransactionsView({
                     aria-label="Выбрать все транзакции"
                   />
                   <span>Выбрать все</span>
+                  {hasAnyFilter && !showAllFiltered && (
+                    <Button
+                      type="button"
+                      variant="glass"
+                      className="rounded-[9px] border-0 flex items-center justify-center text-sm font-normal"
+                      style={
+                        {
+                          "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                          "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                        } as CSSProperties
+                      }
+                      onClick={() => {
+                        setShowAllFiltered(true);
+                        loadTransactions({ cursor: null, append: false });
+                      }}
+                      disabled={loading || isInitialLoading}
+                    >
+                      <span style={{ color: "white", opacity: 0.85 }}>Отобразить все</span>
+                    </Button>
+                  )}
+                  {hasAnyFilter && countsByDirection && (
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="flex items-stretch overflow-hidden rounded-lg min-w-[2.5rem]"
+                        style={{
+                          boxSizing: "border-box",
+                          backgroundColor: MODAL_BG,
+                          borderStyle: "solid",
+                          borderWidth: 0,
+                          borderLeftWidth: 7,
+                          borderColor: GREEN_TRANSACTION,
+                        }}
+                        title="Доход"
+                      >
+                        <div
+                          className="flex items-center justify-center shrink-0"
+                          style={{
+                            width: 10,
+                            marginLeft: -10,
+                            backgroundColor: GREEN_TRANSACTION,
+                            boxShadow: `0 0 250px 50px ${GREEN_TRANSACTION}`,
+                          }}
+                        />
+                        <div
+                          className="flex items-center justify-center flex-1 px-2 py-1 text-sm font-medium tabular-nums"
+                          style={{ color: GREEN_TRANSACTION }}
+                        >
+                          {countsByDirection.income}
+                        </div>
+                      </div>
+                      <div
+                        className="flex items-stretch overflow-hidden rounded-lg min-w-[2.5rem]"
+                        style={{
+                          boxSizing: "border-box",
+                          backgroundColor: MODAL_BG,
+                          borderStyle: "solid",
+                          borderWidth: 0,
+                          borderLeftWidth: 7,
+                          borderColor: RED,
+                        }}
+                        title="Расход"
+                      >
+                        <div
+                          className="flex items-center justify-center shrink-0"
+                          style={{
+                            width: 10,
+                            marginLeft: -10,
+                            backgroundColor: RED,
+                            boxShadow: `0 0 250px 50px ${RED}`,
+                          }}
+                        />
+                        <div
+                          className="flex items-center justify-center flex-1 px-2 py-1 text-sm font-medium tabular-nums"
+                          style={{ color: RED }}
+                        >
+                          {countsByDirection.expense}
+                        </div>
+                      </div>
+                      <div
+                        className="flex items-stretch overflow-hidden rounded-lg min-w-[2.5rem]"
+                        style={{
+                          boxSizing: "border-box",
+                          backgroundColor: MODAL_BG,
+                          borderStyle: "solid",
+                          borderWidth: 0,
+                          borderLeftWidth: 7,
+                          borderColor: ACCENT2,
+                        }}
+                        title="Перевод"
+                      >
+                        <div
+                          className="flex items-center justify-center shrink-0"
+                          style={{
+                            width: 10,
+                            marginLeft: -10,
+                            backgroundColor: ACCENT2,
+                            boxShadow: `0 0 250px 50px ${ACCENT2}`,
+                          }}
+                        />
+                        <div
+                          className="flex items-center justify-center flex-1 px-2 py-1 text-sm font-medium tabular-nums"
+                          style={{ color: ACCENT2 }}
+                        >
+                          {countsByDirection.transfer}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
+                <div className="flex flex-wrap items-center gap-2 ml-auto">
                 {selectedVisibleCount > 1 && (
                   <div className="flex flex-wrap items-center gap-2">
                     <IconButton
@@ -7374,6 +7678,7 @@ function TransactionsView({
                     </IconButton>
                   </div>
                 )}
+                </div>
               </div>
             {isInitialLoading && !isDesktop ? (
               <div className="w-screen relative left-1/2 -translate-x-1/2 max-w-none space-y-6 px-4">
@@ -7389,7 +7694,13 @@ function TransactionsView({
                 ))}
               </div>
             ) : mergedRows.length === 0 ? (
-              <EmptyState />
+              hasAnyFilter ? (
+                <p className="text-sm py-6 text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                  Отсутствуют транзакции, подходящие под установленные фильтры
+                </p>
+              ) : (
+                <EmptyState />
+              )
             ) : !isDesktop ? (
               /* Мобильная верстка: карточки от края до края экрана */
               <div
@@ -7576,17 +7887,20 @@ function TransactionsView({
                 })}
               </div>
             )}
-            {hasMoreTxs && (
-              <div className="flex justify-center pt-2">
-                <IconButton
-                  type="button"
-                  aria-label={isLoadingMore ? "Загрузка..." : "Загрузить ещё"}
-                  onClick={handleLoadMore}
-                  disabled={isLoadingMore || loading}
-                >
-                  <ChevronDown className="h-4 w-4" />
-                </IconButton>
-              </div>
+            {hasMoreTxs && (!hasAnyFilter || !showAllFiltered) && (
+              <>
+                <div ref={loadMoreSentinelRef} className="h-1 w-full" aria-hidden />
+                <div className="flex justify-center pt-2">
+                  <IconButton
+                    type="button"
+                    aria-label={isLoadingMore ? "Загрузка..." : "Загрузить ещё"}
+                    onClick={handleLoadMore}
+                    disabled={isLoadingMore || loading}
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </IconButton>
+                </div>
+              </>
             )}
             </div>
           </div>

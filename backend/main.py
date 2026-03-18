@@ -1616,10 +1616,17 @@ def create_item(
             currency_code,
         )
 
-    min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
+    # Для кредитной карты — не ниже -credit_limit; для основной стоимости «Балансовая» — допускается любое отрицательное; иначе — не отрицательное.
+    primary_for_balance = primary_value_kind_pre or "BALANCE"
+    allow_negative_balance = primary_for_balance == "BALANCE"
+    min_balance = (
+        -credit_limit
+        if card_kind == "CREDIT" and credit_limit is not None
+        else (-(2**31) if allow_negative_balance else 0)
+    )
     if initial_balance_minor_for_item < min_balance:
         detail = "Initial balance must be non-negative."
-        if min_balance < 0:
+        if min_balance < 0 and card_kind == "CREDIT":
             detail = "Initial balance cannot be below credit limit."
         raise HTTPException(status_code=400, detail=detail)
 
@@ -2050,10 +2057,17 @@ def update_item(
     next_current_balance_minor = new_base + delta
     if is_moex:
         next_current_balance_minor = item.current_balance_minor
-    min_balance = -credit_limit if card_kind == "CREDIT" and credit_limit is not None else 0
+    # Для кредитной карты — не ниже -credit_limit; для основной стоимости «Балансовая» — допускается отрицательное; иначе — не отрицательное.
+    patch_primary = patch_primary_value_kind if patch_primary_value_kind is not None else getattr(item, "primary_value_kind", None)
+    allow_negative = (patch_primary or "BALANCE") == "BALANCE"
+    min_balance = (
+        -credit_limit
+        if card_kind == "CREDIT" and credit_limit is not None
+        else (-(2**31) if allow_negative else 0)
+    )
     if not is_moex and next_current_balance_minor < min_balance:
         detail = "New initial value would make current balance negative."
-        if min_balance < 0:
+        if min_balance < 0 and card_kind == "CREDIT":
             detail = "New initial value would exceed the credit limit."
         raise HTTPException(status_code=400, detail=detail)
 
@@ -3476,10 +3490,12 @@ def list_balance_checkpoints_for_items(
     item_ids: str | None = None,
     include_closed: bool = False,
     include_archived: bool = False,
+    date_from: date_type | None = None,
+    date_to: date_type | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Список КТ по выбранным активам (для страницы транзакций). item_ids — comma-separated; пусто = все BALANCE-активы пользователя. include_closed/include_archived — для экспорта в бэкап."""
+    """Список КТ по выбранным активам (для страницы транзакций). item_ids — comma-separated; пусто = все BALANCE-активы пользователя. date_from/date_to — фильтр по дате КТ (YYYY-MM-DD). include_closed/include_archived — для экспорта в бэкап."""
     if item_ids:
         id_list = [int(x.strip()) for x in item_ids.split(",") if x.strip()]
         if not id_list:
@@ -3500,15 +3516,22 @@ def list_balance_checkpoints_for_items(
         allowed_ids = {i.id for i in items}
     if not allowed_ids:
         return []
-    rows = (
+    q = (
         db.query(ItemBalanceCheckpoint)
         .filter(
             ItemBalanceCheckpoint.user_id == user.id,
             ItemBalanceCheckpoint.item_id.in_(allowed_ids),
         )
-        .order_by(ItemBalanceCheckpoint.checkpoint_at.asc())
-        .all()
     )
+    if date_from is not None:
+        q = q.where(
+            ItemBalanceCheckpoint.checkpoint_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+        )
+    if date_to is not None:
+        q = q.where(
+            ItemBalanceCheckpoint.checkpoint_at <= datetime.combine(date_to, time.max, tzinfo=timezone.utc)
+        )
+    rows = q.order_by(ItemBalanceCheckpoint.checkpoint_at.asc()).all()
     items_by_id = {i.id: i for i in items}
     result = []
     for r in rows:

@@ -14,6 +14,7 @@ from schemas import (
     TransactionOut,
     TransactionStatusUpdate,
     TransactionPageOut,
+    TransactionCountsByDirectionOut,
     TransactionSplitCreate,
     TransactionSplitOut,
     TransactionDirection,
@@ -93,6 +94,35 @@ def _resolve_effective_side(
         card_item=item,
         start_date=start_date,
     )
+
+def _expand_category_ids_with_descendants(
+    db: Session, user_id: int, category_ids: list[int]
+) -> list[int]:
+    """Return category_ids plus all descendant category IDs (recursive)."""
+    if not category_ids:
+        return []
+    result = set(category_ids)
+    current = set(category_ids)
+    while current:
+        children = (
+            db.query(Category.id)
+            .filter(
+                Category.parent_id.in_(current),
+                or_(
+                    Category.owner_user_id.is_(None),
+                    Category.owner_user_id == user_id,
+                ),
+            )
+            .all()
+        )
+        next_ids = {r[0] for r in children}
+        added = next_ids - result
+        if not added:
+            break
+        result |= added
+        current = added
+    return list(result)
+
 
 def _parse_cursor(value: str) -> tuple[datetime, datetime | None, int]:
     """Returns (transaction_date, created_at or None, id). Old format 'date|id' supported for backward compatibility."""
@@ -253,9 +283,11 @@ def list_transactions(
     )
 
 
+MAX_PAGE_LIMIT = 10000
+
 @router.get("/page", response_model=TransactionPageOut)
 def list_transactions_page(
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=MAX_PAGE_LIMIT),
     cursor: str | None = None,
     include_deleted: bool = False,
     deleted_only: bool = False,
@@ -269,8 +301,11 @@ def list_transactions_page(
     currency_item_ids: list[int] | None = Query(default=None),
     category_ids: list[int] | None = Query(default=None),
     counterparty_ids: list[int] | None = Query(default=None),
+    counterparty_missing: bool = False,
+    chain_missing: bool = False,
     comment_query: str | None = None,
     related_item_ids: list[int] | None = Query(default=None),
+    transfer_destination_item_ids: list[int] | None = Query(default=None),
     min_amount: int | None = Query(default=None, ge=0),
     max_amount: int | None = Query(default=None, ge=0),
     db: Session = Depends(get_db),
@@ -298,9 +333,15 @@ def list_transactions_page(
     if transaction_type:
         stmt = stmt.where(Transaction.transaction_type.in_(transaction_type))
     if category_ids:
-        stmt = stmt.where(Transaction.category_id.in_(category_ids))
-    if counterparty_ids:
+        expanded = _expand_category_ids_with_descendants(db, user.id, category_ids)
+        if expanded:
+            stmt = stmt.where(Transaction.category_id.in_(expanded))
+    if counterparty_missing:
+        stmt = stmt.where(Transaction.counterparty_id.is_(None))
+    elif counterparty_ids:
         stmt = stmt.where(Transaction.counterparty_id.in_(counterparty_ids))
+    if chain_missing:
+        stmt = stmt.where(Transaction.chain_id.is_(None))
     item_filters = []
     if item_ids:
         item_filters.append(
@@ -331,6 +372,11 @@ def list_transactions_page(
             stmt = stmt.where(Transaction.comment.ilike(f"%{trimmed}%"))
     if related_item_ids:
         stmt = stmt.where(Transaction.related_item_id.in_(related_item_ids))
+    if transfer_destination_item_ids:
+        stmt = stmt.where(
+            Transaction.direction == "TRANSFER",
+            Transaction.counterparty_item_id.in_(transfer_destination_item_ids),
+        )
     if min_amount is not None or max_amount is not None:
         abs_amount = func.abs(Transaction.amount_primary_minor)
         if min_amount is not None:
@@ -386,6 +432,118 @@ def list_transactions_page(
         next_cursor = f"{last.transaction_date.isoformat()}|{last.created_at.isoformat()}|{last.id}"
 
     return TransactionPageOut(items=rows, next_cursor=next_cursor, has_more=has_more)
+
+
+@router.get("/counts", response_model=TransactionCountsByDirectionOut)
+def list_transactions_counts(
+    include_deleted: bool = False,
+    deleted_only: bool = False,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    status: list[TransactionStatus] | None = Query(default=None),
+    direction: list[TransactionDirection] | None = Query(default=None),
+    transaction_type: list[TransactionType] | None = Query(default=None),
+    item_ids: list[int] | None = Query(default=None),
+    card_item_ids: list[int] | None = Query(default=None),
+    currency_item_ids: list[int] | None = Query(default=None),
+    category_ids: list[int] | None = Query(default=None),
+    counterparty_ids: list[int] | None = Query(default=None),
+    counterparty_missing: bool = False,
+    chain_missing: bool = False,
+    comment_query: str | None = None,
+    related_item_ids: list[int] | None = Query(default=None),
+    transfer_destination_item_ids: list[int] | None = Query(default=None),
+    min_amount: int | None = Query(default=None, ge=0),
+    max_amount: int | None = Query(default=None, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Count transactions by direction (INCOME, EXPENSE, TRANSFER) with same filters as /page."""
+    stmt = select(Transaction.direction, func.count(Transaction.id)).where(
+        Transaction.user_id == user.id
+    )
+
+    if deleted_only:
+        stmt = stmt.where(Transaction.deleted_at.isnot(None))
+    elif not include_deleted:
+        stmt = stmt.where(Transaction.deleted_at.is_(None))
+    if date_from:
+        stmt = stmt.where(
+            Transaction.transaction_date >= datetime.combine(date_from, time.min)
+        )
+    if date_to:
+        stmt = stmt.where(
+            Transaction.transaction_date <= datetime.combine(date_to, time.max)
+        )
+    if status:
+        stmt = stmt.where(Transaction.status.in_(status))
+    if direction:
+        stmt = stmt.where(Transaction.direction.in_(direction))
+    if transaction_type:
+        stmt = stmt.where(Transaction.transaction_type.in_(transaction_type))
+    if category_ids:
+        expanded = _expand_category_ids_with_descendants(db, user.id, category_ids)
+        if expanded:
+            stmt = stmt.where(Transaction.category_id.in_(expanded))
+    if counterparty_missing:
+        stmt = stmt.where(Transaction.counterparty_id.is_(None))
+    elif counterparty_ids:
+        stmt = stmt.where(Transaction.counterparty_id.in_(counterparty_ids))
+    if chain_missing:
+        stmt = stmt.where(Transaction.chain_id.is_(None))
+    item_filters = []
+    if item_ids:
+        item_filters.append(
+            or_(
+                Transaction.primary_item_id.in_(item_ids),
+                Transaction.counterparty_item_id.in_(item_ids),
+            )
+        )
+    if card_item_ids:
+        item_filters.append(
+            or_(
+                Transaction.primary_card_item_id.in_(card_item_ids),
+                Transaction.counterparty_card_item_id.in_(card_item_ids),
+            )
+        )
+    if item_filters:
+        stmt = stmt.where(or_(*item_filters))
+    if currency_item_ids:
+        stmt = stmt.where(
+            or_(
+                Transaction.primary_item_id.in_(currency_item_ids),
+                Transaction.counterparty_item_id.in_(currency_item_ids),
+            )
+        )
+    if comment_query:
+        trimmed = comment_query.strip()
+        if trimmed:
+            stmt = stmt.where(Transaction.comment.ilike(f"%{trimmed}%"))
+    if related_item_ids:
+        stmt = stmt.where(Transaction.related_item_id.in_(related_item_ids))
+    if transfer_destination_item_ids:
+        stmt = stmt.where(
+            Transaction.direction == "TRANSFER",
+            Transaction.counterparty_item_id.in_(transfer_destination_item_ids),
+        )
+    if min_amount is not None or max_amount is not None:
+        abs_amount = func.abs(Transaction.amount_primary_minor)
+        if min_amount is not None:
+            stmt = stmt.where(abs_amount >= min_amount)
+        if max_amount is not None:
+            stmt = stmt.where(abs_amount <= max_amount)
+
+    stmt = stmt.group_by(Transaction.direction)
+    rows = db.execute(stmt).all()
+    counts = {"income": 0, "expense": 0, "transfer": 0}
+    for direction_val, cnt in rows:
+        if direction_val == "INCOME":
+            counts["income"] = cnt
+        elif direction_val == "EXPENSE":
+            counts["expense"] = cnt
+        elif direction_val == "TRANSFER":
+            counts["transfer"] = cnt
+    return TransactionCountsByDirectionOut(**counts)
 
 
 @router.get("/deleted", response_model=list[TransactionOut])

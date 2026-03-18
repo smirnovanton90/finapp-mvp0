@@ -11,6 +11,7 @@ import {
   type CSSProperties,
 } from "react";
 
+import { CircleX } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 import { CategoryNode, buildCategoryLookup } from "@/lib/categories";
 import { DROPDOWN_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
@@ -41,6 +42,10 @@ type ChainSelectorProps = {
   ariaLabel?: string;
   includeDeleted?: boolean;
   apiBase?: string;
+  /** When true, adds "Без цепочки" as first option in the dropdown. */
+  showMissingOption?: boolean;
+  missingOptionSelected?: boolean;
+  onMissingOptionChange?: (selected: boolean) => void;
 };
 
 const DEFAULT_EMPTY_MESSAGE = "Нет цепочек транзакций.";
@@ -104,6 +109,9 @@ export function ChainSelector({
   ariaLabel,
   includeDeleted = false,
   apiBase = API_BASE,
+  showMissingOption = false,
+  missingOptionSelected = false,
+  onMissingOptionChange,
 }: ChainSelectorProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -137,12 +145,24 @@ export function ChainSelector({
     [chainOptions, selectedChainId]
   );
 
-  const selectedLabel = selectedOption?.name ?? "";
+  const selectedLabel = missingOptionSelected
+    ? "Без цепочки"
+    : selectedOption?.name ?? "";
   const inputValue = query || selectedLabel;
 
   const applySelection = (opt: ChainOption) => {
     if (disabled) return;
+    onMissingOptionChange?.(false);
     onChange?.(opt.chainId);
+    setQuery("");
+    setOpen(false);
+    anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
+  };
+
+  const selectMissingOption = () => {
+    if (disabled) return;
+    onChange?.(null);
+    onMissingOptionChange?.(true);
     setQuery("");
     setOpen(false);
     anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
@@ -151,6 +171,7 @@ export function ChainSelector({
   const clearSelection = () => {
     if (disabled) return;
     onChange?.(null);
+    onMissingOptionChange?.(false);
     setQuery("");
     setOpen(false);
     anchorRef.current?.querySelector<HTMLInputElement>("input")?.blur();
@@ -292,6 +313,27 @@ export function ChainSelector({
                 className="relative rounded-lg p-1 z-10"
                 style={{ backgroundColor: DROPDOWN_BG }}
               >
+                {showMissingOption && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+                    style={{ color: SIDEBAR_TEXT_ACTIVE }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor =
+                        "rgba(108, 93, 215, 0.22)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectMissingOption();
+                    }}
+                  >
+                    <CircleX className="h-4 w-4 shrink-0" aria-hidden />
+                    <span>Без цепочки</span>
+                  </button>
+                )}
                 {clearLabel && (
                   <button
                     type="button"

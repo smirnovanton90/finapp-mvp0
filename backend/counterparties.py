@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from io import BytesIO
 import re
 
@@ -16,6 +16,7 @@ from models import Counterparty, CounterpartyIndustry, User
 from opf_reference import LEGAL_FORMS
 from schemas import (
     CounterpartyCreate,
+    CounterpartyDeletedAtUpdate,
     CounterpartyIndustryOut,
     CounterpartyOut,
     CounterpartyPageOut,
@@ -549,6 +550,24 @@ def delete_counterparty(
     counterparty.deleted_at = datetime.now(timezone.utc)
     db.commit()
     return {"ok": True}
+
+
+@router.patch("/{counterparty_id}/deleted_at", response_model=CounterpartyOut)
+def update_counterparty_deleted_at(
+    counterparty_id: int,
+    payload: CounterpartyDeletedAtUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Установить или обновить дату удаления контрагента (при восстановлении из бэкапа)."""
+    counterparty = db.get(Counterparty, counterparty_id)
+    if not counterparty or counterparty.owner_user_id != user.id:
+        raise HTTPException(status_code=404, detail="Контрагент не найден.")
+    deleted_dt = datetime.combine(payload.deleted_date, time.min, tzinfo=timezone.utc)
+    counterparty.deleted_at = deleted_dt
+    db.commit()
+    db.refresh(counterparty)
+    return counterparty_to_out(counterparty)
 
 
 @router.get("/{counterparty_id}/logo")

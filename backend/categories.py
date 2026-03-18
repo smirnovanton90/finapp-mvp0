@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import hashlib
 import json
+from datetime import datetime, time, timezone
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File
@@ -16,6 +17,7 @@ from config import settings
 from db import get_db
 from models import Category, User, UserCategoryState
 from schemas import (
+    CategoryArchivedAtUpdate,
     CategoryCreate,
     CategoryIconUpdate,
     CategoryOut,
@@ -611,3 +613,22 @@ def delete_category(
     db.commit()
     invalidate_category_cache(user.id)
     return {"ok": True}
+
+
+@router.patch("/{category_id}/archived_at", response_model=CategoryOut)
+def update_category_archived_at(
+    category_id: int,
+    payload: CategoryArchivedAtUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Установить или обновить дату архивации категории (при восстановлении из бэкапа)."""
+    category = fetch_category(db, user, category_id, allow_archived=True)
+    if category.owner_user_id != user.id:
+        raise HTTPException(status_code=403, detail="Cannot update global category")
+    archived_dt = datetime.combine(payload.archived_date, time.min, tzinfo=timezone.utc)
+    category.archived_at = archived_dt
+    db.commit()
+    db.refresh(category)
+    invalidate_category_cache(user.id)
+    return build_category_out(category, db.get(UserCategoryState, (user.id, category.id)))

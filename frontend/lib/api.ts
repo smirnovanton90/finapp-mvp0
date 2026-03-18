@@ -926,6 +926,19 @@ export async function deleteCounterparty(id: number): Promise<void> {
   if (!res.ok) throw new Error(await readError(res));
 }
 
+export async function updateCounterpartyDeletedAt(
+  id: number,
+  deleted_date: string
+): Promise<CounterpartyOut> {
+  const res = await authFetch(`${API_BASE}/counterparties/${id}/deleted_at`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deleted_date }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function uploadCounterpartyLogo(
   id: number,
   file: File
@@ -1177,6 +1190,19 @@ export async function deleteCategory(
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function updateCategoryArchivedAt(
+  id: number,
+  archived_date: string
+): Promise<CategoryNode> {
+  const res = await authFetch(`${API_BASE}/categories/${id}/archived_at`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archived_date }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
 }
 
 export async function createItem(payload: ItemCreate): Promise<ItemOut> {
@@ -1790,4 +1816,17 @@ export async function deleteGoal(id: number): Promise<void> {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function updateGoalDeletedAt(
+  id: number,
+  deleted_date: string
+): Promise<GoalOut> {
+  const res = await authFetch(`${API_BASE}/goals/${id}/deleted_at`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deleted_date }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return mapGoalFromApi(await res.json());
 }

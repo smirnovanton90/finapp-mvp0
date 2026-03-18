@@ -144,6 +144,21 @@ class ItemArchivedAtUpdate(BaseModel):
     archived_date: date
 
 
+class CounterpartyDeletedAtUpdate(BaseModel):
+    """Установка даты удаления контрагента (для восстановления из бэкапа)."""
+    deleted_date: date
+
+
+class GoalDeletedAtUpdate(BaseModel):
+    """Установка даты удаления цели (для восстановления из бэкапа)."""
+    deleted_date: date
+
+
+class CategoryArchivedAtUpdate(BaseModel):
+    """Установка даты архивации категории (для восстановления из бэкапа)."""
+    archived_date: date
+
+
 class OnboardingStateOut(BaseModel):
     device_type: OnboardingDeviceType
     status: OnboardingStatus

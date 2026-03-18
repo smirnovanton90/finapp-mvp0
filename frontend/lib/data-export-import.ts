@@ -16,13 +16,16 @@ import {
   fetchItemMarketValues,
   setAccountingStartDate,
   createCounterparty,
+  updateCounterpartyDeletedAt,
   createCategory,
+  updateCategoryArchivedAt,
   createItem,
   updateItemClosedAt,
   updateItemArchivedAt,
   createTransactionChain,
   createTransaction,
   createGoal,
+  updateGoalDeletedAt,
   createBalanceCheckpoint,
   createItemMarketValue,
   type ItemOut,
@@ -294,7 +297,7 @@ function getTransferReceiverSender(
   };
 }
 
-/** Сортирует транзакции для импорта: по дню по возрастанию, внутри дня — доходы → переводы → расходы; внутри переводов — сначала переводы НА счёт (получатель), потом СО счёта (отправитель), чтобы избежать отрицательного сальдо. */
+/** Сортирует транзакции для импорта: по дню по возрастанию, внутри дня — доходы → переводы → расходы; внутри переводов — сначала переводы НА счёт, потом СО счёта; родительские транзакции (split parent) всегда перед дочерними. */
 function sortTransactionsForImport(
   rows: Array<Record<string, string>>,
   itemRows?: Array<Record<string, string>>
@@ -308,6 +311,12 @@ function sortTransactionsForImport(
     const dirA = TRANSACTION_DIRECTION_ORDER[str(a.direction)] ?? 2;
     const dirB = TRANSACTION_DIRECTION_ORDER[str(b.direction)] ?? 2;
     if (dirA !== dirB) return dirA - dirB;
+    const parentIdA = num(a.parent_transaction_id);
+    const parentIdB = num(b.parent_transaction_id);
+    const idA = num(a.id);
+    const idB = num(b.id);
+    if (parentIdA === idB) return 1;
+    if (parentIdB === idA) return -1;
     if (str(a.direction) === "TRANSFER" && str(b.direction) === "TRANSFER" && itemRows?.length) {
       const rsA = getTransferReceiverSender(a, itemRows);
       const rsB = getTransferReceiverSender(b, itemRows);
@@ -421,6 +430,8 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
   }
 
   // COUNTERPARTIES (все добавленные пользователем + все, на кого ссылаются активы/цепочки/транзакции)
+  const cpDateOnly = (d: string | null | undefined): string =>
+    d ? (typeof d === "string" ? d.slice(0, 10) : "") : "";
   lines.push(SECTION_COUNTERPARTIES);
   lines.push(
     csvRow([
@@ -435,6 +446,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
       "last_name",
       "middle_name",
       "synonyms",
+      "deleted_at",
     ])
   );
   for (const r of counterpartiesToExport) {
@@ -451,15 +463,28 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
         r.last_name ?? "",
         r.middle_name ?? "",
         (r.synonyms ?? []).join(";"),
+        cpDateOnly(r.deleted_at ?? undefined),
       ])
     );
   }
   lines.push("");
 
   // CATEGORIES (все уровни: корень, дочерние, внуки — с полным путём для импорта)
+  const catDateOnly = (d: string | null | undefined): string =>
+    d ? (typeof d === "string" ? d.slice(0, 10) : "") : "";
   lines.push(SECTION_CATEGORIES);
   lines.push(
-    csvRow(["id", "name", "scope", "icon_name", "parent_id", "enabled", "synonyms", "full_path"])
+    csvRow([
+      "id",
+      "name",
+      "scope",
+      "icon_name",
+      "parent_id",
+      "enabled",
+      "synonyms",
+      "full_path",
+      "archived_at",
+    ])
   );
   for (const c of sortedCategories) {
     lines.push(
@@ -472,6 +497,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
         c.enabled,
         (c.synonyms ?? []).join(";"),
         categoryFullPathById.get(c.id) ?? c.name,
+        catDateOnly(c.archived_at ?? undefined),
       ])
     );
   }
@@ -511,11 +537,17 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
     "plan_settings_json",
     "closed_at",
     "archived_at",
+    "primary_value_kind",
+    "acquisition_value_rub",
   ];
   lines.push(csvRow(itemHeaders));
   const dateOnly = (d: string | Date | null | undefined): string =>
     d ? (typeof d === "string" ? d : (d as Date).toISOString().slice(0, 10)) : "";
   for (const i of items) {
+    const acqVal =
+      (i as { acquisitionCents?: number | null }).acquisitionCents ??
+      (i as { acquisition_rub?: number | null }).acquisition_rub ??
+      "";
     lines.push(
       csvRow([
         i.id,
@@ -549,6 +581,8 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
         i.plan_settings ? JSON.stringify(i.plan_settings) : "",
         dateOnly(i.closed_at ?? undefined),
         dateOnly(i.archived_at ?? undefined),
+        (i as { primary_value_kind?: string | null }).primary_value_kind ?? "",
+        acqVal !== "" ? String(acqVal) : "",
       ])
     );
   }
@@ -641,10 +675,11 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
       "comment",
       "related_item_id",
       "asset_link_type",
+      "parent_transaction_id",
+      "is_split_parent",
     ])
   );
   for (const t of transactions) {
-    // Для переводов при экспорте выгружаем контрагентский счёт: приоритет counterparty_item_id, иначе counterparty_card_item_id (в интерфейсе может отображаться карта)
     const exportCounterpartyItemId =
       t.direction === "TRANSFER"
         ? (t.counterparty_item_id ?? t.counterparty_card_item_id ?? "")
@@ -669,12 +704,16 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
         t.comment ?? "",
         t.related_item_id ?? "",
         t.asset_link_type ?? "",
+        (t as { parent_transaction_id?: number | null }).parent_transaction_id ?? "",
+        (t as { is_split_parent?: boolean }).is_split_parent ? "true" : "false",
       ])
     );
   }
   lines.push("");
 
   // GOALS
+  const goalDateOnly = (d: string | null | undefined): string =>
+    d ? (typeof d === "string" ? d.slice(0, 10) : "") : "";
   lines.push(SECTION_GOALS);
   lines.push(
     csvRow([
@@ -685,6 +724,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
       "custom_end_date",
       "category_id",
       "amount",
+      "deleted_at",
     ])
   );
   for (const g of goals) {
@@ -697,6 +737,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
         g.custom_end_date ?? "",
         g.category_id,
         g.amount,
+        goalDateOnly(g.deleted_at ?? undefined),
       ])
     );
   }
@@ -1103,7 +1144,7 @@ export async function runImport(
     // 1. Контрагенты (если с такими реквизитами уже есть — используем существующего)
     // Синонимы на бэкенде уникальны среди контрагентов: при импорте пропускаем уже «занятые» синонимы, чтобы не падать на дубликатах в файле.
     const usedSynonyms = new Set<string>();
-    const existingCounterparties = await fetchCounterparties({ include_deleted: false });
+    const existingCounterparties = await fetchCounterparties({ include_deleted: true });
     const totalCp = data.counterparties.length;
     for (let i = 0; i < totalCp; i++) {
       const row = data.counterparties[i];
@@ -1130,42 +1171,54 @@ export async function runImport(
         synonyms,
       };
       const existing = findExistingCounterparty(existingCounterparties, payload);
+      let counterpartyId: number;
       if (existing) {
         counterpartyIdMap.set(oldId, existing.id);
+        counterpartyId = existing.id;
         counts.counterparties += 1;
-        continue;
-      }
-      try {
-        const created = await createCounterparty(payload);
-        counterpartyIdMap.set(oldId, created.id);
-        existingCounterparties.push(created);
-        counts.counterparties += 1;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("уже существует")) {
-          const refreshed = await fetchCounterparties({ include_deleted: false });
-          const found = findExistingCounterparty(refreshed, payload);
-          if (found) {
-            counterpartyIdMap.set(oldId, found.id);
+      } else {
+        try {
+          const created = await createCounterparty(payload);
+          counterpartyIdMap.set(oldId, created.id);
+          existingCounterparties.push(created);
+          counterpartyId = created.id;
+          counts.counterparties += 1;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("уже существует")) {
+            const refreshed = await fetchCounterparties({ include_deleted: true });
+            const found = findExistingCounterparty(refreshed, payload);
+            if (found) {
+              counterpartyIdMap.set(oldId, found.id);
+              counterpartyId = found.id;
+              counts.counterparties += 1;
+            } else {
+              throw err;
+            }
+          } else if (msg.includes("синоним") && synonyms.length > 0) {
+            const payloadWithoutSynonyms: CounterpartyCreate = { ...payload, synonyms: [] };
+            const created = await createCounterparty(payloadWithoutSynonyms);
+            counterpartyIdMap.set(oldId, created.id);
+            existingCounterparties.push(created);
+            counterpartyId = created.id;
             counts.counterparties += 1;
           } else {
             throw err;
           }
-        } else if (msg.includes("синоним") && synonyms.length > 0) {
-          // Один из синонимов уже используется другим контрагентом — создаём без синонимов
-          const payloadWithoutSynonyms: CounterpartyCreate = { ...payload, synonyms: [] };
-          const created = await createCounterparty(payloadWithoutSynonyms);
-          counterpartyIdMap.set(oldId, created.id);
-          existingCounterparties.push(created);
-          counts.counterparties += 1;
-        } else {
-          throw err;
+        }
+      }
+      const deletedAtRaw = str(row.deleted_at).trim().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(deletedAtRaw)) {
+        try {
+          await updateCounterpartyDeletedAt(counterpartyId, deletedAtRaw);
+        } catch {
+          // игнорируем ошибку
         }
       }
     }
 
     // 2. Категории: все уровни; поиск по полному пути (Уровень1 > Уровень2 > Уровень3); если не найдено — создаём
-    const existingCategoriesTree = await fetchCategories({ includeArchived: false });
+    const existingCategoriesTree = await fetchCategories({ includeArchived: true });
     let existingCategoriesFlat: CategoryFlatWithPath[] = flattenCategoriesWithFullPath(existingCategoriesTree);
     const catRows = data.categories;
     const sortedCats: Array<Record<string, string>> = [];
@@ -1200,45 +1253,57 @@ export async function runImport(
       const name = str(row.name) || "Категория";
       const fullPath = getCategoryFullPathFromRow(catRows, row);
       const existingCat = findExistingCategoryByFullPath(existingCategoriesFlat, fullPath);
+      let categoryId: number;
       if (existingCat) {
         categoryIdMap.set(oldId, existingCat.id);
+        categoryId = existingCat.id;
         counts.categories += 1;
-        continue;
-      }
-      try {
-        const payload: CategoryCreate = {
-          name,
-          parent_id: newParentId,
-          scope: (str(row.scope) || "BOTH") as CategoryScope,
-          icon_name: str(row.icon_name) || null,
-          synonyms: str(row.synonyms) ? str(row.synonyms).split(";").filter(Boolean) : [],
-        };
-        const created = await createCategory(payload);
-        categoryIdMap.set(oldId, created.id);
-        const parentFullPath =
-          newParentId != null ? existingCategoriesFlat.find((c) => c.id === newParentId)?.full_path : null;
-        const newFullPath = parentFullPath ? `${parentFullPath} > ${created.name}` : created.name;
-        existingCategoriesFlat.push({
-          id: created.id,
-          name: created.name,
-          parent_id: created.parent_id ?? null,
-          full_path: newFullPath,
-        });
-        counts.categories += 1;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("same name already exists")) {
-          const refreshed = await fetchCategories({ includeArchived: false });
-          existingCategoriesFlat = flattenCategoriesWithFullPath(refreshed);
-          const found = findExistingCategoryByFullPath(existingCategoriesFlat, fullPath);
-          if (found) {
-            categoryIdMap.set(oldId, found.id);
-            counts.categories += 1;
+      } else {
+        try {
+          const payload: CategoryCreate = {
+            name,
+            parent_id: newParentId,
+            scope: (str(row.scope) || "BOTH") as CategoryScope,
+            icon_name: str(row.icon_name) || null,
+            synonyms: str(row.synonyms) ? str(row.synonyms).split(";").filter(Boolean) : [],
+          };
+          const created = await createCategory(payload);
+          categoryIdMap.set(oldId, created.id);
+          categoryId = created.id;
+          const parentFullPath =
+            newParentId != null ? existingCategoriesFlat.find((c) => c.id === newParentId)?.full_path : null;
+          const newFullPath = parentFullPath ? `${parentFullPath} > ${created.name}` : created.name;
+          existingCategoriesFlat.push({
+            id: created.id,
+            name: created.name,
+            parent_id: created.parent_id ?? null,
+            full_path: newFullPath,
+          });
+          counts.categories += 1;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("same name already exists")) {
+            const refreshed = await fetchCategories({ includeArchived: true });
+            existingCategoriesFlat = flattenCategoriesWithFullPath(refreshed);
+            const found = findExistingCategoryByFullPath(existingCategoriesFlat, fullPath);
+            if (found) {
+              categoryIdMap.set(oldId, found.id);
+              categoryId = found.id;
+              counts.categories += 1;
+            } else {
+              throw err;
+            }
           } else {
             throw err;
           }
-        } else {
-          throw err;
+        }
+      }
+      const archivedAtRaw = str(row.archived_at).trim().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(archivedAtRaw)) {
+        try {
+          await updateCategoryArchivedAt(categoryId, archivedAtRaw);
+        } catch {
+          // игнорируем ошибку
         }
       }
     }
@@ -1346,6 +1411,14 @@ export async function runImport(
         initial_balance_minor: num(row.initial_balance_minor ?? row.initial_value_rub) ?? 0,
         synonyms: str(row.synonyms) ? str(row.synonyms).split(";").filter(Boolean) : [],
       };
+      const primaryValueKindRaw = str(row.primary_value_kind).toUpperCase();
+      const primaryValueKind =
+        primaryValueKindRaw && ["BALANCE", "ACQUISITION", "INVESTED", "MARKET"].includes(primaryValueKindRaw)
+          ? (primaryValueKindRaw as ItemCreate["primary_value_kind"])
+          : undefined;
+      if (primaryValueKind) payload.primary_value_kind = primaryValueKind;
+      const acquisitionValueRub = num(row.acquisition_value_rub);
+      if (acquisitionValueRub != null && acquisitionValueRub >= 0) payload.acquisition_value_rub = acquisitionValueRub;
       if (row.plan_settings_json) {
         try {
           payload.plan_settings = JSON.parse(row.plan_settings_json) as ItemCreate["plan_settings"];
@@ -1476,16 +1549,18 @@ export async function runImport(
       }
     }
 
-    // 6. Транзакции (сортируем по дате и внутри дня: доходы → переводы → расходы; внутри переводов — сначала НА счёт, потом СО счёта)
+    // 6. Транзакции (сортируем по дате; родительские транзакции split — перед дочерними)
     // Транзакции открытия по обязательствам/активам не импортируем — бэкенд создаёт их при создании позиции (createItem).
     const OPENING_COMMENT_PREFIX = "Открытие: ";
     const sortedTransactions = sortTransactionsForImport(data.transactions, data.items);
+    const transactionIdMap = new Map<number, number>();
     const totalTx = sortedTransactions.length;
     for (let i = 0; i < totalTx; i++) {
       const row = sortedTransactions[i];
       report("Транзакции", i + 1, totalTx);
       const comment = str(row.comment).trim();
       if (comment.startsWith(OPENING_COMMENT_PREFIX)) continue;
+      const oldTxId = num(row.id);
       const primaryItemId = num(row.primary_item_id);
       const counterpartyItemId = num(row.counterparty_item_id);
       const counterpartyId = num(row.counterparty_id);
@@ -1511,7 +1586,12 @@ export async function runImport(
           `counterparty_item_id is required for TRANSFER (${txRowInfo}). Для перевода должен быть указан контрагентский счёт в файле и он должен быть импортирован.`
         );
       }
-      // Для переводов не импортируем атрибуты, запрещённые для TRANSFER (counterparty_id, category_id, related_item_id, asset_link_type)
+      const parentOldId = num(row.parent_transaction_id);
+      const resolvedParentId =
+        parentOldId != null && transactionIdMap.has(parentOldId)
+          ? transactionIdMap.get(parentOldId)!
+          : null;
+      const isSplitParent = str(row.is_split_parent).toLowerCase() === "true";
       const payload: TransactionCreate = {
         transaction_date: txDate,
         primary_item_id: itemIdMap.get(primaryItemId)!,
@@ -1545,9 +1625,12 @@ export async function runImport(
             : assetLinkType && resolvedRelatedItemId != null
               ? assetLinkType
               : undefined,
+        ...(resolvedParentId != null ? { parent_transaction_id: resolvedParentId } : {}),
+        ...(isSplitParent ? { is_split_parent: true } : {}),
       };
       try {
-        await createTransaction(payload);
+        const created = await createTransaction(payload);
+        if (oldTxId != null) transactionIdMap.set(oldTxId, created.id);
         counts.transactions += 1;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1576,8 +1659,16 @@ export async function runImport(
         category_id: categoryIdMap.get(categoryId)!,
         amount: num(row.amount) ?? 0,
       };
-      await createGoal(payload);
+      const created = await createGoal(payload);
       counts.goals += 1;
+      const deletedAtRaw = str(row.deleted_at).trim().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(deletedAtRaw)) {
+        try {
+          await updateGoalDeletedAt(created.id, deletedAtRaw);
+        } catch {
+          // игнорируем ошибку
+        }
+      }
     }
 
     // 8. Контрольные точки (только для актива, который импортирован или сопоставлен)

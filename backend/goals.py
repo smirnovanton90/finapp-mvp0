@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, date as date_type
+from datetime import datetime, time, timezone, date as date_type
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -8,7 +8,7 @@ from auth import get_current_user
 from category_service import resolve_category_or_400
 from db import get_db
 from models import Goal, User
-from schemas import GoalCreate, GoalOut
+from schemas import GoalCreate, GoalDeletedAtUpdate, GoalOut
 
 router = APIRouter(prefix="/goals", tags=["goals"])
 
@@ -135,3 +135,25 @@ def delete_goal(
     goal.deleted_at = datetime.now(timezone.utc)
     db.commit()
     return {"ok": True}
+
+
+@router.patch("/{goal_id}/deleted_at", response_model=GoalOut)
+def update_goal_deleted_at(
+    goal_id: int,
+    payload: GoalDeletedAtUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Установить или обновить дату удаления цели (при восстановлении из бэкапа)."""
+    goal = (
+        db.query(Goal)
+        .filter(Goal.id == goal_id, Goal.user_id == user.id)
+        .first()
+    )
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    deleted_dt = datetime.combine(payload.deleted_date, time.min, tzinfo=timezone.utc)
+    goal.deleted_at = deleted_dt
+    db.commit()
+    db.refresh(goal)
+    return goal

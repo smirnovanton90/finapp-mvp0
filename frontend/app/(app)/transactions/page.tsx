@@ -4543,10 +4543,24 @@ function TransactionsView({
 
   useEffect(() => {
     if (!session) return;
-    setIsInitialLoading(true);
-    const handle = setTimeout(() => {
+    // При смене запроса (фильтры/пресеты) сразу убираем старые транзакции,
+    // чтобы скелетон не отображался поверх предыдущего списка.
+    if (txQuery.disabled) {
+      setTxs([]);
       setTxCursor(null);
       setHasMoreTxs(false);
+      setLoading(false);
+      setIsLoadingMore(false);
+      setIsInitialLoading(false);
+      return;
+    }
+    txRequestIdRef.current += 1; // инвалидируем предыдущие запросы
+    setTxs([]);
+    setTxCursor(null);
+    setHasMoreTxs(false);
+    setLoading(true);
+    setIsInitialLoading(true);
+    const handle = setTimeout(() => {
       loadTransactions({ cursor: null, append: false });
     }, 300);
     return () => clearTimeout(handle);
@@ -4886,9 +4900,9 @@ function TransactionsView({
     }
   }, [sortedTxs.map((t) => t.id).join(",")]);
 
-  const contentVisible =
-    mergedRows.length > 0 &&
-    (sortedTxs.length === 0 || readyRowCount >= sortedTxs.length);
+  const contentVisible = !loading;
+
+  const showDesktopSkeleton = isDesktop && loading;
 
   const handleLoadMore = useCallback(() => {
     if ((hasAnyFilter && showAllFiltered) || !hasMoreTxs || isLoadingMore || loading) return;
@@ -7680,7 +7694,184 @@ function TransactionsView({
                 )}
                 </div>
               </div>
-            {isInitialLoading && !isDesktop ? (
+            {isDesktop ? (
+              <div className="relative">
+                {showDesktopSkeleton && (
+                  <div className="absolute inset-0 z-10 pointer-events-none">
+                    <div className="space-y-3">
+                      {[1, 2, 3].map((sectionIdx) => (
+                        <div key={sectionIdx} className="space-y-3">
+                          <Skeleton className="h-8 w-32 rounded-[9px]" aria-hidden />
+                          {[1, 2, 3, 4, 5].map((rowIdx) => (
+                            <Skeleton
+                              key={rowIdx}
+                              className="h-20 w-[900px] @[1400px]:w-full rounded-lg"
+                            />
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {mergedRows.length === 0 ? (
+                  loading ? (
+                    <div className="h-1 w-full" aria-hidden />
+                  ) : hasAnyFilter ? (
+                    <p className="text-sm py-6 text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      Отсутствуют транзакции, подходящие под установленные фильтры
+                    </p>
+                  ) : (
+                    <EmptyState />
+                  )
+                ) : (
+                  <div
+                    className="space-y-3"
+                    style={{
+                      opacity: contentVisible ? 1 : 0,
+                      transition: "opacity 0.3s ease-in-out",
+                    }}
+                  >
+                    {mergedRows.map((row, idx) => {
+                      if (row.type === "date_header") {
+                        if (!checkpointsVisible) {
+                          let hasTransactionOnDate = false;
+                          for (let i = idx + 1; i < mergedRows.length; i++) {
+                            const r = mergedRows[i];
+                            if (r.type === "date_header") break;
+                            if (r.type === "transaction") {
+                              hasTransactionOnDate = true;
+                              break;
+                            }
+                          }
+                          if (!hasTransactionOnDate) return null;
+                        }
+                        return (
+                          <div
+                            key={`date-${row.dateKey}`}
+                            className="text-2xl font-medium pt-1 pb-0.5 first:pt-0"
+                            style={{ color: ACTIVE_TEXT_DARK }}
+                          >
+                            {formatDateSectionHeader(row.dateKey)}
+                          </div>
+                        );
+                      }
+                      if (row.type === "checkpoint_line") {
+                        if (!checkpointsVisible) return null;
+                        const hasMismatch = row.checkpoints.some((c) => c.status === "MISMATCH");
+                        const lineColor = hasMismatch ? RED : GREEN;
+                        return (
+                          <div
+                            key={`cp-${row.dateKey}-${row.timeKey}-${idx}`}
+                            className="rounded-lg overflow-hidden"
+                          >
+                            <div className="px-3 py-2 space-y-1.5">
+                              {row.checkpoints.map((cp) => {
+                                const item = itemsById.get(cp.item_id);
+                                const currencyCode = item?.currency_code ?? "RUB";
+                                const d = new Date(cp.checkpoint_at);
+                                const dateTimeLabel = `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+                                const cpOk = cp.status === "OK";
+                                return (
+                                  <div key={cp.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                                    <span className="flex items-center gap-2 tabular-nums shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>
+                                      {cpOk ? <MapPinCheck className="h-6 w-6 shrink-0" style={{ color: GREEN }} aria-hidden /> : <MapPinX className="h-6 w-6 shrink-0" style={{ color: RED }} aria-hidden />}
+                                      {dateTimeLabel}
+                                    </span>
+                                    {item ? (
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <div className="h-8 w-8 shrink-0 rounded overflow-hidden flex items-center justify-center">
+                                          <AssetItemIcon
+                                            item={item}
+                                            counterparty={getCounterpartyForItemId(cp.item_id)}
+                                            apiBase={API_BASE}
+                                            size={20}
+                                            className="h-5 w-5 rounded object-contain"
+                                            fallbackIconColor={ACTIVE_TEXT_DARK}
+                                            alt={cp.item_name}
+                                          />
+                                        </div>
+                                        <span className="font-medium" style={{ color: ACTIVE_TEXT_DARK }}>{cp.item_name}</span>
+                                      </div>
+                                    ) : (
+                                      <span className="font-medium" style={{ color: ACTIVE_TEXT_DARK }}>{cp.item_name}</span>
+                                    )}
+                                    <span className="tabular-nums flex items-center gap-1.5">
+                                      <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Расчётное сальдо:</span> <CurrencyChip code={currencyCode} />
+                                      <span style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(cp.computed_balance_cents)}</span>
+                                    </span>
+                                    <span className="tabular-nums flex items-center gap-1.5">
+                                      <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Должно быть:</span> <CurrencyChip code={currencyCode} />
+                                      <span style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(cp.stated_balance_cents)}</span>
+                                    </span>
+                                    <span
+                                      className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium shrink-0"
+                                      style={{
+                                        backgroundColor: "rgba(148, 163, 184, 0.2)",
+                                        color: PLACEHOLDER_COLOR_DARK,
+                                      }}
+                                    >
+                                      {cp.source === "IMPORTED" ? "Импортированная" : "Ручная"}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div
+                              className="h-1 w-full"
+                              style={{ backgroundColor: lineColor, opacity: 0.9 }}
+                              aria-hidden
+                            />
+                          </div>
+                        );
+                      }
+                      const tx = row.tx;
+                      return (
+                        <Fragment key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}>
+                          <TransactionCardRow
+                            tx={tx}
+                            counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
+                            itemName={itemName}
+                            itemCurrencyCode={itemCurrencyCode}
+                            getItemTypeCode={(id: number | null | undefined) => (id != null ? itemsById.get(id)?.type_code : undefined)}
+                            primaryItemCounterparty={getItemCounterparty(tx.primary_card_item_id ?? tx.primary_item_id)}
+                            counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
+                            apiBase={API_BASE}
+                            itemBankName={itemBankName}
+                            categoryLookup={categoryLookup}
+                            categoryLinesForId={getCategoryLines}
+                            getRubEquivalentCents={getRubEquivalentCents}
+                            isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
+                            onToggleSelection={toggleTxSelection}
+                            onCreateFrom={openCreateFromDialog}
+                            onRealize={openRealizeDialog}
+                            onEdit={openEditDialog}
+                            onDelete={(id) => openDeleteDialog([id])}
+                            isDeleting={isDeleting}
+                            onConfirm={handleConfirmStatus}
+                            isConfirming={
+                              confirmingTxId === tx.id ||
+                              (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
+                            }
+                            onReady={() => {
+                              if (!readyRowSetRef.current.has(tx.id)) {
+                                readyRowSetRef.current.add(tx.id);
+                                setReadyRowCount((prev) => prev + 1);
+                              }
+                            }}
+                            relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
+                            relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
+                            onUnsplit={(t) => setUnsplitConfirmTxId(t.id)}
+                            onAddChild={openAddChildDialog}
+                            childrenSumCents={tx.is_split_parent ? (childrenSumByParentId.get(tx.id) ?? null) : undefined}
+                          />
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : isInitialLoading && !isDesktop ? (
               <div className="w-screen relative left-1/2 -translate-x-1/2 max-w-none space-y-6 px-4">
                 {[1, 2, 3].map((sectionIdx) => (
                   <div key={sectionIdx}>
@@ -7693,7 +7884,7 @@ function TransactionsView({
                   </div>
                 ))}
               </div>
-            ) : mergedRows.length === 0 ? (
+            ) : mergedRows.length === 0 && !loading ? (
               hasAnyFilter ? (
                 <p className="text-sm py-6 text-center" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                   Отсутствуют транзакции, подходящие под установленные фильтры

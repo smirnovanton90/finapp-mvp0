@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Camera, Info, RefreshCcw, Upload, Wallet } from "lucide-react";
+import { Camera, Info, Plus, RefreshCcw, Trash2, Upload, Wallet } from "lucide-react";
 import { FormModal } from "@/components/form-modal";
 import { CollapsibleFormSection } from "@/components/ui/collapsible-form-section";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
@@ -14,6 +14,7 @@ import { CounterpartySelector } from "@/components/counterparty-selector";
 import { ChipsInput } from "@/components/ui/chips-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { CurrencyChip } from "@/components/currency-chip";
+import { IconButton } from "@/components/ui/icon-button";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, BACKGROUND_DT, DROPDOWN_BG, GREEN, MODAL_BG, PLACEHOLDER_COLOR_DARK, RED, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,7 @@ import {
   fetchMarketInstrumentDividends,
   fetchFxRatesBatch,
   fetchTransactionChains,
+  fetchTransactionsPage,
   createItem,
   updateItem,
   uploadItemPhoto,
@@ -149,6 +151,8 @@ export function AddEditItemFormModal({
   const userDidEditMoexPriceRef = useRef(false);
   /** Пользователь вручную вводил цену покупки крипты — при смене даты появления не перезаписывать. */
   const userDidEditCryptoPriceRef = useRef(false);
+  /** Пользователь вручную вводил НКД — не перезаписывать из MOEX. */
+  const userDidEditNkdRef = useRef(false);
 
   const [instrumentQuery, setInstrumentQuery] = useState("");
   const [instrumentOptions, setInstrumentOptions] = useState<MarketInstrumentOut[]>([]);
@@ -162,11 +166,15 @@ export function AddEditItemFormModal({
   const [positionLots, setPositionLots] = useState("");
   const [quantityUnitsStr, setQuantityUnitsStr] = useState("");
   const [moexPurchasePrice, setMoexPurchasePrice] = useState("");
+  /** Сделки при открытии (NEW MOEX): количество лотов и цена за единицу в каждой строке. */
+  const [moexDeals, setMoexDeals] = useState<{ quantityLotsStr: string; priceStr: string }[]>([{ quantityLotsStr: "", priceStr: "" }]);
+  const [nkdAmount, setNkdAmount] = useState("");
   const [cryptoPurchasePrice, setCryptoPurchasePrice] = useState("");
   const [historicalAcquisitionCost, setHistoricalAcquisitionCost] = useState("");
   const [commissionEnabled, setCommissionEnabled] = useState(false);
   const [commissionAmount, setCommissionAmount] = useState("");
   const [commissionPaymentItemId, setCommissionPaymentItemId] = useState("");
+  const [fetchedTransactionsForEdit, setFetchedTransactionsForEdit] = useState<TransactionOut[]>([]);
   const [marketPrice, setMarketPrice] = useState<MarketPriceOut | null>(null);
   const [moexDatePrices, setMoexDatePrices] = useState<Record<string, MarketPriceOut | null>>({});
   const [moexDatePricesLoading, setMoexDatePricesLoading] = useState(false);
@@ -333,7 +341,30 @@ export function AddEditItemFormModal({
         setDepositTermDays(editingItem.deposit_term_days != null ? String(editingItem.deposit_term_days) : "");
       }
       setPositionLots(editingItem.position_lots != null ? String(editingItem.position_lots) : "");
-      setMoexPurchasePrice("");
+      const pl = editingItem.position_lots ?? 0;
+      const ls = editingItem.lot_size ?? 1;
+      if (pl > 0 && ls > 0 && editingItem.acquisitionCents != null && editingItem.acquisitionCents > 0) {
+        const unitPriceCents = Math.round(editingItem.acquisitionCents / (pl * ls));
+        setMoexPurchasePrice(formatCentsForInput(unitPriceCents));
+      } else {
+        setMoexPurchasePrice("");
+      }
+      if (editingItem.opening_deals?.length) {
+        setMoexDeals(
+          editingItem.opening_deals.map((d) => ({
+            quantityLotsStr: String(d.quantity_lots),
+            priceStr: formatCentsForInput(d.price_cents),
+          }))
+        );
+      } else {
+        const qStr = editingItem.position_lots != null ? String(editingItem.position_lots) : "";
+        const pStr =
+          pl > 0 && ls > 0 && editingItem.acquisitionCents != null && editingItem.acquisitionCents > 0
+            ? formatCentsForInput(Math.round(editingItem.acquisitionCents / (pl * ls)))
+            : "";
+        setMoexDeals([{ quantityLotsStr: qStr, priceStr: pStr }]);
+      }
+      setNkdAmount("");
       setHistoricalAcquisitionCost(editingItem.acquisitionCents != null && editingItem.acquisitionCents !== 0 ? formatAmount(editingItem.acquisitionCents) : "");
       const commissionTx = transactionsForEdit.find((tx) => tx.related_item_id === editingItem.id && tx.source === "AUTO_ITEM_COMMISSION");
       if (commissionTx) {
@@ -394,8 +425,51 @@ export function AddEditItemFormModal({
       setItemPhotoPreview(getItemPhotoUrl(editingItem, API_BASE));
       setItemPhotoFile(null);
       fetchTransactionChains({ linked_item_id: editingItem.id }).then((chains) => setLinkedChains((chains ?? []).filter((c) => !c.deleted_at))).catch(() => setLinkedChains([]));
+    } else {
+      setMoexDeals([{ quantityLotsStr: "", priceStr: "" }]);
     }
   }, [open, initialCreateOptions, initialCreateDefaults, editingItem?.id ?? null, accountingStartDate]);
+
+  useEffect(() => {
+    if (!open) setFetchedTransactionsForEdit([]);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !editingItem || transactionsForEdit.length > 0) return;
+    let cancelled = false;
+    fetchTransactionsPage({ related_item_ids: [editingItem.id], limit: 200 })
+      .then((res) => {
+        if (!cancelled) setFetchedTransactionsForEdit(res.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setFetchedTransactionsForEdit([]);
+      });
+    return () => { cancelled = true; };
+  }, [open, editingItem?.id, transactionsForEdit.length]);
+
+  const effectiveTransactionsForEdit = transactionsForEdit.length > 0 ? transactionsForEdit : fetchedTransactionsForEdit;
+  useEffect(() => {
+    if (!editingItem || effectiveTransactionsForEdit.length === 0) return;
+    const commissionTx = effectiveTransactionsForEdit.find((tx) => tx.related_item_id === editingItem.id && tx.source === "AUTO_ITEM_COMMISSION");
+    if (commissionTx) {
+      setCommissionEnabled(true);
+      setCommissionAmount(commissionTx.amount != null ? formatAmount(commissionTx.amount) : "");
+      setCommissionPaymentItemId(commissionTx.primary_item_id != null ? String(commissionTx.primary_item_id) : "");
+    }
+    if (editingItem.type_code === "bonds" && editingItem.position_lots != null && editingItem.lot_size != null) {
+      const openingPurchase = effectiveTransactionsForEdit.find(
+        (tx) => tx.related_item_id === editingItem.id && tx.asset_link_type === "ASSET_PURCHASE" && (tx.source === "AUTO_ITEM_OPENING" || tx.primary_quantity_lots != null)
+      );
+      if (openingPurchase && openingPurchase.amount != null) {
+        const pl = editingItem.position_lots ?? 0;
+        const ls = editingItem.lot_size ?? 1;
+        const unitCents = pl > 0 && ls > 0 && editingItem.acquisitionCents != null ? Math.round(editingItem.acquisitionCents / (pl * ls)) : 0;
+        const pricePart = unitCents * pl * ls;
+        const nkdCents = Math.max(0, (openingPurchase.amount ?? 0) - pricePart);
+        setNkdAmount(formatCentsForInput(nkdCents));
+      }
+    }
+  }, [editingItem?.id, editingItem?.type_code, editingItem?.position_lots, editingItem?.lot_size, editingItem?.acquisitionCents, transactionsForEdit, fetchedTransactionsForEdit]);
 
   const sectionOptions = useMemo(
     () => ITEM_SECTIONS.filter((s) => s.kind === kind),
@@ -461,22 +535,49 @@ export function AddEditItemFormModal({
     if (editingItem) return;
     setPrimaryValueKind(getDefaultPrimaryValueKind(typeCode || "", kind));
   }, [typeCode, kind, editingItem]);
+
+  const resolvedHistoryStatus = useMemo(() => {
+    if (openDate && accountingStartDate) {
+      return openDate > accountingStartDate ? "NEW" : "HISTORICAL";
+    }
+    return editingItem?.history_status ?? null;
+  }, [openDate, accountingStartDate, editingItem]);
+
+  /** Итоги по сделкам (NEW MOEX): сумма лотов и средняя цена. */
+  const moexDealsTotals = useMemo(() => {
+    if (!isMoexType || moexDeals.length === 0) return { totalLots: 0, totalCostCents: 0, averagePriceCents: null as number | null };
+    let totalLots = 0;
+    let totalCostCents = 0;
+    const lotSize = selectedInstrument?.lot_size ?? 1;
+    for (const row of moexDeals) {
+      const q = Math.floor(Number(String(row.quantityLotsStr).replace(/\s/g, "")));
+      const priceCents = row.priceStr.trim() ? parseRubToCents(row.priceStr) : null;
+      if (Number.isFinite(q) && q >= 0 && priceCents != null && Number.isFinite(priceCents) && priceCents >= 0) {
+        totalLots += q;
+        totalCostCents += q * priceCents * lotSize;
+      }
+    }
+    const averagePriceCents = totalLots > 0 && lotSize > 0 ? Math.round(totalCostCents / (totalLots * lotSize)) : null;
+    return { totalLots, totalCostCents, averagePriceCents };
+  }, [isMoexType, moexDeals, selectedInstrument?.lot_size]);
   const moexLots = useMemo(() => {
     if (!isMoexType) return null;
+    if (resolvedHistoryStatus === "NEW" && moexDealsTotals.totalLots > 0) return moexDealsTotals.totalLots;
     const rawLots = positionLots.replace(/\s/g, "");
     if (!rawLots) return null;
     const value = Number(rawLots);
     if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) return null;
     return value;
-  }, [isMoexType, positionLots]);
+  }, [isMoexType, resolvedHistoryStatus, moexDealsTotals.totalLots, positionLots]);
   const moexPurchasePriceCents = useMemo(() => {
     if (!isMoexType) return null;
+    if (resolvedHistoryStatus === "NEW" && moexDealsTotals.averagePriceCents != null) return moexDealsTotals.averagePriceCents;
     const trimmed = moexPurchasePrice.trim();
     if (!trimmed) return null;
     const parsed = parseRubToCents(trimmed);
     if (!Number.isFinite(parsed) || parsed < 0) return null;
     return parsed;
-  }, [isMoexType, moexPurchasePrice]);
+  }, [isMoexType, resolvedHistoryStatus, moexDealsTotals.averagePriceCents, moexPurchasePrice]);
   const cryptoPurchasePriceCents = useMemo(() => {
     if (!isCryptoType) return null;
     const trimmed = cryptoPurchasePrice.trim();
@@ -620,12 +721,6 @@ export function AddEditItemFormModal({
     () => LOAN_LIABILITY_TYPES.includes(typeCode),
     [typeCode]
   );
-  const resolvedHistoryStatus = useMemo(() => {
-    if (openDate && accountingStartDate) {
-      return openDate > accountingStartDate ? "NEW" : "HISTORICAL";
-    }
-    return editingItem?.history_status ?? null;
-  }, [openDate, accountingStartDate, editingItem]);
 
   /** Для MOEX: данные для таблицы Цена/Стоимость и прибыль (дата появления, текущая дата). Таблица показывается всегда, значения могут быть null. */
   const moexPriceTable = useMemo(() => {
@@ -973,6 +1068,7 @@ export function AddEditItemFormModal({
     setPositionLots("");
     setQuantityUnitsStr("");
     setMoexPurchasePrice("");
+    setNkdAmount("");
     setCryptoPurchasePrice("");
     setHistoricalAcquisitionCost("");
     setCommissionEnabled(false);
@@ -1134,7 +1230,7 @@ export function AddEditItemFormModal({
           setInstrumentBoardId("default");
         }
         const nextName = data.instrument.short_name || data.instrument.name || "";
-        if (nextName) setName(nextName);
+        if (nextName && !name.trim()) setName(nextName);
         if (isCrypto && data.instrument.short_name && data.instrument.name) {
           setInstrumentQuery(`${data.instrument.short_name} - ${data.instrument.name}`);
         }
@@ -1323,16 +1419,32 @@ export function AddEditItemFormModal({
   useEffect(() => {
     userDidEditMoexPriceRef.current = false;
     userDidEditCryptoPriceRef.current = false;
+    userDidEditNkdRef.current = false;
   }, [openDate, selectedInstrument]);
 
   useEffect(() => {
-    if (!isMoexType || !openDate) return;
-    if (userDidEditMoexPriceRef.current) return;
+    if (!isMoexType || !openDate || editingItem || userDidEditMoexPriceRef.current) return;
     const priceOnOpen = moexDatePrices[openDate];
-    if (priceOnOpen?.price_cents != null) {
-      setMoexPurchasePrice(formatCentsForInput(priceOnOpen.price_cents));
-    }
-  }, [isMoexType, openDate, moexDatePrices]);
+    if (priceOnOpen?.price_cents == null) return;
+    const priceStr = formatCentsForInput(priceOnOpen.price_cents);
+    setMoexDeals((prev) => prev.map((d) => ({ ...d, priceStr: d.priceStr.trim() ? d.priceStr : priceStr })));
+  }, [isMoexType, openDate, moexDatePrices, editingItem]);
+
+  useEffect(() => {
+    if (typeCode !== "bonds" || editingItem || userDidEditNkdRef.current) return;
+    const priceOnOpen = moexDatePrices[openDate];
+    const accintCents = priceOnOpen?.accint_cents ?? 0;
+    const lotSize = selectedInstrument?.lot_size ?? 1;
+    const lots =
+      resolvedHistoryStatus === "NEW"
+        ? moexDealsTotals.totalLots
+        : (() => {
+            const lotsStr = positionLots.replace(/\s/g, "");
+            return Number.isFinite(Number(lotsStr)) ? Math.max(0, Math.floor(Number(lotsStr))) : 0;
+          })();
+    const totalNkdCents = accintCents * lots * lotSize;
+    setNkdAmount(formatCentsForInput(totalNkdCents));
+  }, [typeCode, openDate, moexDatePrices, editingItem, positionLots, selectedInstrument?.lot_size, resolvedHistoryStatus, moexDealsTotals.totalLots]);
 
   useEffect(() => {
     if (!isCryptoType || userDidEditCryptoPriceRef.current) return;
@@ -1494,21 +1606,32 @@ export function AddEditItemFormModal({
         setFormError("Выберите торговый режим.");
         return;
       }
-      const trimmedLots = positionLots.trim();
-      if (!trimmedLots) {
-        setFormError("Укажите количество лотов.");
-        return;
+      if (resolvedHistoryStatus === "NEW") {
+        if (moexDealsTotals.totalLots <= 0) {
+          setFormError("Добавьте хотя бы одну сделку с количеством лотов больше 0.");
+          return;
+        }
+        if (moexDealsTotals.averagePriceCents == null) {
+          setFormError("Укажите цену за единицу в каждой сделке.");
+          return;
+        }
+      } else {
+        const trimmedLots = positionLots.trim();
+        if (!trimmedLots) {
+          setFormError("Укажите количество лотов.");
+          return;
+        }
+        const cleanedLots = trimmedLots.replace(/\s/g, "");
+        const parsedLots = Number(cleanedLots);
+        if (!Number.isFinite(parsedLots) || parsedLots < 0 || !Number.isInteger(parsedLots)) {
+          setFormError("Количество лотов должно быть целым неотрицательным числом.");
+          return;
+        }
       }
-      const cleanedLots = trimmedLots.replace(/\s/g, "");
-      const parsedLots = Number(cleanedLots);
-      if (!Number.isFinite(parsedLots) || parsedLots < 0 || !Number.isInteger(parsedLots)) {
-        setFormError("Количество лотов должно быть целым неотрицательным числом.");
-        return;
-      }
-      if (resolvedHistoryStatus === "NEW" && moexPurchasePrice.trim()) {
-        const parsedPrice = parseRubToCents(moexPurchasePrice);
-        if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-          setFormError("Цена покупки должна быть числом (например: 123,45).");
+      if (typeCode === "bonds" && resolvedHistoryStatus === "NEW") {
+        const nkdCents = nkdAmount.trim() ? parseRubToCents(nkdAmount) : NaN;
+        if (!Number.isFinite(nkdCents) || nkdCents < 0) {
+          setFormError("Укажите НКД (накопленный купонный доход), можно 0.");
           return;
         }
       }
@@ -1926,16 +2049,43 @@ export function AddEditItemFormModal({
       if (isMoexType && selectedInstrument) {
         payload.instrument_id = selectedInstrument.secid;
         payload.instrument_board_id = instrumentBoardId || null;
-        const lots = Number(positionLots.replace(/\s/g, ""));
-        payload.position_lots = lots;
-        if (resolvedHistoryStatus === "NEW" && moexPurchasePrice.trim() && moexPurchasePriceCents != null) {
-          payload.opening_price_cents = moexPurchasePriceCents;
+        const lotSize = selectedInstrument?.lot_size ?? 1;
+        let lots = 0;
+        const validDeals =
+          resolvedHistoryStatus === "NEW"
+            ? moexDeals
+                .map((row) => {
+                  const q = Math.floor(Number(String(row.quantityLotsStr).replace(/\s/g, "")));
+                  const priceCents = row.priceStr.trim() ? parseRubToCents(row.priceStr) : null;
+                  if (!Number.isFinite(q) || q <= 0 || priceCents == null || !Number.isFinite(priceCents) || priceCents < 0) return null;
+                  return { quantity_lots: q, price_cents: priceCents };
+                })
+                .filter((d): d is { quantity_lots: number; price_cents: number } => d != null)
+            : [];
+        if (validDeals.length > 0) {
+          payload.opening_deals = validDeals;
+          lots = validDeals.reduce((s, d) => s + d.quantity_lots, 0);
+        } else {
+          const lotsParsed = Number(positionLots.replace(/\s/g, ""));
+          lots =
+            editingItem && (Number.isNaN(lotsParsed) || lotsParsed <= 0) && (editingItem.position_lots ?? 0) > 0
+              ? editingItem.position_lots!
+              : resolvedHistoryStatus === "NEW"
+                ? moexDealsTotals.totalLots
+                : lotsParsed;
+          payload.position_lots = lots;
+          if (resolvedHistoryStatus === "NEW" && (moexPurchasePriceCents != null || moexDealsTotals.averagePriceCents != null)) {
+            payload.opening_price_cents = moexPurchasePriceCents ?? moexDealsTotals.averagePriceCents ?? undefined;
+          }
+        }
+        if (typeCode === "bonds") {
+          const nkdCents = nkdAmount.trim() ? parseRubToCents(nkdAmount) : 0;
+          payload.opening_accint_minor = Number.isFinite(nkdCents) && nkdCents >= 0 ? nkdCents : 0;
         }
         if (resolvedHistoryStatus === "HISTORICAL" && historicalAcquisitionCost.trim()) {
           const priceCents = parseRubToCents(historicalAcquisitionCost);
           if (Number.isFinite(priceCents) && priceCents >= 0) {
             payload.opening_price_cents = priceCents;
-            const lotSize = selectedInstrument?.lot_size ?? 1;
             if (lots > 0) {
               payload.acquisition_value_rub = Math.round(priceCents * lots * lotSize);
             }
@@ -2508,11 +2658,62 @@ export function AddEditItemFormModal({
                   {isMoexType ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex flex-col gap-4 min-w-0">
-                        <TextField label="Количество лотов" value={positionLots} onChange={(e) => setPositionLots(e.target.value)} inputMode="decimal" placeholder="Например: 10" />
                         {resolvedHistoryStatus === "NEW" ? (
-                          <TextField label="Цена покупки (за 1 шт.)" currencyCode={currencyCode} value={moexPurchasePrice} onChange={(e) => { userDidEditMoexPriceRef.current = true; setMoexPurchasePrice(formatRubInput(e.target.value)); }} onBlur={(e) => setMoexPurchasePrice(normalizeRubOnBlur(e.target.value))} placeholder={moexDatePrices[openDate]?.price_cents != null ? formatCentsForInput(moexDatePrices[openDate]!.price_cents) : "По умолчанию — рыночная цена на дату"} />
+                          <div className="space-y-3">
+                            <Label style={{ color: ACTIVE_TEXT_DARK }}>Сделки</Label>
+                            <div className="space-y-3">
+                              {moexDeals.map((deal, idx) => (
+                                <div key={idx} className="rounded-lg border p-3 space-y-2" style={{ borderColor: "rgba(148, 163, 184, 0.4)" }}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-sm font-medium" style={{ color: ACTIVE_TEXT_DARK }}>Сделка {idx + 1}</span>
+                                    {moexDeals.length > 1 && (
+                                      <Tooltip content="Удалить сделку">
+                                        <IconButton type="button" aria-label="Удалить сделку" style={{ color: RED }} onClick={() => setMoexDeals(moexDeals.filter((_, i) => i !== idx))}>
+                                          <Trash2 className="h-4 w-4" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    )}
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <TextField label="" value={deal.quantityLotsStr} onChange={(e) => { const next = [...moexDeals]; next[idx] = { ...next[idx], quantityLotsStr: e.target.value }; setMoexDeals(next); }} inputMode="decimal" placeholder="Лотов" />
+                                    <TextField label="" currencyCode={currencyCode} value={deal.priceStr} onChange={(e) => { userDidEditMoexPriceRef.current = true; const next = [...moexDeals]; next[idx] = { ...next[idx], priceStr: formatRubInput(e.target.value) }; setMoexDeals(next); }} onBlur={(e) => { const next = [...moexDeals]; next[idx] = { ...next[idx], priceStr: normalizeRubOnBlur(e.target.value) }; setMoexDeals(next); }} placeholder="Цена за 1 шт." />
+                                  </div>
+                                </div>
+                              ))}
+                              <Tooltip content="Добавить сделку" className="block w-full">
+                                <IconButton
+                                  type="button"
+                                  aria-label="Добавить сделку"
+                                  className="!w-full"
+                                  onClick={() => {
+                                    const defaultPriceStr =
+                                      openDate && moexDatePrices[openDate]?.price_cents != null
+                                        ? formatCentsForInput(moexDatePrices[openDate].price_cents)
+                                        : "";
+                                    setMoexDeals([...moexDeals, { quantityLotsStr: "", priceStr: defaultPriceStr }]);
+                                  }}
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </IconButton>
+                              </Tooltip>
+                            </div>
+                            {(moexDealsTotals.totalLots > 0 || moexDeals.some((d) => d.quantityLotsStr.trim() || d.priceStr.trim())) && (
+                              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                                <span>Итого: <strong>{moexDealsTotals.totalLots}</strong> лотов</span>
+                                {moexDealsTotals.averagePriceCents != null && (
+                                  <span>Средняя цена: <span className="flex items-center gap-1 inline-flex"><CurrencyChip code={currencyCode} className="shrink-0" />{formatCentsForInput(moexDealsTotals.averagePriceCents)}</span></span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         ) : (
-                          <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас" currencyCode={currencyCode} value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 123,45" />
+                          <>
+                            <TextField label="Количество лотов" value={positionLots} onChange={(e) => setPositionLots(e.target.value)} inputMode="decimal" placeholder="Например: 10" />
+                            <TextField label="Цена приобретения" labelHint="Укажите среднюю цену приобретения позиции с момента её появления у вас" currencyCode={currencyCode} value={historicalAcquisitionCost} onChange={(e) => setHistoricalAcquisitionCost(formatRubInput(e.target.value))} onBlur={(e) => setHistoricalAcquisitionCost(normalizeRubOnBlur(e.target.value))} placeholder="Например: 123,45" />
+                          </>
+                        )}
+                        {typeCode === "bonds" && resolvedHistoryStatus === "NEW" && (
+                          <TextField label="НКД" labelHint="Накопленный купонный доход из MOEX (можно скорректировать)" currencyCode={currencyCode} value={nkdAmount} onChange={(e) => { userDidEditNkdRef.current = true; setNkdAmount(formatRubInput(e.target.value)); }} onBlur={(e) => setNkdAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" required />
                         )}
                         {commissionAllowed && (
                           <TextField label="Сумма комиссии" currencyCode={currencyCode} value={commissionAmount} onChange={(e) => setCommissionAmount(formatRubInput(e.target.value))} onBlur={(e) => setCommissionAmount(normalizeRubOnBlur(e.target.value))} placeholder="0" />

@@ -1439,12 +1439,14 @@ def create_item(
     face_value_cents = None
     quantity_units = None
     currency_code = payload.currency_code
+    opening_deals_for_item = None
 
     if is_moex:
         if not payload.instrument_id:
             raise HTTPException(status_code=400, detail="instrument_id is required for MOEX items")
-        if payload.position_lots is None:
-            raise HTTPException(status_code=400, detail="position_lots is required for MOEX items")
+        has_deals = getattr(payload, "opening_deals", None) and len(payload.opening_deals) > 0
+        if not has_deals and payload.position_lots is None:
+            raise HTTPException(status_code=400, detail="position_lots or opening_deals is required for MOEX items")
         instrument, boards, details = resolve_market_instrument(db, payload.instrument_id)
         instrument_id = instrument.secid
         board_candidates = {board.board_id for board in boards if board.board_id}
@@ -1454,12 +1456,18 @@ def create_item(
         if board_candidates and selected_board not in board_candidates:
             raise HTTPException(status_code=400, detail="Invalid instrument_board_id")
         instrument_board_id = selected_board
-        position_lots = payload.position_lots
         lot_size = instrument.lot_size or details.get("lot_size") or 1
         face_value_cents = instrument.face_value_cents
         if instrument.currency_code and instrument.currency_code != payload.currency_code:
             raise HTTPException(status_code=400, detail="instrument currency must match item currency")
         currency_code = instrument.currency_code or payload.currency_code
+        if has_deals:
+            position_lots = sum(d.quantity_lots for d in payload.opening_deals)
+            if position_lots <= 0:
+                raise HTTPException(status_code=400, detail="opening_deals must have at least one deal with quantity_lots > 0")
+            opening_deals_for_item = [{"quantity_lots": d.quantity_lots, "price_cents": d.price_cents} for d in payload.opening_deals]
+        else:
+            position_lots = payload.position_lots
     elif is_crypto:
         if not payload.instrument_id:
             raise HTTPException(status_code=400, detail="instrument_id is required for crypto items")
@@ -1538,7 +1546,8 @@ def create_item(
         deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
 
     history_status = _resolve_history_status(payload.open_date, accounting_start_date)
-    opening_quantity_lots = payload.position_lots if is_moex else None
+    # При opening_deals position_lots уже вычислен из сделок; иначе берём из payload
+    opening_quantity_lots = position_lots if is_moex else None
     has_opening_value = (
         (opening_quantity_lots is not None and opening_quantity_lots > 0)
         if is_moex
@@ -1547,6 +1556,15 @@ def create_item(
         else payload.initial_balance_minor > 0
     )
     opening_price_cents = payload.opening_price_cents if (is_moex or is_crypto) else None
+    if (
+        payload.type_code == "bonds"
+        and has_opening_value
+        and getattr(payload, "opening_accint_minor", None) is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="opening_accint_minor is required for bonds (НКД при покупке)",
+        )
     # У рыночных активов (MOEX, crypto, MARKET не-биржевые) баланс всегда 0 — отображается рыночная стоимость
     primary_value_kind_pre = getattr(payload, "primary_value_kind", None)
     # Начальный остаток в валюте актива (минорные единицы). API принимает в валюте актива.
@@ -1556,8 +1574,21 @@ def create_item(
         else payload.initial_balance_minor
     )
     opening_amount_rub = payload.initial_balance_minor
-    if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
+    opening_accint_minor = getattr(payload, "opening_accint_minor", None) or 0
+    if is_moex and opening_deals_for_item:
+        # Сумма из сделок: сумма(лоты * цена_за_единицу * lot_size) в копейках
+        opening_amount_rub = sum(
+            d["quantity_lots"] * d["price_cents"] * (lot_size or 1) for d in opening_deals_for_item
+        )
+        if payload.type_code == "bonds":
+            opening_amount_rub += opening_accint_minor
+        # Средняя цена для комментария (копейки за единицу)
+        _total_units = opening_quantity_lots * (lot_size or 1)
+        opening_price_cents = (opening_amount_rub - opening_accint_minor) // _total_units if _total_units else None
+    elif is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
+        if payload.type_code == "bonds":
+            opening_amount_rub += opening_accint_minor
     elif is_crypto and opening_price_cents is not None and quantity_units is not None and quantity_units > 0:
         # Сумма расхода в USD (центы): Количество × Цена (USD). Транзакция не переводится в рубли.
         opening_amount_rub = int(quantity_units * opening_price_cents)
@@ -1710,11 +1741,27 @@ def create_item(
             )
             else None
         ),
+        opening_deals=opening_deals_for_item,
     )
     db.add(item)
     db.flush()
 
     settings = upsert_plan_settings(db, item, payload.plan_settings)
+    bond_opening_comment = None
+    if (
+        history_status == "NEW"
+        and has_opening_value
+        and payload.type_code == "bonds"
+        and opening_quantity_lots is not None
+        and (lot_size or 0) > 0
+        and opening_price_cents is not None
+    ):
+        qty = opening_quantity_lots * (lot_size or 1)
+        _price_str = f"{opening_price_cents / 100:.2f}".replace(".", ",")
+        _accint_str = f"{(opening_accint_minor or 0) / 100:.2f}".replace(".", ",")
+        bond_opening_comment = (
+            f'Покупка {qty} облигаций "{item.name}" по цене {_price_str}, НКД - {_accint_str}'
+        )
     if history_status == "NEW" and has_opening_value:
         create_opening_transactions(
             db=db,
@@ -1726,6 +1773,7 @@ def create_item(
             quantity_units=quantity_units,
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
+            opening_comment_override=bond_opening_comment,
         )
         # position_lots/quantity_units обновляются в create_opening_transactions через _apply_position_delta/_apply_quantity_units_delta
     if settings and settings.enabled:
@@ -1803,12 +1851,14 @@ def update_item(
     face_value_cents = None
     quantity_units = None
     currency_code = payload.currency_code
+    opening_deals_for_item_patch = None
 
     if is_moex:
         if not payload.instrument_id:
             raise HTTPException(status_code=400, detail="instrument_id is required for MOEX items")
-        if payload.position_lots is None:
-            raise HTTPException(status_code=400, detail="position_lots is required for MOEX items")
+        has_deals = getattr(payload, "opening_deals", None) and len(payload.opening_deals) > 0
+        if not has_deals and payload.position_lots is None:
+            raise HTTPException(status_code=400, detail="position_lots or opening_deals is required for MOEX items")
         instrument, boards, details = resolve_market_instrument(db, payload.instrument_id)
         instrument_id = instrument.secid
         board_candidates = {board.board_id for board in boards if board.board_id}
@@ -1818,12 +1868,18 @@ def update_item(
         if board_candidates and selected_board not in board_candidates:
             raise HTTPException(status_code=400, detail="Invalid instrument_board_id")
         instrument_board_id = selected_board
-        position_lots = payload.position_lots
         lot_size = instrument.lot_size or details.get("lot_size") or 1
         face_value_cents = instrument.face_value_cents
         if instrument.currency_code and instrument.currency_code != payload.currency_code:
             raise HTTPException(status_code=400, detail="instrument currency must match item currency")
         currency_code = instrument.currency_code or payload.currency_code
+        if has_deals:
+            position_lots = sum(d.quantity_lots for d in payload.opening_deals)
+            if position_lots <= 0:
+                raise HTTPException(status_code=400, detail="opening_deals must have at least one deal with quantity_lots > 0")
+            opening_deals_for_item_patch = [{"quantity_lots": d.quantity_lots, "price_cents": d.price_cents} for d in payload.opening_deals]
+        else:
+            position_lots = payload.position_lots
     elif is_crypto:
         if not payload.instrument_id:
             raise HTTPException(status_code=400, detail="instrument_id is required for crypto items")
@@ -1945,7 +2001,8 @@ def update_item(
         deposit_end_date = payload.open_date + timedelta(days=payload.deposit_term_days)
 
     new_history_status = _resolve_history_status(payload.open_date, accounting_start_date)
-    opening_quantity_lots = payload.position_lots if is_moex else None
+    # При opening_deals position_lots уже вычислен из сделок; иначе берём из payload
+    opening_quantity_lots = position_lots if is_moex else None
     has_opening_value = (
         (opening_quantity_lots is not None and opening_quantity_lots > 0)
         if is_moex
@@ -1953,10 +2010,30 @@ def update_item(
         if is_crypto
         else payload.initial_balance_minor > 0
     )
+    if (
+        payload.type_code == "bonds"
+        and has_opening_value
+        and getattr(payload, "opening_accint_minor", None) is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="opening_accint_minor is required for bonds (НКД при покупке)",
+        )
     opening_price_cents = payload.opening_price_cents if (is_moex or is_crypto) else None
+    opening_accint_minor_patch = getattr(payload, "opening_accint_minor", None) or 0
     opening_amount_rub = payload.initial_balance_minor
-    if is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
+    if is_moex and opening_deals_for_item_patch:
+        opening_amount_rub = sum(
+            d["quantity_lots"] * d["price_cents"] * (lot_size or 1) for d in opening_deals_for_item_patch
+        )
+        if payload.type_code == "bonds":
+            opening_amount_rub += opening_accint_minor_patch
+        _total_units_patch = opening_quantity_lots * (lot_size or 1)
+        opening_price_cents = (opening_amount_rub - opening_accint_minor_patch) // _total_units_patch if _total_units_patch else None
+    elif is_moex and opening_price_cents is not None and opening_quantity_lots is not None:
         opening_amount_rub = int(opening_price_cents * opening_quantity_lots * (lot_size or 1))
+        if payload.type_code == "bonds":
+            opening_amount_rub += opening_accint_minor_patch
     elif is_crypto and opening_price_cents is not None and quantity_units is not None and quantity_units > 0:
         opening_amount_rub = int(quantity_units * opening_price_cents)
     commission_requested = (
@@ -2091,16 +2168,16 @@ def update_item(
     item.interest_payout_account_id = interest_payout_account_id
     item.instrument_id = instrument_id
     item.instrument_board_id = instrument_board_id
-    if not (
-        (is_moex or is_crypto)
-        and new_history_status == "NEW"
-        and has_opening_value
-        and should_rebuild_opening
-    ):
+    # Всегда обновляем position_lots/quantity_units/lot_size до вызова rebuild_item_chains,
+    # чтобы план купонов/дивидендов видел актуальные значения.
+    if position_lots is not None:
         item.position_lots = position_lots
+    if quantity_units is not None:
         item.quantity_units = quantity_units
     item.lot_size = lot_size
     item.face_value_cents = face_value_cents
+    if opening_deals_for_item_patch is not None:
+        item.opening_deals = opening_deals_for_item_patch
     item.initial_balance_minor = (
         0
         if (is_moex or is_crypto or patch_primary_value_kind == "MARKET")
@@ -2146,6 +2223,24 @@ def update_item(
         delete_auto_chains(db, user, item.id, keep_realized=True)
 
     if should_rebuild_opening and new_history_status == "NEW" and has_opening_value:
+        bond_opening_comment_patch = None
+        if (
+            payload.type_code == "bonds"
+            and opening_quantity_lots is not None
+            and (lot_size or 0) > 0
+            and opening_price_cents is not None
+        ):
+            qty = opening_quantity_lots * (lot_size or 1)
+            _p_str = f"{opening_price_cents / 100:.2f}".replace(".", ",")
+            _a_str = f"{(opening_accint_minor_patch or 0) / 100:.2f}".replace(".", ",")
+            bond_opening_comment_patch = (
+                f'Покупка {qty} облигаций "{item.name}" по цене {_p_str}, НКД - {_a_str}'
+            )
+        # Обнуляем лоты/единицы, чтобы create_opening_transactions применил дельту один раз
+        if is_moex:
+            item.position_lots = 0
+        if is_crypto:
+            item.quantity_units = 0
         create_opening_transactions(
             db=db,
             user=user,
@@ -2156,6 +2251,7 @@ def update_item(
             quantity_units=quantity_units,
             deposit_end_date=deposit_end_date,
             plan_settings=settings,
+            opening_comment_override=bond_opening_comment_patch,
         )
 
     if commission_requested and commission_enabled and commission_payment_item:

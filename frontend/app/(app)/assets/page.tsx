@@ -3205,6 +3205,7 @@ export default function Page() {
         initialCreateDefaults={initialCreateDefaults}
         askConfirm={askConfirm}
         items={items}
+        transactionsForEdit={editingItem ? txs.filter((tx) => tx.related_item_id === editingItem.id || tx.primary_item_id === editingItem.id || tx.counterparty_item_id === editingItem.id) : []}
       />
 
 

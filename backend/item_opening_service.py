@@ -327,12 +327,11 @@ def _resolve_closing_date(
     deposit_end_date: date | None,
     plan_settings,
 ) -> date | None:
+    """Дата закрытия позиции для плановой транзакции закрытия. Для облигаций/акций plan_end_date — это «планировать купоны/дивиденды до», не дата закрытия."""
     if item.type_code == "deposit":
         return deposit_end_date
     if plan_settings and plan_settings.loan_end_date:
         return plan_settings.loan_end_date
-    if plan_settings and plan_settings.plan_end_date:
-        return plan_settings.plan_end_date
     return None
 
 
@@ -346,6 +345,7 @@ def create_opening_transactions(
     quantity_units: float | None = None,
     deposit_end_date: date | None = None,
     plan_settings=None,
+    opening_comment_override: str | None = None,
 ) -> None:
     # Не создаем транзакции открытия, если дата открытия равна дате начала учета
     # Транзакции открытия создаются только для активов/обязательств с типом "Новый" (позже даты начала учета)
@@ -365,7 +365,7 @@ def create_opening_transactions(
     elif amount_rub <= 0:
         return
 
-    opening_comment = _build_item_comment(item, "OPEN")
+    opening_comment = opening_comment_override if opening_comment_override else _build_item_comment(item, "OPEN")
     closing_comment = _build_item_comment(item, "CLOSE")
 
     tx_date = item.open_date

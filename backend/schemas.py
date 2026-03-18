@@ -250,6 +250,17 @@ class ItemPlanSettingsBase(BaseModel):
         return self
 
 
+class OpeningDealCreate(BaseModel):
+    """Одна сделка при открытии позиции: количество лотов и цена за единицу (копейки)."""
+    quantity_lots: int = Field(..., ge=0)
+    price_cents: int = Field(..., ge=0)
+
+
+class OpeningDealOut(BaseModel):
+    quantity_lots: int
+    price_cents: int
+
+
 class ItemCreate(BaseModel):
     kind: ItemKind
     type_code: str = Field(min_length=1, max_length=50)
@@ -274,6 +285,10 @@ class ItemCreate(BaseModel):
     position_lots: int | None = Field(default=None, ge=0)
     quantity_units: float | None = Field(default=None, ge=0)
     opening_price_cents: int | None = Field(default=None, ge=0)
+    """Сделки при открытии (MOEX): список { quantity_lots, price_cents }. Если задан, position_lots и сумма считаются из него."""
+    opening_deals: list[OpeningDealCreate] | None = Field(default=None, max_length=100)
+    """НКД при покупке облигации (копейки), добавляется к сумме расхода. Только для type_code bonds."""
+    opening_accint_minor: int | None = Field(default=None, ge=0)
     commission_enabled: bool | None = None
     commission_amount_rub: int | None = Field(default=None, ge=0)
     commission_payment_item_id: int | None = None
@@ -462,6 +477,9 @@ class ItemOut(BaseModel):
     """Стоимость приобретения (копейки), из транзакций ASSET_PURCHASE. Заполняется в list/get."""
     invested_rub: int | None = None
     """Стоимость вложенных средств (копейки), acquisition + ASSET_INVESTMENT. Заполняется в list/get."""
+    opening_deals: list[OpeningDealOut] | None = None
+    """Сделки при открытии (MOEX), для отображения при редактировании."""
+
 
     @field_validator("synonyms", mode="before")
     @classmethod

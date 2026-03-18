@@ -16,7 +16,9 @@ import { MobileFloatingBar } from "@/components/mobile-floating-bar";
 import { MobileWizardOpenProvider, useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+// Таймаут неактивности: только когда вкладка в фокусе (visible).
+// При переключении на другое приложение/вкладку таймер не идёт — разлогин не происходит.
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
@@ -52,35 +54,62 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const contentMarginLeft = isDesktop ? contentMarginLeftDesktop : 0;
 
   useEffect(() => {
-    if (status !== "loading" && !session) {
+    // Редирект только при явном unauthenticated, чтобы не выкидывать при кратковременном refetch сессии.
+    if (status === "unauthenticated") {
       router.replace("/login");
     }
-  }, [session, status, router]);
+  }, [status, router]);
+
+  useEffect(() => {
+    const err = (session as { error?: string } | null)?.error;
+    if (err === "RefreshAccessTokenError") {
+      signOut({ callbackUrl: "/login" });
+    }
+  }, [session]);
   useEffect(() => {
     if (status !== "authenticated") {
       return;
     }
 
     let timeoutId: number | undefined;
-    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
+    // Включаем input/change/keyup, чтобы при заполнении полей (ввод, вставка, выбор) таймер сбрасывался.
+    const events = [
+      "mousemove", "mousedown", "keydown", "keyup",
+      "input", "change",
+      "scroll", "touchstart",
+    ];
 
-    const resetTimer = () => {
-      if (timeoutId) {
-        window.clearTimeout(timeoutId);
-      }
+    const scheduleSignOut = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         signOut({ callbackUrl: "/login" });
       }, IDLE_TIMEOUT_MS);
     };
 
+    const resetTimer = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+      scheduleSignOut();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        scheduleSignOut();
+      } else {
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+          timeoutId = undefined;
+        }
+      }
+    };
+
     events.forEach((event) => window.addEventListener(event, resetTimer, { passive: true }));
-    resetTimer();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    scheduleSignOut();
 
     return () => {
-      if (timeoutId) {
-        window.clearTimeout(timeoutId);
-      }
+      if (timeoutId) window.clearTimeout(timeoutId);
       events.forEach((event) => window.removeEventListener(event, resetTimer));
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [status]);
 

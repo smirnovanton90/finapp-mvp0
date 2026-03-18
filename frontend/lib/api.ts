@@ -85,6 +85,8 @@ export type ItemOut = {
   acquisitionCents?: number | null;
   /** Стоимость вложенных средств в валюте актива (копейки для RUB, центы для иностранной валюты). Заполняется при маппинге из API (invested_rub). */
   investedCents?: number | null;
+  /** Сделки при открытии (MOEX), для отображения при редактировании. */
+  opening_deals?: { quantity_lots: number; price_cents: number }[] | null;
 };
 
 export type ItemMarketValueOut = {
@@ -206,6 +208,10 @@ export type ItemCreate = {
   position_lots?: number | null;
   quantity_units?: number | null;
   opening_price_cents?: number | null;
+  /** Сделки при открытии (MOEX): список { quantity_lots, price_cents }. Если задан, position_lots и сумма считаются из него. */
+  opening_deals?: { quantity_lots: number; price_cents: number }[] | null;
+  /** НКД при покупке облигации (копейки). Обязательно для type_code bonds при создании/редактировании с открытием. */
+  opening_accint_minor?: number | null;
   commission_enabled?: boolean | null;
   commission_amount_rub?: number | null;
   commission_payment_item_id?: number | null;
@@ -662,7 +668,9 @@ export type TransactionTheyPaidForMeCreate = {
 export const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 async function authFetch(input: RequestInfo, init?: RequestInit) {
-  const session = await getSession();
+  // broadcast: false — не уведомлять другие вкладки при каждом запросе, чтобы не вызывать
+  // каскад refetch сессии во всех вкладках и не блокировать загрузку данных (мультисессия).
+  const session = await getSession({ broadcast: false });
   const idToken = (session as any)?.idToken;
 
   if (!idToken) throw new Error("No idToken in session");

@@ -1118,6 +1118,13 @@ def update_transaction(
     new_primary = new_primary_side.effective_item
     new_primary_is_moex = is_moex_item(new_primary)
     new_primary_is_crypto = is_crypto_item(new_primary)
+    new_related_item = (
+        _load_item(db, user, data.related_item_id, True, "related_item")
+        if data.related_item_id is not None
+        else None
+    )
+    new_related_is_moex = is_moex_item(new_related_item) if new_related_item else False
+    new_related_is_crypto = is_crypto_item(new_related_item) if new_related_item else False
     needs_primary_quantity = (
         data.direction in ("INCOME", "EXPENSE")
         and data.asset_link_type in ("ASSET_PURCHASE", "ASSET_SALE")
@@ -1132,12 +1139,12 @@ def update_transaction(
             status_code=400,
             detail="primary_quantity_units is required for crypto items",
         )
-    if not new_primary_is_moex and data.primary_quantity_lots is not None:
+    if not new_primary_is_moex and data.primary_quantity_lots is not None and not new_related_is_moex:
         raise HTTPException(
             status_code=400,
             detail="primary_quantity_lots is only allowed for MOEX items",
         )
-    if not new_primary_is_crypto and data.primary_quantity_units is not None:
+    if not new_primary_is_crypto and data.primary_quantity_units is not None and not new_related_is_crypto:
         raise HTTPException(
             status_code=400,
             detail="primary_quantity_units is only allowed for crypto items",
@@ -1154,9 +1161,6 @@ def update_transaction(
             )
 
     resolve_counterparty(db, user, data.counterparty_id)
-
-    if data.related_item_id is not None:
-        _load_item(db, user, data.related_item_id, False, "related_item")
 
     new_counter_side = None
     new_counter = None

@@ -400,6 +400,8 @@ class Item(Base):
     lot_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     face_value_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     quantity_units: Mapped[float | None] = mapped_column(Numeric(20, 10), nullable=True)
+    # Сделки при открытии (MOEX): список {"quantity_lots": int, "price_cents": int}
+    opening_deals: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # Начальный остаток в ВАЛЮТЕ АКТИВА (минорные единицы: копейки для RUB, центы для USD и т.д.).
     initial_balance_minor: Mapped[int] = mapped_column("initial_balance_minor", BigInteger, nullable=False)

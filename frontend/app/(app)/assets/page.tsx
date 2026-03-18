@@ -1999,6 +1999,7 @@ export default function Page() {
   async function loadItems() {
     setLoading(true);
     setError(null);
+    setItems([]);
     try {
       const data = await fetchItems({ includeArchived: true, includeClosed: true });
       setItems(data);
@@ -3624,8 +3625,73 @@ export default function Page() {
                     ))}
                   </div>
                 </div>
-                <div className="hidden md:flex items-center justify-center py-16" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                  Загрузка…
+                {/* Десктоп: скелетон с лэйаутом под выбранный режим (карточки / список). */}
+                <div className="hidden md:block">
+                  <div className="relative">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                      <Skeleton className="h-10 w-28 rounded-[9px]" aria-hidden />
+                      <div className="flex items-center rounded-[9px] border border-border overflow-hidden">
+                        <Tooltip content="Карточки">
+                          <button
+                            type="button"
+                            aria-label="Вид карточками"
+                            className={cn(
+                              "p-2 transition-colors",
+                              cardsViewMode !== "grid" && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
+                            )}
+                            style={cardsViewMode === "grid" ? { backgroundColor: ACCENT, color: "white" } : undefined}
+                            onClick={() => setCardsViewMode("grid")}
+                          >
+                            <LayoutGrid className="h-4 w-4" />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content="Список">
+                          <button
+                            type="button"
+                            aria-label="Вид списком"
+                            className={cn(
+                              "p-2 transition-colors",
+                              cardsViewMode !== "list" && "bg-transparent text-muted-foreground hover:bg-input/20 dark:hover:bg-input/30"
+                            )}
+                            style={cardsViewMode === "list" ? { backgroundColor: ACCENT, color: "white" } : undefined}
+                            onClick={() => setCardsViewMode("list")}
+                          >
+                            <List className="h-4 w-4" />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    </div>
+                    <div className="space-y-8">
+                      {[1, 2, 3].map((sectionIdx) => (
+                        <div key={sectionIdx}>
+                          <div
+                            className="flex flex-wrap items-baseline justify-between gap-2 mb-3 px-3 py-2 rounded-lg"
+                            style={{ background: PINK_GRADIENT }}
+                          >
+                            <Skeleton className="h-8 w-40 rounded-[9px] opacity-90" aria-hidden />
+                            <Skeleton className="h-8 w-24 rounded-[9px] opacity-90" aria-hidden />
+                          </div>
+                          <div
+                            className={
+                              cardsViewMode === "list"
+                                ? "flex flex-col gap-4"
+                                : "columns-1 md:columns-2 @[1400px]:columns-3 gap-4"
+                            }
+                          >
+                            {cardsViewMode === "list"
+                              ? [1, 2, 3, 4, 5].map((j) => (
+                                  <Skeleton key={j} className="h-20 w-full rounded-lg" />
+                                ))
+                              : [1, 2, 3, 4, 5, 6].map((j) => (
+                                  <div key={j} style={{ breakInside: "avoid", marginBottom: "1rem" }}>
+                                    <Skeleton className="h-36 w-full rounded-lg" />
+                                  </div>
+                                ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </>
             ) : visibleItems.length === 0 ? (

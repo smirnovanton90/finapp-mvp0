@@ -4900,9 +4900,12 @@ function TransactionsView({
     }
   }, [sortedTxs.map((t) => t.id).join(",")]);
 
-  const contentVisible = !loading;
+  const contentVisible =
+    mergedRows.length > 0 &&
+    (sortedTxs.length === 0 || readyRowCount >= sortedTxs.length);
 
-  const showDesktopSkeleton = isDesktop && loading;
+  const showDesktopSkeleton =
+    isDesktop && (loading || (mergedRows.length > 0 && !contentVisible));
 
   const handleLoadMore = useCallback(() => {
     if ((hasAnyFilter && showAllFiltered) || !hasMoreTxs || isLoadingMore || loading) return;
@@ -7728,6 +7731,7 @@ function TransactionsView({
                   <div
                     className="space-y-3"
                     style={{
+                      visibility: contentVisible ? "visible" : "hidden",
                       opacity: contentVisible ? 1 : 0,
                       transition: "opacity 0.3s ease-in-out",
                     }}

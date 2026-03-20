@@ -3,6 +3,7 @@
  * Вызывать перед первым getDocument().
  */
 
+import "@/lib/import/pdfjs-polyfill";
 import { GlobalWorkerOptions } from "pdfjs-dist";
 
 let workerInitialized = false;

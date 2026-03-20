@@ -26,6 +26,8 @@ import {
   IMPORT_DEFAULT_CATEGORY_EXPENSE,
   IMPORT_DEFAULT_CATEGORY_INCOME,
 } from "@/lib/dzen-csv-parser";
+import { isTransferCategoryName } from "@/lib/import-match-helpers";
+import { isLikelyInboundTransferMisclassifiedAsExpense } from "@/lib/import-transfer-category";
 import type { ImportAccountCardState } from "@/components/import-account-card";
 import type { ImportCategoryCardState } from "@/components/import-category-card";
 import type { ImportCounterpartyCardState } from "@/components/import-counterparty-card";
@@ -227,6 +229,9 @@ export async function executeImportDzen(
         continue;
       }
       const state = categoryCardStates.get(cat.name)!;
+      if (state.transferModeEnabled) {
+        continue;
+      }
       if (state.linkEnabled && state.linkedPath) {
         const key = makeCategoryPathKey(
           state.linkedPath.l1,
@@ -458,6 +463,99 @@ export async function executeImportDzen(
         continue;
       }
 
+      // Перевод по категории с «перевод» в названии (настройка на шаге 3)
+      if (tx.type !== "transfer") {
+        const catState =
+          (tx.categoryName ?? "").trim() !== ""
+            ? categoryCardStates.get(tx.categoryName)
+            : undefined;
+        if (
+          catState?.transferModeEnabled &&
+          isTransferCategoryName(tx.categoryName) &&
+          !outcomeIsDebts &&
+          !incomeIsDebts
+        ) {
+          const flowByKey = catState.transferFlowByAccountKey ?? {};
+          const inbound =
+            tx.type === "income" &&
+            tx.income != null &&
+            tx.income > 0;
+          const inboundMisclassified =
+            tx.type === "expense" &&
+            tx.outcome != null &&
+            tx.outcome > 0 &&
+            isLikelyInboundTransferMisclassifiedAsExpense(tx);
+          if (inbound || inboundMisclassified) {
+            const accKey = inbound
+              ? `${tx.incomeAccountName}|${tx.incomeCurrency}`
+              : `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
+            const amountCents = inbound ? tx.income! : tx.outcome!;
+            const flow = flowByKey[accKey];
+            const sourceId = flow?.inboundSourceItemId ?? null;
+            const toItemId = accountKeyToItemId.get(accKey) ?? null;
+            if (
+              toItemId != null &&
+              sourceId != null &&
+              Number.isFinite(sourceId)
+            ) {
+              const amountCounterparty =
+                tx.outcomeCurrency !== tx.incomeCurrency &&
+                (inbound ? tx.outcome != null : tx.income != null)
+                  ? inbound
+                    ? tx.outcome ?? undefined
+                    : tx.income ?? undefined
+                  : undefined;
+              await createTransaction({
+                transaction_date: getTransactionDateTimeSortKey(tx),
+                primary_item_id: sourceId,
+                counterparty_item_id: toItemId,
+                amount: amountCents,
+                amount_counterparty: amountCounterparty,
+                direction: "TRANSFER",
+                transaction_type: "ACTUAL",
+                status: "UNCONFIRMED",
+                category_id: null,
+                comment: tx.comment || null,
+              });
+              continue;
+            }
+          } else if (
+            tx.type === "expense" &&
+            tx.outcome != null &&
+            tx.outcome > 0 &&
+            !isLikelyInboundTransferMisclassifiedAsExpense(tx)
+          ) {
+            const accKey = `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
+            const flow = flowByKey[accKey];
+            const destId = flow?.outboundDestItemId ?? null;
+            const fromItemId = accountKeyToItemId.get(accKey) ?? null;
+            if (
+              fromItemId != null &&
+              destId != null &&
+              Number.isFinite(destId)
+            ) {
+              const amountCounterparty =
+                tx.outcomeCurrency !== tx.incomeCurrency && tx.income != null
+                  ? tx.income
+                  : undefined;
+              await createTransaction({
+                transaction_date: getTransactionDateTimeSortKey(tx),
+                primary_item_id: fromItemId,
+                counterparty_item_id: destId,
+                amount: tx.outcome,
+                amount_counterparty: amountCounterparty,
+                direction: "TRANSFER",
+                transaction_type: "ACTUAL",
+                status: "UNCONFIRMED",
+                category_id: null,
+                comment: tx.comment || null,
+              });
+              continue;
+            }
+          }
+        }
+      }
+
       let primaryItemId: number | null = null;
       let direction: "INCOME" | "EXPENSE" | "TRANSFER" = "EXPENSE";
       let amountCents = 0;
@@ -558,6 +656,9 @@ export async function executeImportDzen(
     // Добавить название из выписки в синонимы выбранной категории, чтобы при следующем импорте категория определилась автоматически
     for (const cat of parsedData.categories ?? []) {
       const state = categoryCardStates.get(cat.name);
+      if (state?.transferModeEnabled) {
+        continue;
+      }
       if (state?.linkEnabled && state.linkedPath != null) {
         const key = makeCategoryPathKey(
           state.linkedPath.l1,

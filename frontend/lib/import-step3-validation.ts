@@ -51,7 +51,12 @@ export function validateStep3(
   const sortedForPath = [...categories]
     .filter((c) => {
       const s = categoryCardStates.get(c.name);
-      return s && !s.linkEnabled && (s.name || c.name).trim();
+      return (
+        s &&
+        !s.linkEnabled &&
+        !s.transferModeEnabled &&
+        (s.name || c.name).trim()
+      );
     })
     .sort((a, b) => {
       const sa = categoryCardStates.get(a.name)!;
@@ -89,6 +94,10 @@ export function validateStep3(
     const key = category.name;
     const state = categoryCardStates.get(key);
     if (!state) continue;
+
+    if (state.transferModeEnabled) {
+      continue;
+    }
 
     if (state.linkEnabled) {
       if (!state.linkedPath) {

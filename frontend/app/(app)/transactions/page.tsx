@@ -91,6 +91,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import "@/lib/import/pdfjs-polyfill";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import jsQR from "jsqr";
 import type { PdfTextItem, PdfLineItem } from "@/lib/import";

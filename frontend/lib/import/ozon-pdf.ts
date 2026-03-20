@@ -1,3 +1,5 @@
+import "@/lib/import/pdfjs-polyfill";
+
 /**
  * Парсер выписки Озон Банка (PDF). Справка о движении средств.
  * Механизм как у Сбера/Альфы: границы операций по содержимому (дата в строке),
@@ -18,7 +20,7 @@ import {
   IMPORT_DEFAULT_CATEGORY_EXPENSE,
   IMPORT_DEFAULT_CATEGORY_INCOME,
 } from "@/lib/dzen-csv-parser";
-import type { PdfTextItem } from "./pdf-utils";
+import type { PdfLineItem, PdfTextItem } from "./pdf-utils";
 import {
   buildPdfLines,
   normalizePdfText,
@@ -31,8 +33,14 @@ const OZON_TIME_REGEX = /\b(\d{2}):(\d{2}):(\d{2})\b/;
 const OZON_TIME_SHORT_REGEX = /\b(\d{2}):(\d{2})\b(?!\d)/;
 /** Сумма только с явным знаком: перед числом обязательно «+» или «-», чтобы не путать с датой (25.02.2026). */
 const OZON_SIGNED_AMOUNT_REGEX = /[+\-\u2212]\s*\d+(?:[ \u00A0]\d{3})*[.,]\d{2}/g;
-/** Число с десятичной частью в конце строки (для «Исходящий остаток» может быть 0 или 0,00 без знака) */
-const OZON_BALANCE_NUMBER_REGEX = /\b(\d+(?:[ \u00A0]\d{3})*)([.,](\d{2}))?\s*$/;
+/**
+ * Сумма с копейками (как в выписке). Обязательны десятые — иначе совпадёт номер страницы «4» и т.п.
+ * Конец строки может быть символом ₽ / «руб».
+ */
+const OZON_BALANCE_LINE_END_REGEX =
+  /\b(\d{1,3}(?:[ \u00A0]\d{3})*)([.,](\d{2}))\s*(?:₽|руб\.?)?\s*$/i;
+/** Первое вхождение суммы с копейками после метки (для полного текста страницы) */
+const OZON_MONEY_WITH_KP_REGEX = /\b\d{1,3}(?:[ \u00A0]\d{3})*[.,]\d{2}\b/;
 const OZON_ACCOUNT_REGEX = /лицевого\s+счёта\s*:?\s*№?\s*([\d\s]+)/i;
 const OZON_ACCOUNT_REGEX_ALT = /лицевого\s+счета\s*:?\s*№?\s*([\d\s]+)/i;
 const OZON_ACCOUNT_REGEX_NUM = /(?:номер\s+)?(?:лицевого\s+)?счет[ау]\s*:?\s*№?\s*([\d\s]{4,})/i;
@@ -52,6 +60,57 @@ function getLastAmountStr(text: string): string {
 function removeAmountsFromText(text: string): string {
   OZON_SIGNED_AMOUNT_REGEX.lastIndex = 0;
   return text.replace(OZON_SIGNED_AMOUNT_REGEX, " ").trim();
+}
+
+/**
+ * Текст только из колонки «Назначение платежа» (по X), без «Документ» и без сумм справа —
+ * иначе при склейке всей строки в комментарий попадают номер документа, ₽ и время.
+ */
+function extractOzonPurposeColumn(items: PdfLineItem[], pageWidth: number): string {
+  const xMin = pageWidth * 0.23;
+  const xMax = pageWidth * 0.72;
+  const text = items
+    .filter((item) => item.x >= xMin && item.x < xMax)
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join(" ");
+  return normalizePdfText(text);
+}
+
+function stripLeadingOzonDocumentToken(remainder: string): string {
+  return normalizePdfText(remainder.replace(/^\d{6,14}\s+/, "")).trim();
+}
+
+/** Фрагмент без букв (только цифры, ₽, время) — мусор из соседних колонок, не назначение. */
+function isOzonPurposeNoiseLine(text: string): boolean {
+  const t = normalizePdfText(text);
+  if (!t) return true;
+  return !/[а-яА-ЯёЁa-zA-Z]/.test(t);
+}
+
+function pickOzonPurposeFromLine(
+  items: PdfLineItem[],
+  pageWidth: number,
+  lineTextFull: string
+): string {
+  const fromCol = extractOzonPurposeColumn(items, pageWidth);
+  if (fromCol) return fromCol;
+  let t = removeAmountsFromText(lineTextFull)
+    .replace(OZON_DATE_REGEX, " ")
+    .replace(OZON_TIME_REGEX, " ")
+    .trim();
+  t = stripLeadingOzonDocumentToken(t);
+  return normalizePdfText(t);
+}
+
+/** Артефакт: между «через» и «СБП» вставлены номер документа, символы ₽ и дубликат времени. */
+function collapseOzonInjectedColumnJunk(text: string): string {
+  return normalizePdfText(
+    text.replace(
+      /(через)\s+\d{6,14}(?:\s*₽\s*){1,3}(?:\s+\d{2}:\d{2}:\d{2})?\s+(?=[Сс]бп\.)/gi,
+      "$1 "
+    )
+  );
 }
 
 function extractAccountFromHeader(lineText: string): string {
@@ -181,6 +240,8 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
 
   for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
     const page = await pdf.getPage(pageIndex);
+    const viewport = page.getViewport({ scale: 1 });
+    const pageWidth = viewport.width;
     const textContent = await page.getTextContent();
     const rawItems = textContent.items as unknown[];
     const items = rawItems.filter((item): item is PdfTextItem => {
@@ -250,11 +311,12 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
     }
     if (outgoingBalanceCents === null && fullPageLower.includes("исходящий остаток")) {
       const idx = fullPageLower.indexOf("исходящий остаток");
-      const afterOutgoing = fullPageText.slice(idx + "исходящий остаток".length, idx + 450);
-      const amountM = afterOutgoing.match(/(\d+)([.,](\d{2}))?/g);
-      if (amountM && amountM.length > 0) {
-        const lastAmount = amountM[amountM.length - 1]!.replace(/\s/g, "");
-        const normalized = lastAmount.replace(",", ".");
+      // Берём фрагмент сразу после метки: первая сумма с копейками — это остаток; не последнюю цифру в хвосте (номер страницы).
+      const afterOutgoing = fullPageText.slice(idx + "исходящий остаток".length, idx + 280);
+      OZON_MONEY_WITH_KP_REGEX.lastIndex = 0;
+      const moneyM = afterOutgoing.match(OZON_MONEY_WITH_KP_REGEX);
+      if (moneyM) {
+        const normalized = moneyM[0].replace(/\s/g, "").replace(",", ".");
         const num = parseFloat(normalized);
         if (Number.isFinite(num)) outgoingBalanceCents = Math.round(num * 100);
       }
@@ -276,16 +338,32 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
         .filter(Boolean)
         .join(" ");
       if (isOpeningBalanceOrNonOperation(fullPurpose, amountMeta.amountCents)) return;
+      let isIncome = amountMeta.isIncome;
+      const amtRaw = (currentRow.amountText ?? "").trim();
+      if (!isIncome && /\+/.test(amtRaw)) {
+        const collapsed = amtRaw.replace(/[ \u00A0]/g, "").replace(",", ".");
+        if (collapsed.startsWith("+")) isIncome = true;
+      }
+      const purposeLow = fullPurpose.toLowerCase();
+      if (
+        !isIncome &&
+        purposeLow.includes("перевод") &&
+        purposeLow.includes("сбп") &&
+        purposeLow.includes("отправитель")
+      ) {
+        isIncome = true;
+      }
       const { dateKey, time: timeParsed } = parseOzonDate(currentRow.dateTime);
       if (!dateKey) return;
       let time = timeParsed;
       let comment = normalizePdfText(fullPurpose);
+      comment = collapseOzonInjectedColumnJunk(comment);
       if (time === "00:00:00") {
         const extracted = extractTimeFromPurposeStart(comment);
         time = extracted.time;
         comment = extracted.purposeWithoutTime.trim();
       }
-      const { category, counterparty } = parsePurposeOzon(comment, amountMeta.isIncome);
+      const { category, counterparty } = parsePurposeOzon(comment, isIncome);
       categoriesSet.add(category);
       if (counterparty) counterpartiesSet.add(counterparty);
       const key = `${headerAccountName}|${defaultCurrency}`;
@@ -301,7 +379,7 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
         counterparty,
         comment: normalizePdfText(comment),
         amountCents: amountMeta.amountCents,
-        isIncome: amountMeta.isIncome,
+        isIncome,
       });
     }
 
@@ -341,7 +419,7 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
       if (lineTextLower.includes("исходящий остаток")) {
         let amountStr = getLastAmountStr(lineText);
         if (!amountStr) {
-          const balanceM = lineText.match(OZON_BALANCE_NUMBER_REGEX);
+          const balanceM = lineText.match(OZON_BALANCE_LINE_END_REGEX);
           if (balanceM) {
             const numPart = (balanceM[1] ?? "").replace(/\s/g, "");
             const decPart = balanceM[3] ?? "00";
@@ -375,10 +453,11 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
         flushRow();
         const dateTime = extractDateTimeFromLine(lineText);
         if (!dateTime) continue;
-        const purposeWithoutDateAndAmount = removeAmountsFromText(lineText)
-          .replace(OZON_DATE_REGEX, " ")
-          .replace(OZON_TIME_REGEX, " ")
-          .trim();
+        const purposePart = pickOzonPurposeFromLine(line.items, pageWidth, lineText);
+        const initialPurpose: string[] = [];
+        if (purposePart && !isOzonPurposeNoiseLine(purposePart)) {
+          initialPurpose.push(purposePart);
+        }
         let amountText = amountStr ?? "";
         if (!amountText) {
           const fallback = matchSignedAmounts(lineText);
@@ -386,7 +465,7 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
         }
         currentRow = {
           dateTime,
-          purposeLines: purposeWithoutDateAndAmount ? [purposeWithoutDateAndAmount] : [],
+          purposeLines: initialPurpose,
           amountText,
         };
         continue;
@@ -396,10 +475,10 @@ export async function parseOzonPdfFile(file: File): Promise<DzenParsedData> {
 
       if (amountStr && !currentRow.amountText) {
         currentRow.amountText = amountStr;
-        const purposePart = removeAmountsFromText(lineText).trim();
-        if (purposePart) currentRow.purposeLines.push(purposePart);
-      } else {
-        currentRow.purposeLines.push(lineText);
+      }
+      const purposePart = pickOzonPurposeFromLine(line.items, pageWidth, lineText);
+      if (purposePart && !isOzonPurposeNoiseLine(purposePart)) {
+        currentRow.purposeLines.push(purposePart);
       }
     }
 

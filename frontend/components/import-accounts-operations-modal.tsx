@@ -39,6 +39,7 @@ import {
   parseAlfaPdfFile,
   parseOzonPdfFile,
 } from "@/lib/import";
+import { formatImportFileParseError } from "@/lib/import/import-parse-error-message";
 import { parseExportCsv } from "@/lib/data-export-import";
 import { parsedExportToDzenParsedData } from "@/lib/prostofin-to-dzen";
 import {
@@ -84,9 +85,17 @@ import { ImportOwnColumnMapping } from "@/components/import-own-column-mapping";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import {
   findMatchingCategoryPath,
+  getAllowedScopesForImportedCategoryName,
   findMatchingCounterpartyId,
   findMatchingItemId,
+  isTransferCategoryName,
 } from "@/lib/import-match-helpers";
+import {
+  buildTransferFlowMap,
+  computeTransferRowsForCategory,
+  getStep3TransferModeWarnings,
+} from "@/lib/import-transfer-category";
+import { filterCounterpartiesForMappingStep } from "@/lib/import-counterparty-step-filter";
 
 /** Источники, для которых открывается пошаговый импорт */
 type ServiceImportSourceKey =
@@ -324,14 +333,18 @@ export function ImportAccountsOperationsModal({
             setParseError(null);
           } catch (err) {
             setParseError(
-              err instanceof Error ? err.message : "Не удалось распознать файл экспорта."
+              err instanceof Error
+                ? formatImportFileParseError(err)
+                : "Не удалось распознать файл экспорта."
             );
           }
         })
         .catch((err) => {
           if (!cancelled) {
             setParseError(
-              err instanceof Error ? err.message : "Не удалось прочитать файл."
+              err instanceof Error
+                ? formatImportFileParseError(err)
+                : "Не удалось прочитать файл."
             );
           }
         })
@@ -361,9 +374,7 @@ export function ImportAccountsOperationsModal({
       })
       .catch((err) => {
         if (!cancelled) {
-          setParseError(
-            err instanceof Error ? err.message : "Не удалось распознать файл."
-          );
+          setParseError(formatImportFileParseError(err));
         }
       })
       .finally(() => {
@@ -444,21 +455,87 @@ export function ImportAccountsOperationsModal({
     if (parsedData?.categories?.length) {
       const next = new Map<string, ImportCategoryCardState>();
       for (const cat of parsedData.categories) {
-        next.set(cat.name, getInitialCategoryCardState(cat));
+        next.set(
+          cat.name,
+          getInitialCategoryCardState(cat, {
+            defaultTransferMode: isTransferCategoryName(cat.name),
+          })
+        );
       }
       setCategoryCardStates(next);
     }
   }, [parsedData?.categories]);
 
+  /** Синхронизация ключей счетов в маппинге переводов при смене привязок на шаге 2 */
   React.useEffect(() => {
-    if (parsedData?.counterparties?.length) {
-      const next = new Map<string, ImportCounterpartyCardState>();
-      for (const cp of parsedData.counterparties) {
-        next.set(cp.name, getInitialCounterpartyCardState(cp));
+    if (step !== stepCategories || !parsedData?.categories?.length) return;
+    setCategoryCardStates((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      const txs = parsedData.transactions ?? [];
+      const accs = parsedData.accounts ?? [];
+      for (const cat of parsedData.categories) {
+        const st = next.get(cat.name);
+        if (!st?.transferModeEnabled) continue;
+        const rows = computeTransferRowsForCategory(
+          cat.name,
+          txs,
+          accs,
+          accountCardStates
+        );
+        const merged = buildTransferFlowMap(st.transferFlowByAccountKey, rows);
+        if (JSON.stringify(merged) !== JSON.stringify(st.transferFlowByAccountKey)) {
+          next.set(cat.name, { ...st, transferFlowByAccountKey: merged });
+          changed = true;
+        }
       }
-      setCounterpartyCardStates(next);
-    }
-  }, [parsedData?.counterparties]);
+      return changed ? next : prev;
+    });
+  }, [step, stepCategories, parsedData, accountCardStates]);
+
+  React.useEffect(() => {
+    if (!parsedData || step < stepCategories) return;
+    fetchItems()
+      .then(setItems)
+      .catch(() => {});
+  }, [parsedData, step, stepCategories]);
+
+  const counterpartiesForMappingStep = React.useMemo(
+    () =>
+      parsedData
+        ? filterCounterpartiesForMappingStep(
+            parsedData.counterparties ?? [],
+            parsedData.transactions ?? [],
+            categoryCardStates,
+            accountCardStates,
+            parsedData.accounts ?? []
+          )
+        : [],
+    [parsedData, categoryCardStates, accountCardStates]
+  );
+
+  React.useEffect(() => {
+    if (!parsedData) return;
+    setCounterpartyCardStates((prev) => {
+      const next = new Map<string, ImportCounterpartyCardState>();
+      for (const cp of counterpartiesForMappingStep) {
+        next.set(cp.name, prev.get(cp.name) ?? getInitialCounterpartyCardState(cp));
+      }
+      return next;
+    });
+  }, [parsedData, counterpartiesForMappingStep]);
+
+  const categoryStepTransferWarnings = React.useMemo(
+    () =>
+      parsedData
+        ? getStep3TransferModeWarnings(
+            parsedData,
+            categoryCardStates,
+            accountCardStates
+          )
+        : [],
+    [parsedData, categoryCardStates, accountCardStates]
+  );
 
   React.useEffect(() => {
     if (
@@ -573,12 +650,16 @@ export function ImportAccountsOperationsModal({
       return;
     }
     categoriesStepAutoLinkApplied.current = true;
+    const txs = parsedData?.transactions ?? [];
     setCategoryCardStates((prev) => {
       let changed = false;
       const next = new Map(prev);
       for (const [key, state] of next) {
         if (state.linkEnabled) continue;
-        const match = findMatchingCategoryPath(state.name || key, categories);
+        const name = state.name || key;
+        if (isTransferCategoryName(name)) continue;
+        const allowedScopes = getAllowedScopesForImportedCategoryName(name, txs);
+        const match = findMatchingCategoryPath(name, categories, allowedScopes);
         if (match) {
           next.set(key, { ...state, linkEnabled: true, linkedPath: match });
           changed = true;
@@ -586,7 +667,7 @@ export function ImportAccountsOperationsModal({
       }
       return changed ? next : prev;
     });
-  }, [step, stepCategories, categories, categoryCardStates.size]);
+  }, [step, stepCategories, categories, categoryCardStates.size, parsedData?.transactions]);
 
   // Авто-сопряжение контрагентов: при совпадении названия (полном или частичном) включаем режим связи и выбираем контрагента.
   React.useEffect(() => {
@@ -659,6 +740,17 @@ export function ImportAccountsOperationsModal({
     },
     [items, counterparties]
   );
+
+  const linkedItemLabelByAccountKey = React.useMemo(() => {
+    const rec: Record<string, string> = {};
+    for (const [accKey, st] of accountCardStates) {
+      if (!st.linkEnabled || st.linkedItemId == null) continue;
+      const item = items.find((i) => i.id === st.linkedItemId);
+      const name = (item?.name ?? st.name ?? "").trim();
+      if (name) rec[accKey] = name;
+    }
+    return rec;
+  }, [accountCardStates, items]);
 
   const ownMappingPreview = React.useMemo((): DzenParsedData | null => {
     if (importSource !== "own" || !parsedFileData) return null;
@@ -785,7 +877,7 @@ export function ImportAccountsOperationsModal({
     if (step === stepCounterparties && parsedData) {
       setStep4Error(null);
       const result = validateStep4(
-        parsedData.counterparties ?? [],
+        counterpartiesForMappingStep,
         counterpartyCardStates,
         counterparties
       );
@@ -1792,6 +1884,22 @@ export function ImportAccountsOperationsModal({
                     имеющейся — для этого включите движок «Связать».
                   </p>
                 </div>
+                {categoryStepTransferWarnings.length > 0 && (
+                  <div
+                    className="shrink-0 space-y-2 rounded-lg px-4 py-3"
+                    style={{ backgroundColor: "rgba(232, 163, 23, 0.12)" }}
+                  >
+                    {categoryStepTransferWarnings.map((w, i) => (
+                      <p
+                        key={i}
+                        className="text-base"
+                        style={{ color: "#E8A317", lineHeight: 1.4 }}
+                      >
+                        {w}
+                      </p>
+                    ))}
+                  </div>
+                )}
                 {step3Error && (
                   <p
                     className="text-base shrink-0"
@@ -1804,7 +1912,16 @@ export function ImportAccountsOperationsModal({
                   {parsedData.categories.map((category) => {
                     const key = category.name;
                     const cardState =
-                      categoryCardStates.get(key) ?? getInitialCategoryCardState(category);
+                      categoryCardStates.get(key) ??
+                      getInitialCategoryCardState(category, {
+                        defaultTransferMode: isTransferCategoryName(category.name),
+                      });
+                    const transferRows = computeTransferRowsForCategory(
+                      category.name,
+                      parsedData.transactions ?? [],
+                      parsedData.accounts ?? [],
+                      accountCardStates
+                    );
                     return (
                       <ImportCategoryCard
                         key={key}
@@ -1819,6 +1936,12 @@ export function ImportAccountsOperationsModal({
                           });
                         }}
                         onAddCategory={() => setCreateCategoryOpen(true)}
+                        showTransferMode={isTransferCategoryName(category.name)}
+                        transferRows={transferRows}
+                        linkedItemLabelByAccountKey={linkedItemLabelByAccountKey}
+                        items={items}
+                        getCounterpartyForItemId={getCounterpartyForItemId}
+                        apiBase={API_BASE}
                       />
                     );
                   })}
@@ -1830,7 +1953,9 @@ export function ImportAccountsOperationsModal({
                 Сначала загрузите файл на шаге 1.
               </p>
             )}
-            {step === stepCounterparties && parsedData && (parsedData.counterparties?.length ?? 0) > 0 && (
+            {step === stepCounterparties &&
+              parsedData &&
+              counterpartiesForMappingStep.length > 0 && (
               <div className="flex flex-col gap-4">
                 <div
                   className="shrink-0 text-center"
@@ -1859,7 +1984,7 @@ export function ImportAccountsOperationsModal({
                   </p>
                 )}
                 <div className="flex flex-col gap-4 overflow-auto min-w-0">
-                  {parsedData.counterparties!.map((cp) => {
+                  {counterpartiesForMappingStep.map((cp) => {
                     const key = cp.name;
                     const cardState =
                       counterpartyCardStates.get(key) ??
@@ -1885,11 +2010,21 @@ export function ImportAccountsOperationsModal({
               </div>
             )}
             {step === stepCounterparties &&
-              (parsedData?.counterparties?.length ?? 0) === 0 &&
-              parsedData && (
+              parsedData &&
+              (parsedData.counterparties?.length ?? 0) === 0 && (
                 <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
                   В выгрузке не найдено контрагентов. Перейдите к следующему
                   шагу.
+                </p>
+              )}
+            {step === stepCounterparties &&
+              parsedData &&
+              (parsedData.counterparties?.length ?? 0) > 0 &&
+              counterpartiesForMappingStep.length === 0 && (
+                <p style={{ lineHeight: 1.4, color: PLACEHOLDER_COLOR_DARK }}>
+                  Для операций с контрагентами из выписки не требуется
+                  сопоставление: все такие операции обрабатываются как переводы
+                  по настройкам категорий. Перейдите к следующему шагу.
                 </p>
               )}
             {step === stepCounterparties && !parsedData && (
@@ -2092,15 +2227,15 @@ export function ImportAccountsOperationsModal({
                       const s = categoryCardStates.get(c.name);
                       return !!s && s.linkEnabled;
                     }).length;
-                    const counterpartiesTotal = (
-                      parsedData?.counterparties ?? []
-                    ).filter((c) => !!counterpartyCardStates.get(c.name)).length;
-                    const counterpartiesLinked = (
-                      parsedData?.counterparties ?? []
-                    ).filter((c) => {
-                      const s = counterpartyCardStates.get(c.name);
-                      return !!s && s.linkEnabled;
-                    }).length;
+                    const counterpartiesTotal =
+                      counterpartiesForMappingStep.filter(
+                        (c) => !!counterpartyCardStates.get(c.name)
+                      ).length;
+                    const counterpartiesLinked =
+                      counterpartiesForMappingStep.filter((c) => {
+                        const s = counterpartyCardStates.get(c.name);
+                        return !!s && s.linkEnabled;
+                      }).length;
 
                     return (
                       <>

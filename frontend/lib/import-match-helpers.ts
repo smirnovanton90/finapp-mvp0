@@ -4,8 +4,9 @@
  */
 
 import { buildCategoryLookup } from "@/lib/categories";
-import type { CategoryNode } from "@/lib/categories";
+import type { CategoryNode, CategoryScope } from "@/lib/categories";
 import type { CounterpartyOut, ItemOut } from "@/lib/api";
+import type { DzenParsedTransaction } from "@/lib/dzen-csv-parser";
 
 export type CategoryPath = { l1: string; l2: string; l3: string };
 
@@ -22,6 +23,11 @@ function norm(s: string): string {
   return (s ?? "").trim().toLowerCase();
 }
 
+/** Категория выписки считается «переводной» по подстроке «перевод» (без учёта регистра). */
+export function isTransferCategoryName(name: string | null | undefined): boolean {
+  return norm(name).includes("перевод");
+}
+
 /** Полное или частичное совпадение: равны или одна строка содержит другую. */
 function namesMatch(a: string, b: string): boolean {
   const na = norm(a);
@@ -32,22 +38,70 @@ function namesMatch(a: string, b: string): boolean {
 }
 
 /**
+ * По операциям выписки определяет, какие scope допустимы для автосопоставления категории.
+ * — Только доходы → INCOME и BOTH.
+ * — Только расходы → EXPENSE и BOTH.
+ * — И доходы, и расходы с одним именем категории → только BOTH (универсальные).
+ * — Есть переводы с этой категорией → без фильтра (null).
+ */
+export function getAllowedScopesForImportedCategoryName(
+  importedCategoryName: string,
+  transactions: DzenParsedTransaction[]
+): Set<CategoryScope> | null {
+  const target = (importedCategoryName ?? "").trim();
+  if (!target || !transactions?.length) return null;
+
+  let seenIncome = false;
+  let seenExpense = false;
+  let seenTransfer = false;
+
+  for (const tx of transactions) {
+    if ((tx.categoryName ?? "").trim() !== target) continue;
+    if (tx.type === "income") seenIncome = true;
+    else if (tx.type === "expense") seenExpense = true;
+    else if (tx.type === "transfer") seenTransfer = true;
+  }
+
+  if (!seenIncome && !seenExpense && !seenTransfer) return null;
+  if (seenTransfer) return null;
+
+  if (seenIncome && seenExpense) return new Set<CategoryScope>(["BOTH"]);
+  if (seenIncome) return new Set<CategoryScope>(["INCOME", "BOTH"]);
+  if (seenExpense) return new Set<CategoryScope>(["EXPENSE", "BOTH"]);
+  return null;
+}
+
+function categoryIdMatchesAllowedScopes(
+  id: number,
+  allowedScopes: Set<CategoryScope> | null | undefined,
+  idToScope: Map<number, CategoryScope>
+): boolean {
+  if (allowedScopes == null || allowedScopes.size === 0) return true;
+  const scope = idToScope.get(id);
+  return scope != null && allowedScopes.has(scope);
+}
+
+/**
  * Ищет существующую категорию по совпадению с импортируемым названием.
  * — Обход: все категории (по умолчанию + пользовательские), начиная с 3-го уровня, затем 2-й, затем 1-й.
  * — На совпадение проверяется только название самой категории (без названий родителей).
  * — Полное совпадение предпочитается частичному.
+ * @param allowedScopes если задан — учитываются только категории с таким scope (автомэтчинг по типу операций выписки).
  */
 export function findMatchingCategoryPath(
   importedName: string,
-  existingNodes: CategoryNode[]
+  existingNodes: CategoryNode[],
+  allowedScopes?: Set<CategoryScope> | null
 ): CategoryPath | null {
   if (!importedName?.trim() || !existingNodes?.length) return null;
   const lookup = buildCategoryLookup(existingNodes);
-  const { idToPath } = lookup;
-  const entries = Array.from(idToPath.entries()).map(([id, path]) => ({
-    id,
-    path,
-  }));
+  const { idToPath, idToScope } = lookup;
+  const entries = Array.from(idToPath.entries())
+    .filter(([id]) => categoryIdMatchesAllowedScopes(id, allowedScopes, idToScope))
+    .map(([id, path]) => ({
+      id,
+      path,
+    }));
   // Сначала 3-й уровень, затем 2-й, затем 1-й
   entries.sort((a, b) => b.path.length - a.path.length);
 

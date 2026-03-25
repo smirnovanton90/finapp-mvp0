@@ -1525,6 +1525,65 @@ def _get_or_create_related_item_for_tbank_operation(
     )
 
 
+def _tbank_import_moex_single_trade_equals_payment(
+    db: Session,
+    user: User,
+    integration: UserIntegration,
+    *,
+    oid: str,
+    imported_tx: Transaction | None,
+    primary: Item,
+    related_item: Item,
+    tbank_counterparty_id: int,
+    leg: tuple[str, datetime, int, int],
+    base_comment_type: str,
+    tb_instr_ref: str,
+    category_id: int | None,
+    direction: str,
+    asset_link_type: str,
+) -> None:
+    """Одна сделка на всю сумму платежа — одна транзакция без родителя «разбивка по сделкам»."""
+    from transactions import _rollback_transaction_balance
+
+    if imported_tx is not None:
+        _rollback_transaction_balance(db, user, imported_tx)
+        db.query(BrokerImportedOperation).filter(
+            BrokerImportedOperation.integration_id == integration.id,
+            BrokerImportedOperation.external_operation_id == oid,
+        ).delete(synchronize_session=False)
+        db.delete(imported_tx)
+        db.flush()
+
+    suf, leg_dt, amt, ql = leg
+    leg_comment = f"{base_comment_type} {tb_instr_ref} ({ql} л., сделка #{suf})"
+    payload = TransactionCreate(
+        transaction_date=leg_dt,
+        primary_item_id=primary.id,
+        counterparty_item_id=None,
+        counterparty_id=tbank_counterparty_id,
+        amount_primary_minor=amt,
+        amount_counterparty=None,
+        primary_quantity_lots=ql,
+        direction=direction,  # type: ignore[arg-type]
+        transaction_type="ACTUAL",
+        status=TBANK_IMPORT_TX_STATUS,
+        category_id=category_id,
+        comment=leg_comment,
+        related_item_id=related_item.id,
+        asset_link_type=asset_link_type,  # type: ignore[arg-type]
+        is_split_parent=False,
+    )
+    tx_new = _create_transaction_impl(db, user, payload)
+    tx_new.source = TBANK_IMPORT_SOURCE
+    db.add(
+        BrokerImportedOperation(
+            integration_id=integration.id,
+            external_operation_id=oid,
+            transaction_id=tx_new.id,
+        )
+    )
+
+
 def sync_operations_for_account(
     db: Session,
     user: User,
@@ -1718,6 +1777,25 @@ def sync_operations_for_account(
                     trade_cash = sum(leg[2] for leg in legs)
                     remainder = max(0, abs_pay - trade_cash)
                     cat_buy_id = _category_id_by_name(db, user, "Приобретение активов")
+                    if len(legs) == 1 and remainder == 0:
+                        _tbank_import_moex_single_trade_equals_payment(
+                            db,
+                            user,
+                            integration,
+                            oid=oid,
+                            imported_tx=imported_tx,
+                            primary=primary,
+                            related_item=related_item,
+                            tbank_counterparty_id=tbank_counterparty_id,
+                            leg=legs[0],
+                            base_comment_type=base_comment_type,
+                            tb_instr_ref=tb_instr_ref,
+                            category_id=cat_buy_id,
+                            direction="EXPENSE",
+                            asset_link_type="ASSET_PURCHASE",
+                        )
+                        created += 1
+                        continue
                     if imported_tx is not None:
                         from transactions import _rollback_transaction_balance  # local import to avoid module cycle at import time
                         _rollback_transaction_balance(db, user, imported_tx)
@@ -1902,6 +1980,25 @@ def sync_operations_for_account(
                     trade_cash = sum(leg[2] for leg in legs)
                     remainder = max(0, abs_pay - trade_cash)
                     cat_sell_id = _category_id_by_name(db, user, "Продажа активов")
+                    if len(legs) == 1 and remainder == 0:
+                        _tbank_import_moex_single_trade_equals_payment(
+                            db,
+                            user,
+                            integration,
+                            oid=oid,
+                            imported_tx=imported_tx,
+                            primary=primary,
+                            related_item=related_item,
+                            tbank_counterparty_id=tbank_counterparty_id,
+                            leg=legs[0],
+                            base_comment_type=base_comment_type,
+                            tb_instr_ref=tb_instr_ref,
+                            category_id=cat_sell_id,
+                            direction="INCOME",
+                            asset_link_type="ASSET_SALE",
+                        )
+                        created += 1
+                        continue
                     if imported_tx is not None:
                         from transactions import _rollback_transaction_balance  # local import to avoid module cycle at import time
                         _rollback_transaction_balance(db, user, imported_tx)

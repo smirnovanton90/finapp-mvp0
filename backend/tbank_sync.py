@@ -65,6 +65,8 @@ PROVIDER_TBANK = "TBANK_INVEST"
 
 TBANK_COUNTERPARTY_INN = "7710140679"
 TBANK_IMPORT_SOURCE = "TBANK_IMPORT"
+# Новые транзакции с импорта — в UI «Неподтверждена» (TransactionStatus.UNCONFIRMED).
+TBANK_IMPORT_TX_STATUS = "UNCONFIRMED"
 
 
 _ALLOWED_OPERATION_TYPES = frozenset(
@@ -427,7 +429,7 @@ def _apply_brokerage_cash_transaction(
         amount_counterparty=None,
         direction=direction,
         transaction_type="ACTUAL",
-        status="CONFIRMED",
+        status=TBANK_IMPORT_TX_STATUS,
         category_id=category.id if category else None,
         comment=comment,
         related_item_id=None,
@@ -829,7 +831,7 @@ def _repair_broker_split_rest_if_needed(
             primary_quantity_lots=None,
             direction="EXPENSE",
             transaction_type="ACTUAL",
-            status="CONFIRMED",
+            status=TBANK_IMPORT_TX_STATUS,
             category_id=cat_id,
             comment=(
                 f"{base_comment_type} (НКД, комиссии и прочие составляющие платежа) "
@@ -851,7 +853,7 @@ def _repair_broker_split_rest_if_needed(
             primary_quantity_lots=None,
             direction="INCOME",
             transaction_type="ACTUAL",
-            status="CONFIRMED",
+            status=TBANK_IMPORT_TX_STATUS,
             category_id=cat_id,
             comment=(
                 f"{base_comment_type} (купон, комиссии и прочие составляющие платежа) "
@@ -1685,7 +1687,7 @@ def sync_operations_for_account(
                     counterparty_quantity_lots=None,
                     direction="TRANSFER",
                     transaction_type="ACTUAL",
-                    status="CONFIRMED",
+                    status=TBANK_IMPORT_TX_STATUS,
                     category_id=None,
                     comment=f"{base_comment_type} валюта {tb_instr_ref}",
                     related_item_id=None,
@@ -1735,7 +1737,7 @@ def sync_operations_for_account(
                             primary_quantity_lots=None,
                             direction="EXPENSE",
                             transaction_type="ACTUAL",
-                            status="CONFIRMED",
+                            status=TBANK_IMPORT_TX_STATUS,
                             category_id=cat_buy_id,
                             comment=f"{base_comment_type} {tb_instr_ref} (разбивка по сделкам)",
                             related_item_id=related_item.id,
@@ -1764,7 +1766,7 @@ def sync_operations_for_account(
                             primary_quantity_lots=ql,
                             direction="EXPENSE",
                             transaction_type="ACTUAL",
-                            status="CONFIRMED",
+                            status=TBANK_IMPORT_TX_STATUS,
                             category_id=cat_buy_id,
                             comment=leg_comment,
                             related_item_id=related_item.id,
@@ -1792,7 +1794,7 @@ def sync_operations_for_account(
                             primary_quantity_lots=None,
                             direction="EXPENSE",
                             transaction_type="ACTUAL",
-                            status="CONFIRMED",
+                            status=TBANK_IMPORT_TX_STATUS,
                             category_id=cat_buy_id,
                             comment=(
                                 f"{base_comment_type} (НКД, комиссии и прочие составляющие платежа) "
@@ -1869,7 +1871,7 @@ def sync_operations_for_account(
                     counterparty_quantity_lots=None,
                     direction="TRANSFER",
                     transaction_type="ACTUAL",
-                    status="CONFIRMED",
+                    status=TBANK_IMPORT_TX_STATUS,
                     category_id=None,
                     comment=f"{base_comment_type} валюта {tb_instr_ref}",
                     related_item_id=None,
@@ -1919,7 +1921,7 @@ def sync_operations_for_account(
                             primary_quantity_lots=None,
                             direction="INCOME",
                             transaction_type="ACTUAL",
-                            status="CONFIRMED",
+                            status=TBANK_IMPORT_TX_STATUS,
                             category_id=cat_sell_id,
                             comment=f"{base_comment_type} {tb_instr_ref} (разбивка по сделкам)",
                             related_item_id=related_item.id,
@@ -1948,7 +1950,7 @@ def sync_operations_for_account(
                             primary_quantity_lots=ql,
                             direction="INCOME",
                             transaction_type="ACTUAL",
-                            status="CONFIRMED",
+                            status=TBANK_IMPORT_TX_STATUS,
                             category_id=cat_sell_id,
                             comment=leg_comment,
                             related_item_id=related_item.id,
@@ -1976,7 +1978,7 @@ def sync_operations_for_account(
                             primary_quantity_lots=None,
                             direction="INCOME",
                             transaction_type="ACTUAL",
-                            status="CONFIRMED",
+                            status=TBANK_IMPORT_TX_STATUS,
                             category_id=cat_sell_id,
                             comment=(
                                 f"{base_comment_type} (купон, комиссии и прочие составляющие платежа) "
@@ -2129,7 +2131,7 @@ def sync_operations_for_account(
             primary_quantity_lots=qty_lots,
             direction=direction,  # type: ignore[arg-type]
             transaction_type="ACTUAL",
-            status="CONFIRMED",
+            status=TBANK_IMPORT_TX_STATUS,
             category_id=cat_id,
             comment=comment,
             related_item_id=related_item.id if related_item else None,

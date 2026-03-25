@@ -278,6 +278,7 @@ export const CATEGORY_ICON_BY_L1: Record<string, CategoryIcon> = {
   "Уход за собой": Scissors,
   "Хозяйственные расходы": Home,
   "Прочие расходы": MoreVertical,
+  "Приобретение активов": ShoppingCart,
   "Комиссии": Receipt,
   "Парфюмерия": Droplets,
   "Tax-free": CirclePercent,

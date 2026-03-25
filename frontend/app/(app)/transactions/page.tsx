@@ -1259,9 +1259,9 @@ function TransactionMobileTableRow({
     CategoryIcon: CategoryIconFallback,
     setCategoryIconFormat,
   } = useCategoryImage(tx.category_id, categoryLookup, apiBase);
-  // Как на десктопе: подсветка (полоска 10px + тень), фон MODAL_BG
-  const row1HighlightColor = tx.isDeleted ? "transparent" : isIncome ? GREEN_TRANSACTION : isExpense ? RED : ACCENT2;
-  const row1Bg = tx.isDeleted ? "transparent" : MODAL_BG;
+  // Как на десктопе: подсветка (полоска 10px + тень), фон MODAL_BG; удалённые — полоска PLACEHOLDER_COLOR_DARK, фон BACKGROUND_DT
+  const row1HighlightColor = tx.isDeleted ? PLACEHOLDER_COLOR_DARK : isIncome ? GREEN_TRANSACTION : isExpense ? RED : ACCENT2;
+  const row1Bg = tx.isDeleted ? BACKGROUND_DT : MODAL_BG;
   const amountColor = tx.isDeleted ? textColor : isTransfer ? RED : isIncome ? GREEN : RED;
   const rightAmountColor = tx.isDeleted ? textColor : isTransfer ? GREEN : textColor;
 
@@ -1280,7 +1280,10 @@ function TransactionMobileTableRow({
               style={{
                 width: 10,
                 backgroundColor: row1HighlightColor,
-                boxShadow: row1HighlightColor !== "transparent" ? `0 0 250px 50px ${row1HighlightColor}` : "none",
+                boxShadow:
+                  !tx.isDeleted && row1HighlightColor !== "transparent"
+                    ? `0 0 250px 50px ${row1HighlightColor}`
+                    : "none",
               }}
             />
             <div
@@ -1305,7 +1308,7 @@ function TransactionMobileTableRow({
                       size={28}
                       shadow
                       fallbackIcon={ArrowRight}
-                      fallbackIconColor={ACCENT2}
+                      fallbackIconColor={tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACCENT2}
                       onError={() => setTransferIconFormat(null)}
                     />
                   </div>
@@ -1327,7 +1330,7 @@ function TransactionMobileTableRow({
                           size={28}
                           shadow
                           fallbackIcon={CategoryIconFallback}
-                          fallbackIconColor={ACCENT2}
+                          fallbackIconColor={tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACCENT2}
                           onError={() => {
                             categoryImageOnError();
                             setCategoryIconFormat(null);
@@ -1335,7 +1338,10 @@ function TransactionMobileTableRow({
                         />
                       ) : (
                         <div className="flex items-center justify-center w-full h-full">
-                          <CategoryIconFallback strokeWidth={1.5} style={{ width: 24, height: 24, color: ACCENT2 }} />
+                          <CategoryIconFallback
+                            strokeWidth={1.5}
+                            style={{ width: 24, height: 24, color: tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACCENT2 }}
+                          />
                         </div>
                       )}
                     </div>
@@ -1357,7 +1363,11 @@ function TransactionMobileTableRow({
           {/* Строка 2: доход/расход — слева актив, справа контрагент. Перевод — слева счёт откуда, справа счёт куда */}
           <div
             className="flex items-center justify-between gap-3 flex-wrap"
-            style={{ padding: "8px 12px", paddingBottom: commentText ? 6 : 10 }}
+            style={{
+              padding: "8px 12px",
+              paddingBottom: commentText ? 6 : 10,
+              backgroundColor: tx.isDeleted ? BACKGROUND_DT : undefined,
+            }}
           >
             <div className="flex items-center gap-2 min-w-0 max-w-[50%]">
               <div className="shrink-0 flex items-center justify-center" style={{ width: 24, height: 24 }}>
@@ -1436,7 +1446,15 @@ function TransactionMobileTableRow({
           </div>
           {/* Строка 3: комментарий */}
           {commentText && (
-            <div className="flex items-start gap-2 min-w-0" style={{ paddingLeft: 12, paddingRight: 12, paddingBottom: 10 }}>
+            <div
+              className="flex items-start gap-2 min-w-0"
+              style={{
+                paddingLeft: 12,
+                paddingRight: 12,
+                paddingBottom: 10,
+                backgroundColor: tx.isDeleted ? BACKGROUND_DT : undefined,
+              }}
+            >
               <MessageSquare className="h-4 w-4 shrink-0 mt-0.5" style={{ color: PLACEHOLDER_COLOR_DARK }} />
               <span className="text-xs break-words min-w-0" style={{ color: PLACEHOLDER_COLOR_DARK }}>
                 {commentText}
@@ -1451,7 +1469,7 @@ function TransactionMobileTableRow({
 
 /** Левая обводка общего блока «родитель + дочерние» разбиения (как доход/расход на странице актива). */
 function splitGroupContainerLeftBorderColor(tx: TransactionCard): string {
-  if (tx.isDeleted) return "rgba(148,163,184,0.4)";
+  if (tx.isDeleted) return PLACEHOLDER_COLOR_DARK;
   if (tx.direction === "TRANSFER") return ACCENT2;
   if (tx.direction === "INCOME") return GREEN_TRANSACTION;
   return RED;
@@ -1630,16 +1648,21 @@ function TransactionCardRow({
 
   // Фон всей карточки: для фактических — MODAL_BG для всех трёх видов (доход, расход, перевод).
   // Дочерние вне блока разбиения — прозрачный фон; внутри блока — как у родителя (MODAL_BG).
+  // Удалённые — BACKGROUND_DT (кроме строк внутри общего блока разбиения — фон даёт контейнер).
   const outerBackgroundColor =
-    isChild && !isSplitGroupChildRow && !tx.isDeleted
+    tx.isDeleted && (isSplitGroupChildRow || isSplitGroupParentRow)
       ? "transparent"
-      : !isPlanned && !tx.isDeleted
-        ? MODAL_BG
-        : "transparent";
+      : tx.isDeleted
+        ? BACKGROUND_DT
+        : isChild && !isSplitGroupChildRow
+          ? "transparent"
+          : !isPlanned
+            ? MODAL_BG
+            : "transparent";
 
   // Обводка: у плановых — по всем сторонам, у фактических — слева 7px (GREEN_TRANSACTION / RED / ACCENT2) с закруглением
   const outerBorderColor = tx.isDeleted
-    ? "rgba(148,163,184,0.4)"
+    ? PLACEHOLDER_COLOR_DARK
     : isIncome
       ? GREEN_TRANSACTION
       : stripeColor;
@@ -1707,9 +1730,10 @@ function TransactionCardRow({
           }
       : tx.isDeleted
       ? {
-          borderColor: "transparent" as const,
+          borderColor: PLACEHOLDER_COLOR_DARK,
           borderStyle: "solid" as const,
           borderWidth: 0,
+          borderLeftWidth: 7,
         }
       : isPlanned
         ? {
@@ -1725,8 +1749,8 @@ function TransactionCardRow({
             borderLeftWidth: 7,
           };
 
-  const textColor = tx.isDeleted ? "rgba(148,163,184,1)" : ACTIVE_TEXT_DARK;
-  const subtleTextColor = tx.isDeleted ? "rgba(148,163,184,1)" : PLACEHOLDER_COLOR_DARK;
+  const textColor = tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK;
+  const subtleTextColor = PLACEHOLDER_COLOR_DARK;
 
   // Цвет суммы: доход — GREEN, расход — RED; перевод: уменьшение — RED, увеличение — GREEN
   const leftAmountColor =
@@ -1883,7 +1907,7 @@ function TransactionCardRow({
             style={{
               fontSize: 16,
               fontWeight: 400,
-              color: isOverduePlanned ? RED : ACTIVE_TEXT_DARK,
+              color: isOverduePlanned ? RED : tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK,
               textShadow: isOverduePlanned
                 ? `0 0 15px ${RED}`
                 : "none",
@@ -1967,7 +1991,7 @@ function TransactionCardRow({
                 size={20}
                 shadow={false}
                 fallbackIcon={primaryBankFallbackIcon}
-                fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                fallbackIconColor={tx.isDeleted ? PLACEHOLDER_COLOR_DARK : "rgb(203 213 225)"}
                 imgRef={(el) => setImageRef(0, el)}
                 onLoad={() => handleImageLoad(0)}
                 onError={() => {
@@ -2009,7 +2033,7 @@ function TransactionCardRow({
                 size={90}
                 shadow
                 fallbackIcon={ArrowRight}
-                fallbackIconColor={ACCENT2}
+                fallbackIconColor={tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACCENT2}
                 imgRef={(el) => setImageRef(1, el)}
                 onLoad={() => handleImageLoad(1)}
                 onError={() => {
@@ -2025,7 +2049,7 @@ function TransactionCardRow({
               size={90}
               shadow
               fallbackIcon={CategoryIconFallback}
-              fallbackIconColor={ACCENT2}
+              fallbackIconColor={tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACCENT2}
               imgRef={(el) => setImageRef(1, el)}
               onLoad={() => handleImageLoad(1)}
               onError={() => {
@@ -2045,7 +2069,11 @@ function TransactionCardRow({
             >
               <CategoryIconFallback
                 strokeWidth={1.5}
-                style={{ width: 56, height: 56, color: ACCENT2 }}
+                style={{
+                  width: 56,
+                  height: 56,
+                  color: tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACCENT2,
+                }}
               />
             </div>
           )}
@@ -2098,7 +2126,7 @@ function TransactionCardRow({
                     size={20}
                     shadow={false}
                     fallbackIcon={counterpartyBankFallbackIcon}
-                    fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                    fallbackIconColor={tx.isDeleted ? PLACEHOLDER_COLOR_DARK : "rgb(203 213 225)"}
                     imgRef={(el) => setImageRef(2, el)}
                     onLoad={() => handleImageLoad(2)}
                     onError={() => {
@@ -2128,7 +2156,12 @@ function TransactionCardRow({
                       style={{
                         fontSize: lastIndex === 0 ? 14 : 10,
                         fontWeight: 400,
-                        color: lastIndex === 0 ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,
+                        color:
+                          tx.isDeleted
+                            ? textColor
+                            : lastIndex === 0
+                              ? ACTIVE_TEXT_DARK
+                              : PLACEHOLDER_COLOR_DARK,
                       }}
                     >
                       {visible[0]}
@@ -2141,7 +2174,12 @@ function TransactionCardRow({
                         marginTop: visible[0] ? 4 : 0,
                         fontSize: lastIndex === 1 ? 14 : 10,
                         fontWeight: 400,
-                        color: lastIndex === 1 ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,
+                        color:
+                          tx.isDeleted
+                            ? textColor
+                            : lastIndex === 1
+                              ? ACTIVE_TEXT_DARK
+                              : PLACEHOLDER_COLOR_DARK,
                       }}
                     >
                       {visible[1]}
@@ -2154,7 +2192,7 @@ function TransactionCardRow({
                         marginTop: visible[0] || visible[1] ? 4 : 0,
                         fontSize: 14,
                         fontWeight: 400,
-                        color: ACTIVE_TEXT_DARK,
+                        color: tx.isDeleted ? textColor : ACTIVE_TEXT_DARK,
                       }}
                     >
                       {visible[2]}
@@ -2184,7 +2222,7 @@ function TransactionCardRow({
                   size={20}
                   shadow={false}
                   fallbackIcon={CounterpartyFallbackIcon}
-                  fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                  fallbackIconColor={tx.isDeleted ? PLACEHOLDER_COLOR_DARK : "rgb(203 213 225)"}
                   imgRef={(el) => setImageRef(3, el)}
                   onLoad={() => handleImageLoad(3)}
                   onError={() => {
@@ -2197,7 +2235,7 @@ function TransactionCardRow({
                   style={{
                     fontSize: 14,
                     fontWeight: 400,
-                    color: ACTIVE_TEXT_DARK,
+                    color: tx.isDeleted ? textColor : ACTIVE_TEXT_DARK,
                   }}
                 >
                   {counterpartyName}
@@ -2212,7 +2250,7 @@ function TransactionCardRow({
                   apiBase={apiBase}
                   size={20}
                   shadow={false}
-                  fallbackIconColor={tx.isDeleted ? "rgb(148 163 184)" : "rgb(203 213 225)"}
+                  fallbackIconColor={tx.isDeleted ? PLACEHOLDER_COLOR_DARK : "rgb(203 213 225)"}
                   alt=""
                 />
                 <div
@@ -2220,7 +2258,7 @@ function TransactionCardRow({
                   style={{
                     fontSize: 14,
                     fontWeight: 400,
-                    color: ACTIVE_TEXT_DARK,
+                    color: tx.isDeleted ? textColor : ACTIVE_TEXT_DARK,
                   }}
                 >
                   {relatedItem.name}
@@ -2281,7 +2319,11 @@ function TransactionCardRow({
         >
           {tx.isDeleted && (
             <Tooltip content="Удалена">
-              <span className="inline-flex items-center text-slate-400" aria-label="Удалена">
+              <span
+                className="inline-flex items-center"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+                aria-label="Удалена"
+              >
                 <Ban className="h-4 w-4" />
               </span>
             </Tooltip>

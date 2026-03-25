@@ -1457,6 +1457,11 @@ function splitGroupContainerLeftBorderColor(tx: TransactionCard): string {
   return RED;
 }
 
+/** Как у заголовка «Доход/Расход» на странице актива: сплошной слой `цвет + 22` (alpha 0x22), без градиента слева направо */
+function solidHighlightTintOverModalBg(highlightHex: string): string {
+  return `linear-gradient(0deg, ${highlightHex}22, ${highlightHex}22), ${MODAL_BG}`;
+}
+
 function TransactionCardRow({
   tx,
   counterparty,
@@ -1531,6 +1536,9 @@ function TransactionCardRow({
   const isSplitParent = tx.is_split_parent === true;
   const isChild = tx.parent_transaction_id != null;
   const hideRowLeftAccent = isChild;
+  const useSplitParentFullTint =
+    isSplitGroupParentRow && !isPlanned && !tx.isDeleted;
+  const hideLeftStripeColumn = hideRowLeftAccent || useSplitParentFullTint;
   const hasSumMismatch =
     isSplitParent &&
     childrenSumCents != null &&
@@ -1811,33 +1819,37 @@ function TransactionCardRow({
       )}
       style={{
         boxSizing: "border-box",
-        backgroundColor: outerBackgroundColor,
+        ...(useSplitParentFullTint
+          ? {
+              background: solidHighlightTintOverModalBg(highlightFillColor),
+            }
+          : { backgroundColor: outerBackgroundColor }),
         ...outerBorderStyle,
         opacity: rowReady ? 1 : 0,
         transition: "opacity 0.2s ease-in-out",
       }}
     >
-      {/* Контейнер 1 — подсветка: заливка GREEN_TRANSACTION / RED / ACCENT2 (у дочерних частей разбиения не показываем) */}
+      {/* Контейнер 1 — подсветка: полоса + свечение (у дочерних и у родителя в группе с полной заливкой не показываем) */}
       <div
         className="flex items-center justify-center shrink-0"
         style={{
-          width: hideRowLeftAccent ? 0 : 10,
+          width: hideLeftStripeColumn ? 0 : 10,
           padding: 0,
-          marginLeft: !tx.isDeleted && !hideRowLeftAccent ? -10 : 0,
-          backgroundColor: tx.isDeleted || hideRowLeftAccent ? "transparent" : highlightFillColor,
+          marginLeft: !tx.isDeleted && !hideLeftStripeColumn ? -10 : 0,
+          backgroundColor: tx.isDeleted || hideLeftStripeColumn ? "transparent" : highlightFillColor,
           boxShadow:
-            !isPlanned && !tx.isDeleted && !hideRowLeftAccent
+            !isPlanned && !tx.isDeleted && !hideLeftStripeColumn
               ? `0 0 250px 50px ${highlightFillColor}`
               : "none",
         }}
-        aria-hidden={hideRowLeftAccent}
+        aria-hidden={hideLeftStripeColumn}
       />
 
       {/* Контейнер 2 — контент: фиксированная ширина в узком режиме, во всю ширину в широком (у дочерних частей нет 10px-полосы — ширина на всю карточку) */}
       <div
         className={cn(
           "flex items-stretch @[1400px]:w-full @[1400px]:flex-1 @[1400px]:min-w-0",
-          hideRowLeftAccent ? "w-[900px]" : "w-[890px]"
+          hideLeftStripeColumn ? "w-[900px]" : "w-[890px]"
         )}
         style={{
           paddingTop: 4,

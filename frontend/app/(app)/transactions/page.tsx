@@ -35,6 +35,7 @@ import {
   GREEN_FILL,
   ACCENT2,
   MODAL_BG,
+  BACKGROUND_DT,
 } from "@/lib/colors";
 import { PINK_GRADIENT } from "@/lib/gradients";
 import {
@@ -1448,6 +1449,14 @@ function TransactionMobileTableRow({
   );
 }
 
+/** Левая обводка общего блока «родитель + дочерние» разбиения (как доход/расход на странице актива). */
+function splitGroupContainerLeftBorderColor(tx: TransactionCard): string {
+  if (tx.isDeleted) return "rgba(148,163,184,0.4)";
+  if (tx.direction === "TRANSFER") return ACCENT2;
+  if (tx.direction === "INCOME") return GREEN_TRANSACTION;
+  return RED;
+}
+
 function TransactionCardRow({
   tx,
   counterparty,
@@ -1476,6 +1485,8 @@ function TransactionCardRow({
   onUnsplit,
   onAddChild,
   childrenSumCents,
+  isSplitGroupParentRow = false,
+  isSplitGroupChildRow = false,
 }: {
   tx: TransactionCard;
   counterparty: CounterpartyOut | null;
@@ -1506,6 +1517,10 @@ function TransactionCardRow({
   onUnsplit?: (tx: TransactionCard) => void;
   onAddChild?: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
   childrenSumCents?: number | null;
+  /** Родитель в группе разбиения: своя левая 7px-обводка не рисуется (она на общем контейнере); полоса подсветки и свечение — как у обычной строки */
+  isSplitGroupParentRow?: boolean;
+  /** Дочерняя строка внутри блока разбиения: MODAL_BG как у родителя, без полосы подсветки и без левой 7px */
+  isSplitGroupChildRow?: boolean;
 }) {
   const isTransfer = tx.direction === "TRANSFER";
   const isExpense = tx.direction === "EXPENSE";
@@ -1515,6 +1530,7 @@ function TransactionCardRow({
   const isRealized = tx.status === "REALIZED";
   const isSplitParent = tx.is_split_parent === true;
   const isChild = tx.parent_transaction_id != null;
+  const hideRowLeftAccent = isChild;
   const hasSumMismatch =
     isSplitParent &&
     childrenSumCents != null &&
@@ -1602,12 +1618,16 @@ function TransactionCardRow({
 
   // Цвета и заливки по новому дизайну карточки
   const stripeColor = isIncome ? GREEN : isExpense ? RED : ACCENT2;
-  // Заливка контейнера подсветки: доход — GREEN_TRANSACTION, расход — RED, перевод — ACCENT2
   const highlightFillColor = isIncome ? GREEN_TRANSACTION : isExpense ? RED : ACCENT2;
 
-  // Фон всей карточки: для фактических — MODAL_BG для всех трёх видов (доход, расход, перевод)
+  // Фон всей карточки: для фактических — MODAL_BG для всех трёх видов (доход, расход, перевод).
+  // Дочерние вне блока разбиения — прозрачный фон; внутри блока — как у родителя (MODAL_BG).
   const outerBackgroundColor =
-    !isPlanned && !tx.isDeleted ? MODAL_BG : "transparent";
+    isChild && !isSplitGroupChildRow && !tx.isDeleted
+      ? "transparent"
+      : !isPlanned && !tx.isDeleted
+        ? MODAL_BG
+        : "transparent";
 
   // Обводка: у плановых — по всем сторонам, у фактических — слева 7px (GREEN_TRANSACTION / RED / ACCENT2) с закруглением
   const outerBorderColor = tx.isDeleted
@@ -1617,7 +1637,67 @@ function TransactionCardRow({
       : stripeColor;
 
   const outerBorderStyle =
-    tx.isDeleted
+    isSplitGroupChildRow && tx.isDeleted
+      ? {
+          borderColor: "transparent" as const,
+          borderStyle: "solid" as const,
+          borderWidth: 0,
+        }
+      : isSplitGroupChildRow && isPlanned
+        ? {
+            borderColor: outerBorderColor,
+            borderStyle: "solid" as const,
+            borderWidth: 1,
+            borderLeftWidth: 0,
+          }
+      : isSplitGroupChildRow
+        ? {
+            borderColor: "transparent" as const,
+            borderStyle: "solid" as const,
+            borderWidth: 0,
+            borderLeftWidth: 0,
+          }
+      : isChild && tx.isDeleted
+      ? {
+          borderColor: "transparent" as const,
+          borderStyle: "solid" as const,
+          borderWidth: 0,
+        }
+      : isChild && isPlanned
+        ? {
+            borderColor: outerBorderColor,
+            borderStyle: "solid" as const,
+            borderWidth: 1,
+            borderLeftWidth: 0,
+          }
+      : isChild
+        ? {
+            borderColor: "transparent" as const,
+            borderStyle: "solid" as const,
+            borderWidth: 0,
+            borderBottom: "1px solid rgba(255,255,255,0.1)",
+          }
+      : isSplitGroupParentRow && tx.isDeleted
+        ? {
+            borderColor: "transparent" as const,
+            borderStyle: "solid" as const,
+            borderWidth: 0,
+          }
+      : isSplitGroupParentRow && isPlanned
+        ? {
+            borderColor: outerBorderColor,
+            borderStyle: "solid" as const,
+            borderWidth: 1,
+            borderLeftWidth: 0,
+          }
+      : isSplitGroupParentRow
+        ? {
+            borderColor: "transparent" as const,
+            borderStyle: "solid" as const,
+            borderWidth: 0,
+            borderLeftWidth: 0,
+          }
+      : tx.isDeleted
       ? {
           borderColor: "transparent" as const,
           borderStyle: "solid" as const,
@@ -1725,8 +1805,9 @@ function TransactionCardRow({
   return (
     <div
       className={cn(
-        "flex items-stretch overflow-hidden rounded-lg w-[900px] @[1400px]:w-full",
-        isChild && "ml-4 border-l-2 border-slate-600/50"
+        "flex items-stretch overflow-hidden w-[900px] @[1400px]:w-full",
+        !isChild && !isSplitGroupParentRow && "rounded-lg",
+        (isChild || isSplitGroupParentRow) && "rounded-none" // дочерние в блоке: isChild && isSplitGroupChildRow
       )}
       style={{
         boxSizing: "border-box",
@@ -1736,25 +1817,28 @@ function TransactionCardRow({
         transition: "opacity 0.2s ease-in-out",
       }}
     >
-      {/* Контейнер 1 — подсветка: заливка GREEN_TRANSACTION / RED / ACCENT2 */}
+      {/* Контейнер 1 — подсветка: заливка GREEN_TRANSACTION / RED / ACCENT2 (у дочерних частей разбиения не показываем) */}
       <div
         className="flex items-center justify-center shrink-0"
         style={{
-          width: 10,
+          width: hideRowLeftAccent ? 0 : 10,
           padding: 0,
-          marginLeft: !tx.isDeleted ? -10 : 0,
-          backgroundColor: tx.isDeleted ? "transparent" : highlightFillColor,
-          // Тень от подсветки: X 0, Y 0, Blur 250, Spread 50 (только для фактических)
+          marginLeft: !tx.isDeleted && !hideRowLeftAccent ? -10 : 0,
+          backgroundColor: tx.isDeleted || hideRowLeftAccent ? "transparent" : highlightFillColor,
           boxShadow:
-            !isPlanned && !tx.isDeleted
+            !isPlanned && !tx.isDeleted && !hideRowLeftAccent
               ? `0 0 250px 50px ${highlightFillColor}`
               : "none",
         }}
+        aria-hidden={hideRowLeftAccent}
       />
 
-      {/* Контейнер 2 — контент: фиксированная ширина в узком режиме, во всю ширину в широком */}
+      {/* Контейнер 2 — контент: фиксированная ширина в узком режиме, во всю ширину в широком (у дочерних частей нет 10px-полосы — ширина на всю карточку) */}
       <div
-        className="flex items-stretch w-[890px] @[1400px]:w-full @[1400px]:flex-1 @[1400px]:min-w-0"
+        className={cn(
+          "flex items-stretch @[1400px]:w-full @[1400px]:flex-1 @[1400px]:min-w-0",
+          hideRowLeftAccent ? "w-[900px]" : "w-[890px]"
+        )}
         style={{
           paddingTop: 4,
           paddingBottom: 4,
@@ -4756,7 +4840,8 @@ function TransactionsView({
   type MergedRow =
     | { type: "date_header"; dateKey: string }
     | { type: "checkpoint_line"; dateKey: string; timeKey: string; checkpoints: BalanceCheckpointWithItemOut[] }
-    | { type: "transaction"; tx: TransactionCard };
+    | { type: "transaction"; tx: TransactionCard }
+    | { type: "split_group"; parent: TransactionCard; children: TransactionCard[] };
 
   const mergedRows = useMemo((): MergedRow[] => {
     const dateKeys = new Set<string>();
@@ -4783,8 +4868,20 @@ function TransactionsView({
         rows.push({ type: "checkpoint_line", dateKey, timeKey, checkpoints: byTime.get(timeKey)! });
       }
       const txsOnDate = sortedTxs.filter((tx) => getDateKey(tx.transaction_date) === dateKey);
+      const skipTxIds = new Set<number>();
       for (const tx of txsOnDate) {
-        rows.push({ type: "transaction", tx });
+        if (skipTxIds.has(tx.id)) continue;
+        if (tx.is_split_parent) {
+          const splitChildren = txsOnDate.filter((t) => t.parent_transaction_id === tx.id);
+          splitChildren.forEach((c) => skipTxIds.add(c.id));
+          if (splitChildren.length > 0) {
+            rows.push({ type: "split_group", parent: tx, children: splitChildren });
+          } else {
+            rows.push({ type: "transaction", tx });
+          }
+        } else {
+          rows.push({ type: "transaction", tx });
+        }
       }
     }
     return rows;
@@ -5031,6 +5128,51 @@ function TransactionsView({
   const isIncomeSelected = selectedDirections.has("INCOME");
   const isExpenseSelected = selectedDirections.has("EXPENSE");
   const isTransferSelected = selectedDirections.has("TRANSFER");
+
+  const renderDesktopTransactionCardRow = (
+    tx: TransactionCard,
+    opts?: { splitGroupParent?: boolean; splitGroupChild?: boolean }
+  ) => (
+    <TransactionCardRow
+      tx={tx}
+      counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
+      itemName={itemName}
+      itemCurrencyCode={itemCurrencyCode}
+      getItemTypeCode={(id: number | null | undefined) => (id != null ? itemsById.get(id)?.type_code : undefined)}
+      primaryItemCounterparty={getItemCounterparty(tx.primary_card_item_id ?? tx.primary_item_id)}
+      counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
+      apiBase={API_BASE}
+      itemBankName={itemBankName}
+      categoryLookup={categoryLookup}
+      categoryLinesForId={getCategoryLines}
+      getRubEquivalentCents={getRubEquivalentCents}
+      isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
+      onToggleSelection={toggleTxSelection}
+      onCreateFrom={openCreateFromDialog}
+      onRealize={openRealizeDialog}
+      onEdit={openEditDialog}
+      onDelete={(id) => openDeleteDialog([id])}
+      isDeleting={isDeleting}
+      onConfirm={handleConfirmStatus}
+      isConfirming={
+        confirmingTxId === tx.id ||
+        (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
+      }
+      onReady={() => {
+        if (!readyRowSetRef.current.has(tx.id)) {
+          readyRowSetRef.current.add(tx.id);
+          setReadyRowCount((prev) => prev + 1);
+        }
+      }}
+      relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
+      relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
+      onUnsplit={(t) => setUnsplitConfirmTxId(t.id)}
+      onAddChild={openAddChildDialog}
+      childrenSumCents={tx.is_split_parent ? (childrenSumByParentId.get(tx.id) ?? null) : undefined}
+      isSplitGroupParentRow={opts?.splitGroupParent === true}
+      isSplitGroupChildRow={opts?.splitGroupChild === true}
+    />
+  );
 
   return (
     <main
@@ -7744,7 +7886,7 @@ function TransactionsView({
                           for (let i = idx + 1; i < mergedRows.length; i++) {
                             const r = mergedRows[i];
                             if (r.type === "date_header") break;
-                            if (r.type === "transaction") {
+                            if (r.type === "transaction" || r.type === "split_group") {
                               hasTransactionOnDate = true;
                               break;
                             }
@@ -7830,46 +7972,32 @@ function TransactionsView({
                           </div>
                         );
                       }
+                      if (row.type === "split_group") {
+                        const { parent, children } = row;
+                        return (
+                          <div
+                            key={`split-${parent.id}-${parent.isDeleted ? "deleted" : "active"}`}
+                            className="rounded-[9px] overflow-hidden"
+                            style={{
+                              backgroundColor: BACKGROUND_DT,
+                              borderLeftWidth: 7,
+                              borderLeftStyle: "solid",
+                              borderLeftColor: splitGroupContainerLeftBorderColor(parent),
+                            }}
+                          >
+                            {renderDesktopTransactionCardRow(parent, { splitGroupParent: true })}
+                            {children.map((child) => (
+                              <Fragment key={`${child.id}-${child.isDeleted ? "deleted" : "active"}`}>
+                                {renderDesktopTransactionCardRow(child, { splitGroupChild: true })}
+                              </Fragment>
+                            ))}
+                          </div>
+                        );
+                      }
                       const tx = row.tx;
                       return (
                         <Fragment key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}>
-                          <TransactionCardRow
-                            tx={tx}
-                            counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
-                            itemName={itemName}
-                            itemCurrencyCode={itemCurrencyCode}
-                            getItemTypeCode={(id: number | null | undefined) => (id != null ? itemsById.get(id)?.type_code : undefined)}
-                            primaryItemCounterparty={getItemCounterparty(tx.primary_card_item_id ?? tx.primary_item_id)}
-                            counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
-                            apiBase={API_BASE}
-                            itemBankName={itemBankName}
-                            categoryLookup={categoryLookup}
-                            categoryLinesForId={getCategoryLines}
-                            getRubEquivalentCents={getRubEquivalentCents}
-                            isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
-                            onToggleSelection={toggleTxSelection}
-                            onCreateFrom={openCreateFromDialog}
-                            onRealize={openRealizeDialog}
-                            onEdit={openEditDialog}
-                            onDelete={(id) => openDeleteDialog([id])}
-                            isDeleting={isDeleting}
-                            onConfirm={handleConfirmStatus}
-                            isConfirming={
-                              confirmingTxId === tx.id ||
-                              (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
-                            }
-                            onReady={() => {
-                              if (!readyRowSetRef.current.has(tx.id)) {
-                                readyRowSetRef.current.add(tx.id);
-                                setReadyRowCount((prev) => prev + 1);
-                              }
-                            }}
-                            relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
-                            relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
-                            onUnsplit={(t) => setUnsplitConfirmTxId(t.id)}
-                            onAddChild={openAddChildDialog}
-                            childrenSumCents={tx.is_split_parent ? (childrenSumByParentId.get(tx.id) ?? null) : undefined}
-                          />
+                          {renderDesktopTransactionCardRow(tx)}
                         </Fragment>
                       );
                     })}
@@ -7952,7 +8080,7 @@ function TransactionsView({
                       for (let i = idx + 1; i < mergedRows.length; i++) {
                         const r = mergedRows[i];
                         if (r.type === "date_header") break;
-                        if (r.type === "transaction") {
+                        if (r.type === "transaction" || r.type === "split_group") {
                           hasTransactionOnDate = true;
                           break;
                         }
@@ -8038,46 +8166,32 @@ function TransactionsView({
                       </div>
                     );
                   }
+                  if (row.type === "split_group") {
+                    const { parent, children } = row;
+                    return (
+                      <div
+                        key={`split-${parent.id}-${parent.isDeleted ? "deleted" : "active"}`}
+                        className="rounded-[9px] overflow-hidden"
+                        style={{
+                          backgroundColor: BACKGROUND_DT,
+                          borderLeftWidth: 7,
+                          borderLeftStyle: "solid",
+                          borderLeftColor: splitGroupContainerLeftBorderColor(parent),
+                        }}
+                      >
+                        {renderDesktopTransactionCardRow(parent, { splitGroupParent: true })}
+                        {children.map((child) => (
+                          <Fragment key={`${child.id}-${child.isDeleted ? "deleted" : "active"}`}>
+                            {renderDesktopTransactionCardRow(child, { splitGroupChild: true })}
+                          </Fragment>
+                        ))}
+                      </div>
+                    );
+                  }
                   const tx = row.tx;
                   return (
                     <Fragment key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}>
-                      <TransactionCardRow
-                        tx={tx}
-                        counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
-                        itemName={itemName}
-                        itemCurrencyCode={itemCurrencyCode}
-                        getItemTypeCode={(id: number | null | undefined) => (id != null ? itemsById.get(id)?.type_code : undefined)}
-                        primaryItemCounterparty={getItemCounterparty(tx.primary_card_item_id ?? tx.primary_item_id)}
-                        counterpartyItemCounterparty={getItemCounterparty(tx.counterparty_card_item_id ?? tx.counterparty_item_id)}
-                        apiBase={API_BASE}
-                        itemBankName={itemBankName}
-                        categoryLookup={categoryLookup}
-                        categoryLinesForId={getCategoryLines}
-                        getRubEquivalentCents={getRubEquivalentCents}
-                        isSelected={!tx.isDeleted && selectedTxIds.has(tx.id)}
-                        onToggleSelection={toggleTxSelection}
-                        onCreateFrom={openCreateFromDialog}
-                        onRealize={openRealizeDialog}
-                        onEdit={openEditDialog}
-                        onDelete={(id) => openDeleteDialog([id])}
-                        isDeleting={isDeleting}
-                        onConfirm={handleConfirmStatus}
-                        isConfirming={
-                          confirmingTxId === tx.id ||
-                          (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
-                        }
-                        onReady={() => {
-                          if (!readyRowSetRef.current.has(tx.id)) {
-                            readyRowSetRef.current.add(tx.id);
-                            setReadyRowCount((prev) => prev + 1);
-                          }
-                        }}
-                        relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
-                        relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
-                        onUnsplit={(t) => setUnsplitConfirmTxId(t.id)}
-                        onAddChild={openAddChildDialog}
-                        childrenSumCents={tx.is_split_parent ? (childrenSumByParentId.get(tx.id) ?? null) : undefined}
-                      />
+                      {renderDesktopTransactionCardRow(tx)}
                     </Fragment>
                   );
                 })}

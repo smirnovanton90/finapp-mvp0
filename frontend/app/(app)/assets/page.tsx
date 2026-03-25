@@ -45,6 +45,7 @@ import { CreateCounterpartyModal } from "@/components/create-counterparty-modal"
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { useOnboarding } from "@/components/onboarding-context";
 import { FilterSection } from "@/components/filter-panel";
+import { AssetSectionHeading } from "@/components/asset-section-heading";
 import { AssetCard } from "@/components/asset-card";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
 import { MobileSearchField } from "@/components/mobile-search-field";
@@ -3665,12 +3666,22 @@ export default function Page() {
                     <div className="space-y-8">
                       {[1, 2, 3].map((sectionIdx) => (
                         <div key={sectionIdx}>
-                          <div
-                            className="flex flex-wrap items-baseline justify-between gap-2 mb-3 px-3 py-2 rounded-lg"
-                            style={{ background: PINK_GRADIENT }}
-                          >
-                            <Skeleton className="h-8 w-40 rounded-[9px] opacity-90" aria-hidden />
-                            <Skeleton className="h-8 w-24 rounded-[9px] opacity-90" aria-hidden />
+                          <div className="relative overflow-visible pt-5 pb-6 mb-4">
+                            <div
+                              className="relative flex flex-wrap items-center justify-between gap-x-3 gap-y-2 overflow-visible rounded-lg px-3 py-2"
+                              style={{ background: PINK_GRADIENT }}
+                            >
+                              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+                                <Skeleton className="h-8 w-40 shrink rounded-[9px] opacity-90" aria-hidden />
+                                <div className="relative h-px w-[5.5rem] shrink-0 overflow-visible">
+                                  <Skeleton
+                                    className="absolute left-0 top-1/2 h-[5.5rem] w-[5.5rem] -translate-y-1/2 rounded-xl opacity-50"
+                                    aria-hidden
+                                  />
+                                </div>
+                              </div>
+                              <Skeleton className="h-8 w-24 rounded-[9px] opacity-90" aria-hidden />
+                            </div>
                           </div>
                           <div
                             className={
@@ -3759,27 +3770,26 @@ export default function Page() {
                 <div className="space-y-8">
                   {orderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
                     <div key={section.id}>
-                      <div
-                        className="flex flex-wrap items-baseline justify-between gap-2 mb-3 px-3 py-2 rounded-lg"
-                        style={{ background: PINK_GRADIENT }}
-                      >
-                        <h2
-                          className="text-2xl font-medium"
-                          style={{ color: "rgba(255,255,255,0.95)" }}
-                        >
-                          {section.label}
-                        </h2>
-                        <span
-                          className="text-2xl font-medium tabular-nums"
-                          style={{ color: "rgba(255,255,255,0.95)" }}
-                        >
-                          {section.kind === "LIABILITY"
-                            ? totalRubCents < 0
-                              ? formatRub(totalRubCents)
-                              : `-${formatRub(totalRubCents)}`
-                            : formatRub(totalRubCents)}
-                        </span>
-                      </div>
+                      <AssetSectionHeading
+                        sectionId={section.id}
+                        title={section.label}
+                        variant="desktop"
+                        amountContent={
+                          <>
+                            <CurrencyChip code="RUB" className="text-sm" />
+                            <span
+                              className="text-2xl font-medium tabular-nums"
+                              style={{ color: "rgba(255,255,255,0.95)" }}
+                            >
+                              {section.kind === "LIABILITY"
+                                ? totalRubCents < 0
+                                  ? formatRub(totalRubCents)
+                                  : `-${formatRub(totalRubCents)}`
+                                : formatRub(totalRubCents)}
+                            </span>
+                          </>
+                        }
+                      />
                       <div
                         className={
                           cardsViewMode === "list"
@@ -3871,27 +3881,26 @@ export default function Page() {
                 <div className="space-y-8">
                   {mobileOrderedSectionsWithItems.map(({ section, items, totalRubCents }) => (
                     <div key={section.id}>
-                      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-                        <h2
-                          className="text-xl font-semibold"
-                          style={{ color: ACTIVE_TEXT_DARK }}
-                        >
-                          {section.label}
-                        </h2>
-                        <span className="inline-flex items-center gap-1.5">
-                          <CurrencyChip code="RUB" className="text-sm" />
-                          <span
-                            className="text-xl font-semibold tabular-nums"
-                            style={{ color: ACTIVE_TEXT_DARK }}
-                          >
-                            {section.kind === "LIABILITY"
-                              ? totalRubCents < 0
-                                ? formatRub(totalRubCents)
-                                : `-${formatRub(totalRubCents)}`
-                              : formatRub(totalRubCents)}
-                          </span>
-                        </span>
-                      </div>
+                      <AssetSectionHeading
+                        sectionId={section.id}
+                        title={section.label}
+                        variant="mobile"
+                        amountContent={
+                          <>
+                            <CurrencyChip code="RUB" className="text-sm" />
+                            <span
+                              className="text-xl font-semibold tabular-nums"
+                              style={{ color: "rgba(255,255,255,0.95)" }}
+                            >
+                              {section.kind === "LIABILITY"
+                                ? totalRubCents < 0
+                                  ? formatRub(totalRubCents)
+                                  : `-${formatRub(totalRubCents)}`
+                                : formatRub(totalRubCents)}
+                            </span>
+                          </>
+                        }
+                      />
                       <div className="space-y-3">
                         {items.map((item) => {
                           const rate = rateByCode[item.currency_code];

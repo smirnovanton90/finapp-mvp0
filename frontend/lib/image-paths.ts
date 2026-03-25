@@ -25,6 +25,11 @@ export function transferIconPath(format?: "png" | null): string | null {
   return `${IMAGES_BASE}/assets/transfer-arrow.${format}`;
 }
 
+/** 3D-декор шапки раздела на странице активов: `public/images/asset-sections/<sectionId>.png`. */
+export function assetSectionIconPath(sectionId: string): string {
+  return `${IMAGES_BASE}/asset-sections/${sectionId}.png`;
+}
+
 export function counterpartyDefaultIconPath(
   entityType: "PERSON" | "LEGAL"
 ): string {

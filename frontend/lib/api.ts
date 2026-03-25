@@ -33,6 +33,12 @@ export type ItemPlanSettings = {
   shift_weekend_payment_to_workday?: boolean | null;
 };
 
+export type LinkedBrokerageAccountOut = {
+  account_name: string;
+  bank_name: string | null;
+  bank_counterparty_id?: number | null;
+};
+
 export type ItemOut = {
   id: number;
   kind: ItemKind;
@@ -87,6 +93,8 @@ export type ItemOut = {
   investedCents?: number | null;
   /** Сделки при открытии (MOEX), для отображения при редактировании. */
   opening_deals?: { quantity_lots: number; price_cents: number }[] | null;
+  /** Позиции с broker_position_links: брокерский счёт и банк. */
+  linked_brokerage_accounts?: LinkedBrokerageAccountOut[];
 };
 
 export type ItemMarketValueOut = {
@@ -688,6 +696,196 @@ async function authFetch(input: RequestInfo, init?: RequestInit) {
 
 export async function fetchUserMe(): Promise<UserMeOut> {
   const res = await authFetch(`${API_BASE}/users/me`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/** Т-Инвестиции и др. интеграции (личный кабинет). */
+export type UserIntegrationOut = {
+  id: number;
+  provider: string;
+  has_token: boolean;
+  sandbox: boolean;
+  last_sync_at: string | null;
+  last_error: string | null;
+  tbank_is_premium?: boolean | null;
+  tbank_is_qualified?: boolean | null;
+  tbank_risk_category?: string | null;
+  tbank_info_fetched_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TbankInfoOut = {
+  is_premium: boolean | null;
+  is_qualified: boolean | null;
+  risk_category: string | null;
+  raw: Record<string, unknown> | null;
+};
+
+export type TbankAccountOut = {
+  external_account_id: string;
+  type: string | null;
+  type_label: string | null;
+  name: string | null;
+  opened_date: string | null;
+};
+
+export type TbankOperationsPreviewOut = {
+  external_account_id: string;
+  importable_total: number;
+  not_imported_total: number;
+  importable_by_type: Record<string, number>;
+  not_imported_by_type: Record<string, number>;
+};
+
+export type TbankOperationsPreviewResponse = {
+  accounts: TbankOperationsPreviewOut[];
+};
+
+export async function fetchTbankInfo(integrationId: number): Promise<TbankInfoOut> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}/tbank/info`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchTbankAccounts(
+  integrationId: number
+): Promise<TbankAccountOut[]> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}/tbank/accounts`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function previewTbankImport(
+  integrationId: number
+): Promise<TbankOperationsPreviewResponse> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}/tbank/preview`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function completeTbankImport(
+  integrationId: number,
+  payload: {
+    mappings: {
+      external_account_id: string;
+      item_id: number | null;
+      create_new: boolean;
+      new_item_name: string | null;
+    }[];
+  }
+): Promise<UserIntegrationOut> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}/tbank/import`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export type BrokerAccountLinkOut = {
+  id: number;
+  external_account_id: string;
+  item_id: number | null;
+  display_name: string | null;
+  account_type_hint: string | null;
+};
+
+export async function fetchIntegrations(): Promise<UserIntegrationOut[]> {
+  const res = await authFetch(`${API_BASE}/users/me/integrations`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function createOrGetTbankIntegration(
+  sandbox = false
+): Promise<UserIntegrationOut> {
+  const res = await authFetch(`${API_BASE}/users/me/integrations`, {
+    method: "POST",
+    body: JSON.stringify({ provider: "TBANK_INVEST", sandbox }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchIntegration(
+  integrationId: number
+): Promise<UserIntegrationOut> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function patchIntegration(
+  integrationId: number,
+  payload: { token?: string; sandbox?: boolean }
+): Promise<UserIntegrationOut> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function deleteIntegrationToken(
+  integrationId: number
+): Promise<UserIntegrationOut> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}/token`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function syncIntegration(
+  integrationId: number
+): Promise<UserIntegrationOut> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}/sync`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function fetchAccountLinks(
+  integrationId: number
+): Promise<BrokerAccountLinkOut[]> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}/account-links`
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function putAccountLinks(
+  integrationId: number,
+  links: { external_account_id: string; item_id: number | null }[]
+): Promise<BrokerAccountLinkOut[]> {
+  const res = await authFetch(
+    `${API_BASE}/users/me/integrations/${integrationId}/account-links`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ links }),
+    }
+  );
   if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
@@ -1335,10 +1533,14 @@ export async function updateItemArchivedAt(
 /** Маппинг ответа API item: acquisition_rub → acquisitionCents, invested_rub → investedCents (значения в валюте актива). */
 function mapItemFromApi(raw: unknown): ItemOut {
   const r = raw as Record<string, unknown>;
+  const linked = r.linked_brokerage_accounts;
   return {
     ...r,
     acquisitionCents: (r.acquisitionCents ?? r.acquisition_rub) as number | null | undefined,
     investedCents: (r.investedCents ?? r.invested_rub) as number | null | undefined,
+    linked_brokerage_accounts: Array.isArray(linked)
+      ? (linked as LinkedBrokerageAccountOut[])
+      : [],
   } as ItemOut;
 }
 

@@ -66,6 +66,14 @@ import {
   fetchCounterpartyIndustries,
   createBalanceCheckpoint,
   API_BASE,
+  completeTbankImport,
+  fetchTbankAccounts,
+  fetchTbankInfo,
+  previewTbankImport,
+  patchIntegration,
+  putAccountLinks,
+  createItem,
+  type TbankAccountOut,
 } from "@/lib/api";
 import { parseRubToCents, formatRubInput, normalizeRubOnBlur, formatCentsForInput } from "@/lib/format-rub";
 import { formatTimeInput } from "@/lib/format-time";
@@ -193,6 +201,8 @@ export type ImportAccountsOperationsModalProps = {
   importSource?: ImportSourceKey;
   /** Вызывается при завершении импорта (кнопка «Завершить импорт») */
   onFinish?: () => void;
+  /** Для режима интеграции T-Invest (tbank_invest_api) */
+  tbankIntegrationId?: number | null;
 };
 
 function formatShortDateDisplay(dateKey: string): string {
@@ -206,6 +216,7 @@ export function ImportAccountsOperationsModal({
   onOpenChange,
   importSource = "dzen",
   onFinish,
+  tbankIntegrationId = null,
 }: ImportAccountsOperationsModalProps) {
   const { accountingStartDate } = useAccountingStart();
   const [step, setStep] = React.useState<ImportStep>(1);
@@ -237,6 +248,17 @@ export function ImportAccountsOperationsModal({
   >([]);
   const [categories, setCategories] = React.useState<Awaited<ReturnType<typeof fetchCategories>>>([]);
   const [addCounterpartyModalOpen, setAddCounterpartyModalOpen] = React.useState(false);
+
+  // --- T-Invest integration mode state (tbank_invest_api) ---
+  const [tbankSandbox, setTbankSandbox] = React.useState(false);
+  const [tbankToken, setTbankToken] = React.useState("");
+  const [tbankInfo, setTbankInfo] = React.useState<Awaited<ReturnType<typeof fetchTbankInfo>> | null>(null);
+  const [tbankAccounts, setTbankAccounts] = React.useState<TbankAccountOut[]>([]);
+  const [tbankError, setTbankError] = React.useState<string | null>(null);
+  const [tbankLoading, setTbankLoading] = React.useState(false);
+  const [tbankPreview, setTbankPreview] = React.useState<Awaited<ReturnType<typeof previewTbankImport>> | null>(null);
+
+  const isTbankInvestIntegration = importSource === "tbank_invest_api";
   const [addCounterpartyForAccountKey, setAddCounterpartyForAccountKey] = React.useState<string | null>(null);
   const [confirmCloseOpen, setConfirmCloseOpen] = React.useState(false);
   const [createCategoryOpen, setCreateCategoryOpen] = React.useState(false);
@@ -267,17 +289,34 @@ export function ImportAccountsOperationsModal({
     importSource === "sber" ||
     importSource === "alfa" ||
     importSource === "ozon";
-  const STEPS = isBankImport ? STEPS_BANK : importSource === "own" ? STEPS_OWN : STEPS_DZEN;
+  const STEPS_TBANK_INVEST = [
+    { key: 1, label: "Токен" },
+    { key: 2, label: "Счета" },
+    { key: 3, label: "Импорт" },
+  ] as const;
+  const STEPS = isTbankInvestIntegration
+    ? STEPS_TBANK_INVEST
+    : isBankImport
+      ? STEPS_BANK
+      : importSource === "own"
+        ? STEPS_OWN
+        : STEPS_DZEN;
 
   React.useEffect(() => {
     if (contentScrollRef.current) contentScrollRef.current.scrollTop = 0;
   }, [step]);
-  const stepLineWidth = importSource === "own" ? 100 : isBankImport ? 100 : 130;
-  const stepAccounts = importSource === "own" ? 3 : 2;
-  const stepCategories = importSource === "own" ? 4 : 3;
-  const stepCounterparties = importSource === "own" ? 5 : 4;
-  const stepCheckpoint = isBankImport ? 5 : 0;
-  const stepConfirm = isBankImport ? 6 : importSource === "own" ? 6 : 5;
+  const stepLineWidth = isTbankInvestIntegration
+    ? 110
+    : importSource === "own"
+      ? 100
+      : isBankImport
+        ? 100
+        : 130;
+  const stepAccounts = isTbankInvestIntegration ? 2 : importSource === "own" ? 3 : 2;
+  const stepCategories = isTbankInvestIntegration ? 0 : importSource === "own" ? 4 : 3;
+  const stepCounterparties = isTbankInvestIntegration ? 0 : importSource === "own" ? 5 : 4;
+  const stepCheckpoint = isTbankInvestIntegration ? 0 : isBankImport ? 5 : 0;
+  const stepConfirm = isTbankInvestIntegration ? 3 : isBankImport ? 6 : importSource === "own" ? 6 : 5;
   const isLastStep = step === stepConfirm;
   /** На шагах с активами, категориями и контрагентами степпер прокручивается вместе с контентом */
   const stepperScrollsWithContent =
@@ -385,10 +424,68 @@ export function ImportAccountsOperationsModal({
     };
   }, [importSource, selectedFile]);
 
+  // Reset integration flow state on open/close
+  React.useEffect(() => {
+    if (!isTbankInvestIntegration) return;
+    if (open) {
+      setTbankError(null);
+      return;
+    }
+    setTbankSandbox(false);
+    setTbankToken("");
+    setTbankInfo(null);
+    setTbankAccounts([]);
+    setTbankPreview(null);
+    setTbankError(null);
+    setTbankLoading(false);
+  }, [open, isTbankInvestIntegration]);
+
+  const tbankAccountIdByDzenName = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const a of tbankAccounts) {
+      const name = `${a.name ?? "Счёт"} · ${a.external_account_id}`;
+      map[name] = a.external_account_id;
+    }
+    return map;
+  }, [tbankAccounts]);
+
+  const tbankOpenedDateByExternalId = React.useMemo(() => {
+    const map: Record<string, string | null> = {};
+    for (const a of tbankAccounts) {
+      map[a.external_account_id] = a.opened_date ?? null;
+    }
+    return map;
+  }, [tbankAccounts]);
+
+  const isoToDateKey = React.useCallback(
+    (iso: string | null): string => {
+      if (!iso) return (accountingStartDate ?? "").slice(0, 10) || "1970-01-01";
+      try {
+        const d = new Date(iso);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      } catch {
+        return iso.slice(0, 10);
+      }
+    },
+    [accountingStartDate]
+  );
+
   const step1Content =
     importSource && importSource in STEP1_CONTENT
       ? STEP1_CONTENT[importSource as ServiceImportSourceKey]
       : STEP1_CONTENT.dzen;
+
+  const tbankStep1Content = React.useMemo(
+    () => ({
+      title: "Т-Инвестиции",
+      description:
+        "Укажите токен доступа к API Т-Инвестиций. После проверки покажем параметры профиля и перейдём к сопоставлению счетов.",
+    }),
+    []
+  );
 
   React.useEffect(() => {
     if (open) {
@@ -768,6 +865,28 @@ export function ImportAccountsOperationsModal({
   }, [importSource, parsedFileData, columnMapping]);
 
   const handleNext = async () => {
+    if (isTbankInvestIntegration) {
+      // step 1 is handled by the custom "Далее" button (token validation + fetch accounts)
+      if (step === 2) {
+        setStep3Error(null);
+        if (!parsedData?.accounts?.length) {
+          setStep3Error("Сначала загрузите счета на шаге 1.");
+          return;
+        }
+        const result = validateStep2(
+          parsedData.accounts,
+          parsedData.transactions ?? [],
+          accountCardStates
+        );
+        if (!result.valid) {
+          setStep3Error(result.error || "Заполните обязательные поля по счетам.");
+          return;
+        }
+        setStep(3);
+        return;
+      }
+      return;
+    }
     const step1CsvOrBank =
       importSource === "dzen" ||
       importSource === "coinkeeper" ||
@@ -1204,7 +1323,7 @@ export function ImportAccountsOperationsModal({
             {stepperScrollsWithContent && (
               <div className="pb-6">{stepperBox}</div>
             )}
-            {step === 1 && parseError && !selectedFile && (
+            {step === 1 && !isTbankInvestIntegration && parseError && !selectedFile && (
               <p
                 className="text-base shrink-0"
                 style={{ color: "#FB4C4F" }}
@@ -1212,7 +1331,131 @@ export function ImportAccountsOperationsModal({
                 {parseError}
               </p>
             )}
-            {step === 1 && (
+            {step === 1 && isTbankInvestIntegration && (
+              <div className="flex flex-col gap-6">
+                <h3
+                  className="text-2xl font-medium"
+                  style={{ color: ACTIVE_TEXT_DARK }}
+                >
+                  {tbankStep1Content.title}
+                </h3>
+                <p style={{ lineHeight: 1.4 }}>{tbankStep1Content.description}</p>
+
+                {tbankError && (
+                  <div
+                    className="text-sm rounded-md border p-3"
+                    style={{
+                      color: "#FB4C4F",
+                      backgroundColor: "rgba(251, 76, 79, 0.08)",
+                      borderColor: "rgba(251, 76, 79, 0.3)",
+                    }}
+                  >
+                    {tbankError}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-base" style={{ color: ACTIVE_TEXT_DARK }}>
+                    Песочница T‑Invest
+                  </span>
+                  <Switch checked={tbankSandbox} onCheckedChange={setTbankSandbox} />
+                </div>
+
+                <div className="max-w-2xl">
+                  <FormField label="Токен API T‑Invest">
+                    <div className="flex flex-wrap gap-2 items-end">
+                      <AuthInput
+                        type="password"
+                        autoComplete="off"
+                        value={tbankToken}
+                        onChange={(e) => setTbankToken(e.target.value)}
+                        placeholder="Введите токен"
+                        className="flex-1 min-w-[240px]"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={tbankLoading || !tbankIntegrationId}
+                        className="rounded-md"
+                        style={{ borderColor: ACCENT2, color: ACTIVE_TEXT_DARK }}
+                        onClick={async () => {
+                          if (!tbankIntegrationId) {
+                            setTbankError("Не выбран идентификатор интеграции.");
+                            return;
+                          }
+                          if (!tbankToken.trim()) {
+                            setTbankError("Введите токен.");
+                            return;
+                          }
+                          setTbankLoading(true);
+                          setTbankError(null);
+                          try {
+                            await patchIntegration(tbankIntegrationId, {
+                              token: tbankToken.trim(),
+                              sandbox: tbankSandbox,
+                            });
+                            const inf = await fetchTbankInfo(tbankIntegrationId);
+                            setTbankInfo(inf);
+                            const acc = await fetchTbankAccounts(tbankIntegrationId);
+                            setTbankAccounts(acc);
+                            setParsedData({
+                              accounts: acc.map((a) => ({
+                                name: `${a.name ?? "Счёт"} · ${a.external_account_id}`,
+                                currency: "RUB",
+                              })),
+                              categories: [],
+                              counterparties: [],
+                              transactions: [],
+                            });
+                            setStep(2);
+                          } catch (e) {
+                            setTbankError(e instanceof Error ? e.message : "Ошибка проверки токена");
+                          } finally {
+                            setTbankLoading(false);
+                          }
+                        }}
+                      >
+                        {tbankLoading ? "Проверка…" : "Далее"}
+                      </Button>
+                    </div>
+                  </FormField>
+                </div>
+
+                {tbankInfo && (
+                  <div
+                    className="rounded-[10px] p-5"
+                    style={{ backgroundColor: BACKGROUND_DT }}
+                  >
+                    <div className="text-base font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+                      Профиль (GetInfo)
+                    </div>
+                    <div className="mt-3 text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      <div>
+                        Премиум:{" "}
+                        <span style={{ color: ACTIVE_TEXT_DARK }}>
+                          {tbankInfo.is_premium == null ? "—" : tbankInfo.is_premium ? "Да" : "Нет"}
+                        </span>
+                      </div>
+                      <div>
+                        Квал. инвестор:{" "}
+                        <span style={{ color: ACTIVE_TEXT_DARK }}>
+                          {tbankInfo.is_qualified == null
+                            ? "—"
+                            : tbankInfo.is_qualified
+                              ? "Да"
+                              : "Нет"}
+                        </span>
+                      </div>
+                      <div>
+                        Категория риска:{" "}
+                        <span style={{ color: ACTIVE_TEXT_DARK }}>{tbankInfo.risk_category ?? "—"}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {step === 1 && !isTbankInvestIntegration && (
               <div className="flex flex-col gap-6">
                 <h3
                   className="text-2xl font-medium"
@@ -2181,7 +2424,174 @@ export function ImportAccountsOperationsModal({
                 Сначала загрузите файл и пройдите предыдущие шаги.
               </p>
             )}
-            {step === stepConfirm && (
+            {step === stepConfirm && isTbankInvestIntegration && (
+              <div className="flex flex-col gap-6">
+                {tbankError && (
+                  <div
+                    className="text-sm rounded-md border p-3"
+                    style={{
+                      color: "#FB4C4F",
+                      backgroundColor: "rgba(251, 76, 79, 0.08)",
+                      borderColor: "rgba(251, 76, 79, 0.3)",
+                    }}
+                  >
+                    {tbankError}
+                  </div>
+                )}
+
+                <div
+                  className="shrink-0 text-center"
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 400,
+                    color: ACTIVE_TEXT_DARK,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <p className="mb-2">Подтвердите импорт операций</p>
+                  <p style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    Для каждого счёта будут загружены операции, подходящие под условия MVP.
+                  </p>
+                </div>
+
+                <div
+                  className="rounded-[10px] p-5"
+                  style={{ backgroundColor: BACKGROUND_DT }}
+                >
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="text-base font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+                      Превью операций
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={tbankLoading || !tbankIntegrationId}
+                      className="rounded-md"
+                      style={{ borderColor: ACCENT2, color: ACTIVE_TEXT_DARK }}
+                      onClick={async () => {
+                        if (!tbankIntegrationId) return;
+                        setTbankLoading(true);
+                        setTbankError(null);
+                        try {
+                          const p = await previewTbankImport(tbankIntegrationId);
+                          setTbankPreview(p);
+                        } catch (e) {
+                          setTbankError(e instanceof Error ? e.message : "Не удалось получить превью");
+                        } finally {
+                          setTbankLoading(false);
+                        }
+                      }}
+                    >
+                      Обновить превью
+                    </Button>
+                  </div>
+
+                  {!tbankPreview ? (
+                    <p className="mt-3 text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                      Нажмите «Обновить превью», чтобы увидеть количество операций по счетам.
+                    </p>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      {tbankPreview.accounts.map((a) => (
+                        <div key={a.external_account_id} className="rounded-md border p-3" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
+                          <div className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                            Счёт {a.external_account_id}
+                          </div>
+                          <div className="text-xs mt-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                            Импортируется: {a.importable_total} • Не импортируется: {a.not_imported_total}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-center">
+                  <Button
+                    type="button"
+                    variant="authPrimary"
+                    disabled={tbankLoading || isImporting || !tbankIntegrationId}
+                    className="h-12 px-10 text-base font-bold rounded-lg border-0"
+                    style={
+                      {
+                        "--auth-primary-bg": PINK_GRADIENT,
+                        "--auth-primary-bg-hover": PINK_GRADIENT,
+                      } as React.CSSProperties
+                    }
+                    onClick={async () => {
+                      if (!tbankIntegrationId) {
+                        setTbankError("Не выбран идентификатор интеграции.");
+                        return;
+                      }
+                      if (!accountingStartDate) {
+                        setTbankError("Сначала установите дату начала учёта.");
+                        return;
+                      }
+                      if (!parsedData?.accounts?.length) {
+                        setTbankError("Сначала загрузите счета на шаге 1.");
+                        return;
+                      }
+                      setIsImporting(true);
+                      setTbankError(null);
+                      try {
+                        const createdIds: Record<string, number> = {};
+                        for (const acc of parsedData.accounts) {
+                          const key = `${acc.name}|${acc.currency}`;
+                          const state = accountCardStates.get(key) ?? getInitialAccountCardState(acc);
+                          const extId = tbankAccountIdByDzenName[acc.name];
+                          if (!extId) continue;
+
+                          if (state.linkEnabled && state.linkedItemId) {
+                            createdIds[extId] = state.linkedItemId;
+                            continue;
+                          }
+                          const openedIso = tbankOpenedDateByExternalId[extId] ?? null;
+                          const openDateKey = isoToDateKey(openedIso);
+                          const initial = parseRubToCents(state.balanceStr || "0");
+                          const item = await createItem({
+                            kind: state.kind,
+                            type_code: state.typeCode || "brokerage",
+                            name: (state.name || acc.name).replace(/ · .+$/, ""),
+                            currency_code: state.currency ?? acc.currency ?? "RUB",
+                            counterparty_id: state.counterpartyId ?? null,
+                            open_date: openDateKey,
+                            initial_balance_minor: Number.isFinite(initial) ? initial : 0,
+                          });
+                          createdIds[extId] = item.id;
+                        }
+
+                        await putAccountLinks(
+                          tbankIntegrationId,
+                          Object.entries(createdIds).map(([external_account_id, item_id]) => ({
+                            external_account_id,
+                            item_id,
+                          }))
+                        );
+
+                        await completeTbankImport(tbankIntegrationId, {
+                          mappings: Object.entries(createdIds).map(([external_account_id, item_id]) => ({
+                            external_account_id,
+                            item_id,
+                            create_new: false,
+                            new_item_name: null,
+                          })),
+                        });
+
+                        onOpenChange(false);
+                        onFinish?.();
+                      } catch (e) {
+                        setTbankError(e instanceof Error ? e.message : "Ошибка импорта");
+                      } finally {
+                        setIsImporting(false);
+                      }
+                    }}
+                  >
+                    {isImporting ? "Импорт…" : "Импортировать"}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {step === stepConfirm && !isTbankInvestIntegration && (
               <div className="flex flex-col gap-6">
                 {step5Error && (
                   <p

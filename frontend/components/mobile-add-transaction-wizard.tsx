@@ -978,6 +978,7 @@ export function MobileAddTransactionWizard({
                               accountingStartDate={accountingStartDate}
                               getItemDisplayBalanceCents={getItemDisplayBalanceCents}
                               counterparty={getItemCounterparty(item.id)}
+                              counterpartiesById={counterpartiesById}
                               showRubEquivalent={false}
                               primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                             />
@@ -1034,6 +1035,7 @@ export function MobileAddTransactionWizard({
                               accountingStartDate={accountingStartDate}
                               getItemDisplayBalanceCents={getItemDisplayBalanceCents}
                               counterparty={getItemCounterparty(item.id)}
+                              counterpartiesById={counterpartiesById}
                               showRubEquivalent={false}
                               primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                             />
@@ -1078,6 +1080,7 @@ export function MobileAddTransactionWizard({
                             accountingStartDate={accountingStartDate}
                             getItemDisplayBalanceCents={getItemDisplayBalanceCents}
                             counterparty={getItemCounterparty(item.id)}
+                            counterpartiesById={counterpartiesById}
                             showRubEquivalent={false}
                             primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                           />
@@ -1437,6 +1440,7 @@ export function MobileAddTransactionWizard({
                           accountingStartDate={accountingStartDate}
                           getItemDisplayBalanceCents={getItemDisplayBalanceCents}
                           counterparty={getItemCounterparty(item.id)}
+                          counterpartiesById={counterpartiesById}
                           showRubEquivalent={false}
                           primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                         />

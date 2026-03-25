@@ -96,6 +96,7 @@ CATEGORY_SEED: list[dict] = [
             {"name": "Дивиденды"},
         ],
     },
+    {"name": "Продажа активов", "scope": "INCOME"},
     {
         "name": "Бонусы и Cash-back",
         "scope": "INCOME",

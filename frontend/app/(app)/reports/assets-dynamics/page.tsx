@@ -231,19 +231,26 @@ function formatDateLabel(dateKey: string) {
   return `${day}.${month}.${year}`;
 }
 
-/** Форматирует дату транзакции: дата; время HH:mm — только если оно есть в transaction_date и не 00:00. */
-function formatTxDateCell(transactionDate: string) {
-  const dateKey = toTxDateKey(transactionDate);
+/** Дата транзакции; время HH:mm или HH:mm:ss — только если есть в строке и не 00:00:00. */
+function formatTxDateCell(transactionDate: string | null | undefined) {
+  if (!transactionDate?.trim()) return "—";
+  const raw = transactionDate.trim();
+  const dateKey = toTxDateKey(raw);
+  if (!dateKey) return "—";
   const dateLabel = formatDateLabel(dateKey);
-  const tIdx = transactionDate.indexOf("T");
+  const tIdx = raw.indexOf("T");
   if (tIdx === -1) return dateLabel;
-  const timePart = transactionDate.slice(tIdx + 1);
-  const match = /^(\d{1,2}):(\d{2})/.exec(timePart);
+  const timePart = raw.slice(tIdx + 1);
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(timePart);
   if (!match) return dateLabel;
   const hours = parseInt(match[1], 10);
   const minutes = parseInt(match[2], 10);
-  if (hours === 0 && minutes === 0) return dateLabel;
-  const timeLabel = `${match[1].padStart(2, "0")}:${match[2]}`;
+  const seconds = match[3] != null ? parseInt(match[3], 10) : 0;
+  if (hours === 0 && minutes === 0 && seconds === 0) return dateLabel;
+  const hh = match[1].padStart(2, "0");
+  const mm = match[2].padStart(2, "0");
+  const timeLabel =
+    seconds !== 0 ? `${hh}:${mm}:${String(seconds).padStart(2, "0")}` : `${hh}:${mm}`;
   return (
     <>
       {dateLabel}
@@ -2920,11 +2927,10 @@ export default function AssetsDynamicsPage() {
                                                       </thead>
                                                       <tbody>
                                                         {quantityHistoryRowsExp.map(({ tx, type, delta, balanceAfter, priceCents, costCents }) => {
-                                                          const dateStr = tx.transaction_date ? new Date(tx.transaction_date.replace("T", " ")).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
                                                           const amountColor = type === "Покупка" ? GREEN : RED;
                                                           return (
                                                             <tr key={tx.id} className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
-                                                              <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{dateStr}</td>
+                                                              <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
                                                               <td className="px-4 py-2 text-sm" style={{ color: amountColor }}>{type}</td>
                                                               <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: amountColor }}>{delta > 0 ? `+${delta}` : delta}</td>
                                                               <td className="px-4 py-2 text-sm text-right tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>{priceCents != null ? formatAmount(priceCents) : "—"}</td>

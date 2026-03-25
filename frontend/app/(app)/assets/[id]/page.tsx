@@ -88,6 +88,7 @@ import { PINK_GRADIENT, ASSET_DETAIL_HEADER_GRADIENT_MOBILE } from "@/lib/gradie
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
 import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip";
+import { LinkedBrokerageAccountsMeta } from "@/components/linked-brokerage-accounts-meta";
 import { AssetCardMiniChart } from "@/components/asset-card";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
@@ -413,10 +414,18 @@ export default function AssetDetailPage() {
   }, [buySellModalOpen, item?.instrument_id, loadItemsAndCounterparties]);
 
   useEffect(() => {
-    if (!item?.counterparty_id) return;
+    const needsCounterparties =
+      item?.counterparty_id != null ||
+      (item?.linked_brokerage_accounts?.some((l) => l.bank_counterparty_id != null) ?? false);
+    if (!needsCounterparties) return;
     if (counterparties.length > 0) return;
     loadItemsAndCounterparties();
-  }, [item?.counterparty_id, counterparties.length, loadItemsAndCounterparties]);
+  }, [
+    item?.counterparty_id,
+    item?.linked_brokerage_accounts,
+    counterparties.length,
+    loadItemsAndCounterparties,
+  ]);
 
   const refetchCostHistory = useCallback(async () => {
     if (!item?.id || !item?.open_date) return;
@@ -702,10 +711,34 @@ export default function AssetDetailPage() {
     return merged.sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
   }, [purchaseTxsForAsset, investmentTxsForAsset]);
 
-  function formatTxDateCell(transactionDate: string) {
-    const dateKey = toTxDateKey(transactionDate);
+  /** Дата транзакции; время (HH:mm или HH:mm:ss) — только если есть в строке и не 00:00:00. */
+  function formatTxDateCell(transactionDate: string | null | undefined) {
+    if (!transactionDate?.trim()) return "—";
+    const raw = transactionDate.trim();
+    const dateKey = toTxDateKey(raw);
     if (!dateKey) return "—";
-    return new Date(dateKey).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const [y, m, d] = dateKey.split("-");
+    const dateLabel = y && m && d ? `${d}.${m}.${y}` : raw;
+    const tIdx = raw.indexOf("T");
+    if (tIdx === -1) return dateLabel;
+    const timePart = raw.slice(tIdx + 1);
+    const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(timePart);
+    if (!match) return dateLabel;
+    const hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const seconds = match[3] != null ? parseInt(match[3], 10) : 0;
+    if (hours === 0 && minutes === 0 && seconds === 0) return dateLabel;
+    const hh = match[1].padStart(2, "0");
+    const mm = match[2].padStart(2, "0");
+    const timeLabel =
+      seconds !== 0 ? `${hh}:${mm}:${String(seconds).padStart(2, "0")}` : `${hh}:${mm}`;
+    return (
+      <>
+        {dateLabel}
+        <br />
+        <span className="text-xs" style={{ color: PLACEHOLDER_COLOR_DARK, fontWeight: 400 }}>{timeLabel}</span>
+      </>
+    );
   }
   const latestRatesByCurrency = useMemo(() => {
     const map = new Map<string, { dateKey: string; rate: number }>();
@@ -1518,16 +1551,44 @@ export default function AssetDetailPage() {
     const current = isCrypto ? (item?.quantity_units ?? 0) : (item?.position_lots ?? 0);
     const startQty = current - totalBuy + totalSell;
     let balance = startQty;
+    let costBasis = 0;
+    if (item?.history_status === "HISTORICAL" && startQty > 0) {
+      const points = costHistoryData?.points ?? [];
+      const startPoint = openDate
+        ? points.find((p) => p.date === openDate) ?? points[0]
+        : points[0];
+      const startAcquisitionCents = startPoint?.acquisition ?? 0;
+      if (startAcquisitionCents > 0) {
+        costBasis = startAcquisitionCents;
+      } else if ((item?.acquisitionCents ?? 0) > 0 && current > 0) {
+        // Фолбэк, если история стоимости ещё не прогрузилась.
+        costBasis = Math.round((item.acquisitionCents! / current) * startQty);
+      }
+    }
     return sorted.map((tx) => {
       const qty = getTxQty(tx);
       const isBuy = getIsBuy(tx);
-      const delta = isBuy ? qty : -qty;
-      balance += delta;
       const costCents = tx.amount ?? 0;
       const priceCents = qty > 0 ? Math.round(costCents / qty) : null;
-      return { tx, type: isBuy ? "Покупка" as const : "Продажа" as const, delta, balanceAfter: balance, priceCents, costCents };
+      if (isBuy) {
+        costBasis += costCents;
+      } else if (qty > 0 && balance > 0) {
+        const avgBefore = costBasis / balance;
+        costBasis = Math.max(0, Math.round(costBasis - avgBefore * qty));
+      }
+      const delta = isBuy ? qty : -qty;
+      balance += delta;
+      const avgBuyPriceAfterCents = balance > 0 ? Math.round(costBasis / balance) : null;
+      return {
+        tx,
+        type: isBuy ? "Покупка" as const : "Продажа" as const,
+        delta,
+        balanceAfter: balance,
+        priceCents,
+        avgBuyPriceAfterCents,
+      };
     });
-  }, [quantityHistoryTxActual, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code]);
+  }, [quantityHistoryTxActual, item?.id, item?.open_date, item?.position_lots, item?.quantity_units, item?.type_code, item?.history_status, item?.acquisitionCents, costHistoryData?.points]);
 
   const quantitySummary = useMemo(() => {
     const openDate = item?.open_date ?? "";
@@ -1858,7 +1919,11 @@ export default function AssetDetailPage() {
     return result;
   }, [costHistoryOpen, checkpoints, costChartGeometry, costChartDisplaySeries]);
 
-  const qtyChartPadding = costChartPadding;
+  /** График количества без правой колонки значений — не наследуем right:120 от графика стоимости. */
+  const qtyChartPadding = useMemo(
+    () => ({ top: 24, right: 8, bottom: 44, left: 0 }),
+    []
+  );
   const qtyChartGeometry = useMemo(() => {
     if (qtyChartSeries.length === 0) return null;
     const width = qtyChartSize.width;
@@ -2825,6 +2890,12 @@ export default function AssetDetailPage() {
                     </span>
                   )}
                 </h2>
+                <LinkedBrokerageAccountsMeta
+                  links={item.linked_brokerage_accounts}
+                  counterpartiesById={counterpartiesById}
+                  align="center"
+                  className="mt-1"
+                />
                 {item.counterparty_id && !itemCounterparty && (
                   <div className="flex items-center gap-1.5">
                     <Skeleton className="h-5 w-5 shrink-0 rounded-full" circle />
@@ -3081,6 +3152,12 @@ export default function AssetDetailPage() {
                 >
                   {item.name}
                 </h2>
+                <LinkedBrokerageAccountsMeta
+                  links={item.linked_brokerage_accounts}
+                  counterpartiesById={counterpartiesById}
+                  align="center"
+                  className="mt-0.5 mb-1"
+                />
                 {itemCounterparty && CounterpartyFallbackIcon && (
                   <div className="flex items-center gap-2 mb-1 justify-center">
                     <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">
@@ -3244,7 +3321,23 @@ export default function AssetDetailPage() {
           return (
             <div className="relative rounded-lg overflow-hidden border-0 outline-none" style={{ backgroundColor: MODAL_BG }}>
               <div className="p-6">
-                <h3 className="text-2xl font-medium mb-4" style={{ color: ACTIVE_TEXT_DARK }}>Количество</h3>
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4 min-w-0">
+                  <h3 className="text-2xl font-medium min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>
+                    История покупок/продаж
+                  </h3>
+                  {item.instrument_id && !isArchived && !isClosed && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
+                      style={{ backgroundColor: ACCENT }}
+                      onClick={() => setBuySellModalOpen(true)}
+                    >
+                      <TrendingUp className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
+                      <span style={{ color: "white", opacity: 0.85 }}>Купить/продать актив</span>
+                    </Button>
+                  )}
+                </div>
                 <div className="w-full">
                   <div className="rounded-[9px] overflow-hidden" style={{ backgroundColor: BACKGROUND_DT }}>
                     <div
@@ -3257,20 +3350,8 @@ export default function AssetDetailPage() {
                       >
                         {quantityBlockOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </IconButton>
-                      <span className="text-sm shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>Количество</span>
+                      <span className="text-sm shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>История покупок/продаж</span>
                       <div className="flex-1 min-w-0" />
-                      {item.instrument_id && !isArchived && !isClosed && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="rounded-[9px] border-0 flex items-center justify-center transition-colors hover:opacity-90 text-sm font-normal shrink-0"
-                          style={{ backgroundColor: ACCENT }}
-                          onClick={(e) => { e.stopPropagation(); setBuySellModalOpen(true); }}
-                        >
-                          <TrendingUp className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
-                          <span style={{ color: "white", opacity: 0.85 }}>Купить/продать актив</span>
-                        </Button>
-                      )}
                       <div className="text-2xl font-medium shrink-0 text-right" style={{ color: ACTIVE_TEXT_DARK }}>
                         {qtyLabel}
                       </div>
@@ -3353,6 +3434,16 @@ export default function AssetDetailPage() {
                                   <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет операций покупки и продажи</p>
                                 ) : (
                                   <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
+                                    <thead>
+                                      <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                                        <th className="py-1.5 pr-4 font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>Дата</th>
+                                        <th className="py-1.5 pr-4 font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>Операция</th>
+                                        <th className="py-1.5 pr-4 text-right font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>Количество</th>
+                                        <th className="py-1.5 pr-4 text-right font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>Цена операции</th>
+                                        <th className="py-1.5 pr-4 text-right font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>Ср. цена покупки</th>
+                                        <th className="py-1.5 text-right font-normal" style={{ color: PLACEHOLDER_COLOR_DARK }}>Остаток</th>
+                                      </tr>
+                                    </thead>
                                     <tbody>
                                       {quantitySummary.startQty !== 0 && item.history_status === "HISTORICAL" && (() => {
                                         const openDateLabel = item.open_date
@@ -3367,6 +3458,8 @@ export default function AssetDetailPage() {
                                                 ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(quantitySummary.startQty)
                                                 : new Intl.NumberFormat("ru-RU").format(quantitySummary.startQty)}
                                             </td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>—</td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: PLACEHOLDER_COLOR_DARK }}>—</td>
                                             <td className="py-1.5 text-right tabular-nums align-middle" style={{ color: ACTIVE_TEXT_DARK }}>
                                               {isCrypto
                                                 ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 10 }).format(quantitySummary.startQty)
@@ -3375,15 +3468,24 @@ export default function AssetDetailPage() {
                                           </tr>
                                         );
                                       })()}
-                                      {quantityHistoryRows.map(({ tx, type, delta, balanceAfter, priceCents, costCents }) => {
-                                        const dateStr = tx.transaction_date ? new Date(tx.transaction_date.replace("T", " ")).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+                                      {quantityHistoryRows.map(({ tx, type, delta, balanceAfter, priceCents, avgBuyPriceAfterCents }) => {
                                         const amountColor = type === "Покупка" ? GREEN : RED;
                                         return (
                                           <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                                            <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{dateStr}</td>
+                                            <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
                                             <td className="py-1.5 pr-4 align-middle" style={{ color: amountColor }}>{type}</td>
                                             <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: amountColor }}>
                                               {delta > 0 ? `+${isCrypto ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 10 }).format(delta) : new Intl.NumberFormat("ru-RU").format(delta)}` : (isCrypto ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 10 }).format(delta) : new Intl.NumberFormat("ru-RU").format(delta))}
+                                            </td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: ACTIVE_TEXT_DARK }}>
+                                              {priceCents != null ? (
+                                                <AmountWithCurrency valueCents={priceCents} currencyCode={item.currency_code ?? "RUB"} className="justify-end" />
+                                              ) : "—"}
+                                            </td>
+                                            <td className="py-1.5 pr-4 text-right tabular-nums align-middle" style={{ color: ACTIVE_TEXT_DARK }}>
+                                              {avgBuyPriceAfterCents != null ? (
+                                                <AmountWithCurrency valueCents={avgBuyPriceAfterCents} currencyCode={item.currency_code ?? "RUB"} className="justify-end" />
+                                              ) : "—"}
                                             </td>
                                             <td className="py-1.5 text-right tabular-nums align-middle" style={{ color: ACTIVE_TEXT_DARK }}>
                                               {isCrypto

@@ -285,6 +285,7 @@ const MANDATORY_COUNTERPARTY_TYPE_CODES = [
   "bank_card_credit",
   "deposit",
   "savings_account",
+  "brokerage",
   "consumer_loan",
   "mortgage",
   "car_loan",
@@ -294,7 +295,6 @@ const MANDATORY_COUNTERPARTY_TYPE_CODES = [
 ];
 
 const OPTIONAL_COUNTERPARTY_TYPE_CODES = [
-  "brokerage",
   "installment",
   "microloan",
   "e_wallet",
@@ -3804,6 +3804,7 @@ export default function Page() {
                               showRubEquivalent={isDesktop}
                               primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                               counterparty={counterparty}
+                              counterpartiesById={counterpartiesById}
                               moexMarketPrice={
                                 MOEX_TYPE_CODES.includes(item.type_code)
                                   ? moexMarketPrices.get(item.id) ?? null
@@ -3833,6 +3834,7 @@ export default function Page() {
                                 showRubEquivalent={isDesktop}
                                 primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                                 counterparty={counterparty}
+                                counterpartiesById={counterpartiesById}
                                 moexMarketPrice={
                                   MOEX_TYPE_CODES.includes(item.type_code)
                                     ? moexMarketPrices.get(item.id) ?? null
@@ -3914,6 +3916,7 @@ export default function Page() {
                                       showRubEquivalent={isDesktop}
                                       primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
                                       counterparty={counterparty}
+                                      counterpartiesById={counterpartiesById}
                                       moexMarketPrice={
                                         MOEX_TYPE_CODES.includes(item.type_code)
                                           ? moexMarketPrices.get(item.id) ?? null

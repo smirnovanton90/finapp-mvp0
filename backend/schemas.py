@@ -112,6 +112,98 @@ class TelegramStatusOut(BaseModel):
     notify_time: str  # "HH:MM"
     notify_enabled: bool
 
+
+class UserIntegrationOut(BaseModel):
+    id: int
+    provider: str
+    has_token: bool
+    sandbox: bool
+    last_sync_at: datetime | None = None
+    last_error: str | None = None
+    # TBANK_INVEST GetInfo snapshot (may be empty until first probe)
+    tbank_is_premium: bool | None = None
+    tbank_is_qualified: bool | None = None
+    tbank_risk_category: str | None = None
+    tbank_info_fetched_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class BrokerAccountLinkOut(BaseModel):
+    id: int
+    external_account_id: str
+    item_id: int | None = None
+    display_name: str | None = None
+    account_type_hint: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserIntegrationCreate(BaseModel):
+    provider: Literal["TBANK_INVEST"] = "TBANK_INVEST"
+    sandbox: bool = False
+
+
+class UserIntegrationTokenUpdate(BaseModel):
+    token: str = Field(min_length=1, max_length=2000)
+
+
+class UserIntegrationPatch(BaseModel):
+    sandbox: bool | None = None
+    token: str | None = Field(default=None, max_length=2000)
+
+
+class TbankInfoOut(BaseModel):
+    is_premium: bool | None = None
+    is_qualified: bool | None = None
+    risk_category: str | None = None
+    raw: dict | None = None
+
+
+class TbankAccountOut(BaseModel):
+    external_account_id: str
+    type: str | None = None
+    type_label: str | None = None
+    name: str | None = None
+    opened_date: datetime | None = None
+
+
+class TbankOperationsPreviewOut(BaseModel):
+    external_account_id: str
+    importable_total: int
+    not_imported_total: int
+    importable_by_type: dict[str, int]
+    not_imported_by_type: dict[str, int]
+
+
+class TbankOperationsPreviewResponse(BaseModel):
+    accounts: list[TbankOperationsPreviewOut]
+
+
+class TbankAccountMappingIn(BaseModel):
+    external_account_id: str = Field(min_length=1, max_length=100)
+    item_id: int | None = None
+    create_new: bool = False
+    new_item_name: str | None = Field(default=None, max_length=200)
+
+
+class TbankCompleteImportIn(BaseModel):
+    mappings: list[TbankAccountMappingIn]
+
+
+class BrokerAccountLinkUpdateRow(BaseModel):
+    external_account_id: str = Field(min_length=1, max_length=100)
+    item_id: int | None = None
+
+
+class BrokerAccountLinksPut(BaseModel):
+    links: list[BrokerAccountLinkUpdateRow]
+
+
 class UserProfileUpdate(BaseModel):
     first_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)
@@ -423,6 +515,15 @@ class ItemCreate(BaseModel):
         return []
 
 
+class LinkedBrokerageAccountOut(BaseModel):
+    """Брокерский счёт (элемент), к которому привязана позиция через T‑Invest."""
+
+    account_name: str
+    bank_name: str | None = None
+    bank_counterparty_id: int | None = None
+    """Контрагент банка у элемента брокерского счёта (иконка как у активов с банком)."""
+
+
 class ItemOut(BaseModel):
     id: int
     kind: ItemKind
@@ -479,6 +580,8 @@ class ItemOut(BaseModel):
     """Стоимость вложенных средств (копейки), acquisition + ASSET_INVESTMENT. Заполняется в list/get."""
     opening_deals: list[OpeningDealOut] | None = None
     """Сделки при открытии (MOEX), для отображения при редактировании."""
+    linked_brokerage_accounts: list[LinkedBrokerageAccountOut] = Field(default_factory=list)
+    """Позиции с broker_position_links: счёт(а) брокера и банк (контрагент счёта)."""
 
 
     @field_validator("synonyms", mode="before")

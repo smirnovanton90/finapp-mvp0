@@ -69,6 +69,9 @@ class User(Base):
     telegram_link_codes: Mapped[list["TelegramLinkCode"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    user_integrations: Mapped[list["UserIntegration"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class TelegramLinkCode(Base):
@@ -350,6 +353,153 @@ class UserCategoryState(Base):
     category: Mapped["Category"] = relationship(back_populates="user_states")
 
 
+class UserIntegration(Base):
+    __tablename__ = "user_integrations"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    user: Mapped["User"] = relationship(back_populates="user_integrations")
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    token_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_sync_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sandbox: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # T-Invest GetInfo snapshot (for cabinet + integration details)
+    tbank_is_premium: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    tbank_is_qualified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    tbank_risk_category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    tbank_info_raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    tbank_info_fetched_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    broker_account_links: Mapped[list["BrokerAccountLink"]] = relationship(
+        back_populates="integration", cascade="all, delete-orphan"
+    )
+    imported_operations: Mapped[list["BrokerImportedOperation"]] = relationship(
+        back_populates="integration", cascade="all, delete-orphan"
+    )
+    position_links: Mapped[list["BrokerPositionLink"]] = relationship(
+        back_populates="integration", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="ux_user_integrations_user_provider"),
+    )
+
+
+class BrokerAccountLink(Base):
+    __tablename__ = "broker_account_links"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    integration_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("user_integrations.id", ondelete="CASCADE"), nullable=False
+    )
+    integration: Mapped["UserIntegration"] = relationship(back_populates="broker_account_links")
+    external_account_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("items.id", ondelete="SET NULL"), nullable=True
+    )
+    item: Mapped[Optional["Item"]] = relationship(foreign_keys=[item_id])
+    display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    account_type_hint: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id",
+            "external_account_id",
+            name="ux_broker_account_links_integration_external",
+        ),
+    )
+
+
+class BrokerImportedOperation(Base):
+    __tablename__ = "broker_imported_operations"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    integration_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("user_integrations.id", ondelete="CASCADE"), nullable=False
+    )
+    integration: Mapped["UserIntegration"] = relationship(back_populates="imported_operations")
+    external_operation_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    transaction_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False
+    )
+    transaction: Mapped["Transaction"] = relationship()
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id",
+            "external_operation_id",
+            name="ux_broker_imported_ops_integration_extid",
+        ),
+    )
+
+
+class BrokerPositionLink(Base):
+    __tablename__ = "broker_position_links"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    integration_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("user_integrations.id", ondelete="CASCADE"), nullable=False
+    )
+    integration: Mapped["UserIntegration"] = relationship(back_populates="position_links")
+    external_account_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    figi: Mapped[str] = mapped_column(String(50), nullable=False)
+    item_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("items.id", ondelete="CASCADE"), nullable=False
+    )
+    item: Mapped["Item"] = relationship(
+        "Item", back_populates="broker_position_links", foreign_keys=[item_id]
+    )
+    # Последние значения с синка по паре (счёт интеграции + FIGI); сумма по ссылкам → Item.position_lots / current_value_rub.
+    sync_position_lots: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    sync_value_rub_kopecks: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id",
+            "external_account_id",
+            "figi",
+            name="ux_broker_position_links_integration_account_figi",
+        ),
+    )
+
+
 class Item(Base):
     __tablename__ = "items"
 
@@ -443,6 +593,9 @@ class Item(Base):
     market_values: Mapped[list["ItemMarketValue"]] = relationship(
         back_populates="item",
         cascade="all, delete-orphan",
+    )
+    broker_position_links: Mapped[list["BrokerPositionLink"]] = relationship(
+        back_populates="item",
     )
     balance_checkpoints: Mapped[list["ItemBalanceCheckpoint"]] = relationship(
         back_populates="item",
@@ -705,7 +858,9 @@ class Transaction(Base):
         CheckConstraint("status in ('CONFIRMED','UNCONFIRMED','REALIZED')", name="ck_transactions_status"),
         CheckConstraint("amount_rub >= 0", name="ck_transactions_amount_non_negative"),
         CheckConstraint(
-            "(source is null) or (source in ('AUTO_ITEM_OPENING','AUTO_ITEM_CLOSING','AUTO_ITEM_COMMISSION','MANUAL'))",
+            "(source is null) or (source in ("
+            "'AUTO_ITEM_OPENING','AUTO_ITEM_CLOSING','AUTO_ITEM_COMMISSION','MANUAL','TBANK_IMPORT'"
+            "))",
             name="ck_transactions_source",
         ),
         CheckConstraint(

@@ -15,8 +15,8 @@ import requests
 from pathlib import Path
 from io import BytesIO
 from PIL import Image
-from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import select, delete, func, or_, text
+from sqlalchemy.orm import Session, selectinload, aliased
+from sqlalchemy import select, delete, func, or_, and_, text
 from sqlalchemy.exc import SQLAlchemyError, ProgrammingError
 
 from db import get_db
@@ -38,6 +38,10 @@ from models import (
     Goal,
     TelegramLinkCode,
     MarketPrice,
+    UserIntegration,
+    BrokerImportedOperation,
+    BrokerAccountLink,
+    BrokerPositionLink,
 )
 from config import settings
 from schemas import (
@@ -85,6 +89,7 @@ from coingecko import get_market_chart_range, get_simple_price
 from market import router as market_router, resolve_coingecko_instrument, resolve_market_instrument, ensure_moex_history_prices
 from onboarding import router as onboarding_router
 from telegram_router import router as telegram_router
+from integrations import router as integrations_router
 from tg_bot.bot import run_bot as telegram_run_bot, stop_bot as telegram_stop_bot
 from tg_bot.scheduler import start_scheduler as telegram_start_scheduler, stop_scheduler as telegram_stop_scheduler
 from market_utils import CRYPTO_BOARD_ID, is_crypto_item, is_crypto_type, is_moex_item, is_moex_type
@@ -149,6 +154,7 @@ _MANDATORY_COUNTERPARTY_TYPE_CODES = {
     "bank_card",
     "deposit",
     "savings_account",
+    "brokerage",
     "consumer_loan",
     "mortgage",
     "car_loan",
@@ -160,7 +166,6 @@ _MANDATORY_COUNTERPARTY_TYPE_CODES = {
 }
 
 _OPTIONAL_COUNTERPARTY_TYPE_CODES = {
-    "brokerage",
     "installment",
     "microloan",
     "e_wallet",
@@ -192,6 +197,7 @@ app.include_router(receipts_router)
 app.include_router(market_router)
 app.include_router(onboarding_router)
 app.include_router(telegram_router)
+app.include_router(integrations_router)
 
 UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -690,6 +696,123 @@ def _apply_item_photo_url(item: Item) -> None:
     setattr(item, "photo_url", url)
 
 
+def _enrich_items_linked_brokerage_accounts(db: Session, user_id: int, items: list[Item]) -> None:
+    """Имя брокерского счёта и банк для позиции: broker_position_links и/или импорт T‑Invest (транзакции)."""
+    for it in items:
+        setattr(it, "linked_brokerage_accounts", [])
+    ids = [i.id for i in items]
+    if not ids:
+        return
+    by_item: dict[int, list[dict[str, str | int | None]]] = {}
+    seen_keys: set[tuple[int, int]] = set()
+
+    acct_item = aliased(Item)
+    stmt_pl = (
+        select(
+            BrokerPositionLink.item_id.label("pos_item_id"),
+            BrokerAccountLink.display_name,
+            acct_item.id.label("acct_item_id"),
+            acct_item.name.label("acct_item_name"),
+            Counterparty.name.label("bank_name"),
+            Counterparty.id.label("bank_counterparty_id"),
+        )
+        .select_from(BrokerPositionLink)
+        .join(
+            BrokerAccountLink,
+            and_(
+                BrokerAccountLink.integration_id == BrokerPositionLink.integration_id,
+                BrokerAccountLink.external_account_id == BrokerPositionLink.external_account_id,
+            ),
+        )
+        .join(acct_item, acct_item.id == BrokerAccountLink.item_id)
+        .outerjoin(Counterparty, Counterparty.id == acct_item.counterparty_id)
+        .where(
+            BrokerPositionLink.item_id.in_(ids),
+            acct_item.user_id == user_id,
+            BrokerAccountLink.item_id.isnot(None),
+        )
+    )
+    rows_pl = db.execute(stmt_pl).all()
+    for row in rows_pl:
+        iid = row.pos_item_id
+        acct_id = row.acct_item_id
+        dedupe = (iid, acct_id)
+        if dedupe in seen_keys:
+            continue
+        seen_keys.add(dedupe)
+        display = (row.display_name or "").strip()
+        nm = (row.acct_item_name or "").strip()
+        account_name = display or nm or "Брокерский счёт"
+        bank = (row.bank_name or "").strip() or None
+        bcp_id = int(row.bank_counterparty_id) if row.bank_counterparty_id is not None else None
+        by_item.setdefault(iid, []).append(
+            {
+                "account_name": account_name,
+                "bank_name": bank,
+                "bank_counterparty_id": bcp_id,
+            }
+        )
+
+    # Импорт операций без sync_positions: связь счёт→актив только в транзакциях (primary = брокерский Item).
+    acct_b = aliased(Item)
+    stmt_tx = (
+        select(
+            Transaction.related_item_id.label("rel_item_id"),
+            BrokerAccountLink.display_name,
+            acct_b.id.label("acct_item_id"),
+            acct_b.name.label("acct_item_name"),
+            Counterparty.name.label("bank_name"),
+            Counterparty.id.label("bank_counterparty_id"),
+        )
+        .select_from(Transaction)
+        .join(BrokerImportedOperation, BrokerImportedOperation.transaction_id == Transaction.id)
+        .join(
+            BrokerAccountLink,
+            and_(
+                BrokerAccountLink.integration_id == BrokerImportedOperation.integration_id,
+                BrokerAccountLink.item_id == Transaction.primary_item_id,
+            ),
+        )
+        .join(acct_b, acct_b.id == BrokerAccountLink.item_id)
+        .outerjoin(Counterparty, Counterparty.id == acct_b.counterparty_id)
+        .where(
+            Transaction.related_item_id.in_(ids),
+            Transaction.user_id == user_id,
+            Transaction.deleted_at.is_(None),
+            Transaction.is_split_parent.is_(False),
+            Transaction.primary_item_id.isnot(None),
+            BrokerAccountLink.item_id.isnot(None),
+            acct_b.user_id == user_id,
+        )
+        .distinct()
+    )
+    rows_tx = db.execute(stmt_tx).all()
+    for row in rows_tx:
+        if row.rel_item_id is None:
+            continue
+        iid = row.rel_item_id
+        acct_id = row.acct_item_id
+        dedupe = (iid, acct_id)
+        if dedupe in seen_keys:
+            continue
+        seen_keys.add(dedupe)
+        display = (row.display_name or "").strip()
+        nm = (row.acct_item_name or "").strip()
+        account_name = display or nm or "Брокерский счёт"
+        bank = (row.bank_name or "").strip() or None
+        bcp_id = int(row.bank_counterparty_id) if row.bank_counterparty_id is not None else None
+        by_item.setdefault(iid, []).append(
+            {
+                "account_name": account_name,
+                "bank_name": bank,
+                "bank_counterparty_id": bcp_id,
+            }
+        )
+
+    for it in items:
+        setattr(it, "linked_brokerage_accounts", by_item.get(it.id, []))
+
+
 def _resolve_card_account_id(
     db: Session,
     user: User,
@@ -1041,6 +1164,15 @@ def reset_all_user_data(
     """Delete all data for the current user and reset to initial state (onboarding)."""
     # 1. Transactions
     db.query(Transaction).filter(Transaction.user_id == user.id).delete(synchronize_session=False)
+    # 1b. Integrations: явная очистка истории импорта, затем удаление интеграций.
+    # Не полагаемся только на ON DELETE CASCADE, чтобы сброс работал одинаково во всех окружениях.
+    integration_ids = [r[0] for r in db.query(UserIntegration.id).filter(UserIntegration.user_id == user.id).all()]
+    if integration_ids:
+        db.query(BrokerImportedOperation).filter(
+            BrokerImportedOperation.integration_id.in_(integration_ids)
+        ).delete(synchronize_session=False)
+    # broker_account_links / broker_position_links и др. дочерние сущности удалятся каскадом вместе с UserIntegration
+    db.query(UserIntegration).filter(UserIntegration.user_id == user.id).delete(synchronize_session=False)
     # 2. Transaction chains
     db.query(TransactionChain).filter(TransactionChain.user_id == user.id).delete(synchronize_session=False)
     # 3. Goals (limits)
@@ -1229,6 +1361,7 @@ def list_items(
         db.commit()
     for item in items:
         _apply_item_photo_url(item)
+    _enrich_items_linked_brokerage_accounts(db, user.id, items)
     return items
 
 
@@ -1316,6 +1449,7 @@ def get_item(
     setattr(item, "balance_currency_cents", bc)
     setattr(item, "balance_rub_cents", br)
     _apply_item_photo_url(item)
+    _enrich_items_linked_brokerage_accounts(db, user.id, [item])
     return item
 
 
@@ -2600,7 +2734,9 @@ def _compute_acquisition_cost_basis(
     Для НОВОГО актива — сумма всех транзакций ASSET_PURCHASE (в т.ч. комиссии).
     Для ИСТОРИЧЕСКОГО: прочие активы — сумма покупок + initial_acquisition_rub;
     MOEX/crypto — средневзвешенная база по quantity + initial_acquisition_rub.
-    Если up_to_date задана, учитываются только транзакции с датой <= up_to_date (для истории по датам).
+    Если up_to_date задана, в цепочку входят только сделки с календарной датой <= up_to_date (как в истории лотов);
+    начальное количество под initial_acquisition_rub считается по всем сделкам, иначе база на дату
+    не совпадала бы с «количество на дату × средняя цена приобретения».
     """
     history_status = getattr(item, "history_status", None) or "NEW"
     if history_status == "NEW":
@@ -2687,7 +2823,7 @@ def _compute_acquisition_cost_basis(
         initial_acq = getattr(item, "initial_acquisition_rub", None) or 0
         return total + initial_acq
 
-    txs = (
+    tx_q = (
         db.query(Transaction)
         .filter(
             Transaction.user_id == user_id,
@@ -2699,12 +2835,19 @@ def _compute_acquisition_cost_basis(
         )
     )
     if is_moex_item(item):
-        txs = txs.filter(Transaction.primary_quantity_lots.isnot(None))
+        tx_q = tx_q.filter(Transaction.primary_quantity_lots.isnot(None))
     else:
-        txs = txs.filter(Transaction.primary_quantity_units.isnot(None))
+        tx_q = tx_q.filter(Transaction.primary_quantity_units.isnot(None))
+    all_txs_ordered = tx_q.order_by(Transaction.transaction_date.asc(), Transaction.id.asc()).all()
+
+    def _tx_cal_day(tx: Transaction) -> date_type:
+        td = tx.transaction_date
+        return td.date() if hasattr(td, "date") else td  # type: ignore[return-value]
+
     if up_to_date is not None:
-        txs = txs.filter(Transaction.transaction_date <= up_to_date)
-    txs = txs.order_by(Transaction.transaction_date.asc(), Transaction.id.asc()).all()
+        txs = [t for t in all_txs_ordered if _tx_cal_day(t) <= up_to_date]
+    else:
+        txs = all_txs_ordered
 
     cost_basis: int = 0
     running_qty: int | float = 0
@@ -2713,16 +2856,24 @@ def _compute_acquisition_cost_basis(
     if initial_acq > 0:
         cost_basis += initial_acq
         if is_moex_item(item):
-            # Начальное количество = текущее - куплено + продано (вычислим из транзакций)
-            total_buy: int | float = sum((tx.primary_quantity_lots or 0) for tx in txs if tx.asset_link_type == "ASSET_PURCHASE")
-            total_sell: int | float = sum((tx.primary_quantity_lots or 0) for tx in txs if tx.asset_link_type == "ASSET_SALE")
+            # Начальное количество до любых сделок — только из полной истории, иначе при up_to_date база искажена
+            total_buy_all: int | float = sum(
+                (tx.primary_quantity_lots or 0) for tx in all_txs_ordered if tx.asset_link_type == "ASSET_PURCHASE"
+            )
+            total_sell_all: int | float = sum(
+                (tx.primary_quantity_lots or 0) for tx in all_txs_ordered if tx.asset_link_type == "ASSET_SALE"
+            )
             current_qty = item.position_lots or 0
-            running_qty = current_qty - total_buy + total_sell
+            running_qty = current_qty - total_buy_all + total_sell_all
         else:
-            total_buy_c: float = sum(float(tx.primary_quantity_units or 0) for tx in txs if tx.asset_link_type == "ASSET_PURCHASE")
-            total_sell_c: float = sum(float(tx.primary_quantity_units or 0) for tx in txs if tx.asset_link_type == "ASSET_SALE")
+            total_buy_all_c = sum(
+                float(tx.primary_quantity_units or 0) for tx in all_txs_ordered if tx.asset_link_type == "ASSET_PURCHASE"
+            )
+            total_sell_all_c = sum(
+                float(tx.primary_quantity_units or 0) for tx in all_txs_ordered if tx.asset_link_type == "ASSET_SALE"
+            )
             current_qty_c = float(item.quantity_units or 0)
-            running_qty = current_qty_c - total_buy_c + total_sell_c
+            running_qty = current_qty_c - total_buy_all_c + total_sell_all_c
 
     for tx in txs:
         if tx.asset_link_type == "ASSET_PURCHASE":

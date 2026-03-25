@@ -24,6 +24,7 @@ export type ImportSourceKey =
   | "sber"
   | "alfa"
   | "ozon"
+  | "tbank_invest_api"
   | "dzen"
   | "coinkeeper"
   | "own"
@@ -60,7 +61,16 @@ function ImportCardIcon({
   source,
   size = CARD_ICON_SIZE,
 }: {
-  source: "dzen" | "coinkeeper" | "own" | "file" | "tbank" | "sber" | "alfa" | "ozon";
+  source:
+    | "dzen"
+    | "coinkeeper"
+    | "own"
+    | "file"
+    | "tbank"
+    | "sber"
+    | "alfa"
+    | "ozon"
+    | "tbank_invest_api";
   size?: number;
 }) {
   const [imgError, setImgError] = useState(false);
@@ -84,8 +94,17 @@ function ImportCardIcon({
     );
   }
 
-  if (source === "tbank" || source === "sber" || source === "alfa" || source === "ozon") {
-    const src = imgError ? null : importBankIconPath(source);
+  if (
+    source === "tbank" ||
+    source === "sber" ||
+    source === "alfa" ||
+    source === "ozon" ||
+    source === "tbank_invest_api"
+  ) {
+    const src =
+      imgError
+        ? null
+        : importBankIconPath(source === "tbank_invest_api" ? "tbank" : source);
     return (
       <div style={boxStyle}>
         <CardIcon

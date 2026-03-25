@@ -135,7 +135,7 @@ export const COUNTERPARTY_TYPE_CODES = [
 ];
 
 export const MANDATORY_COUNTERPARTY_TYPE_CODES = [
-  "bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account", "consumer_loan", "mortgage", "car_loan", "education_loan",
+  "bank_account", "bank_card_debit", "bank_card_credit", "deposit", "savings_account", "brokerage", "consumer_loan", "mortgage", "car_loan", "education_loan",
   "loan_to_third_party", "private_loan",
 ];
 

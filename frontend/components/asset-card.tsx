@@ -36,6 +36,7 @@ import { CardIcon } from "@/components/card-icon";
 import { CurrencyChip } from "@/components/currency-chip";
 import { TableRow, TableCell } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { LinkedBrokerageAccountsMeta } from "@/components/linked-brokerage-accounts-meta";
 
 const MOEX_TYPE_CODES = ["securities", "bonds", "etf", "bpif", "pif"];
 const isCryptoItem = (item: ItemOut) => item.type_code === "crypto";
@@ -99,6 +100,8 @@ interface AssetCardProps {
   /** Подпись над значением в рублях (например «Балансовая стоимость», «Рыночная стоимость») */
   primaryValueLabel?: string | null;
   counterparty?: CounterpartyOut | null;
+  /** Для строки банка у привязанных брокерских счетов (логотип как у карточки). */
+  counterpartiesById?: ReadonlyMap<number, CounterpartyOut>;
   moexMarketPrice?: MarketPriceOut | null;
   onEdit?: (item: ItemOut) => void;
   onDelete?: (item: ItemOut) => void;
@@ -135,6 +138,11 @@ function formatShortDate(dateKey: string) {
   const paddedDay = String(day).padStart(2, "0");
   const paddedMonth = String(month).padStart(2, "0");
   return `${paddedDay}.${paddedMonth}.${year}`;
+}
+
+/** Как в карточке («Количество»): число + «л.». */
+function formatMoexPositionLotsShort(lots: number): string {
+  return `${new Intl.NumberFormat("ru-RU").format(lots)} л.`;
 }
 
 const REPAYMENT_FREQUENCY_LABELS: Record<string, string> = {
@@ -231,6 +239,7 @@ export function AssetCard({
   rubEquivalent,
   primaryValueLabel,
   counterparty,
+  counterpartiesById,
   moexMarketPrice,
   onEdit,
   onDelete,
@@ -522,6 +531,12 @@ export function AssetCard({
             >
               {item.name}
             </span>
+            <LinkedBrokerageAccountsMeta
+              links={item.linked_brokerage_accounts}
+              counterpartiesById={counterpartiesById}
+              align="left"
+              className="self-start w-full min-w-0"
+            />
           </div>
         </TableCell>
         {dailyPrimaryValueRubCents != null && (
@@ -615,6 +630,12 @@ export function AssetCard({
             <h3 className="text-2xl font-medium truncate" style={{ color: textColor }}>
               {item.name}
             </h3>
+            <LinkedBrokerageAccountsMeta
+              links={item.linked_brokerage_accounts}
+              counterpartiesById={counterpartiesById}
+              align="left"
+              className="mt-0.5 w-full min-w-0"
+            />
             {counterparty && CounterpartyFallbackIcon && (
               <div className="flex items-center gap-2">
                 <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">
@@ -722,6 +743,14 @@ export function AssetCard({
                 </span>
               </div>
             )}
+            {isMoexItem && item.instrument_id && item.position_lots != null ? (
+              <span
+                className="text-lg font-normal tabular-nums w-full text-right mt-0.5"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+              >
+                {formatMoexPositionLotsShort(item.position_lots)}
+              </span>
+            ) : null}
           </div>
           {menuDropdown}
         </div>
@@ -817,6 +846,12 @@ export function AssetCard({
             >
               {item.name}
             </h3>
+            <LinkedBrokerageAccountsMeta
+              links={item.linked_brokerage_accounts}
+              counterpartiesById={counterpartiesById}
+              align="center"
+              className="mb-1 w-full"
+            />
             {counterparty && CounterpartyFallbackIcon && (
               <div className="flex items-center gap-2 mb-1 justify-center">
                 <div className="relative h-5 w-5 shrink-0 flex items-center justify-center">

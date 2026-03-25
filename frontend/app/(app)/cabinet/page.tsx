@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Camera, Upload, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TextField, DateField } from "@/components/ui/form-field";
@@ -18,11 +20,15 @@ import {
   resetAllUserData,
   UserProfileUpdate,
   UserMeOut,
+  fetchIntegrations,
+  createOrGetTbankIntegration,
+  type UserIntegrationOut,
 } from "@/lib/api";
 import { useTheme } from "@/components/theme-provider";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { RestoreFromBackupModal } from "@/components/restore-from-backup-modal";
+import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
 import { buildExportCsv } from "@/lib/data-export-import";
 import {
   MODAL_BG,
@@ -68,6 +74,7 @@ function CabinetCard({
 }
 
 export default function CabinetPage() {
+  const router = useRouter();
   const { data: session } = useSession();
   const { theme, setTheme } = useTheme();
   const { accountingStartDate, refresh: refreshAccountingStart, setDateSetupComplete } = useAccountingStart();
@@ -103,9 +110,20 @@ export default function CabinetPage() {
   const [resetConfirmStep, setResetConfirmStep] = useState<1 | 2>(1);
   const [resetting, setResetting] = useState(false);
 
+  const [integrations, setIntegrations] = useState<UserIntegrationOut[] | null>(null);
+  const [tbankOpening, setTbankOpening] = useState(false);
+  const [tbankSetupOpen, setTbankSetupOpen] = useState(false);
+  const [tbankIntegrationId, setTbankIntegrationId] = useState<number | null>(null);
+
   useEffect(() => {
     loadProfile();
     loadTelegramStatus();
+  }, []);
+
+  useEffect(() => {
+    fetchIntegrations()
+      .then(setIntegrations)
+      .catch(() => setIntegrations([]));
   }, []);
 
   const loadTelegramStatus = async () => {
@@ -532,6 +550,82 @@ export default function CabinetPage() {
             </div>
           </div>
         </CabinetCard>
+
+        {/* Интеграции */}
+        <CabinetCard>
+          <div className="space-y-4">
+            <h3
+              className="text-2xl font-medium"
+              style={{ color: ACTIVE_TEXT_DARK }}
+            >
+              Интеграции
+            </h3>
+            <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+              Импорт брокерских счетов, позиций и операций из Т-Инвестиций (API Т-Банка).
+            </p>
+            {integrations === null ? (
+              <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                Загрузка…
+              </p>
+            ) : integrations.some((i) => i.provider === "TBANK_INVEST") ? (
+              <Button
+                asChild
+                variant="outline"
+                className="rounded-md"
+                style={{ borderColor: ACCENT2, color: ACTIVE_TEXT_DARK }}
+              >
+                <Link
+                  href={`/cabinet/integrations/${integrations.find((i) => i.provider === "TBANK_INVEST")!.id}`}
+                >
+                  Настроить Т-Инвестиции
+                </Link>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={tbankOpening}
+                className="rounded-md"
+                style={{ borderColor: ACCENT2, color: ACTIVE_TEXT_DARK }}
+                onClick={async () => {
+                  setTbankOpening(true);
+                  setError(null);
+                  try {
+                    const row = await createOrGetTbankIntegration(false);
+                    setIntegrations((prev) => {
+                      const list = prev ?? [];
+                      if (list.some((x) => x.id === row.id)) return list;
+                      return [...list, row];
+                    });
+                    setTbankIntegrationId(row.id);
+                    setTbankSetupOpen(true);
+                  } catch (e) {
+                    setError(
+                      e instanceof Error ? e.message : "Не удалось открыть интеграцию."
+                    );
+                  } finally {
+                    setTbankOpening(false);
+                  }
+                }}
+              >
+                {tbankOpening ? "Открытие…" : "Подключить Т-Инвестиции"}
+              </Button>
+            )}
+          </div>
+        </CabinetCard>
+
+        {tbankIntegrationId != null && (
+          <ImportAccountsOperationsModal
+            open={tbankSetupOpen}
+            onOpenChange={setTbankSetupOpen}
+            importSource="tbank_invest_api"
+            tbankIntegrationId={tbankIntegrationId}
+            onFinish={() => {
+              setTbankSetupOpen(false);
+              router.push(`/cabinet/integrations/${tbankIntegrationId}`);
+            }}
+          />
+        )}
 
         {/* Telegram */}
         <CabinetCard>

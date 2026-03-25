@@ -19,7 +19,7 @@ function pathArrayToCategoryPath(path: string[]): CategoryPath {
 }
 
 /** Нормализованная строка для сравнения (trim + lowerCase). */
-function norm(s: string): string {
+function norm(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase();
 }
 

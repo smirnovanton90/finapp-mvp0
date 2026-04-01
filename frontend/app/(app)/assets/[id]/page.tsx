@@ -681,30 +681,38 @@ export default function AssetDetailPage() {
     if (item) map.set(item.id, item);
     return map;
   }, [allItems, item]);
+  /**
+   * `fetchTransactions()` в этом экране используется и для отображения удалённых операций (для истории),
+   * но для расчётов динамики/потоков/сальдо удалённые операции учитывать нельзя.
+   */
+  const dynamicsTxsActive = useMemo(
+    () => dynamicsTxs.filter((tx) => tx.deleted_at == null),
+    [dynamicsTxs]
+  );
   const incomeTxsForAsset = useMemo(() => {
     if (!item?.id) return [];
-    return dynamicsTxs
+    return dynamicsTxsActive
       .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_INCOME")
       .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
-  }, [item?.id, dynamicsTxs]);
+  }, [item?.id, dynamicsTxsActive]);
   const expenseTxsForAsset = useMemo(() => {
     if (!item?.id) return [];
-    return dynamicsTxs
+    return dynamicsTxsActive
       .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_EXPENSE")
       .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
-  }, [item?.id, dynamicsTxs]);
+  }, [item?.id, dynamicsTxsActive]);
   const purchaseTxsForAsset = useMemo(() => {
     if (!item?.id) return [];
-    return dynamicsTxs
+    return dynamicsTxsActive
       .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_PURCHASE")
       .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
-  }, [item?.id, dynamicsTxs]);
+  }, [item?.id, dynamicsTxsActive]);
   const investmentTxsForAsset = useMemo(() => {
     if (!item?.id) return [];
-    return dynamicsTxs
+    return dynamicsTxsActive
       .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_INVESTMENT")
       .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
-  }, [item?.id, dynamicsTxs]);
+  }, [item?.id, dynamicsTxsActive]);
   /** Транзакции для блока «Стоимость вложенных средств»: все «Приобретение актива» + «Вложение в актив» (для нового актива; для исторического — та же логика). */
   const investedTxsForAsset = useMemo(() => {
     const merged = [...purchaseTxsForAsset, ...investmentTxsForAsset];
@@ -774,7 +782,7 @@ export default function AssetDetailPage() {
     const isMarketOrCrypto = isMoexItem(it) || isCryptoItem(it);
 
     const txsInRange = (() => {
-      const included = dynamicsTxs.filter((tx) => {
+      const included = dynamicsTxsActive.filter((tx) => {
         const d = toTxDateKey(tx.transaction_date);
         if (d <= dateStart || d > dateEnd) return false;
         const delta = getTxDeltaForItem(tx, it.id, it.kind, it.currency_code);
@@ -1021,7 +1029,7 @@ export default function AssetDetailPage() {
       market: buildOne("MARKET"),
       primary: buildOne(primaryKind),
     };
-  }, [item, costs, costHistoryData, dynamicsTxs, fxRatesByDate, latestRatesByCurrency, sortedFxRateDateKeys, todayKey, effectiveEndDate]);
+  }, [item, costs, costHistoryData, dynamicsTxsActive, fxRatesByDate, latestRatesByCurrency, sortedFxRateDateKeys, todayKey, effectiveEndDate]);
 
   const dynamics = dynamicsByMode.primary;
   const dynamicsBalance = dynamicsByMode.balance;
@@ -1203,7 +1211,7 @@ export default function AssetDetailPage() {
     const isMarketOrCrypto = isMoexItem(it) || isCryptoItem(it);
 
     const txsInRange = (() => {
-      const included = dynamicsTxs.filter((tx) => {
+      const included = dynamicsTxsActive.filter((tx) => {
         const d = toTxDateKey(tx.transaction_date);
         if (d <= dateStart || d > dateEnd) return false;
         const delta = getTxDeltaForItem(tx, it.id, it.kind, it.currency_code);
@@ -1447,7 +1455,7 @@ export default function AssetDetailPage() {
       market: buildOne("MARKET"),
       primary: buildOne(primaryKind),
     };
-  }, [isDesktop, item, costs, costHistoryData, dynamicsTxs, fxRatesByDate, latestRatesByCurrency, sortedFxRateDateKeys, todayKey, mobileCostPeriodBounds]);
+  }, [isDesktop, item, costs, costHistoryData, dynamicsTxsActive, fxRatesByDate, latestRatesByCurrency, sortedFxRateDateKeys, todayKey, mobileCostPeriodBounds]);
 
   const getRateForDateKey = useCallback(
     (dateKey: string): number | null => {
@@ -2059,7 +2067,7 @@ export default function AssetDetailPage() {
     const annualFactor = daysCount > 0 ? 365 / daysCount : 0;
 
     const itemId = item.id;
-    const txs = dynamicsTxs.filter((tx) => {
+    const txs = dynamicsTxsActive.filter((tx) => {
       const dKey = toTxDateKey(tx.transaction_date);
       if (!dKey || dKey < dateStart || dKey > dateEnd) return false;
       if (tx.related_item_id !== itemId) return false;
@@ -2216,7 +2224,7 @@ export default function AssetDetailPage() {
       revaluationProfitRub,
       fxProfitRub,
     };
-  }, [item, todayKey, effectiveEndDate, costHistoryData, dynamicsTxs, dynamics, costs, getRateForDateKey]);
+  }, [item, todayKey, effectiveEndDate, costHistoryData, dynamicsTxsActive, dynamics, costs, getRateForDateKey]);
 
   /** Показатели рентабельности и доходности вложений для размещения справа от параметров актива в шапке */
   const profitabilityCardsInHeader = useMemo(() => {

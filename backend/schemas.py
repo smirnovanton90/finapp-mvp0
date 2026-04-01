@@ -125,6 +125,7 @@ class UserIntegrationOut(BaseModel):
     tbank_is_qualified: bool | None = None
     tbank_risk_category: str | None = None
     tbank_info_fetched_at: datetime | None = None
+    tbank_wizard_import_completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -161,6 +162,7 @@ class TbankInfoOut(BaseModel):
     is_premium: bool | None = None
     is_qualified: bool | None = None
     risk_category: str | None = None
+    tariff: str | None = None
     raw: dict | None = None
 
 

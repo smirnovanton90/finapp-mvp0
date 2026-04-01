@@ -712,6 +712,8 @@ export type UserIntegrationOut = {
   tbank_is_qualified?: boolean | null;
   tbank_risk_category?: string | null;
   tbank_info_fetched_at?: string | null;
+  /** Заполняется после успешного завершения мастера импорта в модалке (POST tbank/import). */
+  tbank_wizard_import_completed_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -720,6 +722,8 @@ export type TbankInfoOut = {
   is_premium: boolean | null;
   is_qualified: boolean | null;
   risk_category: string | null;
+  /** Наименование тарифа из GetInfo (отдельно от категории риска, если API её отдаст). */
+  tariff?: string | null;
   raw: Record<string, unknown> | null;
 };
 

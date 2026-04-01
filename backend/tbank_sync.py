@@ -2360,6 +2360,21 @@ def set_integration_token(integration: UserIntegration, plain_token: str) -> Non
     integration.token_ciphertext = encrypt_token(plain_token.strip())
 
 
+def _coerce_to_bool(v: Any) -> bool | None:
+    """Скаляр из JSON/Proto → bool (T-Invest иногда отдаёт 0/1 или строки)."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int) and v in (0, 1):
+        return bool(v)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("true", "1", "yes"):
+            return True
+        if s in ("false", "0", "no"):
+            return False
+    return None
+
+
 def _deep_find_first_bool(payload: Any, key_names: set[str]) -> bool | None:
     """Search nested dict/list for first boolean under any key in key_names (case-insensitive)."""
     queue: list[Any] = [payload]
@@ -2367,8 +2382,10 @@ def _deep_find_first_bool(payload: Any, key_names: set[str]) -> bool | None:
         cur = queue.pop(0)
         if isinstance(cur, dict):
             for k, v in cur.items():
-                if str(k).lower() in key_names and isinstance(v, bool):
-                    return v
+                if str(k).lower() in key_names:
+                    coerced = _coerce_to_bool(v)
+                    if coerced is not None:
+                        return coerced
                 if isinstance(v, (dict, list)):
                     queue.append(v)
         elif isinstance(cur, list):
@@ -2402,13 +2419,35 @@ def fetch_tbank_info_snapshot(db: Session, integration: UserIntegration) -> Tban
     token = decrypt_token(integration.token_ciphertext)
     raw = get_info(token, sandbox=integration.sandbox)
 
-    is_premium = _deep_find_first_bool(raw, {"ispremium", "premium", "ispremiumclient"})
-    is_qualified = _deep_find_first_bool(raw, {"isqualified", "qualified", "isqualifiedinvestor"})
-    risk_category = _deep_find_first_str(raw, {"riskcategory", "risk_profile", "riskprofile", "risk"})
+    # Proto GetInfoResponse: prem_status, qual_status, tariff (camelCase в JSON: premStatus, qualStatus, tariff)
+    is_premium = _deep_find_first_bool(
+        raw,
+        {
+            "premstatus",
+            "prem_status",
+            "ispremium",
+            "premium",
+            "ispremiumclient",
+        },
+    )
+    is_qualified = _deep_find_first_bool(
+        raw,
+        {
+            "qualstatus",
+            "qual_status",
+            "isqualified",
+            "qualified",
+            "isqualifiedinvestor",
+        },
+    )
+    risk_category = _deep_find_first_str(
+        raw, {"riskcategory", "risk_profile", "riskprofile", "risk"}
+    )
+    tariff = _deep_find_first_str(raw, {"tariff"})
 
     integration.tbank_is_premium = is_premium
     integration.tbank_is_qualified = is_qualified
-    integration.tbank_risk_category = risk_category
+    integration.tbank_risk_category = risk_category or tariff
     integration.tbank_info_raw = raw if isinstance(raw, dict) else {"raw": raw}
     integration.tbank_info_fetched_at = datetime.now(timezone.utc)
     db.commit()
@@ -2417,6 +2456,7 @@ def fetch_tbank_info_snapshot(db: Session, integration: UserIntegration) -> Tban
         is_premium=is_premium,
         is_qualified=is_qualified,
         risk_category=risk_category,
+        tariff=tariff,
         raw=integration.tbank_info_raw,
     )
 
@@ -2830,5 +2870,6 @@ def complete_tbank_import(db: Session, integration: UserIntegration, payload: Tb
         )
 
     integration.last_sync_at = now
+    integration.tbank_wizard_import_completed_at = now
     integration.last_error = None
     db.commit()

@@ -32,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TbankProfileInfoBadges } from "@/components/tbank-profile-info-badges";
 
 type MappingRow = {
   external_account_id: string;
@@ -305,31 +306,7 @@ export default function TbankIntegrationSetupPage() {
                 </div>
 
                 {info && (
-                  <div className="rounded-md border border-white/10 p-4">
-                    <div className="font-medium mb-2">Профиль (GetInfo)</div>
-                    <div className="text-sm text-white/80 space-y-1">
-                      <div>
-                        Премиум:{" "}
-                        <span className="text-white">
-                          {info.is_premium == null ? "—" : info.is_premium ? "Да" : "Нет"}
-                        </span>
-                      </div>
-                      <div>
-                        Квал. инвестор:{" "}
-                        <span className="text-white">
-                          {info.is_qualified == null
-                            ? "—"
-                            : info.is_qualified
-                              ? "Да"
-                              : "Нет"}
-                        </span>
-                      </div>
-                      <div>
-                        Категория риска:{" "}
-                        <span className="text-white">{info.risk_category ?? "—"}</span>
-                      </div>
-                    </div>
-                  </div>
+                  <TbankProfileInfoBadges info={info} variant="setup" />
                 )}
               </div>
             )}

@@ -39,6 +39,7 @@ import {
   type ItemOut,
 } from "@/lib/api";
 import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
+import { TbankProfileInfoBadges } from "@/components/tbank-profile-info-badges";
 import { MODAL_BG, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, ACCENT2 } from "@/lib/colors";
 import { getItemTypeLabel } from "@/lib/item-types";
 import { cn } from "@/lib/utils";
@@ -311,25 +312,8 @@ export default function TbankIntegrationPage() {
             </div>
 
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="rounded-md border p-4 flex-1 min-w-[280px]" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
-                <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                  Профиль (GetInfo)
-                </p>
-                <div className="mt-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
-                  <div>
-                    Премиум:{" "}
-                    {tbankInfo?.is_premium == null ? "—" : tbankInfo.is_premium ? "Да" : "Нет"}
-                  </div>
-                  <div>
-                    Квал. инвестор:{" "}
-                    {tbankInfo?.is_qualified == null
-                      ? "—"
-                      : tbankInfo.is_qualified
-                        ? "Да"
-                        : "Нет"}
-                  </div>
-                  <div>Категория риска: {tbankInfo?.risk_category ?? "—"}</div>
-                </div>
+              <div className="flex-1 min-w-[280px]">
+                <TbankProfileInfoBadges info={tbankInfo} variant="cabinet" />
               </div>
               <Button
                 type="button"

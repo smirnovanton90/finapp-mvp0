@@ -1281,7 +1281,7 @@ function TransactionMobileTableRow({
                 width: 10,
                 backgroundColor: row1HighlightColor,
                 boxShadow:
-                  !tx.isDeleted && row1HighlightColor !== "transparent"
+                  !tx.isDeleted
                     ? `0 0 250px 50px ${row1HighlightColor}`
                     : "none",
               }}

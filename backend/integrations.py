@@ -44,6 +44,7 @@ def _integration_to_out(row: UserIntegration) -> UserIntegrationOut:
         tbank_is_qualified=row.tbank_is_qualified,
         tbank_risk_category=row.tbank_risk_category,
         tbank_info_fetched_at=row.tbank_info_fetched_at,
+        tbank_wizard_import_completed_at=row.tbank_wizard_import_completed_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

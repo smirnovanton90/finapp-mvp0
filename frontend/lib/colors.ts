@@ -40,6 +40,9 @@ export const GREEN_TRANSACTION = "#009A62";
 export const ORANGE = "#FF8D28";
 export const ORANGE_FILL = "rgba(255, 141, 40, 0.22)";
 
+// T-Bank brand yellow
+export const TBANK = "#FFDD2D";
+
 // Accent fill colors
 // Light fill: #5D5FD7 @ 22%
 export const ACCENT_FILL_LIGHT = "rgba(93, 95, 215, 0.22)";

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, Upload, CheckCircle2 } from "lucide-react";
+import { Camera, Upload, CheckCircle2, CircleCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TextField, DateField } from "@/components/ui/form-field";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -33,11 +33,18 @@ import { buildExportCsv } from "@/lib/data-export-import";
 import {
   MODAL_BG,
   ACTIVE_TEXT_DARK,
+  ACTIVE_TEXT_LIGHT,
   PLACEHOLDER_COLOR_DARK,
-  ACCENT,
-  ACCENT2,
+  TBANK,
 } from "@/lib/colors";
 import { cn } from "@/lib/utils";
+
+const CABINET_AUTH_PRIMARY_STYLE = {
+  "--auth-primary-bg":
+    "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+  "--auth-primary-bg-hover":
+    "linear-gradient(315deg, #9487F3 0%, #6C5DD7 57%, #6C5DD7 79%, #483BA6 100%)",
+} as CSSProperties;
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 const MAX_PHOTO_DIM = 1024;
@@ -391,6 +398,14 @@ export default function CabinetPage() {
 
   const photoUrl = photoPreview;
 
+  const tbankRow = integrations?.find((i) => i.provider === "TBANK_INVEST");
+  const tbankInvestConnected =
+    integrations !== null &&
+    Boolean(tbankRow?.tbank_wizard_import_completed_at);
+  const tbankBlockTitleColor = tbankInvestConnected
+    ? ACTIVE_TEXT_LIGHT
+    : ACTIVE_TEXT_DARK;
+
   return (
     <main className="min-h-screen px-8 py-8">
       <div
@@ -560,57 +575,99 @@ export default function CabinetPage() {
             >
               Интеграции
             </h3>
-            <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-              Импорт брокерских счетов, позиций и операций из Т-Инвестиций (API Т-Банка).
-            </p>
-            {integrations === null ? (
-              <p className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                Загрузка…
-              </p>
-            ) : integrations.some((i) => i.provider === "TBANK_INVEST") ? (
-              <Button
-                asChild
-                variant="outline"
-                className="rounded-md"
-                style={{ borderColor: ACCENT2, color: ACTIVE_TEXT_DARK }}
-              >
-                <Link
-                  href={`/cabinet/integrations/${integrations.find((i) => i.provider === "TBANK_INVEST")!.id}`}
+            <div
+              className={cn(
+                "flex flex-col gap-3 rounded-lg px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
+                !tbankInvestConnected && "border-2 border-solid"
+              )}
+              style={
+                tbankInvestConnected
+                  ? { backgroundColor: TBANK }
+                  : { borderColor: TBANK, backgroundColor: "transparent" }
+              }
+            >
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <p
+                  className="text-2xl font-semibold leading-tight tracking-tight sm:text-3xl"
+                  style={{ color: tbankBlockTitleColor }}
                 >
-                  Настроить Т-Инвестиции
-                </Link>
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={tbankOpening}
-                className="rounded-md"
-                style={{ borderColor: ACCENT2, color: ACTIVE_TEXT_DARK }}
-                onClick={async () => {
-                  setTbankOpening(true);
-                  setError(null);
-                  try {
-                    const row = await createOrGetTbankIntegration(false);
-                    setIntegrations((prev) => {
-                      const list = prev ?? [];
-                      if (list.some((x) => x.id === row.id)) return list;
-                      return [...list, row];
-                    });
-                    setTbankIntegrationId(row.id);
-                    setTbankSetupOpen(true);
-                  } catch (e) {
-                    setError(
-                      e instanceof Error ? e.message : "Не удалось открыть интеграцию."
-                    );
-                  } finally {
-                    setTbankOpening(false);
-                  }
-                }}
-              >
-                {tbankOpening ? "Открытие…" : "Подключить Т-Инвестиции"}
-              </Button>
-            )}
+                  Т-Инвестиции
+                </p>
+                {tbankInvestConnected && (
+                  <div
+                    className="flex items-center gap-1.5 text-sm font-normal"
+                    style={{ color: ACTIVE_TEXT_LIGHT }}
+                  >
+                    <CircleCheck className="size-4 shrink-0" strokeWidth={2} aria-hidden />
+                    <span>Подключено</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex min-w-0 flex-col items-stretch justify-center sm:shrink-0 sm:items-end">
+                {integrations === null ? (
+                  <p
+                    className="text-sm font-medium sm:text-right"
+                    style={{ color: ACTIVE_TEXT_DARK }}
+                  >
+                    Загрузка…
+                  </p>
+                ) : tbankInvestConnected && tbankRow ? (
+                  <Button
+                    asChild
+                    variant="authPrimary"
+                    className="w-full rounded-lg border-0 text-sm sm:w-auto"
+                    style={CABINET_AUTH_PRIMARY_STYLE}
+                  >
+                    <Link href={`/cabinet/integrations/${tbankRow.id}`}>
+                      Настроить Т-Инвестиции
+                    </Link>
+                  </Button>
+                ) : tbankRow ? (
+                  <Button
+                    type="button"
+                    variant="authPrimary"
+                    className="w-full rounded-lg border-0 text-sm sm:w-auto"
+                    style={CABINET_AUTH_PRIMARY_STYLE}
+                    onClick={() => {
+                      setTbankIntegrationId(tbankRow.id);
+                      setTbankSetupOpen(true);
+                    }}
+                  >
+                    Продолжить подключение
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="authPrimary"
+                    disabled={tbankOpening}
+                    className="w-full rounded-lg border-0 text-sm sm:w-auto"
+                    style={CABINET_AUTH_PRIMARY_STYLE}
+                    onClick={async () => {
+                      setTbankOpening(true);
+                      setError(null);
+                      try {
+                        const row = await createOrGetTbankIntegration(false);
+                        setIntegrations((prev) => {
+                          const list = prev ?? [];
+                          if (list.some((x) => x.id === row.id)) return list;
+                          return [...list, row];
+                        });
+                        setTbankIntegrationId(row.id);
+                        setTbankSetupOpen(true);
+                      } catch (e) {
+                        setError(
+                          e instanceof Error ? e.message : "Не удалось открыть интеграцию."
+                        );
+                      } finally {
+                        setTbankOpening(false);
+                      }
+                    }}
+                  >
+                    {tbankOpening ? "Открытие…" : "Подключить Т-Инвестиции"}
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </CabinetCard>
 
@@ -622,6 +679,9 @@ export default function CabinetPage() {
             tbankIntegrationId={tbankIntegrationId}
             onFinish={() => {
               setTbankSetupOpen(false);
+              void fetchIntegrations()
+                .then(setIntegrations)
+                .catch(() => {});
               router.push(`/cabinet/integrations/${tbankIntegrationId}`);
             }}
           />

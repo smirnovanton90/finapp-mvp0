@@ -1343,7 +1343,7 @@ def list_items(
         setattr(item, "invested_rub", acq + inv_sum)
     today = date_type.today()
     for item in items:
-        bc, br = _item_balance_currency_and_rub(db, item, today)
+        bc, br = _item_balance_currency_and_rub_consistent(db, user.id, item, today)
         setattr(item, "balance_currency_cents", bc)
         setattr(item, "balance_rub_cents", br)
     # Снять ошибочную пометку «закрыт» у взаиморасчётов в валюте с ненулевым сальдо
@@ -1445,7 +1445,7 @@ def get_item(
     )
     setattr(item, "acquisition_rub", int(acq))
     setattr(item, "invested_rub", int(acq) + int(inv_sum))
-    bc, br = _item_balance_currency_and_rub(db, item, date_type.today())
+    bc, br = _item_balance_currency_and_rub_consistent(db, user.id, item, date_type.today())
     setattr(item, "balance_currency_cents", bc)
     setattr(item, "balance_rub_cents", br)
     _apply_item_photo_url(item)
@@ -2908,8 +2908,8 @@ def get_item_costs(
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
-    balance_currency_cents, balance_rub_cents = _item_balance_currency_and_rub(
-        db, item, date_type.today()
+    balance_currency_cents, balance_rub_cents = _item_balance_currency_and_rub_consistent(
+        db, user.id, item, date_type.today()
     )
     acquisition_rub = _compute_acquisition_cost_basis(db, user.id, item_id, item)
     # Investment: ASSET_INVESTMENT, приведённые к валюте актива
@@ -3204,6 +3204,27 @@ def _compute_balance_rub_at(
     return _convert_amount_between_currencies(
         balance_cents, item_currency, "RUB", at_date, db
     )
+
+
+def _item_balance_currency_and_rub_consistent(
+    db: Session,
+    user_id: int,
+    item: Item,
+    as_of_date: date_type,
+) -> tuple[int, int]:
+    """
+    Сальдо для API (/items, /costs): для обычных балансовых активов/обязательств считаем replay
+    по ACTUAL-транзакциям (как контрольные точки), а не кэш current_balance_minor —
+    иначе после soft-delete и прочих рассинхронов шапка расходится с КТ и историей.
+    Для MOEX/крипты оставляем кэш items: там логика apply отличается от простого replay сумм.
+    """
+    primary = (item.primary_value_kind or "BALANCE").upper()
+    if primary == "BALANCE" and not is_moex_item(item) and not is_crypto_item(item):
+        at = datetime.now(_MOSCOW_TZ)
+        bc = _compute_balance_cents_at(db, user_id, item, at)
+        br = _compute_balance_rub_at(db, user_id, item, at)
+        return bc, br
+    return _item_balance_currency_and_rub(db, item, as_of_date)
 
 
 def _checkpoint_to_out(

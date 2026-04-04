@@ -6181,25 +6181,42 @@ function TransactionsView({
                       const transactionDate = buildTransactionDate(date, time);
                       try {
                         if (isEditMode && editingTx) {
-                          await deleteTransaction(editingTx.id);
+                          const idToDelete =
+                            editingTx.parent_transaction_id != null
+                              ? editingTx.parent_transaction_id
+                              : editingTx.id;
+                          await deleteTransaction(idToDelete);
                         }
-                        if (expenseCents > 0) {
-                          await createTransaction({
-                            transaction_date: transactionDate,
-                            primary_item_id: primaryItemId,
+                        const basePayload = {
+                          transaction_date: transactionDate,
+                          primary_item_id: primaryItemId,
+                          counterparty_id: counterpartyId ?? null,
+                          transaction_type: formTransactionType,
+                          comment: comment || null,
+                        };
+                        if (expenseCents > 0 && splitCents > 0) {
+                          const parent = await createTransaction({
+                            ...basePayload,
                             counterparty_item_id: null,
-                            counterparty_id: counterpartyId,
+                            amount: fullCents,
+                            amount_counterparty: null,
+                            primary_quantity_lots: null,
+                            counterparty_quantity_lots: null,
+                            direction: "EXPENSE",
+                            category_id: resolvedCategoryId,
+                            is_split_parent: true,
+                          });
+                          const childExpensePayload: Parameters<typeof createTransaction>[0] = {
+                            ...basePayload,
+                            counterparty_item_id: null,
                             amount: expenseCents,
                             amount_counterparty: null,
                             primary_quantity_lots: null,
                             counterparty_quantity_lots: null,
                             direction: "EXPENSE",
-                            transaction_type: formTransactionType,
                             category_id: resolvedCategoryId,
-                            comment: comment || null,
-                          });
-                        }
-                        if (splitCents > 0) {
+                            parent_transaction_id: parent.id,
+                          };
                           const payForPayload: Parameters<typeof createDebtsTransaction>[0] = {
                             debt_direction: "I_PAID",
                             counterparty_id: debtPayForCounterpartyId,
@@ -6209,13 +6226,52 @@ function TransactionsView({
                             amount: splitCents,
                             transaction_type: formTransactionType,
                             comment: comment || null,
+                            parent_transaction_id: parent.id,
                           };
                           if (debtSettlementMode === "existing" && debtSettlementItemId != null) {
                             payForPayload.counterparty_settlements_item_id = debtSettlementItemId;
                           } else {
                             payForPayload.new_settlement_name = debtSettlementNewName.trim();
                           }
-                          await createDebtsTransaction(payForPayload);
+                          await Promise.all([
+                            createTransaction(childExpensePayload),
+                            createDebtsTransaction(payForPayload),
+                          ]);
+                        } else {
+                          if (expenseCents > 0) {
+                            await createTransaction({
+                              transaction_date: transactionDate,
+                              primary_item_id: primaryItemId,
+                              counterparty_item_id: null,
+                              counterparty_id: counterpartyId,
+                              amount: expenseCents,
+                              amount_counterparty: null,
+                              primary_quantity_lots: null,
+                              counterparty_quantity_lots: null,
+                              direction: "EXPENSE",
+                              transaction_type: formTransactionType,
+                              category_id: resolvedCategoryId,
+                              comment: comment || null,
+                            });
+                          }
+                          if (splitCents > 0) {
+                            const payForPayloadSingle: Parameters<typeof createDebtsTransaction>[0] = {
+                              debt_direction: "I_PAID",
+                              counterparty_id: debtPayForCounterpartyId,
+                              transaction_counterparty_id: counterpartyId,
+                              primary_item_id: primaryItemId,
+                              transaction_date: transactionDate,
+                              amount: splitCents,
+                              transaction_type: formTransactionType,
+                              comment: comment || null,
+                            };
+                            if (debtSettlementMode === "existing" && debtSettlementItemId != null) {
+                              payForPayloadSingle.counterparty_settlements_item_id = debtSettlementItemId;
+                            } else {
+                              payForPayloadSingle.new_settlement_name = debtSettlementNewName.trim();
+                            }
+                            await createDebtsTransaction(payForPayloadSingle);
+                          }
                         }
                         closeDialog();
                         await loadAll();

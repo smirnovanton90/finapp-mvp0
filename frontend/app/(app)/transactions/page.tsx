@@ -355,6 +355,21 @@ function buildTransactionDate(dateKey: string, timeHHmm: string): string {
   return `${dateKey}T${t}:00`;
 }
 
+/** Локальная метка времени для сортировки КТ и транзакций внутри дня (новее — выше). */
+function toSortableLocalDateTime(value: string | null | undefined): string {
+  if (!value) return "";
+  const raw = value.trim();
+  const d =
+    raw.length <= 10
+      ? new Date(`${raw.slice(0, 10)}T00:00:00`)
+      : new Date(raw);
+  if (Number.isNaN(d.getTime())) {
+    return `${raw.slice(0, 10)}T00:00:00`;
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 /** Для разделителей между днями: текущий год — "8 марта", иначе "10 октября 2027". */
 function formatDateSectionHeader(dateKey: string): string {
   if (!dateKey) return "";
@@ -4882,9 +4897,13 @@ function TransactionsView({
     const txDates = sortedTxs
       .map((tx) => getDateKey(tx.transaction_date))
       .filter((d): d is string => !!d);
-    if (txDates.length === 0) return [];
-    const minDate = txDates.reduce((a, b) => (a < b ? a : b));
-    const maxDate = txDates.reduce((a, b) => (a > b ? a : b));
+    const cpDates = checkpoints
+      .map((cp) => cp.checkpoint_at.slice(0, 10))
+      .filter((d): d is string => !!d);
+    const allDates = [...txDates, ...cpDates];
+    if (allDates.length === 0) return [];
+    const minDate = allDates.reduce((a, b) => (a < b ? a : b));
+    const maxDate = allDates.reduce((a, b) => (a > b ? a : b));
     return checkpoints.filter((cp) => {
       const d = cp.checkpoint_at.slice(0, 10);
       return d >= minDate && d <= maxDate;
@@ -4910,17 +4929,51 @@ function TransactionsView({
     const rows: MergedRow[] = [];
     for (const dateKey of sortedDates) {
       rows.push({ type: "date_header", dateKey });
-      const cpsOnDate = checkpointsInWindow.filter((c) => c.checkpoint_at.slice(0, 10) === dateKey);
+      type PendingDayRow =
+        | {
+            kind: "checkpoint_line";
+            sortKey: string;
+            tie: string;
+            timeKey: string;
+            checkpoints: BalanceCheckpointWithItemOut[];
+          }
+        | {
+            kind: "split_group";
+            sortKey: string;
+            tie: string;
+            parent: TransactionCard;
+            children: TransactionCard[];
+          }
+        | {
+            kind: "transaction";
+            sortKey: string;
+            tie: string;
+            tx: TransactionCard;
+          };
+
+      const pending: PendingDayRow[] = [];
+
+      const cpsOnDate = checkpointsInWindow.filter(
+        (c) => c.checkpoint_at.slice(0, 10) === dateKey
+      );
       const byTime = new Map<string, BalanceCheckpointWithItemOut[]>();
       for (const cp of cpsOnDate) {
         const timeKey = cp.checkpoint_at.slice(11, 16) || "00:00";
         if (!byTime.has(timeKey)) byTime.set(timeKey, []);
         byTime.get(timeKey)!.push(cp);
       }
-      const timeKeys = Array.from(byTime.keys()).sort((a, b) => b.localeCompare(a));
-      for (const timeKey of timeKeys) {
-        rows.push({ type: "checkpoint_line", dateKey, timeKey, checkpoints: byTime.get(timeKey)! });
+      for (const [, cps] of byTime) {
+        const first = cps[0]!;
+        const sortKey = toSortableLocalDateTime(first.checkpoint_at);
+        pending.push({
+          kind: "checkpoint_line",
+          sortKey,
+          tie: `cp:${first.id}`,
+          timeKey: first.checkpoint_at.slice(11, 16) || "00:00",
+          checkpoints: cps,
+        });
       }
+
       const txsOnDate = sortedTxs.filter((tx) => getDateKey(tx.transaction_date) === dateKey);
       const skipTxIds = new Set<number>();
       for (const tx of txsOnDate) {
@@ -4928,31 +4981,80 @@ function TransactionsView({
         if (tx.is_split_parent) {
           const splitChildren = txsOnDate.filter((t) => t.parent_transaction_id === tx.id);
           splitChildren.forEach((c) => skipTxIds.add(c.id));
+          const sortKey = toSortableLocalDateTime(tx.transaction_date ?? "");
+          const tie = `sg:${tx.id}`;
           if (splitChildren.length > 0) {
-            rows.push({ type: "split_group", parent: tx, children: splitChildren });
+            pending.push({
+              kind: "split_group",
+              sortKey,
+              tie,
+              parent: tx,
+              children: splitChildren,
+            });
           } else {
-            rows.push({ type: "transaction", tx });
+            pending.push({
+              kind: "transaction",
+              sortKey,
+              tie: `tx:${tx.id}`,
+              tx,
+            });
           }
         } else {
-          rows.push({ type: "transaction", tx });
+          pending.push({
+            kind: "transaction",
+            sortKey: toSortableLocalDateTime(tx.transaction_date ?? ""),
+            tie: `tx:${tx.id}`,
+            tx,
+          });
+        }
+      }
+
+      pending.sort((a, b) => {
+        const c = b.sortKey.localeCompare(a.sortKey);
+        if (c !== 0) return c;
+        return b.tie.localeCompare(a.tie);
+      });
+
+      for (const p of pending) {
+        if (p.kind === "checkpoint_line") {
+          rows.push({
+            type: "checkpoint_line",
+            dateKey,
+            timeKey: p.timeKey,
+            checkpoints: p.checkpoints,
+          });
+        } else if (p.kind === "split_group") {
+          rows.push({ type: "split_group", parent: p.parent, children: p.children });
+        } else {
+          rows.push({ type: "transaction", tx: p.tx });
         }
       }
     }
     return rows;
   }, [sortedTxs, checkpointsInWindow]);
 
-  /** Для мобильной верстки: транзакции по датам (без КТ — контрольные точки не показываем). */
-  const mobileSections = useMemo(() => {
-    const byDate = new Map<string, TransactionCard[]>();
-    sortedTxs.forEach((tx) => {
-      const d = getDateKey(tx.transaction_date);
-      if (!d) return;
-      if (!byDate.has(d)) byDate.set(d, []);
-      byDate.get(d)!.push(tx);
-    });
-    const dates = Array.from(byDate.keys()).sort((a, b) => b.localeCompare(a));
-    return dates.map((dateKey) => ({ dateKey, transactions: byDate.get(dateKey)! }));
-  }, [sortedTxs]);
+  /** Для мобильной верстки: те же дни и порядок, что и у mergedRows (включая КТ). */
+  const mobileDaySections = useMemo(() => {
+    const sections: {
+      dateKey: string;
+      items: Array<
+        | { type: "checkpoint_line"; dateKey: string; timeKey: string; checkpoints: BalanceCheckpointWithItemOut[] }
+        | { type: "transaction"; tx: TransactionCard }
+        | { type: "split_group"; parent: TransactionCard; children: TransactionCard[] }
+      >;
+    }[] = [];
+    let cur: (typeof sections)[number] | null = null;
+    for (const row of mergedRows) {
+      if (row.type === "date_header") {
+        if (cur) sections.push(cur);
+        cur = { dateKey: row.dateKey, items: [] };
+      } else if (cur) {
+        cur.items.push(row);
+      }
+    }
+    if (cur) sections.push(cur);
+    return sections;
+  }, [mergedRows]);
 
   const checkpointsVisible = useMemo(() => {
     const hasOtherFilter =
@@ -5997,10 +6099,7 @@ function TransactionsView({
                         setFormError("Выберите категорию.");
                         return;
                       }
-                      const transactionDate =
-                        isEditMode && editingTx
-                          ? buildTransactionDate(date, time)
-                          : date;
+                      const transactionDate = buildTransactionDate(date, time);
                       try {
                         if (isEditMode && editingTx) {
                           await deleteTransaction(editingTx.id);
@@ -6079,10 +6178,7 @@ function TransactionsView({
                         setFormError("Выберите категорию расхода.");
                         return;
                       }
-                      const transactionDate =
-                        isEditMode && editingTx
-                          ? buildTransactionDate(date, time)
-                          : date;
+                      const transactionDate = buildTransactionDate(date, time);
                       try {
                         if (isEditMode && editingTx) {
                           await deleteTransaction(editingTx.id);
@@ -6181,10 +6277,7 @@ function TransactionsView({
                         }
                       }
                       try {
-                        const transactionDate =
-                          isEditMode && editingTx
-                            ? buildTransactionDate(date, time)
-                            : date;
+                        const transactionDate = buildTransactionDate(date, time);
                         if (isEditMode && editingTx) {
                           await deleteTransaction(editingTx.id);
                         }
@@ -6327,10 +6420,7 @@ function TransactionsView({
                         const payloadTransactionType = isRealizeMode
                           ? "ACTUAL"
                           : formTransactionType;
-                        const transactionDate =
-                          isEditMode && editingTx
-                            ? buildTransactionDate(date, time)
-                            : date;
+                        const transactionDate = buildTransactionDate(date, time);
                         const resolvedCategoryId = isTransfer
                           ? null
                           : resolveCategoryId(cat1, cat2, cat3);
@@ -8088,36 +8178,147 @@ function TransactionsView({
                   transition: "opacity 0.3s ease-in-out",
                 }}
               >
-                {mobileSections.map(({ dateKey, transactions }) => (
-                  <div key={dateKey}>
-                    <div
-                      className="text-lg font-medium pt-1 pb-0.5 first:pt-0 px-4"
-                      style={{ color: ACTIVE_TEXT_DARK }}
-                    >
-                      {formatDateSectionHeader(dateKey)}
+                {mobileDaySections.map(({ dateKey, items }) => {
+                  const hasTx = items.some(
+                    (r) => r.type === "transaction" || r.type === "split_group"
+                  );
+                  const hasCp = items.some((r) => r.type === "checkpoint_line");
+                  if (!checkpointsVisible && !hasTx) return null;
+                  if (checkpointsVisible && !hasTx && !hasCp) return null;
+                  if (items.length === 0) return null;
+                  return (
+                    <div key={dateKey}>
+                      <div
+                        className="text-lg font-medium pt-1 pb-0.5 first:pt-0 px-4"
+                        style={{ color: ACTIVE_TEXT_DARK }}
+                      >
+                        {formatDateSectionHeader(dateKey)}
+                      </div>
+                      <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b [&_tr]:border-border">
+                        <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
+                          {items.flatMap((row, itemIdx) => {
+                            if (row.type === "checkpoint_line") {
+                              if (!checkpointsVisible) return [];
+                              const hasMismatch = row.checkpoints.some((c) => c.status === "MISMATCH");
+                              const lineColor = hasMismatch ? RED : GREEN;
+                              return [
+                                <TableRow
+                                  key={`cp-${dateKey}-${row.timeKey}-${itemIdx}`}
+                                  className="border-b border-border bg-transparent hover:bg-transparent"
+                                >
+                                  <TableCell colSpan={2} className="py-2 px-4 align-top">
+                                    <div className="rounded-lg overflow-hidden">
+                                      <div className="space-y-1.5">
+                                        {row.checkpoints.map((cp) => {
+                                          const item = itemsById.get(cp.item_id);
+                                          const currencyCode = item?.currency_code ?? "RUB";
+                                          const d = new Date(cp.checkpoint_at);
+                                          const dateTimeLabel = `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+                                          const cpOk = cp.status === "OK";
+                                          return (
+                                            <div key={cp.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                                              <span className="flex items-center gap-2 tabular-nums shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>
+                                                {cpOk ? <MapPinCheck className="h-5 w-5 shrink-0" style={{ color: GREEN }} aria-hidden /> : <MapPinX className="h-5 w-5 shrink-0" style={{ color: RED }} aria-hidden />}
+                                                {dateTimeLabel}
+                                              </span>
+                                              {item ? (
+                                                <div className="flex items-center gap-2 shrink-0 min-w-0">
+                                                  <div className="h-7 w-7 shrink-0 rounded overflow-hidden flex items-center justify-center">
+                                                    <AssetItemIcon
+                                                      item={item}
+                                                      counterparty={getCounterpartyForItemId(cp.item_id)}
+                                                      apiBase={API_BASE}
+                                                      size={18}
+                                                      className="h-4 w-4 rounded object-contain"
+                                                      fallbackIconColor={ACTIVE_TEXT_DARK}
+                                                      alt={cp.item_name}
+                                                    />
+                                                  </div>
+                                                  <span className="font-medium truncate" style={{ color: ACTIVE_TEXT_DARK }}>{cp.item_name}</span>
+                                                </div>
+                                              ) : (
+                                                <span className="font-medium" style={{ color: ACTIVE_TEXT_DARK }}>{cp.item_name}</span>
+                                              )}
+                                              <span className="tabular-nums flex items-center gap-1.5 flex-wrap">
+                                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Расчётное сальдо:</span> <CurrencyChip code={currencyCode} />
+                                                <span style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(cp.computed_balance_cents)}</span>
+                                              </span>
+                                              <span className="tabular-nums flex items-center gap-1.5 flex-wrap">
+                                                <span style={{ color: PLACEHOLDER_COLOR_DARK }}>Должно быть:</span> <CurrencyChip code={currencyCode} />
+                                                <span style={{ color: ACTIVE_TEXT_DARK }}>{formatAmount(cp.stated_balance_cents)}</span>
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                      <div
+                                        className="h-1 w-full mt-1.5 rounded-sm"
+                                        style={{ backgroundColor: lineColor, opacity: 0.9 }}
+                                        aria-hidden
+                                      />
+                                    </div>
+                                  </TableCell>
+                                </TableRow>,
+                              ];
+                            }
+                            if (row.type === "split_group") {
+                              const { parent, children } = row;
+                              return [
+                                <TransactionMobileTableRow
+                                  key={`${parent.id}-split-p-${parent.isDeleted ? "deleted" : "active"}`}
+                                  tx={parent}
+                                  counterparty={parent.counterparty_id ? counterpartiesById.get(parent.counterparty_id) ?? null : null}
+                                  itemName={itemName}
+                                  categoryLookup={categoryLookup}
+                                  getCategoryLines={getCategoryLines}
+                                  resolveCategoryIcon={resolveCategoryIcon}
+                                  itemsById={itemsById}
+                                  getItemCounterparty={getItemCounterparty}
+                                  getCounterpartyForItemId={getCounterpartyForItemId}
+                                  apiBase={API_BASE}
+                                  onEdit={openEditDialog}
+                                />,
+                                ...children.map((child) => (
+                                  <TransactionMobileTableRow
+                                    key={`${child.id}-split-c-${child.isDeleted ? "deleted" : "active"}`}
+                                    tx={child}
+                                    counterparty={child.counterparty_id ? counterpartiesById.get(child.counterparty_id) ?? null : null}
+                                    itemName={itemName}
+                                    categoryLookup={categoryLookup}
+                                    getCategoryLines={getCategoryLines}
+                                    resolveCategoryIcon={resolveCategoryIcon}
+                                    itemsById={itemsById}
+                                    getItemCounterparty={getItemCounterparty}
+                                    getCounterpartyForItemId={getCounterpartyForItemId}
+                                    apiBase={API_BASE}
+                                    onEdit={openEditDialog}
+                                  />
+                                )),
+                              ];
+                            }
+                            const tx = row.tx;
+                            return [
+                              <TransactionMobileTableRow
+                                key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
+                                tx={tx}
+                                counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
+                                itemName={itemName}
+                                categoryLookup={categoryLookup}
+                                getCategoryLines={getCategoryLines}
+                                resolveCategoryIcon={resolveCategoryIcon}
+                                itemsById={itemsById}
+                                getItemCounterparty={getItemCounterparty}
+                                getCounterpartyForItemId={getCounterpartyForItemId}
+                                apiBase={API_BASE}
+                                onEdit={openEditDialog}
+                              />,
+                            ];
+                          })}
+                        </TableBody>
+                      </Table>
                     </div>
-                    <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b [&_tr]:border-border">
-                      <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
-                        {transactions.map((tx) => (
-                          <TransactionMobileTableRow
-                            key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
-                            tx={tx}
-                            counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
-                            itemName={itemName}
-                            categoryLookup={categoryLookup}
-                            getCategoryLines={getCategoryLines}
-                            resolveCategoryIcon={resolveCategoryIcon}
-                            itemsById={itemsById}
-                            getItemCounterparty={getItemCounterparty}
-                            getCounterpartyForItemId={getCounterpartyForItemId}
-                            apiBase={API_BASE}
-                            onEdit={openEditDialog}
-                          />
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div

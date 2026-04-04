@@ -5133,33 +5133,9 @@ function TransactionsView({
   const allSelected =
     selectableIds.length > 0 && selectedVisibleCount === selectableIds.length;
   const someSelected = selectedVisibleCount > 0 && !allSelected;
-  const [readyRowCount, setReadyRowCount] = useState(0);
-  const readyRowSetRef = useRef<Set<number>>(new Set());
 
-  useEffect(() => {
-    const currentIds = new Set(sortedTxs.map((tx) => tx.id));
-    let hasChanges = false;
-    readyRowSetRef.current.forEach((id) => {
-      if (!currentIds.has(id)) {
-        readyRowSetRef.current.delete(id);
-        hasChanges = true;
-      }
-    });
-    if (hasChanges) {
-      setReadyRowCount(readyRowSetRef.current.size);
-    }
-    if (sortedTxs.length === 0) {
-      readyRowSetRef.current.clear();
-      setReadyRowCount(0);
-    }
-  }, [sortedTxs.map((t) => t.id).join(",")]);
-
-  const contentVisible =
-    mergedRows.length > 0 &&
-    (sortedTxs.length === 0 || readyRowCount >= sortedTxs.length);
-
-  const showDesktopSkeleton =
-    isDesktop && (loading || (mergedRows.length > 0 && !contentVisible));
+  /** Скелетон только на запросе списка; готовность картинок в карточках — через opacity строки, без скрытия всего списка (иначе visibility:hidden ломает загрузку img и бесконечный скелетон). */
+  const showDesktopSkeleton = isDesktop && loading;
 
   const handleLoadMore = useCallback(() => {
     if ((hasAnyFilter && showAllFiltered) || !hasMoreTxs || isLoadingMore || loading) return;
@@ -5314,12 +5290,6 @@ function TransactionsView({
         confirmingTxId === tx.id ||
         (isBulkConfirming && selectedConfirmableIdSet.has(tx.id))
       }
-      onReady={() => {
-        if (!readyRowSetRef.current.has(tx.id)) {
-          readyRowSetRef.current.add(tx.id);
-          setReadyRowCount((prev) => prev + 1);
-        }
-      }}
       relatedItem={tx.related_item_id != null ? itemsById.get(tx.related_item_id) ?? null : null}
       relatedItemCounterparty={tx.related_item_id != null ? getCounterpartyForItemId(tx.related_item_id) ?? null : null}
       onUnsplit={(t) => setUnsplitConfirmTxId(t.id)}
@@ -8042,26 +8012,7 @@ function TransactionsView({
               </div>
             {isDesktop ? (
               <div className="relative">
-                {showDesktopSkeleton && (
-                  <div className="absolute inset-0 z-20 bg-background pointer-events-none">
-                    <div className="space-y-3">
-                      {[1, 2, 3].map((sectionIdx) => (
-                        <div key={sectionIdx} className="space-y-3">
-                          <Skeleton className="h-8 w-32 rounded-[9px]" aria-hidden />
-                          {[1, 2, 3, 4, 5].map((rowIdx) => (
-                            <Skeleton
-                              key={rowIdx}
-                              className="h-20 w-[900px] @[1400px]:w-full rounded-lg"
-                            />
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {!showDesktopSkeleton &&
-                  (mergedRows.length === 0 ? (
+                {mergedRows.length === 0 ? (
                   loading ? (
                     <div className="h-1 w-full" aria-hidden />
                   ) : hasAnyFilter ? (
@@ -8072,14 +8023,7 @@ function TransactionsView({
                     <EmptyState />
                   )
                 ) : (
-                  <div
-                    className="space-y-3"
-                    style={{
-                      visibility: contentVisible ? "visible" : "hidden",
-                      opacity: contentVisible ? 1 : 0,
-                      transition: "opacity 0.3s ease-in-out",
-                    }}
-                  >
+                  <div className="space-y-3">
                     {mergedRows.map((row, idx) => {
                       if (row.type === "date_header") {
                         if (!checkpointsVisible) {
@@ -8203,7 +8147,24 @@ function TransactionsView({
                       );
                     })}
                   </div>
-                ))}
+                )}
+                {showDesktopSkeleton && (
+                  <div className="absolute inset-0 z-20 bg-background pointer-events-none">
+                    <div className="space-y-3">
+                      {[1, 2, 3].map((sectionIdx) => (
+                        <div key={sectionIdx} className="space-y-3">
+                          <Skeleton className="h-8 w-32 rounded-[9px]" aria-hidden />
+                          {[1, 2, 3, 4, 5].map((rowIdx) => (
+                            <Skeleton
+                              key={rowIdx}
+                              className="h-20 w-[900px] @[1400px]:w-full rounded-lg"
+                            />
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : isInitialLoading && !isDesktop ? (
               <div className="w-screen relative left-1/2 -translate-x-1/2 max-w-none space-y-6 px-4">
@@ -8378,13 +8339,7 @@ function TransactionsView({
                 })}
               </div>
             ) : (
-              <div
-                className="space-y-3"
-                style={{
-                  opacity: contentVisible ? 1 : 0,
-                  transition: "opacity 0.3s ease-in-out",
-                }}
-              >
+              <div className="space-y-3">
                 {mergedRows.map((row, idx) => {
                   if (row.type === "date_header") {
                     if (!checkpointsVisible) {

@@ -8043,7 +8043,7 @@ function TransactionsView({
             {isDesktop ? (
               <div className="relative">
                 {showDesktopSkeleton && (
-                  <div className="absolute inset-0 z-10 pointer-events-none">
+                  <div className="absolute inset-0 z-20 bg-background pointer-events-none">
                     <div className="space-y-3">
                       {[1, 2, 3].map((sectionIdx) => (
                         <div key={sectionIdx} className="space-y-3">
@@ -8060,7 +8060,8 @@ function TransactionsView({
                   </div>
                 )}
 
-                {mergedRows.length === 0 ? (
+                {!showDesktopSkeleton &&
+                  (mergedRows.length === 0 ? (
                   loading ? (
                     <div className="h-1 w-full" aria-hidden />
                   ) : hasAnyFilter ? (
@@ -8202,7 +8203,7 @@ function TransactionsView({
                       );
                     })}
                   </div>
-                )}
+                ))}
               </div>
             ) : isInitialLoading && !isDesktop ? (
               <div className="w-screen relative left-1/2 -translate-x-1/2 max-w-none space-y-6 px-4">

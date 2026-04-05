@@ -1,4 +1,5 @@
 import { ItemKind, ItemOut, TransactionOut } from "@/lib/api";
+import { joinApiBasePath } from "@/lib/api-image-url";
 
 /**
  * Возвращает основную стоимость актива в копейках/центах (для отображения по primary_value_kind).
@@ -29,17 +30,7 @@ export function getItemPhotoUrl(
   apiBase: string
 ): string | null {
   if (!item?.photo_url) return null;
-  let path: string;
-  if (item.photo_url.startsWith("http")) {
-    try {
-      path = new URL(item.photo_url).pathname;
-    } catch {
-      path = item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`;
-    }
-  } else {
-    path = item.photo_url.startsWith("/") ? item.photo_url : `/${item.photo_url}`;
-  }
-  const base = `${apiBase.replace(/\/$/, "")}${path}`;
+  const base = joinApiBasePath(apiBase, item.photo_url);
   const qs = item.photo_updated_at
     ? `?t=${new Date(item.photo_updated_at).getTime()}`
     : "";

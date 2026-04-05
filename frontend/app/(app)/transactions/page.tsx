@@ -8149,7 +8149,7 @@ function TransactionsView({
                   </div>
                 )}
                 {showDesktopSkeleton && (
-                  <div className="absolute inset-0 z-20 bg-background pointer-events-none">
+                  <div className="absolute inset-0 z-10 pointer-events-none">
                     <div className="space-y-3">
                       {[1, 2, 3].map((sectionIdx) => (
                         <div key={sectionIdx} className="space-y-3">

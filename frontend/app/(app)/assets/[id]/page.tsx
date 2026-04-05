@@ -2715,6 +2715,19 @@ export default function AssetDetailPage() {
             </Button>
           </div>
         )}
+        {rowKey === "market" && !item.instrument_id && !isArchived && !isClosed && (
+          <div className={`mt-3 flex justify-center ${isMobileOverlay ? "px-4" : ""}`}>
+            <Button
+              type="button"
+              className="rounded-[9px] border-0 flex justify-center transition-colors hover:opacity-90 text-sm font-normal"
+              style={{ backgroundColor: ACCENT }}
+              onClick={() => setEditMarketValueModalOpen(true)}
+            >
+              <Pencil className="h-4 w-4 mr-2" style={{ color: "white", opacity: 0.85 }} />
+              <span style={{ color: "white", opacity: 0.85 }}>Изменить рыночную стоимость</span>
+            </Button>
+          </div>
+        )}
         {((rowKey === "balance" && (dynamicsBalance || dynamicsByModeMobilePeriod?.balance)) || (rowKey === "market" && (dynamicsMarket || dynamicsByModeMobilePeriod?.market))) && (() => {
           const d = isMobileOverlay && dynamicsByModeMobilePeriod
             ? (rowKey === "balance" ? dynamicsByModeMobilePeriod.balance : dynamicsByModeMobilePeriod.market)

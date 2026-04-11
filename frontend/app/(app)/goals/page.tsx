@@ -157,6 +157,7 @@ export default function GoalsPage() {
 
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
+  const [createCounterpartyDraftName, setCreateCounterpartyDraftName] = useState("");
 
   const [goals, setGoals] = useState<GoalOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
@@ -650,10 +651,16 @@ export default function GoalsPage() {
       />
       <CreateCounterpartyModal
         open={createCounterpartyOpen}
-        onOpenChange={setCreateCounterpartyOpen}
+        onOpenChange={(next) => {
+          setCreateCounterpartyOpen(next);
+          if (!next) setCreateCounterpartyDraftName("");
+        }}
+        initialName={createCounterpartyDraftName || undefined}
         onSuccess={async (created) => {
           await loadAll();
-          setFilterCounterpartyIds([created.id]);
+          setFilterCounterpartyIds((prev) =>
+            prev.includes(created.id) ? prev : [...prev, created.id]
+          );
         }}
       />
       <ConfirmModal
@@ -795,7 +802,10 @@ export default function GoalsPage() {
               emptyMessage="Нет контрагентов"
               noResultsMessage="Ничего не найдено"
               apiBase={API_BASE}
-              onAddCounterparty={() => setCreateCounterpartyOpen(true)}
+              onAddCounterparty={(draft) => {
+                setCreateCounterpartyDraftName(draft);
+                setCreateCounterpartyOpen(true);
+              }}
             />
           </FilterSection>
 

@@ -287,6 +287,7 @@ export default function FinancialPlanningPage() {
 
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
+  const [createCounterpartyDraftName, setCreateCounterpartyDraftName] = useState("");
   const [createCounterpartyTarget, setCreateCounterpartyTarget] = useState<"main">("main");
 
   const [chains, setChains] = useState<TransactionChainOut[]>([]);
@@ -1721,7 +1722,11 @@ export default function FinancialPlanningPage() {
                   disabled={counterpartyLoading}
                   counterpartyCounts={counterpartyTxCounts}
                   apiBase={API_BASE}
-                  onAddCounterparty={() => { setCreateCounterpartyTarget("main"); setCreateCounterpartyOpen(true); }}
+                  onAddCounterparty={(draft) => {
+                    setCreateCounterpartyTarget("main");
+                    setCreateCounterpartyDraftName(draft);
+                    setCreateCounterpartyOpen(true);
+                  }}
                 />
                 {counterpartyError && (
                   <p className="text-xs" style={{ color: "#FB4C4F" }}>
@@ -1935,7 +1940,11 @@ export default function FinancialPlanningPage() {
       />
       <CreateCounterpartyModal
         open={createCounterpartyOpen}
-        onOpenChange={setCreateCounterpartyOpen}
+        onOpenChange={(next) => {
+          setCreateCounterpartyOpen(next);
+          if (!next) setCreateCounterpartyDraftName("");
+        }}
+        initialName={createCounterpartyDraftName || undefined}
         onSuccess={async (created) => {
           await loadItemsCategoriesCounterparties();
           setCounterpartyId(created.id);

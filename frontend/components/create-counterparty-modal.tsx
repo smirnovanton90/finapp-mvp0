@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Camera, Upload, Users } from "lucide-react";
 import { FormModal } from "@/components/form-modal";
 import { TextField, SelectField } from "@/components/ui/form-field";
@@ -36,6 +36,8 @@ export type CreateCounterpartyModalProps = {
   onSuccess: (created: CounterpartyOut) => void;
   /** Pre-select this industry when opening (e.g. "Банки" when adding bank from import). */
   initialIndustryId?: number | null;
+  /** Prefill "Название" (ЮЛ/ИП) when opening from counterparty search. */
+  initialName?: string | null;
   /** For nested modal: e.g. "z-[100]" to appear above parent. */
   overlayClassName?: string;
   containerClassName?: string;
@@ -48,6 +50,7 @@ export function CreateCounterpartyModal({
   onOpenChange,
   onSuccess,
   initialIndustryId,
+  initialName,
   overlayClassName,
   containerClassName,
   modal = true,
@@ -72,6 +75,14 @@ export function CreateCounterpartyModal({
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      setName((initialName ?? "").trim());
+    }
+    wasOpenRef.current = open;
+  }, [open, initialName]);
 
   useEffect(() => {
     if (!open) return;

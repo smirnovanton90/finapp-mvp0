@@ -44,8 +44,8 @@ type CounterpartySelectorProps = {
   industries?: CounterpartyIndustryOut[];
   counterpartyCounts?: Map<number, number> | Record<number, number>;
   apiBase: string;
-  /** When set, shows "Добавить" as first option; on click calls this and closes dropdown. */
-  onAddCounterparty?: () => void;
+  /** When set, shows "Добавить" as first option; passes trimmed search text for prefilling the create modal. */
+  onAddCounterparty?: (draftSearchText: string) => void;
   /** When true, adds "Без контрагента" as first option in the dropdown. */
   showMissingOption?: boolean;
   missingOptionSelected?: boolean;
@@ -256,6 +256,14 @@ export function CounterpartySelector({
 
   const inputId = useId();
 
+  const handleAddCounterpartyPointer = () => {
+    if (!onAddCounterparty || disabled) return;
+    const draft = query.trim();
+    setQuery("");
+    onAddCounterparty(draft);
+    setOpen(false);
+  };
+
   return (
     <div className="space-y-3" ref={anchorRef}>
       <label
@@ -405,13 +413,7 @@ export function CounterpartySelector({
                     }}
                     onPointerDown={(event) => {
                       event.preventDefault();
-                      onAddCounterparty();
-                      setOpen(false);
-                    }}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      onAddCounterparty();
-                      setOpen(false);
+                      handleAddCounterpartyPointer();
                     }}
                     aria-label="Добавить контрагента"
                   >

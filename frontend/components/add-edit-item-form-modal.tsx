@@ -144,6 +144,7 @@ export function AddEditItemFormModal({
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
   const [openDate, setOpenDate] = useState(() => getTodayDateKey());
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
+  const [createCounterpartyDraftName, setCreateCounterpartyDraftName] = useState("");
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const instrumentAnchorRef = useRef<HTMLDivElement | null>(null);
   const itemPhotoInputRef = useRef<HTMLInputElement | null>(null);
@@ -2338,7 +2339,11 @@ export function AddEditItemFormModal({
     <>
       <CreateCounterpartyModal
         open={createCounterpartyOpen}
-        onOpenChange={setCreateCounterpartyOpen}
+        onOpenChange={(next) => {
+          setCreateCounterpartyOpen(next);
+          if (!next) setCreateCounterpartyDraftName("");
+        }}
+        initialName={createCounterpartyDraftName || undefined}
         onSuccess={async (created) => {
           setCounterparties((prev) => [...prev, created]);
           setCounterpartyId(created.id);
@@ -2537,7 +2542,10 @@ export function AddEditItemFormModal({
                           ? (sectionId === "credit_liabilities" && typeCode !== "microloan" && typeCode !== "installment" ? bankIndustryId : null)
                           : (typeCode === "e_wallet" || typeCode === "loan_to_third_party" ? null : bankIndustryId)
                       }
-                      onAddCounterparty={() => setCreateCounterpartyOpen(true)}
+                      onAddCounterparty={(draft) => {
+                        setCreateCounterpartyDraftName(draft);
+                        setCreateCounterpartyOpen(true);
+                      }}
                     />
                   </FormField>
                 )}

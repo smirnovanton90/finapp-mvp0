@@ -269,6 +269,7 @@ export function ImportAccountsOperationsModal({
 
   const isTbankInvestIntegration = importSource === "tbank_invest_api";
   const [addCounterpartyForAccountKey, setAddCounterpartyForAccountKey] = React.useState<string | null>(null);
+  const [addCounterpartyDraftName, setAddCounterpartyDraftName] = React.useState("");
   const [confirmCloseOpen, setConfirmCloseOpen] = React.useState(false);
   const [createCategoryOpen, setCreateCategoryOpen] = React.useState(false);
   const [columnMapping, setColumnMapping] = React.useState<ColumnMapping>({});
@@ -2251,7 +2252,8 @@ export function ImportAccountsOperationsModal({
                         statementLastTransactionDate={getStatementLastTransactionDate(
                           parsedData
                         )}
-                        onAddCounterparty={() => {
+                        onAddCounterparty={(draft) => {
+                          setAddCounterpartyDraftName(draft);
                           setAddCounterpartyForAccountKey(key);
                           setAddCounterpartyModalOpen(true);
                         }}
@@ -3020,8 +3022,12 @@ export function ImportAccountsOperationsModal({
       open={addCounterpartyModalOpen}
       onOpenChange={(next) => {
         setAddCounterpartyModalOpen(next);
-        if (!next) setAddCounterpartyForAccountKey(null);
+        if (!next) {
+          setAddCounterpartyForAccountKey(null);
+          setAddCounterpartyDraftName("");
+        }
       }}
+      initialName={addCounterpartyDraftName || undefined}
       modal={false}
       onSuccess={(created) => {
         setCounterparties((prev) => [...prev, created]);

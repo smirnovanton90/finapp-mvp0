@@ -2449,6 +2449,7 @@ function TransactionsView({
   const { data: session } = useSession();
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [createCounterpartyOpen, setCreateCounterpartyOpen] = useState(false);
+  const [createCounterpartyDraftName, setCreateCounterpartyDraftName] = useState("");
   const [createCounterpartyTarget, setCreateCounterpartyTarget] = useState<"main" | "debtPayFor" | "wherePaid">("main");
   const router = useRouter();
   const pathname = usePathname();
@@ -3053,8 +3054,9 @@ function TransactionsView({
   const onCounterpartyChangeMain = useCallback((ids: number[]) => {
     setCounterpartyId(ids[0] ?? null);
   }, []);
-  const onAddCounterpartyMain = useCallback(() => {
+  const onAddCounterpartyMain = useCallback((draft: string) => {
     setCreateCounterpartyTarget("main");
+    setCreateCounterpartyDraftName(draft);
     setCreateCounterpartyOpen(true);
   }, []);
   const onDebtPayForCounterpartyChange = useCallback((ids: number[]) => {
@@ -3063,15 +3065,17 @@ function TransactionsView({
     setDebtSettlementItemId(null);
     setDebtSettlementNewName("");
   }, []);
-  const onAddCounterpartyDebtPayFor = useCallback(() => {
+  const onAddCounterpartyDebtPayFor = useCallback((draft: string) => {
     setCreateCounterpartyTarget("debtPayFor");
+    setCreateCounterpartyDraftName(draft);
     setCreateCounterpartyOpen(true);
   }, []);
   const onWherePaidCounterpartyChange = useCallback((ids: number[]) => {
     setWherePaidCounterpartyId(ids[0] ?? null);
   }, []);
-  const onAddCounterpartyWherePaid = useCallback(() => {
+  const onAddCounterpartyWherePaid = useCallback((draft: string) => {
     setCreateCounterpartyTarget("wherePaid");
+    setCreateCounterpartyDraftName(draft);
     setCreateCounterpartyOpen(true);
   }, []);
   const onCounterpartyChangeWithDebtReset = useCallback(
@@ -8517,7 +8521,11 @@ function TransactionsView({
       />
       <CreateCounterpartyModal
         open={createCounterpartyOpen}
-        onOpenChange={setCreateCounterpartyOpen}
+        onOpenChange={(next) => {
+          setCreateCounterpartyOpen(next);
+          if (!next) setCreateCounterpartyDraftName("");
+        }}
+        initialName={createCounterpartyDraftName || undefined}
         onSuccess={async (created) => {
           await loadCounterparties();
           if (createCounterpartyTarget === "debtPayFor") setDebtPayForCounterpartyId(created.id);

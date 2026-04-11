@@ -101,7 +101,7 @@ export type ImportAccountCardProps = {
   /** Дата последней транзакции по выписке — для подписи поля остатка «Остаток на …» */
   statementLastTransactionDate?: string | null;
   /** When set, shows "Добавить" in bank/counterparty selector; on click calls this. */
-  onAddCounterparty?: () => void;
+  onAddCounterparty?: (draftSearchText: string) => void;
   /** Сообщение об ошибке валидации для этого счёта; null/пустая строка — проверка пройдена */
   validationError?: string | null;
   /** Предупреждение (не блокирует импорт), например об отрицательном сальдо в течение периода */

@@ -3223,6 +3223,13 @@ function TransactionsView({
   const isEditMode = dialogMode === "edit";
   const isBulkEdit = dialogMode === "bulk-edit";
   const isRealizeMode = realizeSource !== null;
+  /** Смена вида (простая / погашение / долги) при редактировании — только для «обычных» транзакций. */
+  const canChangeTransactionFormModeInEdit =
+    isEditMode &&
+    editingTx != null &&
+    !editingTx.is_split_parent &&
+    editingTx.parent_transaction_id == null &&
+    editingTx.asset_link_type == null;
 
   const applyCategorySelection = (l1: string, l2: string, l3: string) => {
     if (!l1 || (l1 === CATEGORY_PLACEHOLDER && !l2 && !l3)) {
@@ -6618,7 +6625,7 @@ function TransactionsView({
                 >
                   <div className="grid gap-4">
                     {!isBulkEdit && !isRealizeMode && (
-                      <FormField label="">
+                      <FormField label="Фактическая/плановая">
                         <SegmentedSelector
                           options={[
                             { value: "ACTUAL", label: "Фактическая", colorScheme: "purple" },
@@ -6630,7 +6637,8 @@ function TransactionsView({
                       </FormField>
                     )}
 
-                    {isDesktop && !isEditMode && !isBulkEdit && (
+                    {!isBulkEdit &&
+                      ((!isEditMode && isDesktop) || canChangeTransactionFormModeInEdit) && (
                       <FormField label="Вид транзакции">
                         <SegmentedSelector
                           options={[
@@ -6642,10 +6650,21 @@ function TransactionsView({
                           onChange={(v) => {
                             setFormMode(v as TransactionFormMode);
                             if (v === "DEBTS") setDebtDirection("I_PAID");
-                            if (v === "STANDARD") setDirection("EXPENSE");
+                            if (v === "STANDARD") {
+                              if (isEditMode && editingTx) {
+                                setDirection(editingTx.direction);
+                              } else {
+                                setDirection("EXPENSE");
+                              }
+                            }
                             if (v === "LOAN_REPAYMENT") {
-                              setLoanTotalStr("");
-                              setLoanInterestStr("");
+                              if (isEditMode && editingTx) {
+                                setLoanTotalStr(formatCentsForInput(editingTx.amount));
+                                setLoanInterestStr(formatCentsForInput(0));
+                              } else {
+                                setLoanTotalStr("");
+                                setLoanInterestStr("");
+                              }
                             }
                           }}
                         />

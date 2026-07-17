@@ -1941,12 +1941,17 @@ function TransactionCardRow({
 
   const checkboxDisabled = tx.isDeleted || isDeleting;
 
+  const isInSplitGroup = isNestedChild || isSplitGroupParentRow;
+
   return (
     <div
       className={cn(
-        "flex items-stretch overflow-hidden w-[900px] @[1400px]:w-full",
-        !isNestedChild && !isSplitGroupParentRow && "rounded-lg",
-        (isNestedChild || isSplitGroupParentRow) && "rounded-none"
+        "flex items-stretch overflow-hidden @[1400px]:w-full",
+        // В группе разбиения ширина задаётся общим контейнером (900px с border-box),
+        // чтобы правый край и кнопка «⋯» совпадали с обычными строками.
+        isInSplitGroup ? "w-full" : "w-[900px]",
+        !isInSplitGroup && "rounded-lg",
+        isInSplitGroup && "rounded-none"
       )}
       style={{
         boxSizing: "border-box",
@@ -1980,12 +1985,10 @@ function TransactionCardRow({
         aria-hidden={hideLeftStripeColumn}
       />
 
-      {/* Контейнер 2 — контент: фиксированная ширина в узком режиме, во всю ширину в широком (у дочерних частей нет 10px-полосы — ширина на всю карточку) */}
+      {/* Контейнер 2 — контент: фиксированная 890px в узком режиме (и с полосой, и без неё),
+          чтобы колонка действий и кнопка «⋯» совпадали у всех строк. */}
       <div
-        className={cn(
-          "flex items-stretch @[1400px]:w-full @[1400px]:flex-1 @[1400px]:min-w-0",
-          hideLeftStripeColumn ? "w-[900px]" : "w-[890px]"
-        )}
+        className="flex items-stretch w-[890px] min-w-0 @[1400px]:w-full @[1400px]:flex-1"
         style={{
           paddingTop: 4,
           paddingBottom: 4,
@@ -8375,8 +8378,9 @@ function TransactionsView({
                         return (
                           <div
                             key={`split-${parent.id}-${parent.isDeleted ? "deleted" : "active"}`}
-                            className="rounded-[9px] overflow-hidden"
+                            className="rounded-[9px] overflow-hidden w-[900px] @[1400px]:w-full"
                             style={{
+                              boxSizing: "border-box",
                               backgroundColor: BACKGROUND_DT,
                               borderLeftWidth: 7,
                               borderLeftStyle: "solid",
@@ -8691,8 +8695,9 @@ function TransactionsView({
                     return (
                       <div
                         key={`split-${parent.id}-${parent.isDeleted ? "deleted" : "active"}`}
-                        className="rounded-[9px] overflow-hidden"
+                        className="rounded-[9px] overflow-hidden w-[900px] @[1400px]:w-full"
                         style={{
+                          boxSizing: "border-box",
                           backgroundColor: BACKGROUND_DT,
                           borderLeftWidth: 7,
                           borderLeftStyle: "solid",

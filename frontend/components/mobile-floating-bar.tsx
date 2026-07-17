@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
-import { Wallet, ArrowLeftRight, Plus } from "lucide-react";
+import { LayoutDashboard, Wallet, ArrowLeftRight, Plus } from "lucide-react";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { cn } from "@/lib/utils";
-import { ACCENT, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
+import { PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
 
 const ASSETS_HREF = "/assets";
 const TRANSACTIONS_HREF = "/transactions";
+const DASHBOARD_HREF = "/dashboard";
 const ADD_ASSET_HREF = "/assets?openCreate=1";
 const ADD_TRANSACTION_HREF = "/transactions?openCreate=1";
 
@@ -20,24 +21,26 @@ function NavButton({
   icon: Icon,
   label,
   active,
+  className,
 }: {
   href: string;
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   label: string;
   active: boolean;
+  className?: string;
 }) {
   return (
-    <MobileTapScale className="flex flex-1 min-w-0">
+    <MobileTapScale className={cn("flex min-w-0", className)}>
       <Link
         href={href}
         aria-label={label}
         className={cn(
           "flex flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-2 transition-colors min-w-0",
-          "hover:bg-sidebar-accent/50"
+          "hover:bg-white/8"
         )}
-        style={{ color: active ? ACCENT : PLACEHOLDER_COLOR_DARK }}
+        style={{ color: active ? "rgba(197, 191, 241, 0.95)" : PLACEHOLDER_COLOR_DARK }}
       >
-        <Icon className="size-6" strokeWidth={1.5} />
+        <Icon className="size-5" strokeWidth={1.6} />
         <span className="text-[10px] font-medium leading-tight">{label}</span>
       </Link>
     </MobileTapScale>
@@ -54,6 +57,8 @@ export function MobileFloatingBar() {
 
   const isAssets =
     pathname === ASSETS_HREF || (pathname?.startsWith(ASSETS_HREF + "/") ?? false);
+  const isDashboard =
+    pathname === DASHBOARD_HREF || (pathname?.startsWith(DASHBOARD_HREF + "/") ?? false);
   const isTransactions =
     pathname === TRANSACTIONS_HREF ||
     (pathname?.startsWith(TRANSACTIONS_HREF + "/") ?? false);
@@ -77,54 +82,62 @@ export function MobileFloatingBar() {
   };
 
   const addButtonClass = cn(
-    "flex shrink-0 items-center justify-center rounded-full -my-1 mx-1",
-    "h-12 w-12 shadow-md transition-colors hover:opacity-90"
+    "flex h-12 w-12 shrink-0 items-center justify-center rounded-full mx-1",
+    "border border-white/20 bg-[#7F5CFF]/70 text-white/90 shadow-[0_6px_18px_rgba(127,92,255,0.4),inset_0_1px_0_rgba(255,255,255,0.2)] backdrop-blur-xl",
+    "transition-[transform,background-color,box-shadow] duration-150 ease-out hover:bg-[#7F5CFF]/85 hover:shadow-[0_8px_22px_rgba(127,92,255,0.52),inset_0_1px_0_rgba(255,255,255,0.28)] active:scale-90 motion-reduce:transition-none"
   );
 
   return (
     <nav
       className={cn(
-        "fixed bottom-0 left-0 right-0 z-30 flex min-h-[72px] flex-col justify-end gap-1 px-4 pb-[env(safe-area-inset-bottom)] pt-3",
-        "bg-sidebar/95 backdrop-blur-sm border-t border-sidebar-border"
+        "fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-[calc(0.75rem+env(safe-area-inset-left))] right-[calc(0.75rem+env(safe-area-inset-right))] z-30 flex min-h-16 flex-col justify-center px-3",
+        "rounded-2xl border border-sidebar-border/70 bg-sidebar/70 shadow-[0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/55"
       )}
       aria-label="Основная навигация"
     >
-      <div className="flex items-stretch rounded-xl">
+      <div className="relative grid grid-cols-5 items-stretch rounded-xl">
+        <NavButton
+          href={DASHBOARD_HREF}
+          icon={LayoutDashboard}
+          label="Дэшборд"
+          active={!!isDashboard}
+        />
         <NavButton
           href={ASSETS_HREF}
           icon={Wallet}
           label="Активы"
           active={!!isAssets}
         />
-        <MobileTapScale>
-          {useExpandAnimation ? (
-            <button
-              ref={addButtonRef as React.RefObject<HTMLButtonElement>}
-              type="button"
-              aria-label={addLabel}
-              className={addButtonClass}
-              style={{ backgroundColor: ACCENT }}
-              onClick={handleAddClick}
-            >
-              <Plus className="size-6" strokeWidth={2.5} style={{ color: "white", opacity: 0.85 }} />
-            </button>
-          ) : (
-            <Link
-              ref={addButtonRef as React.RefObject<HTMLAnchorElement>}
-              href={addHref}
-              aria-label={addLabel}
-              className={addButtonClass}
-              style={{ backgroundColor: ACCENT }}
-            >
-              <Plus className="size-6" strokeWidth={2.5} style={{ color: "white", opacity: 0.85 }} />
-            </Link>
-          )}
-        </MobileTapScale>
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          <MobileTapScale>
+            {useExpandAnimation ? (
+              <button
+                ref={addButtonRef as React.RefObject<HTMLButtonElement>}
+                type="button"
+                aria-label={addLabel}
+                className={addButtonClass}
+                onClick={handleAddClick}
+              >
+                <Plus className="size-6" strokeWidth={2.25} />
+              </button>
+            ) : (
+              <Link
+                ref={addButtonRef as React.RefObject<HTMLAnchorElement>}
+                href={addHref}
+                aria-label={addLabel}
+                className={addButtonClass}
+              >
+                <Plus className="size-6" strokeWidth={2.25} />
+              </Link>
+            )}
+          </MobileTapScale>
+        </div>
         <NavButton
           href={TRANSACTIONS_HREF}
           icon={ArrowLeftRight}
           label="Транзакции"
           active={!!isTransactions}
+          className="col-start-5"
         />
       </div>
     </nav>

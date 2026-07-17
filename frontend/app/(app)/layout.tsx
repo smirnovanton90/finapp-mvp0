@@ -191,7 +191,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
               !isDesktop
                 ? {
                     marginLeft: contentMarginLeft,
-                    height: "calc(100dvh - env(safe-area-inset-top) - 72px - env(safe-area-inset-bottom))",
+                    height: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom))",
                     WebkitOverflowScrolling: "touch",
                   }
                 : { marginLeft: contentMarginLeft }

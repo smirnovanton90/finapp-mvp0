@@ -961,6 +961,9 @@ def _create_loan_chains(
     )
 
     interest_counterparty_id = item.counterparty_id if item.kind == "LIABILITY" else None
+    interest_asset_link_type = (
+        "ASSET_EXPENSE" if item.kind == "LIABILITY" else "ASSET_INCOME"
+    )
     _create_chain_with_transactions(
         db=db,
         user=user,
@@ -984,7 +987,7 @@ def _create_loan_chains(
         monthly_rule=monthly_rule,
         interval_days=interval_days,
         weekly_day=weekly_day,
-        asset_link_type=None,
+        asset_link_type=interest_asset_link_type,
     )
 
 

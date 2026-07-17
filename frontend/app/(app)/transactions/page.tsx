@@ -3582,6 +3582,8 @@ function TransactionsView({
         amount_counterparty: null,
         direction: "EXPENSE" as const,
         category_id: expenseCategoryId,
+        related_item_id: counterpartyItemId,
+        asset_link_type: "ASSET_EXPENSE" as const,
         parent_transaction_id: parent.id,
       };
       const childTransferPayload = {
@@ -6233,6 +6235,8 @@ function TransactionsView({
                             amount_counterparty: null,
                             direction: "EXPENSE",
                             category_id: expenseCategoryId,
+                            related_item_id: counterpartyItemId,
+                            asset_link_type: "ASSET_EXPENSE",
                           }),
                           createTransaction({
                             ...basePayload,

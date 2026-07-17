@@ -1680,7 +1680,9 @@ function TransactionCardRow({
   const isRealized = tx.status === "REALIZED";
   const isSplitParent = tx.is_split_parent === true;
   const isChild = tx.parent_transaction_id != null;
-  const hideRowLeftAccent = isChild;
+  /** Дочерняя внутри блока разбиения — вложенный вид без левой обводки */
+  const isNestedChild = isChild && isSplitGroupChildRow;
+  const hideRowLeftAccent = isNestedChild;
   const useSplitParentFullTint =
     isSplitGroupParentRow && !isPlanned && !tx.isDeleted;
   const hideLeftStripeColumn = hideRowLeftAccent || useSplitParentFullTint;
@@ -1774,18 +1776,16 @@ function TransactionCardRow({
   const highlightFillColor = isIncome ? GREEN_TRANSACTION : isExpense ? RED : ACCENT2;
 
   // Фон всей карточки: для фактических — MODAL_BG для всех трёх видов (доход, расход, перевод).
-  // Дочерние вне блока разбиения — прозрачный фон; внутри блока — как у родителя (MODAL_BG).
+  // Дочерние внутри блока — как у родителя; отдельно стоящие дочерние — как обычные/родительские.
   // Удалённые — BACKGROUND_DT (кроме строк внутри общего блока разбиения — фон даёт контейнер).
   const outerBackgroundColor =
     tx.isDeleted && (isSplitGroupChildRow || isSplitGroupParentRow)
       ? "transparent"
       : tx.isDeleted
         ? BACKGROUND_DT
-        : isChild && !isSplitGroupChildRow
-          ? "transparent"
-          : !isPlanned
-            ? MODAL_BG
-            : "transparent";
+        : !isPlanned
+          ? MODAL_BG
+          : "transparent";
 
   // Обводка: у плановых — по всем сторонам, у фактических — слева 7px (GREEN_TRANSACTION / RED / ACCENT2) с закруглением
   const outerBorderColor = tx.isDeleted
@@ -1795,45 +1795,25 @@ function TransactionCardRow({
       : stripeColor;
 
   const outerBorderStyle =
-    isSplitGroupChildRow && tx.isDeleted
+    isNestedChild && tx.isDeleted
       ? {
           borderColor: "transparent" as const,
           borderStyle: "solid" as const,
           borderWidth: 0,
         }
-      : isSplitGroupChildRow && isPlanned
+      : isNestedChild && isPlanned
         ? {
             borderColor: outerBorderColor,
             borderStyle: "solid" as const,
             borderWidth: 1,
             borderLeftWidth: 0,
           }
-      : isSplitGroupChildRow
+      : isNestedChild
         ? {
             borderColor: "transparent" as const,
             borderStyle: "solid" as const,
             borderWidth: 0,
             borderLeftWidth: 0,
-          }
-      : isChild && tx.isDeleted
-      ? {
-          borderColor: "transparent" as const,
-          borderStyle: "solid" as const,
-          borderWidth: 0,
-        }
-      : isChild && isPlanned
-        ? {
-            borderColor: outerBorderColor,
-            borderStyle: "solid" as const,
-            borderWidth: 1,
-            borderLeftWidth: 0,
-          }
-      : isChild
-        ? {
-            borderColor: "transparent" as const,
-            borderStyle: "solid" as const,
-            borderWidth: 0,
-            borderBottom: "1px solid rgba(255,255,255,0.1)",
           }
       : isSplitGroupParentRow && tx.isDeleted
         ? {
@@ -1965,8 +1945,8 @@ function TransactionCardRow({
     <div
       className={cn(
         "flex items-stretch overflow-hidden w-[900px] @[1400px]:w-full",
-        !isChild && !isSplitGroupParentRow && "rounded-lg",
-        (isChild || isSplitGroupParentRow) && "rounded-none" // дочерние в блоке: isChild && isSplitGroupChildRow
+        !isNestedChild && !isSplitGroupParentRow && "rounded-lg",
+        (isNestedChild || isSplitGroupParentRow) && "rounded-none"
       )}
       style={{
         boxSizing: "border-box",

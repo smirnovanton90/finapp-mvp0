@@ -49,6 +49,7 @@ import { AssetSectionHeading } from "@/components/asset-section-heading";
 import { AssetCard } from "@/components/asset-card";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
 import { MobileSearchField } from "@/components/mobile-search-field";
+import { MobileAddAssetWizard } from "@/components/mobile-add-asset-wizard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { AuthInput } from "@/components/ui/auth-input";
@@ -3189,7 +3190,7 @@ export default function Page() {
       )}
     >
       <AddEditItemFormModal
-        open={isCreateOpen}
+        open={isCreateOpen && (isDesktop || editingItem !== null)}
         onOpenChange={(next) => {
           if (!next) setEditingItem(null);
           setIsCreateOpen(next);
@@ -3207,6 +3208,17 @@ export default function Page() {
         askConfirm={askConfirm}
         items={items}
         transactionsForEdit={editingItem ? txs.filter((tx) => tx.related_item_id === editingItem.id || tx.primary_item_id === editingItem.id || tx.counterparty_item_id === editingItem.id) : []}
+      />
+
+      <MobileAddAssetWizard
+        open={isCreateOpen && !isDesktop && editingItem === null}
+        currencies={currencies}
+        items={items}
+        onClose={() => setIsCreateOpen(false)}
+        onSuccess={async () => {
+          await loadItems();
+          await loadTransactions();
+        }}
       />
 
 
@@ -4006,4 +4018,3 @@ export default function Page() {
     </main>
   );
 }
-

@@ -43,10 +43,14 @@ export interface MobileSearchSelectOverlayProps<T> {
   className?: string;
   /** Высота триггера (для выравнивания с другими полями). */
   triggerClassName?: string;
+  /** Использовать поверхность нижней мобильной панели вместо стандартного фона триггера. */
+  useMobileBarSurface?: boolean;
   /** aria-label для триггера. */
   ariaLabel?: string;
   /** Кастомное отображение выбранного значения в триггере (например, иконка + название). */
   renderTriggerContent?: (option: T) => React.ReactNode;
+  /** Кастомное отображение пустого триггера. */
+  renderEmptyTriggerContent?: () => React.ReactNode;
 }
 
 /**
@@ -69,8 +73,10 @@ export function MobileSearchSelectOverlay<T>({
   noResultsMessage = "Ничего не найдено",
   className,
   triggerClassName,
+  useMobileBarSurface = false,
   ariaLabel,
   renderTriggerContent,
+  renderEmptyTriggerContent,
 }: MobileSearchSelectOverlayProps<T>) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -138,14 +144,14 @@ export function MobileSearchSelectOverlay<T>({
         triggerClassName
       )}
       style={{
-        ...(value == null ? triggerEmptyStyle : { backgroundColor: ACCENT_FILL_LIGHT, boxShadow: "none" }),
+        ...(!useMobileBarSurface && (value == null ? triggerEmptyStyle : { backgroundColor: ACCENT_FILL_LIGHT, boxShadow: "none" })),
         color: displayLabel ? ACTIVE_TEXT_DARK : PLACEHOLDER_COLOR_DARK,
         paddingLeft: 12,
         paddingRight: 12,
       }}
     >
       {value == null ? (
-        <>
+        renderEmptyTriggerContent ? renderEmptyTriggerContent() : <>
           <Search
             className="size-4 shrink-0"
             style={{ color: triggerFocused ? ACCENT : PLACEHOLDER_COLOR_DARK }}
@@ -171,8 +177,8 @@ export function MobileSearchSelectOverlay<T>({
   const [headerVisible, setHeaderVisible] = useState(false);
   useEffect(() => {
     if (!open) {
-      setHeaderVisible(false);
-      return;
+      const t = requestAnimationFrame(() => setHeaderVisible(false));
+      return () => cancelAnimationFrame(t);
     }
     const t = requestAnimationFrame(() => setHeaderVisible(true));
     return () => cancelAnimationFrame(t);

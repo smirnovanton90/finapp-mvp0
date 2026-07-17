@@ -1069,6 +1069,23 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
     return tx
 
 
+@router.get("/{tx_id}", response_model=TransactionOut)
+def get_transaction(
+    tx_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    tx = (
+        db.query(Transaction)
+        .filter(Transaction.id == tx_id, Transaction.user_id == user.id)
+        .options(selectinload(Transaction.chain))
+        .first()
+    )
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return tx
+
+
 @router.patch("/{tx_id}", response_model=TransactionOut)
 def update_transaction(
     tx_id: int,

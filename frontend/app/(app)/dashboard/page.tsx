@@ -11,11 +11,26 @@ import {
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, PieChart, Target, Wallet } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDownRight,
+  ArrowRight,
+  ArrowUpRight,
+  ChevronRight,
+  PieChart,
+  Target,
+  User,
+  Wallet,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tag } from "@/components/ui/tag";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   buildCategoryDescendants,
   buildCategoryLookup,
@@ -33,11 +48,14 @@ import {
   fetchFxRates,
   fetchItems,
   fetchTransactions,
+  fetchUserMe,
+  fetchUserPhotoAsBlob,
   FxRateOut,
   ItemKind,
   ItemOut,
   GoalOut,
   TransactionOut,
+  UserMeOut,
 } from "@/lib/api";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
@@ -658,6 +676,8 @@ export default function DashboardPage() {
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [goals, setGoals] = useState<GoalOut[]>([]);
+  const [userProfile, setUserProfile] = useState<UserMeOut | null>(null);
+  const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>(
@@ -667,18 +687,19 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [incomeHover, setIncomeHover] = useState<CategorySegment | null>(null);
   const [expenseHover, setExpenseHover] = useState<CategorySegment | null>(null);
+  const [mobileDetail, setMobileDetail] = useState<"structure" | "income" | "expense" | null>(null);
+  const [mobileDetailExpanded, setMobileDetailExpanded] = useState(false);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const [chartSize, setChartSize] = useState({ width: 240, height: 128 });
   const now = new Date();
   const todayKey = toDateKey(now);
   const monthStartKey = toDateKey(new Date(now.getFullYear(), now.getMonth(), 1));
   const monthEndKey = toDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+  const currentMonthLabel = formatMonthLabel(now);
   const rangeStartKey = monthStartKey;
   const rangeEndKey = monthEndKey;
   const previousMonthRange = getPreviousMonthRange(now);
-  const previousMonthStartKey = toDateKey(previousMonthRange.start);
   const previousMonthEndKey = toDateKey(previousMonthRange.end);
-  const previousMonthLabel = formatMonthLabel(previousMonthRange.start);
   const priorMonthRange = getPreviousMonthRange(previousMonthRange.start);
   const priorMonthStartKey = toDateKey(priorMonthRange.start);
   const priorMonthEndKey = toDateKey(priorMonthRange.end);
@@ -718,6 +739,40 @@ export default function DashboardPage() {
       active = false;
     };
   }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
+    let blobUrl: string | null = null;
+
+    const loadProfile = async () => {
+      try {
+        const profile = await fetchUserMe();
+        if (!active) return;
+        setUserProfile(profile);
+        if (!profile.photo_url) return;
+        if (profile.photo_url.includes("googleusercontent.com")) {
+          setUserPhotoUrl(profile.photo_url);
+          return;
+        }
+        blobUrl = await fetchUserPhotoAsBlob();
+        if (active) setUserPhotoUrl(blobUrl);
+      } catch {
+        if (active) setUserPhotoUrl(null);
+      }
+    };
+
+    loadProfile();
+    return () => {
+      active = false;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [session]);
+
+  const profileFirstName = userProfile?.first_name?.trim() || userProfile?.name?.trim().split(/\s+/)[0] || "";
+  const sessionName = (session?.user as { name?: string } | undefined)?.name?.trim().split(/\s+/)[0] || "";
+  const greetingName = profileFirstName || sessionName;
+  const avatarLetter = greetingName.slice(0, 1).toUpperCase();
 
   const rateByCode = useMemo(() => {
     const map: Record<string, number> = { RUB: 1 };
@@ -969,12 +1024,12 @@ export default function DashboardPage() {
       buildCategoryBreakdown(
         txs,
         "INCOME",
-        previousMonthStartKey,
-        previousMonthEndKey,
+        monthStartKey,
+        monthEndKey,
         categoryLookup,
         CATEGORY_BREAKDOWN_LIMIT
       ),
-    [categoryLookup, previousMonthEndKey, previousMonthStartKey, txs]
+    [categoryLookup, monthEndKey, monthStartKey, txs]
   );
 
   const expenseBreakdown = useMemo(
@@ -982,12 +1037,12 @@ export default function DashboardPage() {
       buildCategoryBreakdown(
         txs,
         "EXPENSE",
-        previousMonthStartKey,
-        previousMonthEndKey,
+        monthStartKey,
+        monthEndKey,
         categoryLookup,
         CATEGORY_BREAKDOWN_LIMIT
       ),
-    [categoryLookup, previousMonthEndKey, previousMonthStartKey, txs]
+    [categoryLookup, monthEndKey, monthStartKey, txs]
   );
 
   const incomeSegments = useMemo(
@@ -1005,11 +1060,11 @@ export default function DashboardPage() {
       buildCategoryTotalsByLabel(
         txs,
         "INCOME",
-        previousMonthStartKey,
-        previousMonthEndKey,
+        monthStartKey,
+        monthEndKey,
         categoryLookup
       ),
-    [categoryLookup, previousMonthEndKey, previousMonthStartKey, txs]
+    [categoryLookup, monthEndKey, monthStartKey, txs]
   );
 
   const expenseTotalsCurrent = useMemo(
@@ -1017,11 +1072,11 @@ export default function DashboardPage() {
       buildCategoryTotalsByLabel(
         txs,
         "EXPENSE",
-        previousMonthStartKey,
-        previousMonthEndKey,
+        monthStartKey,
+        monthEndKey,
         categoryLookup
       ),
-    [categoryLookup, previousMonthEndKey, previousMonthStartKey, txs]
+    [categoryLookup, monthEndKey, monthStartKey, txs]
   );
 
   const incomeTotalsPrevMonth = useMemo(
@@ -1465,7 +1520,75 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <main className="min-h-screen px-8 py-8">
+    <>
+      <main className="min-h-screen pb-28 pt-5 text-slate-50 md:hidden">
+        <div
+          className="flex w-full flex-col gap-5"
+          style={{ opacity: loading ? 0 : 1, transition: "opacity 0.3s ease-in-out" }}
+        >
+          <header className="flex items-center justify-between px-1">
+            <div>
+              <p className="text-xs text-slate-400">{new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" }).format(now)}</p>
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight">{greetingName ? `Привет, ${greetingName}` : "Добрый день"}</h1>
+            </div>
+            <Link href="/cabinet" aria-label="Открыть личный кабинет" className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-white/10 bg-[rgba(93,95,215,0.22)] text-sm font-semibold text-violet-200 shadow-[0_10px_22px_-16px_rgba(127,92,255,0.6)] transition-transform active:scale-90">
+              {userPhotoUrl ? <img src={userPhotoUrl} alt="Фото профиля" className="h-full w-full object-cover" /> : avatarLetter ? avatarLetter : <User className="h-5 w-5" />}
+            </Link>
+          </header>
+
+          <button
+            type="button"
+            onClick={() => { setMobileDetailExpanded(false); setMobileDetail("structure"); }}
+            className="relative overflow-hidden rounded-xl border border-white/10 bg-[#25243F] p-5 text-left text-white shadow-[0_16px_32px_-24px_rgba(0,0,0,0.85)] transition-transform active:scale-[0.98]"
+            aria-label="Открыть структуру активов и обязательств"
+          >
+            <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full border-[20px] border-[rgba(93,95,215,0.22)]" />
+            <div className="relative flex items-center justify-between text-sm text-white/80">
+              <span className="flex items-center gap-2"><Wallet className="h-4 w-4" /> Чистые активы</span>
+              <ChevronRight className="h-5 w-5" />
+            </div>
+            <div className="relative mt-3 text-3xl font-semibold tracking-tight">
+              {loading ? "..." : netTotal < 0 ? `-${formatRub(Math.abs(netTotal))}` : formatRub(netTotal)}
+            </div>
+            <div className="relative mt-3 inline-flex items-center gap-1 rounded-full bg-[rgba(93,95,215,0.22)] px-2.5 py-1 text-xs text-white/90">
+              <ArrowUpRight className="h-3.5 w-3.5" /> С 1 числа месяца {loading ? "..." : formatChangePercent(netTotalChangePercent)}
+            </div>
+            <div className="relative mt-5 grid grid-cols-2 border-t border-white/20 pt-3 text-sm">
+              <div><span className="block text-xs text-white/65">Активы</span><span className="font-medium">{loading ? "..." : formatRub(totalAssets)}</span></div>
+              <div><span className="block text-xs text-white/65">Обязательства</span><span className="font-medium">{loading ? "..." : `-${formatRub(totalLiabilities)}`}</span></div>
+            </div>
+          </button>
+
+          <section>
+            <div className="mb-3 flex items-baseline justify-between px-1"><h2 className="text-lg font-semibold">Деньги в {currentMonthLabel}</h2><span className="text-xs text-slate-400">По статьям</span></div>
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" onClick={() => { setMobileDetailExpanded(false); setMobileDetail("income"); }} className="rounded-xl border border-white/10 bg-[#25243F] p-4 text-left shadow-[0_12px_24px_-20px_rgba(0,0,0,0.8)] transition-transform active:scale-[0.98]">
+                <div className="flex items-center justify-between text-sm text-slate-400"><span>Доходы</span><ArrowUpRight className="h-4 w-4 text-emerald-400" /></div>
+                <div className="mt-2 text-lg font-semibold text-emerald-400">{loading ? "..." : formatRub(incomeBreakdown.total)}</div>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-emerald-950"><div className="h-full w-2/3 rounded-full bg-emerald-400" /></div>
+              </button>
+              <button type="button" onClick={() => { setMobileDetailExpanded(false); setMobileDetail("expense"); }} className="rounded-xl border border-white/10 bg-[#25243F] p-4 text-left shadow-[0_12px_24px_-20px_rgba(0,0,0,0.8)] transition-transform active:scale-[0.98]">
+                <div className="flex items-center justify-between text-sm text-slate-400"><span>Расходы</span><ArrowDownRight className="h-4 w-4 text-rose-400" /></div>
+                <div className="mt-2 text-lg font-semibold text-rose-400">{loading ? "..." : formatRub(expenseBreakdown.total)}</div>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-rose-950"><div className="h-full w-4/5 rounded-full bg-rose-400" /></div>
+              </button>
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-3 flex items-baseline justify-between px-1"><h2 className="text-lg font-semibold">Цели</h2><Link href="/goals" className="text-sm font-medium text-violet-400">Все цели</Link></div>
+            {loading ? <div className="text-sm text-slate-400">Загрузка целей...</div> : activeGoals.length === 0 ? <Link href="/goals" className="block rounded-xl border border-dashed border-white/10 bg-[#25243F] p-4 text-sm text-slate-400">Добавить первую цель →</Link> : <div className="space-y-2">{activeGoals.slice(0, 2).map((goal) => {
+              const summary = goalSummaryById.get(goal.id) ?? { amount: 0, progress: 0, rangeLabel: "" };
+              const progressColor = getGoalProgressColor(summary.progress, categoryLookup.idToScope?.get(goal.category_id) === "INCOME");
+              return <Link href="/goals" key={goal.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#25243F] p-3 shadow-[0_12px_24px_-20px_rgba(0,0,0,0.8)]"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[rgba(93,95,215,0.22)] text-violet-300"><Target className="h-5 w-5" strokeWidth={1.5} /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{goal.name}</span><span className="block truncate text-xs text-slate-400">{formatRub(summary.amount)} из {formatRub(goal.amount)}</span><span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-slate-800"><span className="block h-full rounded-full" style={{ width: `${summary.progress * 100}%`, backgroundColor: progressColor }} /></span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={1.5} /></Link>;
+            })}</div>}
+          </section>
+
+          {hasOverduePlanned && <Link href="/transactions?preset=overdue-planned" className="flex items-center gap-3 rounded-xl border border-[rgba(255,141,40,0.22)] bg-[rgba(255,141,40,0.22)] p-3 text-amber-100 shadow-[0_12px_24px_-20px_rgba(0,0,0,0.8)]"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-400/20 text-amber-300"><AlertTriangle className="h-5 w-5" strokeWidth={1.5} /></span><span className="flex-1"><span className="block text-sm font-semibold">Просроченные операции</span><span className="block text-xs text-amber-200/70">{overduePlannedCount} требуют вашего внимания</span></span><ChevronRight className="h-5 w-5 text-amber-300" strokeWidth={1.5} /></Link>}
+        </div>
+      </main>
+
+      <main className="hidden min-h-screen px-8 py-8 md:block">
       <div
         className="flex w-full flex-col gap-6"
         style={{
@@ -1613,7 +1736,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium text-foreground">
                 Доходы за{" "}
-                <span style={{ color: ACCENT }}>{previousMonthLabel}</span>
+                <span style={{ color: ACCENT }}>{currentMonthLabel}</span>
               </div>
               <div
                 className="text-lg font-semibold whitespace-nowrap"
@@ -1626,7 +1749,7 @@ export default function DashboardPage() {
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : incomeSegments.length === 0 ? (
               <div className="text-sm text-muted-foreground">
-                Нет данных за {previousMonthLabel}
+                Нет данных за {currentMonthLabel}
               </div>
             ) : (
               <>
@@ -1707,7 +1830,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium text-foreground">
                 Расходы за{" "}
-                <span style={{ color: ACCENT }}>{previousMonthLabel}</span>
+                <span style={{ color: ACCENT }}>{currentMonthLabel}</span>
               </div>
               <div
                 className="text-lg font-semibold whitespace-nowrap"
@@ -1720,7 +1843,7 @@ export default function DashboardPage() {
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : expenseSegments.length === 0 ? (
               <div className="text-sm text-muted-foreground">
-                Нет данных за {previousMonthLabel}
+                Нет данных за {currentMonthLabel}
               </div>
             ) : (
               <>
@@ -2045,5 +2168,44 @@ export default function DashboardPage() {
 
       </div>
     </main>
+
+    <Dialog open={mobileDetail !== null} onOpenChange={(open) => !open && setMobileDetail(null)}>
+      <DialogContent
+        title="Детализация"
+        containerClassName="p-0"
+        contentWrapperClassName="justify-end py-0"
+        className="mt-auto mb-0 h-[82dvh] max-h-[82dvh] w-full max-w-none gap-4 overflow-y-auto rounded-b-none rounded-t-3xl border-x-0 border-b-0 border-t border-white/10 bg-[#1C1B2E] p-5 pb-7 text-slate-50 sm:my-auto sm:h-auto sm:max-h-[85vh] sm:max-w-md sm:rounded-xl"
+        overlayClassName="bg-black/55"
+      >
+        <div className="mx-auto -mt-2 h-1.5 w-10 rounded-full bg-slate-600" />
+        <DialogTitle className="pr-10 text-xl">
+          {mobileDetail === "structure" ? "Активы и обязательства" : mobileDetail === "income" ? `Доходы за ${currentMonthLabel}` : `Расходы за ${currentMonthLabel}`}
+        </DialogTitle>
+
+        {mobileDetail === "structure" ? (
+          <div className="space-y-5">
+            <div className="rounded-xl border border-white/10 bg-[#25243F] p-3">
+              <div className="mb-3 flex items-center justify-between"><span className="font-medium">Активы</span><span className="font-semibold text-emerald-400">{formatRub(totalAssets)}</span></div>
+              <div className="space-y-3">{assetSegments.length === 0 ? <p className="text-sm text-slate-400">Активов пока нет</p> : assetSegments.slice(0, mobileDetailExpanded ? assetSegments.length : 4).map((segment) => <div key={segment.label} className="flex items-center gap-2 text-sm"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} /><span className="flex-1 truncate">{segment.label}</span><span className="font-medium">{formatRub(segment.value)}</span><span className="w-10 text-right text-xs text-slate-400">{formatPercent(segment.percent * 100)}%</span></div>)}</div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-[#25243F] p-3">
+              <div className="mb-3 flex items-center justify-between"><span className="font-medium">Обязательства</span><span className="font-semibold text-rose-400">−{formatRub(totalLiabilities)}</span></div>
+              <div className="space-y-3">{liabilitySegments.length === 0 ? <p className="text-sm text-slate-400">Обязательств нет</p> : liabilitySegments.slice(0, mobileDetailExpanded ? liabilitySegments.length : 4).map((segment) => <div key={segment.label} className="flex items-center gap-2 text-sm"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} /><span className="flex-1 truncate">{segment.label}</span><span className="font-medium">{formatRub(segment.value)}</span><span className="w-10 text-right text-xs text-slate-400">{formatPercent(segment.percent * 100)}%</span></div>)}</div>
+            </div>
+            {(assetSegments.length > 4 || liabilitySegments.length > 4) && <button type="button" onClick={() => setMobileDetailExpanded((value) => !value)} className="w-full rounded-xl bg-[rgba(93,95,215,0.22)] py-3 text-sm font-medium text-violet-200">{mobileDetailExpanded ? "Свернуть список" : "Показать все категории"}</button>}
+            <Link href="/assets" className="flex items-center justify-center gap-2 rounded-xl bg-[#7F5CFF] py-3.5 text-sm font-semibold text-white">Открыть активы <ArrowRight className="h-4 w-4" strokeWidth={1.5} /></Link>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-white/10 bg-[#25243F] p-3">
+              <div className="space-y-2">{(mobileDetail === "income" ? incomeLegendRows : expenseLegendRows).length === 0 ? <p className="text-sm text-slate-400">Нет операций за этот месяц</p> : (mobileDetail === "income" ? incomeLegendRows : expenseLegendRows).slice(0, mobileDetailExpanded ? undefined : 5).map((row) => <div key={row.label} className="flex items-center gap-3 py-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: row.color }} /><span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span><span className="text-sm font-semibold">{formatRub(row.value)}</span><span className="w-9 text-right text-xs text-slate-400">{formatPercent(row.percent * 100)}%</span></div>)}</div>
+            </div>
+            {(mobileDetail === "income" ? incomeLegendRows : expenseLegendRows).length > 5 && <button type="button" onClick={() => setMobileDetailExpanded((value) => !value)} className="w-full rounded-xl bg-[rgba(93,95,215,0.22)] py-3 text-sm font-medium text-violet-200">{mobileDetailExpanded ? "Свернуть список" : "Показать все статьи"}</button>}
+            <Link href="/transactions" className="flex items-center justify-center gap-2 rounded-xl bg-[#7F5CFF] py-3.5 text-sm font-semibold text-white">Открыть операции <ArrowRight className="h-4 w-4" strokeWidth={1.5} /></Link>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

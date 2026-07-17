@@ -41,6 +41,7 @@ import { PINK_GRADIENT } from "@/lib/gradients";
 import {
   AlertCircle,
   ArrowRight,
+  ArrowDown,
   ArrowLeft,
   ArrowLeftRight,
   Ban,
@@ -226,6 +227,7 @@ import {
 import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
 
 type TransactionsViewMode = "actual" | "planning";
+type MobileFilterKey = "direction" | "amount" | "date" | "item" | "category" | "counterparty" | "comment";
 
 type TransactionCard = TransactionOut & { isDeleted?: boolean };
 
@@ -259,6 +261,15 @@ type CategoryPathOption = {
 };
 
 const PAGE_SIZE = 50;
+const MOBILE_FILTER_LABELS: Record<MobileFilterKey, string> = {
+  direction: "Вид операции",
+  amount: "Сумма",
+  date: "Дата",
+  item: "Счёт",
+  category: "Категория",
+  counterparty: "Контрагент",
+  comment: "Комментарий",
+};
 const EMPTY_NUMBER_ARRAY: number[] = [];
 const EMPTY_DIRECTION_ARRAY: TransactionOut["direction"][] = [];
 const MOEX_TYPE_CODES = new Set([
@@ -1205,6 +1216,106 @@ function parseReceiptQR(qrData: string): ParsedReceiptData | null {
 }
 
 /** Строка таблицы транзакции для мобильной верстки: карточка — 1) сумма+категория (заливка как на десктопе), 2) актив и контрагент (для перевода: откуда/куда), 3) комментарий. */
+/** Компактная mobile-карточка: категория → контрагент → счёт. */
+function TransactionMobileCard({
+  tx,
+  counterparty,
+  itemName,
+  categoryLookup,
+  getCategoryLines,
+  itemsById,
+  getItemCounterparty,
+  apiBase,
+  onEdit,
+}: {
+  tx: TransactionCard;
+  counterparty: CounterpartyOut | null;
+  itemName: (id: number | null | undefined) => string;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  getCategoryLines: (categoryId: number | null) => [string, string, string];
+  itemsById: Map<number, ItemOut>;
+  getItemCounterparty: (itemId: number | null | undefined) => CounterpartyOut | null;
+  apiBase: string;
+  onEdit: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
+  [key: string]: unknown;
+}) {
+  const router = useRouter();
+  const primaryDisplayId = tx.primary_card_item_id ?? tx.primary_item_id;
+  const counterpartyDisplayId = tx.counterparty_card_item_id ?? tx.counterparty_item_id;
+  const primaryItem = primaryDisplayId != null ? itemsById.get(primaryDisplayId) ?? null : null;
+  const counterpartyItem = counterpartyDisplayId != null ? itemsById.get(counterpartyDisplayId) ?? null : null;
+  const primaryCounterparty = getItemCounterparty(primaryDisplayId);
+  const counterpartyItemCounterparty = getItemCounterparty(counterpartyDisplayId);
+  const [l1, l2, l3] = getCategoryLines(tx.category_id);
+  const categoryLabel = [l3, l2, l1].find((value) => value?.trim() && value !== "-") ?? (tx.direction === "TRANSFER" ? "Перевод" : "Без категории");
+  const isIncome = tx.direction === "INCOME";
+  const isTransfer = tx.direction === "TRANSFER";
+  const amountColor = tx.isDeleted ? PLACEHOLDER_COLOR_DARK : isIncome ? GREEN : isTransfer ? ACCENT2 : RED;
+  const amountPrefix = isTransfer ? "" : isIncome ? "+" : "−";
+  const merchant = isTransfer
+    ? `${itemName(primaryDisplayId) || "Счёт"} → ${itemName(counterpartyDisplayId) || "Счёт"}`
+    : counterparty ? buildCounterpartyName(counterparty) : categoryLabel;
+  const accountName = itemName(primaryDisplayId) || "Счёт не указан";
+  const timeLabel = formatTime(tx.transaction_date);
+  const { currentSrc: counterpartyLogoUrl, onError: counterpartyLogoOnError, showFallbackIcon: counterpartyShowFallbackIcon } = useCounterpartyImage(counterparty, apiBase);
+  const { imageSrc: categoryImageSrc, onError: categoryImageOnError, showFallbackIcon: categoryShowFallbackIcon, CategoryIcon, setCategoryIconFormat } = useCategoryImage(tx.category_id, categoryLookup, apiBase);
+  const CounterpartyFallbackIcon = isTransfer ? ArrowLeftRight : counterparty?.entity_type === "PERSON" ? User : Building2;
+
+  return (
+    <TableRow className="border-0 bg-transparent hover:bg-transparent">
+      <TableCell colSpan={2} className="px-4 py-1.5 align-top">
+        <button
+          type="button"
+          className="w-full py-2 text-left transition-opacity active:opacity-70"
+          onClick={() => !tx.isDeleted && router.push(`/transactions/${tx.id}`)}
+          disabled={tx.isDeleted}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden">
+              {isTransfer ? (
+                <CardIcon src={transferIconPath("png")} alt="" size={56} shadow fallbackIcon={ArrowDown} fallbackIconColor={ACCENT2} />
+              ) : counterpartyLogoUrl && !counterpartyShowFallbackIcon ? (
+                <CardIcon src={counterpartyLogoUrl} alt="" size={56} shadow={false} objectFit="contain" fallbackIcon={CounterpartyFallbackIcon} fallbackIconColor={ACCENT2} onError={counterpartyLogoOnError} />
+              ) : (
+                <CounterpartyFallbackIcon className="h-10 w-10" strokeWidth={1.5} style={{ color: tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACCENT2 }} />
+              )}
+            </div>
+            <div className="min-w-0 flex-1 space-y-1.5">
+              {isTransfer ? (
+                <div className="flex flex-col gap-1.5 text-sm" style={{ color: tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
+                  <span className="flex min-w-0 items-center gap-1.5"><>{primaryItem ? <AssetItemIcon item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} size={14} fallbackIconColor={PLACEHOLDER_COLOR_DARK} alt="" /> : <Wallet className="h-3.5 w-3.5" strokeWidth={1.5} />}</><span className="truncate">{accountName}</span></span>
+                  <ArrowDown className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} style={{ color: ACCENT2 }} />
+                  <span className="flex min-w-0 items-center gap-1.5"><>{counterpartyItem ? <AssetItemIcon item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} size={14} fallbackIconColor={PLACEHOLDER_COLOR_DARK} alt="" /> : <Wallet className="h-3.5 w-3.5" strokeWidth={1.5} />}</><span className="truncate">{itemName(counterpartyDisplayId) || "Счёт не указан"}</span></span>
+                </div>
+              ) : (
+                <>
+                  <div className="truncate text-base font-medium" style={{ color: tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>{merchant}</div>
+                  <div className="flex min-w-0 items-center gap-1.5 text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    {categoryImageSrc && !categoryShowFallbackIcon ? (
+                      <CardIcon src={categoryImageSrc} alt="" size={14} shadow={false} fallbackIcon={CategoryIcon} fallbackIconColor={PLACEHOLDER_COLOR_DARK} onError={() => { categoryImageOnError(); setCategoryIconFormat(null); }} />
+                    ) : (
+                      <CategoryIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
+                    )}
+                    <span className="truncate">{categoryLabel}</span>
+                  </div>
+                  <div className="flex min-w-0 items-center gap-1.5 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    {primaryItem ? <AssetItemIcon item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} size={14} fallbackIconColor={PLACEHOLDER_COLOR_DARK} alt="" /> : <Wallet className="h-3.5 w-3.5" strokeWidth={1.5} />}
+                    <span className="truncate">{accountName}</span>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="relative h-16 shrink-0 self-stretch min-w-[92px]">
+              <span className="absolute right-0 top-0 flex items-center gap-1.5 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}><CurrencyChip code={primaryItem?.currency_code ?? "RUB"} className="text-[10px]" />{timeLabel || "—"}</span>
+              <span className="absolute right-0 top-1/2 -translate-y-1/2 text-xl font-semibold tabular-nums" style={{ color: amountColor }}>{amountPrefix}{formatAmount(tx.amount)}</span>
+            </div>
+          </div>
+        </button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 function TransactionMobileTableRow({
   tx,
   counterparty,
@@ -1560,6 +1671,7 @@ function TransactionCardRow({
   /** Дочерняя строка внутри блока разбиения: MODAL_BG как у родителя, без полосы подсветки и без левой 7px */
   isSplitGroupChildRow?: boolean;
 }) {
+  const router = useRouter();
   const isTransfer = tx.direction === "TRANSFER";
   const isExpense = tx.direction === "EXPENSE";
   const isIncome = tx.direction === "INCOME";
@@ -1866,6 +1978,10 @@ function TransactionCardRow({
         ...outerBorderStyle,
         opacity: rowReady ? 1 : 0,
         transition: "opacity 0.2s ease-in-out",
+      }}
+      onClick={(event) => {
+        if (tx.isDeleted || (event.target as HTMLElement).closest("button, input, a, [role=button], [role=menuitem], [role=menu]")) return;
+        router.push(`/transactions/${tx.id}`);
       }}
     >
       {/* Контейнер 1 — подсветка: полоса + свечение (у дочерних и у родителя в группе с полной заливкой не показываем) */}
@@ -2456,7 +2572,14 @@ function TransactionsView({
   const searchParams = useSearchParams();
   const { accountingStartDate } = useAccountingStart();
   const { activeStep, isWizardOpen } = useOnboarding();
-  const { isCollapsed, filtersSlotId, isDesktop, isFilterPanelCollapsed, toggleFilterPanel } = useSidebar();
+  const {
+    isCollapsed,
+    filtersSlotId,
+    isDesktop,
+    isFilterPanelCollapsed,
+    toggleFilterPanel,
+    setMobileFiltersOpen,
+  } = useSidebar();
   const isPlanningView = view === "planning";
   const defaultShowActual = !isPlanningView;
   const defaultShowPlannedRealized = isPlanningView;
@@ -2601,6 +2724,9 @@ function TransactionsView({
   const [selectedCategoryFilterKeys, setSelectedCategoryFilterKeys] = useState<
     Set<string>
   >(() => new Set());
+  const [mobileFilterKeys, setMobileFilterKeys] = useState<Set<MobileFilterKey>>(
+    () => new Set()
+  );
   const [isCurrencyFilterOpen, setIsCurrencyFilterOpen] = useState(false);
   const [selectedCurrencyCodes, setSelectedCurrencyCodes] = useState<Set<string>>(
     () => new Set()
@@ -5257,6 +5383,23 @@ function TransactionsView({
       return next;
     });
   };
+  const addMobileFilter = (key: MobileFilterKey) => {
+    setMobileFilterKeys((prev) => new Set(prev).add(key));
+  };
+  const removeMobileFilter = (key: MobileFilterKey) => {
+    setMobileFilterKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+    if (key === "direction") setSelectedDirections(new Set());
+    if (key === "amount") { setAmountFrom(""); setAmountTo(""); }
+    if (key === "date") { setDateFrom(""); setDateTo(""); }
+    if (key === "item") { setSelectedItemIds(new Set()); setItemFilterResetKey((value) => value + 1); }
+    if (key === "category") setSelectedCategoryFilterKeys(new Set());
+    if (key === "counterparty") resetCounterpartyFilters();
+    if (key === "comment") setCommentFilter("");
+  };
 
   const deleteCount = deleteIds?.length ?? 0;
   const isBulkDelete = deleteCount > 1;
@@ -5320,7 +5463,7 @@ function TransactionsView({
     >
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-      {mounted && typeof document !== "undefined" && (() => {
+      {mounted && isDesktop && typeof document !== "undefined" && (() => {
         const el = document.getElementById(filtersSlotId);
         return el ? createPortal(
           <div className="space-y-4 py-2">
@@ -5800,6 +5943,69 @@ function TransactionsView({
                 />
               </div>
           </FilterSection>
+          </div>,
+          el
+        ) : null;
+      })()}
+
+      {mounted && !isDesktop && typeof document !== "undefined" && (() => {
+        const el = document.getElementById(filtersSlotId);
+        return el ? createPortal(
+          <div className="space-y-5 pb-8">
+            <div className="rounded-[10px] border border-white/10 bg-[rgba(37,36,63,0.72)] p-3">
+              <label className="mb-2 block text-xs font-medium" style={{ color: PLACEHOLDER_COLOR_DARK }} htmlFor="mobile-transaction-filter">Добавить фильтр</label>
+              <select
+                id="mobile-transaction-filter"
+                value=""
+                className="h-11 w-full rounded-lg border border-white/10 bg-[#25243F] px-3 text-sm outline-none"
+                style={{ color: ACTIVE_TEXT_DARK }}
+                onChange={(event) => {
+                  const key = event.target.value as MobileFilterKey;
+                  if (key) addMobileFilter(key);
+                }}
+              >
+                <option value="">Выберите условие</option>
+                {(Object.keys(MOBILE_FILTER_LABELS) as MobileFilterKey[])
+                  .filter((key) => !mobileFilterKeys.has(key))
+                  .map((key) => <option key={key} value={key}>{MOBILE_FILTER_LABELS[key]}</option>)}
+              </select>
+            </div>
+
+            {mobileFilterKeys.has("direction") && (
+              <FilterSection label="Вид операции" onReset={() => removeMobileFilter("direction")} showReset>
+                <SegmentedSelector options={[{ value: "INCOME", label: "Доход", colorScheme: "green" }, { value: "EXPENSE", label: "Расход", colorScheme: "red" }, { value: "TRANSFER", label: "Перевод", colorScheme: "purple" }]} value={selectedDirections} onChange={(value) => setSelectedDirections(value instanceof Set ? value as Set<TransactionOut["direction"]> : new Set(value as TransactionOut["direction"][]))} multiple />
+              </FilterSection>
+            )}
+            {mobileFilterKeys.has("amount") && (
+              <FilterSection label="Сумма" onReset={() => removeMobileFilter("amount")} showReset>
+                <div className="flex items-center gap-2"><AuthInput type="text" inputMode="decimal" placeholder="От" value={amountFrom} onChange={(event) => setAmountFrom(formatRubInput(event.target.value))} onBlur={() => setAmountFrom((value) => normalizeRubOnBlur(value))} /><span style={{ color: PLACEHOLDER_COLOR_DARK }}>—</span><AuthInput type="text" inputMode="decimal" placeholder="До" value={amountTo} onChange={(event) => setAmountTo(formatRubInput(event.target.value))} onBlur={() => setAmountTo((value) => normalizeRubOnBlur(value))} /></div>
+              </FilterSection>
+            )}
+            {mobileFilterKeys.has("date") && (
+              <FilterSection label="Дата" onReset={() => removeMobileFilter("date")} showReset>
+                <div className="flex items-center gap-2"><AuthInput type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /><span style={{ color: PLACEHOLDER_COLOR_DARK }}>—</span><AuthInput type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></div>
+              </FilterSection>
+            )}
+            {mobileFilterKeys.has("item") && (
+              <FilterSection label="Счёт" onReset={() => removeMobileFilter("item")} showReset>
+                <ItemSelector items={itemsForSelector} selectedIds={Array.from(selectedItemIds)} onChange={(ids) => setSelectedItemIds(new Set(ids))} selectionMode="multi" placeholder="Начните вводить название" getItemTypeLabel={getItemTypeLabel} getItemKind={resolveItemEffectiveKind} getCounterpartyForItemId={getCounterpartyForItemId} apiBase={API_BASE} getBankLogoUrl={itemBankLogoUrl} getBankName={itemBankName} getItemBalance={getItemDisplayBalanceCents} itemCounts={itemTxCounts} resetSignal={itemFilterResetKey} />
+              </FilterSection>
+            )}
+            {mobileFilterKeys.has("category") && (
+              <FilterSection label="Категория" onReset={() => removeMobileFilter("category")} showReset>
+                <CategorySelector categoryNodes={categoryNodes} selectedPathKeys={selectedCategoryFilterKeys} onTogglePath={toggleCategoryFilterSelection} selectionMode="multi" placeholder="Поиск категории" showChips />
+              </FilterSection>
+            )}
+            {mobileFilterKeys.has("counterparty") && (
+              <FilterSection label="Контрагент" onReset={() => removeMobileFilter("counterparty")} showReset>
+                <CounterpartySelector counterparties={selectableCounterparties} selectedIds={Array.from(selectedCounterpartyIds)} onChange={(ids) => setSelectedCounterpartyIds(new Set(ids))} selectionMode="multi" placeholder="Начните вводить название" industries={industries} counterpartyCounts={counterpartyTxCounts} showChips apiBase={API_BASE} />
+              </FilterSection>
+            )}
+            {mobileFilterKeys.has("comment") && (
+              <FilterSection label="Комментарий" onReset={() => removeMobileFilter("comment")} showReset>
+                <AuthInput type="text" placeholder="Введите текст" value={commentFilter} onChange={(event) => setCommentFilter(event.target.value)} />
+              </FilterSection>
+            )}
           </div>,
           el
         ) : null;
@@ -7781,6 +7987,46 @@ function TransactionsView({
 
         <div className="flex-1 min-w-0 pt-[30px]">
           <div className={CONTENT_WIDTH_CLASS}>
+            {!isDesktop && (
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h1 className="text-2xl font-medium tracking-[-0.02em]" style={{ color: ACTIVE_TEXT_DARK }}>
+                    Транзакции
+                  </h1>
+                  <p className="mt-1 text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    {hasAnyFilter ? "Показаны операции по выбранным условиям" : "Все операции по вашим счетам"}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="glass"
+                  className="h-11 shrink-0 rounded-[9px] border-0 px-3 text-sm font-medium active:scale-95"
+                  style={{
+                    "--glass-bg": mobileFilterKeys.size > 0 ? "rgba(127, 92, 255, 0.40)" : "rgba(108, 93, 215, 0.22)",
+                    "--glass-bg-hover": "rgba(108, 93, 215, 0.40)",
+                  } as CSSProperties}
+                  onClick={() => setMobileFiltersOpen(true)}
+                  aria-label="Открыть фильтры транзакций"
+                >
+                  <Filter className="mr-2 h-4 w-4" strokeWidth={1.5} />
+                  Добавить фильтр
+                  {mobileFilterKeys.size > 0 && (
+                    <span className="ml-2 grid h-5 min-w-5 place-items-center rounded-full bg-white px-1 text-[11px] font-semibold" style={{ color: ACCENT }}>
+                      {mobileFilterKeys.size}
+                    </span>
+                  )}
+                </Button>
+              </div>
+            )}
+            {!isDesktop && mobileFilterKeys.size > 0 && (
+              <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
+                {Array.from(mobileFilterKeys).map((key) => (
+                  <button key={key} type="button" className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[rgba(127,92,255,0.45)] bg-[rgba(93,95,215,0.22)] px-3 py-1.5 font-medium text-[#CFCFD6] active:scale-95" onClick={() => removeMobileFilter(key)}>
+                    {MOBILE_FILTER_LABELS[key]} <span className="text-[#AFA5FF]" aria-hidden>×</span><span className="sr-only">Убрать фильтр</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2 mb-4">
               {isDesktop && (
                 <>
@@ -8305,7 +8551,7 @@ function TransactionsView({
                             if (row.type === "split_group") {
                               const { parent, children } = row;
                               return [
-                                <TransactionMobileTableRow
+                                <TransactionMobileCard
                                   key={`${parent.id}-split-p-${parent.isDeleted ? "deleted" : "active"}`}
                                   tx={parent}
                                   counterparty={parent.counterparty_id ? counterpartiesById.get(parent.counterparty_id) ?? null : null}
@@ -8320,7 +8566,7 @@ function TransactionsView({
                                   onEdit={openEditDialog}
                                 />,
                                 ...children.map((child) => (
-                                  <TransactionMobileTableRow
+                                  <TransactionMobileCard
                                     key={`${child.id}-split-c-${child.isDeleted ? "deleted" : "active"}`}
                                     tx={child}
                                     counterparty={child.counterparty_id ? counterpartiesById.get(child.counterparty_id) ?? null : null}
@@ -8339,7 +8585,7 @@ function TransactionsView({
                             }
                             const tx = row.tx;
                             return [
-                              <TransactionMobileTableRow
+                              <TransactionMobileCard
                                 key={`${tx.id}-${tx.isDeleted ? "deleted" : "active"}`}
                                 tx={tx}
                                 counterparty={tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null}

@@ -1788,6 +1788,12 @@ export async function fetchTransactions(): Promise<TransactionOut[]> {
   return raw.map(mapTransactionFromApi);
 }
 
+export async function fetchTransaction(id: number): Promise<TransactionOut> {
+  const res = await authFetch(`${API_BASE}/transactions/${id}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return mapTransactionFromApi(await res.json() as unknown);
+}
+
 export async function fetchTransactionsPage(
   options: FetchTransactionsPageParams
 ): Promise<TransactionPageOut> {

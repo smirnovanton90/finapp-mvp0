@@ -104,7 +104,9 @@ export function FormModal({
           >
             <ChevronLeft className="size-5" strokeWidth={1.5} />
           </IconButton>
-          <span className="flex-1 min-w-0" aria-hidden />
+          <span className="flex-1 min-w-0 truncate text-sm font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+            {title}
+          </span>
           <Button
             type="submit"
             form={isFullscreen ? "form-modal-fullscreen-form" : undefined}

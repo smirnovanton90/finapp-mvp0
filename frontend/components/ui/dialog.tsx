@@ -55,10 +55,12 @@ const DialogContent = React.forwardRef<
     overlayClassName?: string;
     /** Класс для контейнера (fixed inset-0). Например z-[100] для вложенной модалки. */
     containerClassName?: string;
+    /** Класс для внутренней обёртки диалога. Нужен, например, для шторки снизу. */
+    contentWrapperClassName?: string;
     /** Заголовок для скринридеров (обязателен для доступности). Скрыт визуально. */
     title?: string;
   }
->(({ className, children, showCloseButton = true, overlayClassName, containerClassName, title = "Диалог", onPointerDownOutside, onInteractOutside, onFocusOutside, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, overlayClassName, containerClassName, contentWrapperClassName, title = "Диалог", onPointerDownOutside, onInteractOutside, onFocusOutside, ...props }, ref) => {
   const selectorPortalRef = React.useRef<HTMLDivElement>(null);
   const handlePointerDownOutside = (e: Event) => {
     if ((e.target as HTMLElement).closest?.("[data-selector-dropdown]")) {
@@ -84,7 +86,7 @@ const DialogContent = React.forwardRef<
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay className={overlayClassName} />
       <div className={cn("fixed inset-0 z-50 overflow-y-auto overflow-x-hidden overscroll-contain", containerClassName)}>
-        <div className="min-h-full flex flex-col items-center py-6">
+        <div className={cn("min-h-full flex flex-col items-center py-6", contentWrapperClassName)}>
           <DialogPrimitive.Content
             ref={ref}
             data-slot="dialog-content"

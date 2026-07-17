@@ -8,13 +8,14 @@ import { cn } from "@/lib/utils";
 import { AccountingStartGate } from "@/components/accounting-start-gate";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, type CSSProperties } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { MobileFloatingBar } from "@/components/mobile-floating-bar";
 import { MobileWizardOpenProvider, useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
+import { SIDEBAR_BG } from "@/lib/colors";
 
 // Таймаут неактивности: только когда вкладка в фокусе (visible).
 // При переключении на другое приложение/вкладку таймер не идёт — разлогин не происходит.
@@ -150,11 +151,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         style={
           !isDesktop
             ? {
+                "--app-bg": SIDEBAR_BG,
                 paddingTop: "env(safe-area-inset-top, 0px)",
                 paddingBottom: "env(safe-area-inset-bottom, 0px)",
                 paddingLeft: "env(safe-area-inset-left, 0px)",
                 paddingRight: "env(safe-area-inset-right, 0px)",
-              }
+              } as CSSProperties & Record<"--app-bg", string>
             : undefined
         }
         key={sessionKey}
@@ -163,14 +165,14 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
-            background: !isDesktop ? "#000" : APP_BG_GRADIENT,
+            background: !isDesktop ? SIDEBAR_BG : APP_BG_GRADIENT,
             opacity: isDark ? 1 : 0,
           }}
         />
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
-            background: !isDesktop ? "#000" : AUTH_BG_GRADIENT_LIGHT,
+            background: !isDesktop ? SIDEBAR_BG : AUTH_BG_GRADIENT_LIGHT,
             opacity: isDark ? 0 : 1,
           }}
         />

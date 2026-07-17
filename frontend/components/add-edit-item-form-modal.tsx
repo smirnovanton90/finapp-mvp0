@@ -109,6 +109,8 @@ export type AddEditItemFormModalProps = {
   transactionsForEdit?: TransactionOut[];
   /** Если передано, модалка не подгружает список сама (например со страницы «Активы»). */
   items?: ItemOut[];
+  /** На телефоне создание открывается как полноэкранный пошаговый сценарий. */
+  mobileCreateWizard?: boolean;
 };
 
 export function AddEditItemFormModal({
@@ -122,11 +124,14 @@ export function AddEditItemFormModal({
   askConfirm,
   transactionsForEdit = [],
   items: itemsProp,
+  mobileCreateWizard = false,
 }: AddEditItemFormModalProps) {
   const { accountingStartDate } = useAccountingStart();
   const [items, setItems] = useState<ItemOut[]>(itemsProp ?? []);
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [mobileStep, setMobileStep] = useState(1);
   const [kind, setKind] = useState<ItemKind>("ASSET");
   const [allowedTypeCodes, setAllowedTypeCodes] = useState<string[]>(CASH_TYPES);
   const [sectionId, setSectionId] = useState("");
@@ -2334,6 +2339,47 @@ export function AddEditItemFormModal({
   };
 
   const isEditing = Boolean(editingItem);
+  const isMobileWizard = mobileCreateWizard && !isEditing && isMobileViewport;
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobileViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (open) setMobileStep(1);
+  }, [open]);
+
+  const handleMobileWizardSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    setFormError(null);
+    if (mobileStep === 1) {
+      if (isGeneralCreate && !sectionId) return setFormError("Выберите раздел.");
+      if (!typeCode) return setFormError("Выберите вид.");
+      setMobileStep(2);
+      return;
+    }
+    if (mobileStep === 2) {
+      if (!name.trim()) return setFormError("Введите название актива.");
+      setMobileStep(3);
+      return;
+    }
+    void handleSubmit(event);
+  };
+
+  const handleMobileWizardCancel = () => {
+    if (isMobileWizard && mobileStep > 1) {
+      setFormError(null);
+      setMobileStep((current) => current - 1);
+      return;
+    }
+    resetForm();
+    onOpenChange(false);
+    onClearEditingItem();
+  };
 
   return (
     <>
@@ -2359,21 +2405,29 @@ export function AddEditItemFormModal({
           }
           onOpenChange(next);
         }}
-        title={isEditing ? "Редактировать актив/обязательство" : "Добавить актив/обязательство"}
+        title={isMobileWizard ? `Новый актив · шаг ${mobileStep} из 3` : isEditing ? "Редактировать актив/обязательство" : "Добавить актив/обязательство"}
         icon={<Wallet className="w-8 h-8" style={{ color: ACTIVE_TEXT_DARK }} />}
         formError={formError}
-        onSubmit={handleSubmit}
-        onCancel={() => {
-          resetForm();
-          onOpenChange(false);
-          onClearEditingItem();
-        }}
-        submitLabel={loading ? (isEditing ? "Сохраняем..." : "Добавляем...") : isEditing ? "Сохранить" : "Добавить"}
+        onSubmit={isMobileWizard ? handleMobileWizardSubmit : handleSubmit}
+        onCancel={handleMobileWizardCancel}
+        submitLabel={loading ? (isEditing ? "Сохраняем..." : "Добавляем...") : isMobileWizard && mobileStep < 3 ? "Далее" : isEditing ? "Сохранить" : "Добавить"}
         loading={loading}
         size="wide"
+        variant={isMobileWizard ? "fullscreen" : "modal"}
       >
         <div className="grid gap-4 w-full">
-            <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          {isMobileWizard && (
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                <span>{["Тип актива", "Основное", "Стоимость и настройки"][mobileStep - 1]}</span>
+                <span>{mobileStep}/3</span>
+              </div>
+              <div className="flex gap-1" aria-label={`Шаг ${mobileStep} из 3`}>
+                {[1, 2, 3].map((step) => <span key={step} className="h-1 flex-1 rounded-full" style={{ backgroundColor: step <= mobileStep ? ACCENT : "rgba(255,255,255,0.14)" }} />)}
+              </div>
+            </div>
+          )}
+            <div className={cn("grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center", isMobileWizard && mobileStep !== 1 && "hidden")}>
               <div className="relative">
                 <div
                   className="relative w-[200px] h-[200px] rounded-lg overflow-hidden cursor-pointer transition-all group"
@@ -2471,6 +2525,7 @@ export function AddEditItemFormModal({
             </div>
 
             {typeCode && (<>
+            <div className={cn(isMobileWizard && mobileStep !== 2 && "hidden")}>
             {/* ══════ 1. Основное ══════ */}
             <CollapsibleFormSection title="Основное" defaultOpen>
               <div className={`grid grid-cols-1 gap-4 ${showInstrumentBlock || showCounterpartyField ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
@@ -2606,6 +2661,9 @@ export function AddEditItemFormModal({
               </div>
             </CollapsibleFormSection>
 
+            </div>
+
+            <div className={cn(isMobileWizard && mobileStep !== 3 && "hidden")}>
             {/* ══════ 2. Стоимость ══════ */}
             <CollapsibleFormSection
               title="Стоимость"
@@ -3436,6 +3494,9 @@ export function AddEditItemFormModal({
               </CollapsibleFormSection>
             )}
 
+            </div>
+
+            <div className={cn(isMobileWizard && mobileStep !== 3 && "hidden")}>
             {/* ══════ 4. Дополнительно ══════ */}
             <CollapsibleFormSection title="Дополнительно" defaultOpen={false}>
               <ChipsInput label="Синонимы" labelHint="Добавьте альтернативные названия. При импорте транзакций актив/обязательство будет подбираться и по синонимам (например, *1234 для карты)." value={synonyms} onChange={setSynonyms} placeholder="Введите синоним и нажмите Enter" maxItems={50} maxLengthPerItem={300} />
@@ -3453,6 +3514,7 @@ export function AddEditItemFormModal({
 
 
             </CollapsibleFormSection>
+            </div>
             </>)}
         </div>
       </FormModal>

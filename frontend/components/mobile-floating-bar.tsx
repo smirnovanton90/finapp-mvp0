@@ -7,7 +7,7 @@ import { LayoutDashboard, Wallet, ArrowLeftRight, Plus } from "lucide-react";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { cn } from "@/lib/utils";
-import { PLACEHOLDER_COLOR_DARK, SIDEBAR_BG } from "@/lib/colors";
+import { PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
 
 const ASSETS_HREF = "/assets";
@@ -89,12 +89,13 @@ export function MobileFloatingBar() {
 
   return (
     <>
-      {/* Затемнение от панели до низа экрана (включая home indicator) на всех экранах */}
+      {/* Лёгкое затемнение к низу экрана: контент под панелью остаётся читаемым при скролле */}
       <div
         className="pointer-events-none fixed inset-x-0 bottom-0 z-20"
         style={{
           height: "calc(5.75rem + env(safe-area-inset-bottom, 0px))",
-          background: `linear-gradient(to top, ${SIDEBAR_BG} 0%, ${SIDEBAR_BG} 42%, rgba(25, 23, 50, 0.92) 62%, transparent 100%)`,
+          background:
+            "linear-gradient(to top, rgba(25, 23, 50, 0.45) 0%, rgba(25, 23, 50, 0.18) 40%, transparent 100%)",
         }}
         aria-hidden
       />

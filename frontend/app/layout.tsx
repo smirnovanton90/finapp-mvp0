@@ -2,10 +2,13 @@ import type { Metadata, Viewport } from "next";
 import { Providers } from "./providers";
 import "./globals.css";
 
+/** Цвет chrome iOS PWA / статус-бара — совпадает с мобильным фоном приложения (#191732). */
+const PWA_CHROME_COLOR = "#191732";
+
 export const metadata: Metadata = {
   title: "FinApp",
   description: "Учёт активов, транзакций и планирование финансов",
-  // Добавить на экран «Домой» в Safari на iPhone. black-translucent — контент под статус-баром, env(safe-area-inset-*) задаёт отступы (рекомендации для viewport-fit=cover).
+  // black-translucent + viewport-fit=cover: контент под статус-баром, отступы через env(safe-area-inset-*).
   appleWebApp: {
     capable: true,
     title: "FinApp",
@@ -23,15 +26,13 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#1E2128" },
-  ],
+  // Один цвет для light/dark: иначе iOS standalone рисует светлую полосу при системной светлой теме.
+  themeColor: PWA_CHROME_COLOR,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" suppressHydrationWarning>
+    <html lang="ru" className="dark" suppressHydrationWarning>
       <body>
         <Providers>{children}</Providers>
       </body>

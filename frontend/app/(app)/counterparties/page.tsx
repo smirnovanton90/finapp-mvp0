@@ -624,7 +624,7 @@ export default function CounterpartiesPage() {
   const { isCollapsed, filtersSlotId } = useSidebar();
 
   return (
-    <main className={cn("min-h-screen pb-8", isCollapsed ? "pl-0" : "pl-0")}>
+    <main className={cn("min-h-0 pb-2 md:min-h-screen md:pb-8", isCollapsed ? "pl-0" : "pl-0")}>
       {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
       <FormModal

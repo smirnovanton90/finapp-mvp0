@@ -146,22 +146,23 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <div
         className={cn(
           "relative min-h-screen overflow-hidden",
-          !isDesktop && "h-[100dvh] flex flex-col"
+          !isDesktop && "flex h-[100dvh] max-h-[100dvh] flex-col overscroll-none"
         )}
         style={
           !isDesktop
-            ? {
+            ? ({
                 "--app-bg": SIDEBAR_BG,
+                // Только верх и бока: низ заполняет scrim панели навигации до края экрана
                 paddingTop: "env(safe-area-inset-top, 0px)",
-                paddingBottom: "env(safe-area-inset-bottom, 0px)",
                 paddingLeft: "env(safe-area-inset-left, 0px)",
                 paddingRight: "env(safe-area-inset-right, 0px)",
-              } as CSSProperties & Record<"--app-bg", string>
+                backgroundColor: SIDEBAR_BG,
+              } as CSSProperties & Record<"--app-bg", string>)
             : undefined
         }
         key={sessionKey}
       >
-        {/* Фон: на мобильной — чёрный, на десктопе — градиент */}
+        {/* Фон: на мобильной — сплошной, на десктопе — градиент */}
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
@@ -186,14 +187,15 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           <div
             className={cn(
               "flex-1 transition-all duration-300 @container",
-              !isSpecialPage && "min-h-screen flex items-center",
-              !isDesktop && "px-4 pb-6 overflow-y-auto min-h-0"
+              // Вертикальное центрирование только на десктопе — на мобиле оно обрезает верхние заголовки
+              isDesktop && !isSpecialPage && "min-h-screen flex items-center",
+              !isDesktop &&
+                "min-h-0 overflow-y-auto overscroll-y-none px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))]"
             )}
             style={
               !isDesktop
                 ? {
                     marginLeft: contentMarginLeft,
-                    height: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom))",
                     WebkitOverflowScrolling: "touch",
                   }
                 : { marginLeft: contentMarginLeft }
@@ -205,7 +207,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 {children}
               </div>
             ) : (
-              <div className="w-full h-full flex items-center">
+              <div className={cn("w-full", isDesktop && "h-full flex items-center")}>
                 <div className={CONTENT_WIDTH_CLASS}>
                   {children}
                 </div>

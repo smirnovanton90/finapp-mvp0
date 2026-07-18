@@ -27,11 +27,14 @@ export function PwaInstallPrompt() {
   useEffect(() => {
     setMounted(true);
     setDismissed(typeof localStorage !== "undefined" && localStorage.getItem(STORAGE_KEY) === "1");
-    setIsStandalone(
+    const standalone =
       typeof window !== "undefined" &&
-        (window.matchMedia("(display-mode: standalone)").matches ||
-          (window.navigator as { standalone?: boolean }).standalone === true)
-    );
+      (window.matchMedia("(display-mode: standalone)").matches ||
+        (window.navigator as { standalone?: boolean }).standalone === true);
+    setIsStandalone(standalone);
+    if (standalone) {
+      document.documentElement.classList.add("standalone-pwa");
+    }
     setIsIOS(
       typeof navigator !== "undefined" &&
         /iPad|iPhone|iPod/.test(navigator.userAgent) &&
@@ -40,6 +43,9 @@ export function PwaInstallPrompt() {
     if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() => {});
     }
+    return () => {
+      document.documentElement.classList.remove("standalone-pwa");
+    };
   }, []);
 
   useEffect(() => {

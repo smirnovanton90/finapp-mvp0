@@ -1340,7 +1340,7 @@ export default function FinancialPlanningPage() {
   return (
     <main
       className={cn(
-        "min-h-screen pb-8",
+        "min-h-0 pb-2 md:min-h-screen md:pb-8",
         isCollapsed ? "pl-0" : "pl-0"
       )}
     >

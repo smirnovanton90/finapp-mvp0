@@ -750,7 +750,7 @@ export default function CategoriesPage() {
   );
 
   return (
-    <main className="min-h-screen pb-8">
+    <main className="min-h-0 pb-2 md:min-h-screen md:pb-8">
       <FormModal
         open={isAddOpen}
         onOpenChange={(open) => {

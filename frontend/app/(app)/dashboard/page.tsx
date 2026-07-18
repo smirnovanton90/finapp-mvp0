@@ -1521,7 +1521,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <main className="min-h-screen pb-28 pt-5 text-slate-50 md:hidden">
+      <main className="min-h-0 pt-5 pb-2 text-slate-50 md:hidden">
         <div
           className="flex w-full flex-col gap-5"
           style={{ opacity: loading ? 0 : 1, transition: "opacity 0.3s ease-in-out" }}

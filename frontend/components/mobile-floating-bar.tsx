@@ -7,7 +7,7 @@ import { LayoutDashboard, Wallet, ArrowLeftRight, Plus } from "lucide-react";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { cn } from "@/lib/utils";
-import { PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
+import { PLACEHOLDER_COLOR_DARK, SIDEBAR_BG } from "@/lib/colors";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
 
 const ASSETS_HREF = "/assets";
@@ -88,58 +88,69 @@ export function MobileFloatingBar() {
   );
 
   return (
-    <nav
-      className={cn(
-        "fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-[calc(0.75rem+env(safe-area-inset-left))] right-[calc(0.75rem+env(safe-area-inset-right))] z-30 flex min-h-16 flex-col justify-center px-3",
-        "rounded-2xl border border-sidebar-border/70 bg-sidebar/70 shadow-[0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/55"
-      )}
-      aria-label="Основная навигация"
-    >
-      <div className="relative grid grid-cols-5 items-stretch rounded-xl">
-        <NavButton
-          href={DASHBOARD_HREF}
-          icon={LayoutDashboard}
-          label="Дэшборд"
-          active={!!isDashboard}
-        />
-        <NavButton
-          href={ASSETS_HREF}
-          icon={Wallet}
-          label="Активы"
-          active={!!isAssets}
-        />
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          <MobileTapScale>
-            {useExpandAnimation ? (
-              <button
-                ref={addButtonRef as React.RefObject<HTMLButtonElement>}
-                type="button"
-                aria-label={addLabel}
-                className={addButtonClass}
-                onClick={handleAddClick}
-              >
-                <Plus className="size-6" strokeWidth={2.25} />
-              </button>
-            ) : (
-              <Link
-                ref={addButtonRef as React.RefObject<HTMLAnchorElement>}
-                href={addHref}
-                aria-label={addLabel}
-                className={addButtonClass}
-              >
-                <Plus className="size-6" strokeWidth={2.25} />
-              </Link>
-            )}
-          </MobileTapScale>
+    <>
+      {/* Затемнение от панели до низа экрана (включая home indicator) на всех экранах */}
+      <div
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-20"
+        style={{
+          height: "calc(5.75rem + env(safe-area-inset-bottom, 0px))",
+          background: `linear-gradient(to top, ${SIDEBAR_BG} 0%, ${SIDEBAR_BG} 42%, rgba(25, 23, 50, 0.92) 62%, transparent 100%)`,
+        }}
+        aria-hidden
+      />
+      <nav
+        className={cn(
+          "fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-[calc(0.75rem+env(safe-area-inset-left))] right-[calc(0.75rem+env(safe-area-inset-right))] z-30 flex min-h-16 flex-col justify-center px-3",
+          "rounded-2xl border border-sidebar-border/70 bg-sidebar/70 shadow-[0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/55"
+        )}
+        aria-label="Основная навигация"
+      >
+        <div className="relative grid grid-cols-5 items-stretch rounded-xl">
+          <NavButton
+            href={DASHBOARD_HREF}
+            icon={LayoutDashboard}
+            label="Дэшборд"
+            active={!!isDashboard}
+          />
+          <NavButton
+            href={ASSETS_HREF}
+            icon={Wallet}
+            label="Активы"
+            active={!!isAssets}
+          />
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <MobileTapScale>
+              {useExpandAnimation ? (
+                <button
+                  ref={addButtonRef as React.RefObject<HTMLButtonElement>}
+                  type="button"
+                  aria-label={addLabel}
+                  className={addButtonClass}
+                  onClick={handleAddClick}
+                >
+                  <Plus className="size-6" strokeWidth={2.25} />
+                </button>
+              ) : (
+                <Link
+                  ref={addButtonRef as React.RefObject<HTMLAnchorElement>}
+                  href={addHref}
+                  aria-label={addLabel}
+                  className={addButtonClass}
+                >
+                  <Plus className="size-6" strokeWidth={2.25} />
+                </Link>
+              )}
+            </MobileTapScale>
+          </div>
+          <NavButton
+            href={TRANSACTIONS_HREF}
+            icon={ArrowLeftRight}
+            label="Транзакции"
+            active={!!isTransactions}
+            className="col-start-5"
+          />
         </div>
-        <NavButton
-          href={TRANSACTIONS_HREF}
-          icon={ArrowLeftRight}
-          label="Транзакции"
-          active={!!isTransactions}
-          className="col-start-5"
-        />
-      </div>
-    </nav>
+      </nav>
+    </>
   );
 }

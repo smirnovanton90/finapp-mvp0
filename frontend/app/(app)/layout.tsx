@@ -152,8 +152,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           !isDesktop
             ? ({
                 "--app-bg": SIDEBAR_BG,
-                // Только верх и бока: низ заполняет scrim панели навигации до края экрана
-                paddingTop: "env(safe-area-inset-top, 0px)",
+                // На странице актива safe-area рисует сама страница (градиент шапки).
+                // Иначе padding + сплошной SIDEBAR_BG дают тёмную полосу над градиентом.
+                paddingTop: isAssetDetailPage ? 0 : "env(safe-area-inset-top, 0px)",
                 paddingLeft: "env(safe-area-inset-left, 0px)",
                 paddingRight: "env(safe-area-inset-right, 0px)",
                 backgroundColor: SIDEBAR_BG,

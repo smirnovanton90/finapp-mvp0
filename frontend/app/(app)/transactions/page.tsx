@@ -110,6 +110,7 @@ import { AuthInput } from "@/components/ui/auth-input";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AssetItemIcon } from "@/components/asset-item-icon";
+import { TransactionMobileCard as TransactionMobileCardView } from "@/components/transaction-mobile-card";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
@@ -1235,7 +1236,6 @@ function TransactionMobileCard({
   itemsById,
   getItemCounterparty,
   apiBase,
-  onEdit,
 }: {
   tx: TransactionCard;
   counterparty: CounterpartyOut | null;
@@ -1245,81 +1245,21 @@ function TransactionMobileCard({
   itemsById: Map<number, ItemOut>;
   getItemCounterparty: (itemId: number | null | undefined) => CounterpartyOut | null;
   apiBase: string;
-  onEdit: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
   [key: string]: unknown;
 }) {
-  const router = useRouter();
-  const primaryDisplayId = tx.primary_card_item_id ?? tx.primary_item_id;
-  const counterpartyDisplayId = tx.counterparty_card_item_id ?? tx.counterparty_item_id;
-  const primaryItem = primaryDisplayId != null ? itemsById.get(primaryDisplayId) ?? null : null;
-  const counterpartyItem = counterpartyDisplayId != null ? itemsById.get(counterpartyDisplayId) ?? null : null;
-  const primaryCounterparty = getItemCounterparty(primaryDisplayId);
-  const counterpartyItemCounterparty = getItemCounterparty(counterpartyDisplayId);
-  const [l1, l2, l3] = getCategoryLines(tx.category_id);
-  const categoryLabel = [l3, l2, l1].find((value) => value?.trim() && value !== "-") ?? (tx.direction === "TRANSFER" ? "Перевод" : "Без категории");
-  const isIncome = tx.direction === "INCOME";
-  const isTransfer = tx.direction === "TRANSFER";
-  const amountColor = tx.isDeleted ? PLACEHOLDER_COLOR_DARK : isIncome ? GREEN : isTransfer ? ACCENT2 : RED;
-  const amountPrefix = isTransfer ? "" : isIncome ? "+" : "−";
-  const merchant = isTransfer
-    ? `${itemName(primaryDisplayId) || "Счёт"} → ${itemName(counterpartyDisplayId) || "Счёт"}`
-    : counterparty ? buildCounterpartyName(counterparty) : categoryLabel;
-  const accountName = itemName(primaryDisplayId) || "Счёт не указан";
-  const timeLabel = formatTime(tx.transaction_date);
-  const { currentSrc: counterpartyLogoUrl, onError: counterpartyLogoOnError, showFallbackIcon: counterpartyShowFallbackIcon } = useCounterpartyImage(counterparty, apiBase);
-  const { imageSrc: categoryImageSrc, onError: categoryImageOnError, showFallbackIcon: categoryShowFallbackIcon, CategoryIcon, setCategoryIconFormat } = useCategoryImage(tx.category_id, categoryLookup, apiBase);
-  const CounterpartyFallbackIcon = isTransfer ? ArrowLeftRight : counterparty?.entity_type === "PERSON" ? User : Building2;
-
   return (
     <TableRow className="border-0 bg-transparent hover:bg-transparent">
-      <TableCell colSpan={2} className="px-4 py-1.5 align-top">
-        <button
-          type="button"
-          className="w-full py-2 text-left transition-opacity active:opacity-70"
-          onClick={() => !tx.isDeleted && router.push(`/transactions/${tx.id}`)}
-          disabled={tx.isDeleted}
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden">
-              {isTransfer ? (
-                <CardIcon src={transferIconPath("png")} alt="" size={56} shadow fallbackIcon={ArrowDown} fallbackIconColor={ACCENT2} />
-              ) : counterpartyLogoUrl && !counterpartyShowFallbackIcon ? (
-                <CardIcon src={counterpartyLogoUrl} alt="" size={56} shadow={false} objectFit="contain" fallbackIcon={CounterpartyFallbackIcon} fallbackIconColor={ACCENT2} onError={counterpartyLogoOnError} />
-              ) : (
-                <CounterpartyFallbackIcon className="h-10 w-10" strokeWidth={1.5} style={{ color: tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACCENT2 }} />
-              )}
-            </div>
-            <div className="min-w-0 flex-1 space-y-1.5">
-              {isTransfer ? (
-                <div className="flex flex-col gap-1.5 text-sm" style={{ color: tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>
-                  <span className="flex min-w-0 items-center gap-1.5"><>{primaryItem ? <AssetItemIcon item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} size={14} fallbackIconColor={PLACEHOLDER_COLOR_DARK} alt="" /> : <Wallet className="h-3.5 w-3.5" strokeWidth={1.5} />}</><span className="truncate">{accountName}</span></span>
-                  <ArrowDown className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} style={{ color: ACCENT2 }} />
-                  <span className="flex min-w-0 items-center gap-1.5"><>{counterpartyItem ? <AssetItemIcon item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} size={14} fallbackIconColor={PLACEHOLDER_COLOR_DARK} alt="" /> : <Wallet className="h-3.5 w-3.5" strokeWidth={1.5} />}</><span className="truncate">{itemName(counterpartyDisplayId) || "Счёт не указан"}</span></span>
-                </div>
-              ) : (
-                <>
-                  <div className="truncate text-base font-medium" style={{ color: tx.isDeleted ? PLACEHOLDER_COLOR_DARK : ACTIVE_TEXT_DARK }}>{merchant}</div>
-                  <div className="flex min-w-0 items-center gap-1.5 text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                    {categoryImageSrc && !categoryShowFallbackIcon ? (
-                      <CardIcon src={categoryImageSrc} alt="" size={14} shadow={false} fallbackIcon={CategoryIcon} fallbackIconColor={PLACEHOLDER_COLOR_DARK} onError={() => { categoryImageOnError(); setCategoryIconFormat(null); }} />
-                    ) : (
-                      <CategoryIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
-                    )}
-                    <span className="truncate">{categoryLabel}</span>
-                  </div>
-                  <div className="flex min-w-0 items-center gap-1.5 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                    {primaryItem ? <AssetItemIcon item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} size={14} fallbackIconColor={PLACEHOLDER_COLOR_DARK} alt="" /> : <Wallet className="h-3.5 w-3.5" strokeWidth={1.5} />}
-                    <span className="truncate">{accountName}</span>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="relative h-16 shrink-0 self-stretch min-w-[92px]">
-              <span className="absolute right-0 top-0 flex items-center gap-1.5 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}><CurrencyChip code={primaryItem?.currency_code ?? "RUB"} className="text-[10px]" />{timeLabel || "—"}</span>
-              <span className="absolute right-0 top-1/2 -translate-y-1/2 text-xl font-semibold tabular-nums" style={{ color: amountColor }}>{amountPrefix}{formatAmount(tx.amount)}</span>
-            </div>
-          </div>
-        </button>
+      <TableCell colSpan={2} className="px-0 py-1.5 align-top">
+        <TransactionMobileCardView
+          tx={tx}
+          counterparty={counterparty}
+          itemName={itemName}
+          categoryLookup={categoryLookup}
+          getCategoryLines={getCategoryLines}
+          itemsById={itemsById}
+          getItemCounterparty={getItemCounterparty}
+          apiBase={apiBase}
+        />
       </TableCell>
     </TableRow>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -82,14 +82,13 @@ import {
   formatSize,
   getTodayDateKey,
 } from "@/lib/asset-item-form-constants";
-import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG } from "@/lib/colors";
+import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG, GREEN_FILL, RED_FILL } from "@/lib/colors";
 import { formatTimeInput } from "@/lib/format-time";
 import { PINK_GRADIENT, ASSET_DETAIL_HEADER_GRADIENT_MOBILE } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
 import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip";
 import { LinkedBrokerageAccountsMeta } from "@/components/linked-brokerage-accounts-meta";
-import { AssetCardMiniChart } from "@/components/asset-card";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
@@ -97,6 +96,7 @@ import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
 import { AddEditItemFormModal } from "@/components/add-edit-item-form-modal";
 import { MobileBottomSheet } from "@/components/mobile-bottom-sheet";
+import { TransactionMobileCard } from "@/components/transaction-mobile-card";
 import {
   Dialog,
   DialogContent,
@@ -305,6 +305,19 @@ export default function AssetDetailPage() {
   const [rentabilityOpen, setRentabilityOpen] = useState<"income" | "expense" | null>(null);
   const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [checkpoints, setCheckpoints] = useState<BalanceCheckpointOut[]>([]);
+  /** Мобильные шторки списков: контрольные точки / стоимости / доходы / расходы */
+  const [mobileListSheet, setMobileListSheet] = useState<
+    "checkpoints" | "values" | "income" | "expense" | null
+  >(null);
+  /** Сколько транзакций показывать в мобильном блоке (старт 5, «Показать ещё» +10). */
+  const [mobileTxVisibleCount, setMobileTxVisibleCount] = useState(5);
+  /** Сколько КТ показывать в мобильном блоке (старт 3, «Показать ещё» +5). */
+  const [mobileCheckpointVisibleCount, setMobileCheckpointVisibleCount] = useState(3);
+  /** Компактная фиксированная шапка при скролле (мобильная). */
+  const [mobileStickyHeaderVisible, setMobileStickyHeaderVisible] = useState(false);
+  const mobileHeroDissolveRef = useRef<HTMLDivElement | null>(null);
+  const mobileHeroGradientRef = useRef<HTMLDivElement | null>(null);
+  const mobileStickyHeaderVisibleRef = useRef(false);
   const [checkpointModalOpen, setCheckpointModalOpen] = useState(false);
   const [checkpointEditId, setCheckpointEditId] = useState<number | null>(null);
   const [checkpointDateStr, setCheckpointDateStr] = useState("");
@@ -617,12 +630,13 @@ export default function AssetDetailPage() {
     setLoadingDynamics(true);
     const dateEnd = new Date().toISOString().slice(0, 10);
     const dateStart = item.open_date ?? dateEnd;
-    Promise.all([fetchTransactions(), fetchCategories(), fetchItems()])
-      .then(([txs, cats, itemsRes]) => {
+    Promise.all([fetchTransactions(), fetchCategories(), fetchItems(), fetchCounterparties()])
+      .then(([txs, cats, itemsRes, cpRes]) => {
         if (cancelled) return;
         setDynamicsTxs(txs);
         setCategories(cats ?? []);
         setAllItems(itemsRes ?? []);
+        setCounterparties(cpRes ?? []);
         const dateSet = new Set<string>([dateStart, dateEnd]);
         txs.forEach((tx) => {
           const d = toTxDateKey(tx.transaction_date);
@@ -701,6 +715,21 @@ export default function AssetDetailPage() {
       .filter((tx) => tx.related_item_id === item.id && tx.asset_link_type === "ASSET_EXPENSE")
       .sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
   }, [item?.id, dynamicsTxsActive]);
+  /** Транзакции, влияющие на остаток актива/обязательства (primary/counterparty/card). */
+  const txsForAssetBalance = useMemo(() => {
+    if (!item?.id) return [];
+    return dynamicsTxsActive
+      .filter((tx) => getTxDeltaForItem(tx, item.id, item.kind, item.currency_code) !== null)
+      .sort((a, b) => {
+        const dateCmp = toTxDateKey(b.transaction_date).localeCompare(toTxDateKey(a.transaction_date));
+        if (dateCmp !== 0) return dateCmp;
+        return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+      });
+  }, [item?.id, item?.kind, item?.currency_code, dynamicsTxsActive]);
+  const checkpointsSortedDesc = useMemo(
+    () => [...checkpoints].sort((a, b) => b.checkpoint_at.localeCompare(a.checkpoint_at)),
+    [checkpoints]
+  );
   const purchaseTxsForAsset = useMemo(() => {
     if (!item?.id) return [];
     return dynamicsTxsActive
@@ -1178,6 +1207,56 @@ export default function AssetDetailPage() {
 
   const { isDesktop } = useSidebar();
 
+  useEffect(() => {
+    setMobileTxVisibleCount(5);
+    setMobileCheckpointVisibleCount(3);
+  }, [item?.id]);
+
+  // Герой: при скролле уменьшается и растворяется на месте; затем появляется компактная шапка.
+  useLayoutEffect(() => {
+    if (isDesktop) {
+      mobileStickyHeaderVisibleRef.current = false;
+      setMobileStickyHeaderVisible(false);
+      return;
+    }
+    const root = document.querySelector("[data-app-scroll-container]");
+    if (!(root instanceof HTMLElement)) return;
+
+    const COLLAPSE_RANGE_PX = 160;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const y = root.scrollTop;
+      const p = Math.min(1, Math.max(0, y / COLLAPSE_RANGE_PX));
+      const dissolveEl = mobileHeroDissolveRef.current;
+      if (dissolveEl) {
+        dissolveEl.style.opacity = String(Math.max(0, 1 - p));
+        dissolveEl.style.transform = `translate3d(0, ${y}px, 0) scale(${1 - p * 0.42})`;
+        dissolveEl.style.pointerEvents = p > 0.85 ? "none" : "auto";
+      }
+      const gradientEl = mobileHeroGradientRef.current;
+      if (gradientEl) {
+        gradientEl.style.opacity = String(Math.max(0, 1 - p * 1.15));
+        gradientEl.style.transform = `translate3d(0, ${y}px, 0)`;
+      }
+      const showSticky = p >= 0.55;
+      if (showSticky !== mobileStickyHeaderVisibleRef.current) {
+        mobileStickyHeaderVisibleRef.current = showSticky;
+        setMobileStickyHeaderVisible(showSticky);
+      }
+    };
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(update);
+    };
+    update();
+    root.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [isDesktop, item?.id, loading]);
+
   // Сброс скролла при открытии страницы (после отрисовки), чтобы контент не оставался «под верхним краем».
   useLayoutEffect(() => {
     if (isDesktop) return;
@@ -1474,12 +1553,29 @@ export default function AssetDetailPage() {
   );
 
   const getCounterpartyForItemId = useCallback(
-    (itemId: number) => {
+    (itemId: number | null | undefined) => {
+      if (itemId == null) return null;
       const it = allItems.find((i) => i.id === itemId);
       if (!it?.counterparty_id) return null;
       return counterpartiesById.get(it.counterparty_id) ?? null;
     },
     [allItems, counterpartiesById]
+  );
+
+  const itemNameById = useCallback(
+    (id: number | null | undefined) => {
+      if (id == null) return "";
+      return itemsById.get(id)?.name ?? "";
+    },
+    [itemsById]
+  );
+
+  const getCategoryLines = useCallback(
+    (categoryId: number | null): [string, string, string] => {
+      const path = categoryId != null ? categoryLookup.idToPath.get(categoryId) ?? [] : [];
+      return [path[0] ?? "-", path[1] ?? "-", path[2] ?? "-"];
+    },
+    [categoryLookup]
   );
 
   const itemCounterpartyLogoUrl = useCallback(
@@ -2809,14 +2905,13 @@ export default function AssetDetailPage() {
   return (
     <main className={`min-h-screen box-border ${CONTENT_WIDTH_CLASS} ${isDesktop ? "px-8 py-8" : "px-0 max-w-none pt-0 pb-3"} ${!isDesktop ? "w-full min-w-0" : ""}`}>
       <div className={cn(!isDesktop && "w-full min-w-0")}>
-      <div className={`flex flex-col gap-6 ${!isDesktop ? "w-full min-w-0" : "w-full"}`}>
-        {/* Мобильная шапка: градиент от верха экрана (перекрывает корневой safe-area), отступ до кнопок — внутри блока */}
+      <div className={cn("flex flex-col", !isDesktop ? "w-full min-w-0 gap-6" : "w-full gap-6")}>
+        {/* Мобильная шапка: градиент от верха экрана (включая safe-area) */}
         {!isDesktop && (
           <div
-            className="relative flex flex-col gap-4 pb-6 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
+            className="relative flex flex-col gap-3 pb-4 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
             style={{
-              marginTop: "calc(-1 * env(safe-area-inset-top, 0px))",
-              paddingTop: "calc(env(safe-area-inset-top, 0px) + 56px)",
+              paddingTop: "calc(env(safe-area-inset-top, 0px) + 8px)",
             }}
           >
             <style dangerouslySetInnerHTML={{ __html: `
@@ -2825,45 +2920,35 @@ export default function AssetDetailPage() {
                 50% { background-position: 25% 15%; }
               }
             ` }} />
-            {/* Слой градиента, плавно исчезает маской (safe area только в корневом layout) */}
+            {/* Слой градиента только в шапке — не перекрывает блоки ниже */}
             <div
-              className="absolute left-0 right-0 z-0 pointer-events-none"
+              ref={mobileHeroGradientRef}
+              className="absolute left-0 right-0 z-0 pointer-events-none overflow-hidden will-change-transform"
               style={{
                 top: 0,
-                height: "75vh",
+                bottom: 0,
                 background: ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
                 backgroundSize: "200% 200%",
                 backgroundPosition: "0% 0%",
                 animation: "asset-header-gradient-shift 18s ease-in-out infinite",
-                WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 28%, transparent 100%)",
-                maskImage: "linear-gradient(to bottom, black 0%, black 28%, transparent 100%)",
+                WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 55%, transparent 100%)",
+                maskImage: "linear-gradient(to bottom, black 0%, black 55%, transparent 100%)",
               }}
             />
-            <div className="relative z-10 flex flex-col gap-4">
-            {/* Строка под safe area: иконка назад слева, переключатель периода справа */}
-            <div className="flex flex-row items-center justify-between">
+            <div
+              ref={mobileHeroDissolveRef}
+              className="relative z-0 flex flex-col gap-3 will-change-transform"
+              style={{
+                transformOrigin: "center top",
+              }}
+            >
+            {/* Строка под safe area: иконка назад */}
+            <div className="flex flex-row items-center">
               <IconButton variant="ghost" size="icon" asChild aria-label="К активам и обязательствам">
                 <Link href="/assets" className="text-white/90 hover:text-white">
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               </IconButton>
-              <div className="flex items-center rounded-[9px] border border-white/30 overflow-hidden" role="group" aria-label="Период графика">
-                {(["week", "month", "year", "all"] as const).map((period) => (
-                  <button
-                    key={period}
-                    type="button"
-                    aria-label={period === "week" ? "Неделя" : period === "month" ? "Месяц" : period === "year" ? "Год" : "За весь период"}
-                    className={cn(
-                      "px-2.5 py-1.5 text-xs font-medium transition-colors min-w-[2.25rem] flex items-center justify-center",
-                      mobileCostPeriod !== period && "bg-transparent text-white/70 hover:bg-white/10"
-                    )}
-                    style={mobileCostPeriod === period ? { backgroundColor: ACCENT, color: "white" } : undefined}
-                    onClick={() => setMobileCostPeriod(period)}
-                  >
-                    {period === "all" ? <CalendarCheck className="h-3.5 w-3.5" /> : period === "week" ? "Н" : period === "month" ? "М" : "Г"}
-                  </button>
-                ))}
-              </div>
             </div>
             {/* Картинка актива */}
             <div className="flex flex-col items-center gap-3">
@@ -2958,150 +3043,332 @@ export default function AssetDetailPage() {
                   ))}
                 </div>
               )}
-              {!costs && !isDesktop ? (
-                <div
-                  className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none pl-4 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                  style={{ WebkitOverflowScrolling: "touch" }}
-                >
-                  <div className="shrink-0 w-4 min-w-4" aria-hidden />
-                  <Skeleton className="shrink-0 w-[min(85vw,320px)] h-[72px] rounded-[9px]" />
-                  <Skeleton className="shrink-0 w-[min(85vw,320px)] h-[72px] rounded-[9px]" />
-                  <Skeleton className="shrink-0 w-[min(85vw,320px)] h-[72px] rounded-[9px]" />
-                  <div className="shrink-0 w-4 min-w-4" aria-hidden />
-                </div>
-              ) : costs ? (() => {
-                const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
-                const kindToKey = (k: PrimaryValueKind): "balance" | "market" | "acquisition" | "invested" =>
-                  k === "MARKET" ? "market" : k === "ACQUISITION" ? "acquisition" : k === "INVESTED" ? "invested" : "balance";
-                const rows = [
-                  { kind: "BALANCE" as PrimaryValueKind, label: "Балансовая стоимость", valueCents: costs.balance_currency_cents },
-                  { kind: "MARKET" as PrimaryValueKind, label: "Рыночная стоимость", valueCents: costs.market_rub },
-                  { kind: "ACQUISITION" as PrimaryValueKind, label: "Стоимость приобретения", valueCents: costs.acquisition_rub },
-                  { kind: "INVESTED" as PrimaryValueKind, label: "Стоимость вложенных средств", valueCents: costs.invested_rub },
-                ];
-                const primaryRow = rows.find((r) => r.kind === primaryKind);
-                const otherRows = rows.filter((r) => r.kind !== primaryKind);
-                const primaryAmountStyle = { background: PINK_GRADIENT, WebkitBackgroundClip: "text" as const, WebkitTextFillColor: "transparent", backgroundClip: "text" as const, fontSize: "1.875rem", fontWeight: 500 };
-                const openCostOverlay = (key: "balance" | "market" | "acquisition" | "invested") => {
-                  setCostHistoryOpen(key);
-                  setMobileCostOverlayKey(key);
-                };
-                return (
-                  <>
-                    {isDesktop ? (
-                      <>
-                        {primaryRow && (
-                          <div className="w-full min-w-0 mt-2">
-                            <div
-                              className="rounded-[9px] p-[2px] min-w-0 overflow-hidden"
-                              style={{ backgroundImage: PINK_GRADIENT }}
-                            >
-                              <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex items-center justify-between gap-3" style={{ backgroundColor: "#25243F" }}>
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-sm mb-1 truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    {primaryRow.valueCents != null ? (
-                                      <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={primaryAmountStyle} />
-                                    ) : (
-                                      <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={primaryAmountStyle}>—</span>
-                                    )}
-                                  </div>
-                                </div>
-                                {primaryValueMiniChartSeries.length > 1 && (
-                                  <AssetCardMiniChart series={primaryValueMiniChartSeries} itemId={item.id} strokeColor={ACCENT} />
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        <div className="flex gap-2 w-full min-w-0 mt-2">
-                          {otherRows.map((row) => (
-                            <div key={row.kind} className="flex-1 min-w-0 rounded-[9px] px-4 py-3 flex flex-col gap-0.5 min-h-[72px]" style={{ backgroundColor: "#25243F" }}>
-                              <p className="text-sm truncate mb-1" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
-                              {row.valueCents != null ? (
-                                <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "0.875rem", fontWeight: 500 }} />
-                              ) : (
-                                <span className="text-sm" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div
-                          className="mt-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 -mx-6 w-screen max-w-none pl-4 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                          style={{ WebkitOverflowScrolling: "touch" }}
-                        >
-                        <div className="shrink-0 w-4 min-w-4" aria-hidden />
-                        {primaryRow && (
-                          <div
-                            className="shrink-0 w-[min(85vw,320px)] snap-start snap-always rounded-[9px] p-[2px] overflow-hidden cursor-pointer active:opacity-95"
-                            style={{ backgroundImage: PINK_GRADIENT }}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => openCostOverlay(kindToKey(primaryRow.kind))}
-                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(primaryRow.kind)); } }}
-                          >
-                            <div className="rounded-[9px] overflow-hidden px-4 py-3 min-w-0 flex flex-col gap-1" style={{ backgroundColor: "#25243F" }}>
-                              <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
-                              <div className="flex items-center justify-between gap-2 min-w-0">
-                                <div className="min-w-0">
-                                  {primaryRow.valueCents != null ? (
-                                    <AmountWithCurrency valueCents={primaryRow.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.875rem", fontWeight: 500 }} />
-                                  ) : (
-                                    <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
-                                  )}
-                                </div>
-                                {!isDesktop && loadingCostHistory ? (
-                                  <Skeleton className="h-6 w-14 shrink-0 rounded-md" />
-                                ) : mobilePrimaryGrowthPercent != null ? (
-                                  <span
-                                    className="shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums"
-                                    style={{
-                                      borderColor: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
-                                      backgroundColor: mobilePrimaryGrowthPercent > 0 ? "rgba(34, 197, 94, 0.15)" : mobilePrimaryGrowthPercent < 0 ? "rgba(239, 68, 68, 0.15)" : "transparent",
-                                      color: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
-                                    }}
-                                  >
-                                    {mobilePrimaryGrowthPercent > 0 ? "+" : ""}{mobilePrimaryGrowthPercent.toFixed(1)}%
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        {otherRows.map((row) => (
-                          <div
-                            key={row.kind}
-                            className="shrink-0 w-[min(85vw,320px)] snap-start snap-always rounded-[9px] px-4 py-3 flex flex-col gap-1 min-h-[72px] cursor-pointer active:opacity-95"
-                            style={{ backgroundColor: "#25243F" }}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => openCostOverlay(kindToKey(row.kind))}
-                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCostOverlay(kindToKey(row.kind)); } }}
-                          >
-                            <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</p>
-                            <div className="flex items-center min-w-0">
-                              {row.valueCents != null ? (
-                                <AmountWithCurrency valueCents={row.valueCents} currencyCode={item.currency_code ?? "RUB"} amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.875rem", fontWeight: 500 }} />
-                              ) : (
-                                <span className="text-3xl font-medium text-ellipsis overflow-hidden min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                        <div className="shrink-0 w-4 min-w-4" aria-hidden />
-                        </div>
-                      </>
-                    )}
-                  </>
-                );
-              })() : null}
             </div>
             </div>
           </div>
         )}
+
+        {/* Мобильные блоки: контрольные точки, стоимость, доходы/расходы, транзакции */}
+        {!isDesktop && (() => {
+          const primaryKind = (item.primary_value_kind ?? "BALANCE") as PrimaryValueKind;
+          const isBalancePrimary = primaryKind === "BALANCE";
+          const kindToKey = (k: PrimaryValueKind): "balance" | "market" | "acquisition" | "invested" =>
+            k === "MARKET" ? "market" : k === "ACQUISITION" ? "acquisition" : k === "INVESTED" ? "invested" : "balance";
+          const costRows = costs
+            ? ([
+                { kind: "BALANCE" as PrimaryValueKind, key: "balance" as const, label: "Балансовая стоимость", valueCents: costs.balance_currency_cents },
+                { kind: "MARKET" as PrimaryValueKind, key: "market" as const, label: "Рыночная стоимость", valueCents: costs.market_rub },
+                { kind: "ACQUISITION" as PrimaryValueKind, key: "acquisition" as const, label: "Стоимость приобретения", valueCents: costs.acquisition_rub },
+                { kind: "INVESTED" as PrimaryValueKind, key: "invested" as const, label: "Стоимость вложенных средств", valueCents: costs.invested_rub },
+              ] as const)
+            : [];
+          const primaryRow = costRows.find((r) => r.kind === primaryKind) ?? costRows[0];
+          const openCostOverlay = (key: "balance" | "market" | "acquisition" | "invested") => {
+            setCostHistoryOpen(key);
+            setMobileCostOverlayKey(key);
+          };
+          const blockHeader = (title: ReactNode, onAll?: () => void) => (
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="text-lg font-medium min-w-0 truncate flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+                {title}
+              </h3>
+              {onAll && (
+                <button
+                  type="button"
+                  className="text-sm font-medium shrink-0"
+                  style={{ color: ACCENT }}
+                  onClick={onAll}
+                >
+                  Все
+                </button>
+              )}
+            </div>
+          );
+          const renderCompactTxRow = (
+            tx: TransactionOut,
+            opts?: { amountCents?: number; amountColor?: string; currencyCode?: string; href?: string }
+          ) => {
+            const categoryPath = tx.category_id != null ? (categoryLookup.idToPath.get(tx.category_id) ?? []) : [];
+            const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : null;
+            const amountCents = opts?.amountCents ?? tx.amount ?? 0;
+            const amountColor = opts?.amountColor ?? (amountCents >= 0 ? GREEN : RED);
+            const currencyCode = opts?.currencyCode ?? "RUB";
+            const dateKey = toTxDateKey(tx.transaction_date);
+            const dateLabel = dateKey
+              ? (() => {
+                  const [y, m, d] = dateKey.split("-");
+                  return y && m && d ? `${d}.${m}.${y}` : dateKey;
+                })()
+              : "—";
+            const content = (
+              <>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs tabular-nums" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    {dateLabel}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                    {tx.category_id != null && categoryLabel ? (
+                      <>
+                        <CategoryIconImage
+                          categoryId={tx.category_id}
+                          categoryLookup={categoryLookup}
+                          apiBase={API_BASE}
+                          size={16}
+                          className="h-4 w-4 rounded-sm object-contain shrink-0"
+                          fallbackIconColor={ACTIVE_TEXT_DARK}
+                        />
+                        <span className="text-sm truncate" style={{ color: ACTIVE_TEXT_DARK }}>{categoryLabel}</span>
+                      </>
+                    ) : (
+                      <span className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                        {tx.comment?.trim() || "—"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <AmountWithCurrency
+                  valueCents={amountCents}
+                  currencyCode={currencyCode}
+                  className="shrink-0"
+                  amountStyle={{ color: amountColor, fontSize: "0.875rem", fontWeight: 500 }}
+                />
+              </>
+            );
+            const className = "flex items-center gap-3 py-2.5 border-b border-white/10 last:border-0";
+            if (opts?.href) {
+              return (
+                <Link key={tx.id} href={opts.href} className={cn(className, "active:opacity-80")}>
+                  {content}
+                </Link>
+              );
+            }
+            return <div key={tx.id} className={className}>{content}</div>;
+          };
+          const incomePreview = incomeTxsForAsset.slice(0, 3);
+          const expensePreview = expenseTxsForAsset.slice(0, 3);
+          const txsPreview = txsForAssetBalance.slice(0, mobileTxVisibleCount);
+          const hasMoreTxs = txsForAssetBalance.length > mobileTxVisibleCount;
+          const checkpointsPreview = checkpointsSortedDesc.slice(0, mobileCheckpointVisibleCount);
+          const hasMoreCheckpoints = checkpointsSortedDesc.length > mobileCheckpointVisibleCount;
+
+          return (
+            <div className="relative z-10 flex flex-col gap-6 w-full min-w-0">
+              <div className="rounded-lg overflow-hidden px-4 py-4" style={{ backgroundColor: MODAL_BG }}>
+                {blockHeader("Стоимость", () => setMobileListSheet("values"))}
+                {!costs || !primaryRow ? (
+                  <Skeleton className="h-[72px] w-full rounded-[9px]" />
+                ) : (
+                  <button
+                    type="button"
+                    className="w-full rounded-[9px] p-[2px] text-left active:opacity-95"
+                    style={{ backgroundImage: PINK_GRADIENT }}
+                    onClick={() => openCostOverlay(kindToKey(primaryRow.kind))}
+                  >
+                    <div className="rounded-[9px] overflow-hidden px-4 py-3 flex flex-col gap-1" style={{ backgroundColor: BACKGROUND_DT }}>
+                      <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{primaryRow.label}</p>
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <div className="min-w-0">
+                          {primaryRow.valueCents != null ? (
+                            <AmountWithCurrency
+                              valueCents={primaryRow.valueCents}
+                              currencyCode={item.currency_code ?? "RUB"}
+                              amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.875rem", fontWeight: 500 }}
+                            />
+                          ) : (
+                            <span className="text-3xl font-medium" style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                          )}
+                        </div>
+                        {loadingCostHistory ? (
+                          <Skeleton className="h-6 w-14 shrink-0 rounded-md" />
+                        ) : mobilePrimaryGrowthPercent != null ? (
+                          <span
+                            className="shrink-0 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums"
+                            style={{
+                              borderColor: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
+                              backgroundColor: mobilePrimaryGrowthPercent > 0 ? "rgba(34, 197, 94, 0.15)" : mobilePrimaryGrowthPercent < 0 ? "rgba(239, 68, 68, 0.15)" : "transparent",
+                              color: mobilePrimaryGrowthPercent > 0 ? GREEN : mobilePrimaryGrowthPercent < 0 ? RED : PLACEHOLDER_COLOR_DARK,
+                            }}
+                          >
+                            {mobilePrimaryGrowthPercent > 0 ? "+" : ""}{mobilePrimaryGrowthPercent.toFixed(1)}%
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </button>
+                )}
+              </div>
+
+              {isBalancePrimary && checkpointsPreview.length > 0 && (
+                <div className="rounded-lg overflow-hidden px-4 py-4" style={{ backgroundColor: MODAL_BG }}>
+                  {blockHeader(
+                    <>
+                      <MapPin className="h-5 w-5 shrink-0" style={{ color: ACTIVE_TEXT_DARK }} aria-hidden />
+                      Контрольные точки
+                    </>
+                  )}
+                  <div className="flex flex-col gap-2">
+                    {checkpointsPreview.map((cp) => {
+                      const dt = new Date(cp.checkpoint_at);
+                      const dateTimeLabel = dt.toLocaleString("ru-RU", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      });
+                      const diffCents = cp.stated_balance_cents - cp.computed_balance_cents;
+                      const isOk = cp.status === "OK";
+                      return (
+                        <button
+                          key={cp.id}
+                          type="button"
+                          className="w-full flex items-center justify-between gap-3 rounded-[9px] px-3 py-2.5 text-left active:opacity-90"
+                          style={{ backgroundColor: isOk ? GREEN_FILL : RED_FILL }}
+                          onClick={() => openCheckpointModal(cp.id)}
+                        >
+                          <span className="text-sm tabular-nums shrink-0" style={{ color: ACTIVE_TEXT_DARK }}>
+                            {dateTimeLabel}
+                          </span>
+                          <AmountWithCurrency
+                            valueCents={diffCents}
+                            currencyCode={item.currency_code ?? "RUB"}
+                            className="shrink-0"
+                            amountStyle={{
+                              color: isOk ? GREEN : RED,
+                              fontWeight: 500,
+                              fontSize: "0.875rem",
+                            }}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {hasMoreCheckpoints && (
+                    <div className="pt-2">
+                      <Button
+                        type="button"
+                        variant="glass"
+                        className="w-full rounded-[9px] border-0"
+                        style={
+                          {
+                            "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                            "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                          } as React.CSSProperties
+                        }
+                        onClick={() => setMobileCheckpointVisibleCount((n) => n + 5)}
+                      >
+                        Показать ещё
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {incomeTxsForAsset.length > 0 && (
+                <div className="rounded-lg overflow-hidden px-4 py-4" style={{ backgroundColor: MODAL_BG }}>
+                  {blockHeader("Доходы по активу", () => setMobileListSheet("income"))}
+                  <div className="rounded-[9px] px-3" style={{ backgroundColor: BACKGROUND_DT, borderLeft: `7px solid ${GREEN}` }}>
+                    {incomePreview.map((tx) => {
+                      const d = toTxDateKey(tx.transaction_date);
+                      const primaryItem = itemsById.get(tx.primary_item_id) ?? null;
+                      const txCurrency = (primaryItem?.currency_code ?? "RUB").toUpperCase();
+                      const rateTxCur =
+                        txCurrency === "RUB"
+                          ? 1
+                          : getRateForDate(fxRatesByDate, d, txCurrency, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
+                      const rubCentsTx =
+                        rateTxCur != null && rateTxCur > 0
+                          ? Math.round((tx.amount ?? 0) * rateTxCur)
+                          : (tx.amount ?? 0);
+                      return renderCompactTxRow(tx, {
+                        amountCents: rubCentsTx,
+                        amountColor: GREEN,
+                        href: `/transactions/${tx.id}`,
+                      });
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {expenseTxsForAsset.length > 0 && (
+                <div className="rounded-lg overflow-hidden px-4 py-4" style={{ backgroundColor: MODAL_BG }}>
+                  {blockHeader("Расходы по активу", () => setMobileListSheet("expense"))}
+                  <div className="rounded-[9px] px-3" style={{ backgroundColor: BACKGROUND_DT, borderLeft: `7px solid ${RED}` }}>
+                    {expensePreview.map((tx) => {
+                      const d = toTxDateKey(tx.transaction_date);
+                      const primaryItem = itemsById.get(tx.primary_item_id) ?? null;
+                      const txCurrency = (primaryItem?.currency_code ?? "RUB").toUpperCase();
+                      const rateTxCur =
+                        txCurrency === "RUB"
+                          ? 1
+                          : getRateForDate(fxRatesByDate, d, txCurrency, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
+                      const rubCentsTx =
+                        rateTxCur != null && rateTxCur > 0
+                          ? Math.round((tx.amount ?? 0) * rateTxCur)
+                          : (tx.amount ?? 0);
+                      return renderCompactTxRow(tx, {
+                        amountCents: -rubCentsTx,
+                        amountColor: RED,
+                        href: `/transactions/${tx.id}`,
+                      });
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {txsForAssetBalance.length > 0 && (
+                <div className="w-screen max-w-none relative left-1/2 -translate-x-1/2">
+                  <div className="flex items-center justify-between gap-2 px-4 mb-2">
+                    <h3 className="text-lg font-medium min-w-0 truncate" style={{ color: ACTIVE_TEXT_DARK }}>
+                      Транзакции
+                    </h3>
+                    <button
+                      type="button"
+                      className="text-sm font-medium shrink-0"
+                      style={{ color: ACCENT }}
+                      onClick={() => router.push(`/transactions?item_id=${item.id}&openFilters=1`)}
+                    >
+                      Все
+                    </button>
+                  </div>
+                  <div className="flex flex-col">
+                    {txsPreview.map((tx) => (
+                      <TransactionMobileCard
+                        key={tx.id}
+                        tx={tx}
+                        counterparty={tx.counterparty_id != null ? counterpartiesById.get(tx.counterparty_id) ?? null : null}
+                        itemName={itemNameById}
+                        categoryLookup={categoryLookup}
+                        getCategoryLines={getCategoryLines}
+                        itemsById={itemsById}
+                        getItemCounterparty={getCounterpartyForItemId}
+                        apiBase={API_BASE}
+                      />
+                    ))}
+                  </div>
+                  {hasMoreTxs && (
+                    <div className="px-4 pt-2 pb-1">
+                      <Button
+                        type="button"
+                        variant="glass"
+                        className="w-full rounded-[9px] border-0"
+                        style={
+                          {
+                            "--glass-bg": "rgba(108, 93, 215, 0.22)",
+                            "--glass-bg-hover": "rgba(108, 93, 215, 0.4)",
+                          } as React.CSSProperties
+                        }
+                        onClick={() => setMobileTxVisibleCount((n) => n + 10)}
+                      >
+                        Показать ещё
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {isDesktop && (
           <div className="flex flex-wrap items-center justify-start gap-2 -ml-2">
@@ -4118,6 +4385,79 @@ export default function AssetDetailPage() {
       </div>
       </div>
 
+      {typeof document !== "undefined" && !isDesktop && createPortal(
+        <>
+          <div
+            className={cn(
+              "pointer-events-none fixed inset-x-0 top-0 z-40 transition-opacity duration-200 ease-out",
+              mobileStickyHeaderVisible ? "opacity-100" : "opacity-0"
+            )}
+            style={{
+              height: "calc(5.75rem + env(safe-area-inset-top, 0px))",
+              background:
+                "linear-gradient(to bottom, rgba(25, 23, 50, 0.45) 0%, rgba(25, 23, 50, 0.18) 40%, transparent 100%)",
+            }}
+            aria-hidden
+          />
+          <div
+            className={cn(
+              "fixed z-40 flex min-h-12 items-center gap-2 px-3 py-2 transition-all duration-200 ease-out",
+              "left-[calc(0.75rem+env(safe-area-inset-left))] right-[calc(0.75rem+env(safe-area-inset-right))]",
+              "top-[calc(0.75rem+env(safe-area-inset-top))]",
+              "rounded-2xl border border-sidebar-border/70 bg-sidebar/70 shadow-[0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/55",
+              mobileStickyHeaderVisible
+                ? "opacity-100 translate-y-0 pointer-events-auto"
+                : "opacity-0 -translate-y-2 pointer-events-none"
+            )}
+            aria-hidden={!mobileStickyHeaderVisible}
+          >
+            <IconButton variant="ghost" size="icon" asChild aria-label="К активам и обязательствам">
+              <Link href="/assets" className="text-white/90 hover:text-white shrink-0">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </IconButton>
+            <div className="relative h-9 w-9 shrink-0 rounded-md overflow-hidden flex items-center justify-center">
+              {photoUrl ? (
+                <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+              ) : icon3dPath ? (
+                <img src={icon3dPath} alt="" className="h-full w-full object-contain" onError={() => setIconFormat(null)} />
+              ) : TypeIcon ? (
+                <TypeIcon className="h-5 w-5" strokeWidth={1.5} style={{ color: ACCENT }} />
+              ) : (
+                <Camera className="h-4 w-4" style={{ color: PLACEHOLDER_COLOR_DARK }} />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-base font-medium" style={{ color: ACTIVE_TEXT_DARK }}>
+                {item.name}
+              </div>
+              {itemCounterparty && (
+                <div className="flex items-center gap-1.5 min-w-0 mt-0.5">
+                  {CounterpartyFallbackIcon && (
+                    <div className="relative h-4 w-4 shrink-0 flex items-center justify-center">
+                      <CardIcon
+                        src={counterpartyCurrentSrc && !showCounterpartyIcon ? counterpartyCurrentSrc : null}
+                        alt={buildCounterpartyDisplayName(itemCounterparty)}
+                        fallbackIcon={CounterpartyFallbackIcon}
+                        size={16}
+                        shadow={false}
+                        objectFit="contain"
+                        fallbackIconColor="rgba(255,255,255,0.7)"
+                        onError={counterpartyOnError}
+                      />
+                    </div>
+                  )}
+                  <span className="truncate text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                    {buildCounterpartyDisplayName(itemCounterparty)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
       {typeof document !== "undefined" && !isDesktop && mobileCostOverlayKey && createPortal(
         <MobileBottomSheet
           title={mobileCostOverlayKey === "balance" ? "Балансовая стоимость" : mobileCostOverlayKey === "market" ? "Рыночная стоимость" : mobileCostOverlayKey === "acquisition" ? "Стоимость приобретения" : "Стоимость вложенных средств"}
@@ -4143,6 +4483,233 @@ export default function AssetDetailPage() {
           }
         >
           {renderCostSectionExpandedContent({ rowKey: mobileCostOverlayKey, isMobileOverlay: true, chartContainerRef: overlayChartContainerRef, dayMarksOverride: overlayDayMarks })}
+        </MobileBottomSheet>,
+        document.body
+      )}
+
+      {typeof document !== "undefined" && !isDesktop && mobileListSheet === "checkpoints" && createPortal(
+        <MobileBottomSheet
+          title="Контрольные точки"
+          onClose={() => setMobileListSheet(null)}
+          headerRight={
+            <Button
+              type="button"
+              className="rounded-[9px] border-0 h-8 px-3 text-sm font-normal"
+              style={{ backgroundColor: ACCENT, color: "white" }}
+              onClick={() => {
+                setMobileListSheet(null);
+                openCheckpointModal(null);
+              }}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Добавить
+            </Button>
+          }
+        >
+          <div className="px-4 pb-8 pt-2 flex flex-col gap-2">
+            {checkpointsSortedDesc.length === 0 ? (
+              <p className="text-sm py-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет контрольных точек.</p>
+            ) : (
+              checkpointsSortedDesc.map((cp) => {
+                const dt = new Date(cp.checkpoint_at);
+                const dateTimeLabel = dt.toLocaleString("ru-RU", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                return (
+                  <div
+                    key={cp.id}
+                    className="rounded-[9px] px-3 py-3"
+                    style={{ backgroundColor: BACKGROUND_DT }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs mb-2" style={{ color: PLACEHOLDER_COLOR_DARK }}>{dateTimeLabel}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Должно быть</span>
+                          <AmountWithCurrency valueCents={cp.stated_balance_cents} currencyCode={item.currency_code ?? "RUB"} />
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <span className="text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>Расчётное</span>
+                          <AmountWithCurrency valueCents={cp.computed_balance_cents} currencyCode={item.currency_code ?? "RUB"} />
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span
+                            className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
+                            style={{
+                              backgroundColor: cp.status === "OK" ? "rgba(34, 197, 94, 0.2)" : "rgba(239, 68, 68, 0.2)",
+                              color: cp.status === "OK" ? GREEN : RED,
+                            }}
+                          >
+                            {cp.status === "OK" ? "ОК" : "Расхождение"}
+                          </span>
+                          <span
+                            className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
+                            style={{ backgroundColor: "rgba(148, 163, 184, 0.2)", color: PLACEHOLDER_COLOR_DARK }}
+                          >
+                            {cp.source === "IMPORTED" ? "Импортированная" : "Ручная"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <IconButton
+                          aria-label="Редактировать"
+                          onClick={() => {
+                            setMobileListSheet(null);
+                            openCheckpointModal(cp.id);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </IconButton>
+                        <IconButton aria-label="Удалить" onClick={() => deleteCheckpoint(cp.id)}>
+                          <Trash2 className="h-4 w-4" style={{ color: RED }} />
+                        </IconButton>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </MobileBottomSheet>,
+        document.body
+      )}
+
+      {typeof document !== "undefined" && !isDesktop && mobileListSheet === "values" && costs && createPortal(
+        <MobileBottomSheet title="Стоимости" onClose={() => setMobileListSheet(null)}>
+          <div className="px-4 pb-8 pt-2 flex flex-col gap-2">
+            {([
+              { kind: "BALANCE" as PrimaryValueKind, key: "balance" as const, label: "Балансовая стоимость", valueCents: costs.balance_currency_cents },
+              { kind: "MARKET" as PrimaryValueKind, key: "market" as const, label: "Рыночная стоимость", valueCents: costs.market_rub },
+              { kind: "ACQUISITION" as PrimaryValueKind, key: "acquisition" as const, label: "Стоимость приобретения", valueCents: costs.acquisition_rub },
+              { kind: "INVESTED" as PrimaryValueKind, key: "invested" as const, label: "Стоимость вложенных средств", valueCents: costs.invested_rub },
+            ] as const).map(({ kind, key, label, valueCents }) => {
+              const isPrimary = (item.primary_value_kind ?? "BALANCE") === kind;
+              return (
+                <div
+                  key={key}
+                  className={cn("rounded-[9px]", isPrimary && "p-[2px]")}
+                  style={isPrimary ? { backgroundImage: PINK_GRADIENT } : undefined}
+                >
+                  <button
+                    type="button"
+                    className="w-full rounded-[9px] px-3 py-3 text-left active:opacity-90 disabled:opacity-60"
+                    style={{ backgroundColor: BACKGROUND_DT }}
+                    disabled={savingPrimary}
+                    onClick={() => {
+                      if (!isPrimary) {
+                        void handlePrimaryValueKindChange(kind);
+                        return;
+                      }
+                      setMobileListSheet(null);
+                      setCostHistoryOpen(key);
+                      setMobileCostOverlayKey(key);
+                    }}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>{label}</p>
+                      {isPrimary && (
+                        <span className="h-6 flex items-center rounded-[9px] px-2 text-xs font-normal shrink-0" style={{ backgroundColor: ACCENT2, color: "#fff" }}>
+                          Основная
+                        </span>
+                      )}
+                    </div>
+                    {valueCents != null ? (
+                      <AmountWithCurrency
+                        valueCents={valueCents}
+                        currencyCode={item.currency_code ?? "RUB"}
+                        amountStyle={{ color: ACTIVE_TEXT_DARK, fontSize: "1.25rem", fontWeight: 500 }}
+                      />
+                    ) : (
+                      <span style={{ color: ACTIVE_TEXT_DARK }}>—</span>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </MobileBottomSheet>,
+        document.body
+      )}
+
+      {typeof document !== "undefined" && !isDesktop && (mobileListSheet === "income" || mobileListSheet === "expense") && createPortal(
+        <MobileBottomSheet
+          title={mobileListSheet === "income" ? "Доходы по активу" : "Расходы по активу"}
+          onClose={() => setMobileListSheet(null)}
+        >
+          <div className="px-4 pb-8 pt-2">
+            <div
+              className="rounded-[9px] px-3"
+              style={{
+                backgroundColor: BACKGROUND_DT,
+                borderLeft: `7px solid ${mobileListSheet === "income" ? GREEN : RED}`,
+              }}
+            >
+              {(mobileListSheet === "income" ? incomeTxsForAsset : expenseTxsForAsset).map((tx) => {
+                const d = toTxDateKey(tx.transaction_date);
+                const primaryItem = itemsById.get(tx.primary_item_id) ?? null;
+                const txCurrency = (primaryItem?.currency_code ?? "RUB").toUpperCase();
+                const rateTxCur =
+                  txCurrency === "RUB"
+                    ? 1
+                    : getRateForDate(fxRatesByDate, d, txCurrency, latestRatesByCurrency, todayKey, sortedFxRateDateKeys);
+                const rubCentsTx =
+                  rateTxCur != null && rateTxCur > 0
+                    ? Math.round((tx.amount ?? 0) * rateTxCur)
+                    : (tx.amount ?? 0);
+                const isIncome = mobileListSheet === "income";
+                const categoryPath = tx.category_id != null ? (categoryLookup.idToPath.get(tx.category_id) ?? []) : [];
+                const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : null;
+                const dateKey = toTxDateKey(tx.transaction_date);
+                const dateLabel = dateKey
+                  ? (() => {
+                      const [y, m, dPart] = dateKey.split("-");
+                      return y && m && dPart ? `${dPart}.${m}.${y}` : dateKey;
+                    })()
+                  : "—";
+                return (
+                  <Link
+                    key={tx.id}
+                    href={`/transactions/${tx.id}`}
+                    className="flex items-center gap-3 py-2.5 border-b border-white/10 last:border-0 active:opacity-80"
+                    onClick={() => setMobileListSheet(null)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs tabular-nums" style={{ color: PLACEHOLDER_COLOR_DARK }}>{dateLabel}</div>
+                      <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                        {tx.category_id != null && categoryLabel ? (
+                          <>
+                            <CategoryIconImage
+                              categoryId={tx.category_id}
+                              categoryLookup={categoryLookup}
+                              apiBase={API_BASE}
+                              size={16}
+                              className="h-4 w-4 rounded-sm object-contain shrink-0"
+                              fallbackIconColor={ACTIVE_TEXT_DARK}
+                            />
+                            <span className="text-sm truncate" style={{ color: ACTIVE_TEXT_DARK }}>{categoryLabel}</span>
+                          </>
+                        ) : (
+                          <span className="text-sm truncate" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                            {tx.comment?.trim() || "—"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <AmountWithCurrency
+                      valueCents={isIncome ? rubCentsTx : -rubCentsTx}
+                      currencyCode="RUB"
+                      className="shrink-0"
+                      amountStyle={{ color: isIncome ? GREEN : RED, fontSize: "0.875rem", fontWeight: 500 }}
+                    />
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
         </MobileBottomSheet>,
         document.body
       )}

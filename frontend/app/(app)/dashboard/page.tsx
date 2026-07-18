@@ -21,9 +21,7 @@ import {
   Calendar,
   ChevronDown,
   ChevronRight,
-  Minus,
   PieChart,
-  Plus,
   Target,
   User,
   Wallet,
@@ -1258,23 +1256,6 @@ export default function DashboardPage() {
     [expenseCashflow, showPlan]
   );
 
-  const cashflowScale = Math.max(
-    displayIncomeCashflow.total,
-    displayExpenseCashflow.total,
-    1
-  );
-  const plannedFreeBalance =
-    displayIncomeCashflow.total - displayExpenseCashflow.total;
-  const remainderAbs = Math.abs(plannedFreeBalance);
-  const expensesExceedIncome =
-    displayExpenseCashflow.total > displayIncomeCashflow.total;
-  const incomeBarPct =
-    cashflowScale > 0 ? (displayIncomeCashflow.total / cashflowScale) * 100 : 0;
-  const expenseBarPct =
-    cashflowScale > 0 ? (displayExpenseCashflow.total / cashflowScale) * 100 : 0;
-  const remainderBarPct =
-    cashflowScale > 0 ? (remainderAbs / cashflowScale) * 100 : 0;
-
   const incomeBucketGroups = useMemo(
     () =>
       buildCashflowBucketGroups(
@@ -2081,7 +2062,7 @@ export default function DashboardPage() {
         />
         {/* Шапка с анимированным градиентом от верха экрана (включая safe-area), как на странице актива */}
         <div
-          className="relative mb-5 flex w-screen max-w-none flex-col gap-3 ml-[calc(-50vw+50%)] px-4 pb-4"
+          className="relative mb-6 flex w-screen max-w-none flex-col gap-4 ml-[calc(-50vw+50%)] px-4 pb-2"
           style={{
             paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
             opacity: loading ? 0 : 1,
@@ -2107,11 +2088,29 @@ export default function DashboardPage() {
           >
             <header className="relative z-10 flex items-center justify-between px-1">
               <div>
-                <p className="text-xs text-white/65">{new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" }).format(now)}</p>
-                <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">{greetingName ? `Привет, ${greetingName}` : "Добрый день"}</h1>
+                <p className="text-sm text-white/65">
+                  {new Intl.DateTimeFormat("ru-RU", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                  }).format(now)}
+                </p>
+                <h1 className="mt-1 text-[22px] font-semibold leading-tight tracking-tight text-white">
+                  {greetingName ? `Привет, ${greetingName}` : "Добрый день"}
+                </h1>
               </div>
-              <Link href="/cabinet" aria-label="Открыть личный кабинет" className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-white/10 bg-[rgba(93,95,215,0.22)] text-sm font-semibold text-violet-200 shadow-[0_10px_22px_-16px_rgba(127,92,255,0.6)] transition-transform active:scale-90">
-                {userPhotoUrl ? <img src={userPhotoUrl} alt="Фото профиля" className="h-full w-full object-cover" /> : avatarLetter ? avatarLetter : <User className="h-5 w-5" />}
+              <Link
+                href="/cabinet"
+                aria-label="Открыть личный кабинет"
+                className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-white/10 bg-[rgba(93,95,215,0.22)] text-base font-semibold text-violet-200 shadow-[0_10px_22px_-16px_rgba(127,92,255,0.6)] transition-transform active:scale-90"
+              >
+                {userPhotoUrl ? (
+                  <img src={userPhotoUrl} alt="Фото профиля" className="h-full w-full object-cover" />
+                ) : avatarLetter ? (
+                  avatarLetter
+                ) : (
+                  <User className="h-5 w-5" />
+                )}
               </Link>
             </header>
           </div>
@@ -2126,61 +2125,364 @@ export default function DashboardPage() {
         </div>
 
         <div
-          className="relative z-10 flex w-full flex-col gap-5"
+          className="relative z-10 flex w-full flex-col gap-8"
           style={{ opacity: loading ? 0 : 1, transition: "opacity 0.3s ease-in-out" }}
         >
-          {showPlan && (todayPlannedCount > 0 || overduePlannedCount > 0) && (
-            <div
-              className={cn(
-                "grid gap-2",
-                todayPlannedCount > 0 && overduePlannedCount > 0
-                  ? "grid-cols-2"
-                  : "grid-cols-1"
-              )}
+          {/* Чистые активы — главный акцент */}
+          <section className="space-y-3">
+            <h2 className="px-1 text-xl font-semibold tracking-tight text-white/95">
+              Чистые активы
+            </h2>
+            <button
+              type="button"
+              onClick={() => {
+                setMobileDetailExpanded(false);
+                setMobileDetail("structure");
+              }}
+              className={`${assetCardSurfaceClass} w-full p-6 text-left text-white transition-transform active:scale-[0.98]`}
+              style={{ backgroundColor: MODAL_BG }}
+              aria-label="Открыть структуру активов и обязательств"
             >
-              {todayPlannedCount > 0 && (
-                <Link
-                  href="/transactions?preset=today-planned"
-                  className={`${assetCardSurfaceClass} flex flex-col gap-2 p-3 transition-transform active:scale-[0.98]`}
-                  style={{ backgroundColor: MODAL_BG }}
+              <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full border-[20px] border-[rgba(93,95,215,0.18)]" />
+              <div className="relative flex flex-wrap items-center gap-2.5">
+                <CurrencyChip code="RUB" />
+                <span className="text-[32px] font-semibold leading-none tracking-tight tabular-nums text-white">
+                  {loading
+                    ? "..."
+                    : netTotal < 0
+                      ? `−${formatRub(Math.abs(netTotal))}`
+                      : formatRub(netTotal)}
+                </span>
+              </div>
+              <div className="relative mt-4 inline-flex items-center gap-1.5 rounded-full bg-[rgba(93,95,215,0.22)] px-3 py-1.5 text-sm text-white/90">
+                <ArrowUpRight className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+                <span>
+                  {netTotalChangeLabel}{" "}
+                  {loading ? "..." : formatChangePercent(netTotalChangePercent)}
+                </span>
+              </div>
+              <div className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
+                <div>
+                  <span className="block text-sm text-white/55">Активы</span>
+                  <span className="mt-1 block text-base font-medium tabular-nums text-white/90">
+                    {loading ? "..." : formatRub(totalAssets)}
+                  </span>
+                </div>
+                <div>
+                  <span className="block text-sm text-white/55">Обязательства</span>
+                  <span className="mt-1 block text-base font-medium tabular-nums text-white/90">
+                    {loading ? "..." : `−${formatRub(totalLiabilities)}`}
+                  </span>
+                </div>
+              </div>
+            </button>
+          </section>
+
+          {/* Доходы и расходы — две крупные суммы */}
+          <section className="space-y-3">
+            <h2 className="px-1 text-xl font-semibold tracking-tight text-white/95">
+              Доходы и расходы
+            </h2>
+            <div className="grid gap-3">
+              <div
+                className={`${assetCardSurfaceClass} p-5`}
+                style={{ backgroundColor: MODAL_BG }}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleCashflowExpand("income")}
+                  className="flex w-full flex-col gap-3 text-left transition-opacity active:opacity-80"
+                  aria-expanded={expandedCashflow === "income"}
                 >
-                  <span className="flex items-center gap-2">
-                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-[rgba(93,95,215,0.22)] text-violet-300">
-                      <Calendar className="h-4 w-4" strokeWidth={1.5} />
-                    </span>
-                    <span className="text-sm font-semibold tabular-nums text-white">
-                      {loading ? "..." : todayPlannedCount}
-                    </span>
+                  <span className="flex items-center gap-2 text-base text-white/60">
+                    <ArrowUpRight className="h-5 w-5 text-emerald-400" strokeWidth={1.5} />
+                    Доходы
+                    <ChevronDown
+                      className={cn(
+                        "ml-auto h-4 w-4 text-white/40 transition-transform",
+                        expandedCashflow === "income" && "rotate-180"
+                      )}
+                      strokeWidth={1.5}
+                    />
                   </span>
-                  <span className="text-xs leading-snug text-slate-400">
-                    На сегодня запланировано
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-white">
+                  <span className="inline-flex flex-wrap items-center gap-2.5">
                     <CurrencyChip code="RUB" />
-                    <span className="tabular-nums">
-                      {loading ? "..." : formatRub(todayPlannedSum)}
+                    <span
+                      className="text-[28px] font-semibold leading-none tracking-tight tabular-nums"
+                      style={{ color: GREEN }}
+                    >
+                      {loading ? "..." : formatRub(displayIncomeCashflow.total)}
                     </span>
                   </span>
-                </Link>
-              )}
+                </button>
+
+                {expandedCashflow === "income" && (
+                  <div className="mt-5 space-y-3 border-t border-white/10 pt-4">
+                    {incomeBucketGroups.length === 0 ? (
+                      <p className="text-sm text-slate-400">Нет операций</p>
+                    ) : showPlan ? (
+                      incomeBucketGroups.map((group) => (
+                        <div key={group.key} className="space-y-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: group.color }}
+                            />
+                            <span className="min-w-0 flex-1 truncate text-base font-medium text-slate-200">
+                              {group.label}
+                            </span>
+                            <Link
+                              href={buildCashflowTransactionsHref({
+                                direction: "INCOME",
+                                bucket: group.key,
+                                periodStartKey,
+                                periodEndKey,
+                              })}
+                              className="inline-flex items-center gap-1.5 transition-opacity active:opacity-70"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <CurrencyChip code="RUB" />
+                              <span
+                                className="text-base font-semibold tabular-nums underline-offset-2 hover:underline"
+                                style={{ color: GREEN }}
+                              >
+                                {formatRub(group.total)}
+                              </span>
+                            </Link>
+                          </div>
+                          {group.categories.map((row) => {
+                            const CategoryIcon =
+                              topLevelIconByLabel.get(row.label) ??
+                              CATEGORY_ICON_FALLBACK;
+                            const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+                            return (
+                              <div
+                                key={`${group.key}-${row.label}`}
+                                className="flex items-center gap-2.5 pl-5 text-sm"
+                              >
+                                <span style={{ color: ACCENT }}>
+                                  <CategoryIcon className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-slate-400">
+                                  {row.label}
+                                </span>
+                                <Link
+                                  href={buildCashflowTransactionsHref({
+                                    direction: "INCOME",
+                                    bucket: group.key,
+                                    periodStartKey,
+                                    periodEndKey,
+                                    categoryL1: isUncategorized ? null : row.label,
+                                    uncategorized: isUncategorized,
+                                  })}
+                                  className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {formatRub(row.value)}
+                                </Link>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))
+                    ) : (
+                      (incomeBucketGroups[0]?.categories ?? []).map((row) => {
+                        const CategoryIcon =
+                          topLevelIconByLabel.get(row.label) ??
+                          CATEGORY_ICON_FALLBACK;
+                        const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+                        return (
+                          <div
+                            key={row.label}
+                            className="flex items-center gap-2.5 text-sm"
+                          >
+                            <span style={{ color: ACCENT }}>
+                              <CategoryIcon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-slate-400">
+                              {row.label}
+                            </span>
+                            <Link
+                              href={buildCashflowTransactionsHref({
+                                direction: "INCOME",
+                                bucket: "actual",
+                                periodStartKey,
+                                periodEndKey,
+                                categoryL1: isUncategorized ? null : row.label,
+                                uncategorized: isUncategorized,
+                              })}
+                              className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {formatRub(row.value)}
+                            </Link>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div
+                className={`${assetCardSurfaceClass} p-5`}
+                style={{ backgroundColor: MODAL_BG }}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleCashflowExpand("expense")}
+                  className="flex w-full flex-col gap-3 text-left transition-opacity active:opacity-80"
+                  aria-expanded={expandedCashflow === "expense"}
+                >
+                  <span className="flex items-center gap-2 text-base text-white/60">
+                    <ArrowDownRight className="h-5 w-5 text-rose-400" strokeWidth={1.5} />
+                    Расходы
+                    <ChevronDown
+                      className={cn(
+                        "ml-auto h-4 w-4 text-white/40 transition-transform",
+                        expandedCashflow === "expense" && "rotate-180"
+                      )}
+                      strokeWidth={1.5}
+                    />
+                  </span>
+                  <span className="inline-flex flex-wrap items-center gap-2.5">
+                    <CurrencyChip code="RUB" />
+                    <span
+                      className="text-[28px] font-semibold leading-none tracking-tight tabular-nums"
+                      style={{ color: RED }}
+                    >
+                      {loading ? "..." : formatRub(displayExpenseCashflow.total)}
+                    </span>
+                  </span>
+                </button>
+
+                {expandedCashflow === "expense" && (
+                  <div className="mt-5 space-y-3 border-t border-white/10 pt-4">
+                    {expenseBucketGroups.length === 0 ? (
+                      <p className="text-sm text-slate-400">Нет операций</p>
+                    ) : showPlan ? (
+                      expenseBucketGroups.map((group) => (
+                        <div key={group.key} className="space-y-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: group.color }}
+                            />
+                            <span className="min-w-0 flex-1 truncate text-base font-medium text-slate-200">
+                              {group.label}
+                            </span>
+                            <Link
+                              href={buildCashflowTransactionsHref({
+                                direction: "EXPENSE",
+                                bucket: group.key,
+                                periodStartKey,
+                                periodEndKey,
+                              })}
+                              className="inline-flex items-center gap-1.5 transition-opacity active:opacity-70"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <CurrencyChip code="RUB" />
+                              <span
+                                className="text-base font-semibold tabular-nums underline-offset-2 hover:underline"
+                                style={{ color: RED }}
+                              >
+                                {formatRub(group.total)}
+                              </span>
+                            </Link>
+                          </div>
+                          {group.categories.map((row) => {
+                            const CategoryIcon =
+                              topLevelIconByLabel.get(row.label) ??
+                              CATEGORY_ICON_FALLBACK;
+                            const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+                            return (
+                              <div
+                                key={`${group.key}-${row.label}`}
+                                className="flex items-center gap-2.5 pl-5 text-sm"
+                              >
+                                <span style={{ color: ACCENT }}>
+                                  <CategoryIcon className="h-4 w-4" />
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-slate-400">
+                                  {row.label}
+                                </span>
+                                <Link
+                                  href={buildCashflowTransactionsHref({
+                                    direction: "EXPENSE",
+                                    bucket: group.key,
+                                    periodStartKey,
+                                    periodEndKey,
+                                    categoryL1: isUncategorized ? null : row.label,
+                                    uncategorized: isUncategorized,
+                                  })}
+                                  className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {formatRub(row.value)}
+                                </Link>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))
+                    ) : (
+                      (expenseBucketGroups[0]?.categories ?? []).map((row) => {
+                        const CategoryIcon =
+                          topLevelIconByLabel.get(row.label) ??
+                          CATEGORY_ICON_FALLBACK;
+                        const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+                        return (
+                          <div
+                            key={row.label}
+                            className="flex items-center gap-2.5 text-sm"
+                          >
+                            <span style={{ color: ACCENT }}>
+                              <CategoryIcon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-slate-400">
+                              {row.label}
+                            </span>
+                            <Link
+                              href={buildCashflowTransactionsHref({
+                                direction: "EXPENSE",
+                                bucket: "actual",
+                                periodStartKey,
+                                periodEndKey,
+                                categoryL1: isUncategorized ? null : row.label,
+                                uncategorized: isUncategorized,
+                              })}
+                              className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {formatRub(row.value)}
+                            </Link>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Компактные сигналы плана — ниже главных цифр */}
+          {showPlan && (todayPlannedCount > 0 || overduePlannedCount > 0) && (
+            <section className="space-y-2">
               {overduePlannedCount > 0 && (
                 <Link
                   href="/transactions?preset=overdue-planned"
-                  className={`${assetCardSurfaceClass} flex flex-col gap-2 p-3 transition-transform active:scale-[0.98]`}
+                  className={`${assetCardSurfaceClass} flex items-center gap-3 px-4 py-3.5 transition-transform active:scale-[0.98]`}
                   style={{ backgroundColor: "rgba(255, 141, 40, 0.22)" }}
                 >
-                  <span className="flex items-center gap-2">
-                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-amber-400/20 text-amber-300">
-                      <AlertTriangle className="h-4 w-4" strokeWidth={1.5} />
-                    </span>
-                    <span className="text-sm font-semibold tabular-nums text-amber-100">
+                  <AlertTriangle className="h-5 w-5 shrink-0 text-amber-300" strokeWidth={1.5} />
+                  <span className="min-w-0 flex-1 text-base text-amber-100">
+                    Просрочено:{" "}
+                    <span className="font-semibold tabular-nums">
                       {loading ? "..." : overduePlannedCount}
                     </span>
                   </span>
-                  <span className="text-xs leading-snug text-amber-200/70">
-                    Просроченные транзакции
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-100">
+                  <span className="inline-flex shrink-0 items-center gap-1.5 text-base font-semibold text-amber-100">
                     <CurrencyChip code="RUB" />
                     <span className="tabular-nums">
                       {loading ? "..." : formatRub(overduePlannedSum)}
@@ -2188,423 +2490,97 @@ export default function DashboardPage() {
                   </span>
                 </Link>
               )}
-            </div>
+              {todayPlannedCount > 0 && (
+                <Link
+                  href="/transactions?preset=today-planned"
+                  className={`${assetCardSurfaceClass} flex items-center gap-3 px-4 py-3.5 transition-transform active:scale-[0.98]`}
+                  style={{ backgroundColor: MODAL_BG }}
+                >
+                  <Calendar className="h-5 w-5 shrink-0 text-violet-300" strokeWidth={1.5} />
+                  <span className="min-w-0 flex-1 text-base text-white/80">
+                    На сегодня:{" "}
+                    <span className="font-semibold tabular-nums text-white">
+                      {loading ? "..." : todayPlannedCount}
+                    </span>
+                  </span>
+                  <span className="inline-flex shrink-0 items-center gap-1.5 text-base font-semibold text-white">
+                    <CurrencyChip code="RUB" />
+                    <span className="tabular-nums">
+                      {loading ? "..." : formatRub(todayPlannedSum)}
+                    </span>
+                  </span>
+                </Link>
+              )}
+            </section>
           )}
 
-          <section>
-            <div className="mb-3 flex items-baseline justify-between px-1">
-              <h2 className="text-lg font-semibold">Чистые активы</h2>
+          {/* Цели — вторичный блок */}
+          <section className="space-y-3">
+            <div className="flex items-baseline justify-between px-1">
+              <h2 className="text-xl font-semibold tracking-tight text-white/95">Цели</h2>
+              <Link href="/goals" className="text-base font-medium text-violet-400">
+                Все
+              </Link>
             </div>
-            <button
-              type="button"
-              onClick={() => { setMobileDetailExpanded(false); setMobileDetail("structure"); }}
-              className={`${assetCardSurfaceClass} w-full p-5 text-left text-white transition-transform active:scale-[0.98]`}
-              style={{ backgroundColor: MODAL_BG }}
-              aria-label="Открыть структуру активов и обязательств"
-            >
-              <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full border-[20px] border-[rgba(93,95,215,0.22)]" />
-              <div className="relative text-3xl font-semibold tracking-tight">
-                {loading ? "..." : netTotal < 0 ? `-${formatRub(Math.abs(netTotal))}` : formatRub(netTotal)}
-              </div>
-              <div className="relative mt-3 inline-flex items-center gap-1 rounded-full bg-[rgba(93,95,215,0.22)] px-2.5 py-1 text-xs text-white/90">
-                <ArrowUpRight className="h-3.5 w-3.5" /> {netTotalChangeLabel}{" "}
-                {loading ? "..." : formatChangePercent(netTotalChangePercent)}
-              </div>
-              <div className="relative mt-5 grid grid-cols-2 border-t border-white/20 pt-3 text-sm">
-                <div><span className="block text-xs text-white/65">Активы</span><span className="font-medium">{loading ? "..." : formatRub(totalAssets)}</span></div>
-                <div><span className="block text-xs text-white/65">Обязательства</span><span className="font-medium">{loading ? "..." : `-${formatRub(totalLiabilities)}`}</span></div>
-              </div>
-            </button>
-          </section>
-
-          <section>
-            <div className="mb-3 flex items-baseline justify-between px-1">
-              <h2 className="text-lg font-semibold">Доходы и расходы</h2>
-            </div>
-            <div
-              className={`${assetCardSurfaceClass} p-4`}
-              style={{ backgroundColor: MODAL_BG }}
-            >
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleCashflowExpand("income")}
-                    className="flex w-full items-center justify-between gap-3 text-left transition-opacity active:opacity-80"
-                  >
-                    <span className="flex items-center gap-1.5 text-sm text-slate-400">
-                      <ArrowUpRight className="h-4 w-4 text-emerald-400" />
-                      Доходы
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <CurrencyChip code="RUB" />
-                      <span
-                        className="text-base font-semibold tabular-nums"
-                        style={{ color: GREEN }}
-                      >
-                        {loading ? "..." : formatRub(displayIncomeCashflow.total)}
+            {loading ? (
+              <div className="text-base text-slate-400">Загрузка целей...</div>
+            ) : activeGoals.length === 0 ? (
+              <Link
+                href="/goals"
+                className="block overflow-hidden rounded-lg border border-dashed border-white/10 p-5 text-base text-slate-400"
+                style={{ backgroundColor: MODAL_BG }}
+              >
+                Добавить первую цель →
+              </Link>
+            ) : (
+              <div className="space-y-3">
+                {activeGoals.slice(0, 1).map((goal) => {
+                  const summary = goalSummaryById.get(goal.id) ?? {
+                    amount: 0,
+                    progress: 0,
+                    progressLabel: "",
+                  };
+                  const progressColor = getGoalProgressColor(
+                    summary.progress,
+                    categoryLookup.idToScope?.get(goal.category_id) === "INCOME"
+                  );
+                  return (
+                    <Link
+                      href="/goals"
+                      key={goal.id}
+                      className={`flex items-center gap-3 ${assetCardSurfaceClass} p-4`}
+                      style={{ backgroundColor: MODAL_BG }}
+                    >
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[rgba(93,95,215,0.22)] text-violet-300">
+                        <Target className="h-5 w-5" strokeWidth={1.5} />
                       </span>
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => toggleCashflowExpand("income")}
-                    className="flex h-3 w-full justify-end"
-                    aria-label="Прогресс доходов"
-                  >
-                    {!loading && displayIncomeCashflow.total > 0 && (
-                      <div
-                        className="flex h-full shrink-0 overflow-hidden rounded-full"
-                        style={{ width: `${incomeBarPct}%` }}
-                      >
-                        {displayIncomeCashflow.segments.map((segment) => (
-                          <div
-                            key={`income-bar-${segment.key}`}
-                            title={`${segment.label}: ${formatRub(segment.value)}`}
-                            className="h-full min-w-[3px] shrink-0"
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-base font-medium text-white">
+                          {goal.name}
+                        </span>
+                        <span className="mt-1 block truncate text-sm text-slate-400">
+                          {formatRub(summary.amount)} из {formatRub(goal.amount)}
+                        </span>
+                        <span className="mt-2.5 block h-1.5 overflow-hidden rounded-full bg-slate-800">
+                          <span
+                            className="block h-full rounded-full"
                             style={{
-                              width: `${(segment.value / displayIncomeCashflow.total) * 100}%`,
-                              backgroundColor: segment.color,
+                              width: `${summary.progress * 100}%`,
+                              backgroundColor: progressColor,
                             }}
                           />
-                        ))}
-                      </div>
-                    )}
-                  </button>
-
-                  {expandedCashflow === "income" && (
-                    <div className={cn("pt-1", showPlan ? "space-y-2" : "space-y-1")}>
-                      {incomeBucketGroups.length === 0 ? (
-                        <p className="text-xs text-slate-500">Нет операций</p>
-                      ) : showPlan ? (
-                        incomeBucketGroups.map((group) => (
-                          <div key={group.key} className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="h-2 w-2 shrink-0 rounded-full"
-                                style={{ backgroundColor: group.color }}
-                              />
-                              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-200">
-                                {group.label}
-                              </span>
-                              <Link
-                                href={buildCashflowTransactionsHref({
-                                  direction: "INCOME",
-                                  bucket: group.key,
-      periodStartKey,
-      periodEndKey,
-                                })}
-                                className="inline-flex items-center gap-1 transition-opacity active:opacity-70"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <CurrencyChip code="RUB" className="scale-90" />
-                                <span
-                                  className="text-sm font-semibold tabular-nums underline-offset-2 hover:underline"
-                                  style={{ color: GREEN }}
-                                >
-                                  {formatRub(group.total)}
-                                </span>
-                              </Link>
-                            </div>
-                            {group.categories.map((row) => {
-                              const CategoryIcon =
-                                topLevelIconByLabel.get(row.label) ??
-                                CATEGORY_ICON_FALLBACK;
-                              const isUncategorized = row.label === UNCATEGORIZED_LABEL;
-                              return (
-                                <div
-                                  key={`${group.key}-${row.label}`}
-                                  className="flex items-center gap-2 pl-4 text-xs"
-                                >
-                                  <span style={{ color: ACCENT }}>
-                                    <CategoryIcon className="h-3.5 w-3.5" />
-                                  </span>
-                                  <span className="min-w-0 flex-1 truncate text-slate-400">
-                                    {row.label}
-                                  </span>
-                                  <Link
-                                    href={buildCashflowTransactionsHref({
-                                      direction: "INCOME",
-                                      bucket: group.key,
-          periodStartKey,
-      periodEndKey,
-                                      categoryL1: isUncategorized ? null : row.label,
-                                      uncategorized: isUncategorized,
-                                    })}
-                                    className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    {formatRub(row.value)}
-                                  </Link>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ))
-                      ) : (
-                        (incomeBucketGroups[0]?.categories ?? []).map((row) => {
-                          const CategoryIcon =
-                            topLevelIconByLabel.get(row.label) ??
-                            CATEGORY_ICON_FALLBACK;
-                          const isUncategorized = row.label === UNCATEGORIZED_LABEL;
-                          return (
-                            <div
-                              key={row.label}
-                              className="flex items-center gap-2 text-xs"
-                            >
-                              <span style={{ color: ACCENT }}>
-                                <CategoryIcon className="h-3.5 w-3.5" />
-                              </span>
-                              <span className="min-w-0 flex-1 truncate text-slate-400">
-                                {row.label}
-                              </span>
-                              <Link
-                                href={buildCashflowTransactionsHref({
-                                  direction: "INCOME",
-                                  bucket: "actual",
-      periodStartKey,
-      periodEndKey,
-                                  categoryL1: isUncategorized ? null : row.label,
-                                  uncategorized: isUncategorized,
-                                })}
-                                className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {formatRub(row.value)}
-                              </Link>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleCashflowExpand("expense")}
-                    className="flex w-full items-center justify-between gap-3 text-left transition-opacity active:opacity-80"
-                  >
-                    <span className="flex items-center gap-1.5 text-sm text-slate-400">
-                      <ArrowDownRight className="h-4 w-4 text-rose-400" />
-                      Расходы
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <CurrencyChip code="RUB" />
-                      <span
-                        className="text-base font-semibold tabular-nums"
-                        style={{ color: RED }}
-                      >
-                        {loading ? "..." : formatRub(displayExpenseCashflow.total)}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => toggleCashflowExpand("expense")}
-                    className={cn(
-                      "flex h-3 w-full",
-                      expensesExceedIncome ? "justify-start" : "justify-end"
-                    )}
-                    aria-label="Прогресс расходов"
-                  >
-                    {!loading && displayExpenseCashflow.total > 0 && (
-                      <div
-                        className="flex h-full shrink-0 flex-row-reverse overflow-hidden rounded-full"
-                        style={{ width: `${expenseBarPct}%` }}
-                      >
-                        {displayExpenseCashflow.segments.map((segment) => (
-                          <div
-                            key={`expense-bar-${segment.key}`}
-                            title={`${segment.label}: ${formatRub(segment.value)}`}
-                            className="h-full min-w-[3px] shrink-0"
-                            style={{
-                              width: `${(segment.value / displayExpenseCashflow.total) * 100}%`,
-                              backgroundColor: segment.color,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </button>
-
-                  {expandedCashflow === "expense" && (
-                    <div className={cn("pt-1", showPlan ? "space-y-2" : "space-y-1")}>
-                      {expenseBucketGroups.length === 0 ? (
-                        <p className="text-xs text-slate-500">Нет операций</p>
-                      ) : showPlan ? (
-                        expenseBucketGroups.map((group) => (
-                          <div key={group.key} className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="h-2 w-2 shrink-0 rounded-full"
-                                style={{ backgroundColor: group.color }}
-                              />
-                              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-200">
-                                {group.label}
-                              </span>
-                              <Link
-                                href={buildCashflowTransactionsHref({
-                                  direction: "EXPENSE",
-                                  bucket: group.key,
-      periodStartKey,
-      periodEndKey,
-                                })}
-                                className="inline-flex items-center gap-1 transition-opacity active:opacity-70"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <CurrencyChip code="RUB" className="scale-90" />
-                                <span
-                                  className="text-sm font-semibold tabular-nums underline-offset-2 hover:underline"
-                                  style={{ color: RED }}
-                                >
-                                  {formatRub(group.total)}
-                                </span>
-                              </Link>
-                            </div>
-                            {group.categories.map((row) => {
-                              const CategoryIcon =
-                                topLevelIconByLabel.get(row.label) ??
-                                CATEGORY_ICON_FALLBACK;
-                              const isUncategorized = row.label === UNCATEGORIZED_LABEL;
-                              return (
-                                <div
-                                  key={`${group.key}-${row.label}`}
-                                  className="flex items-center gap-2 pl-4 text-xs"
-                                >
-                                  <span style={{ color: ACCENT }}>
-                                    <CategoryIcon className="h-3.5 w-3.5" />
-                                  </span>
-                                  <span className="min-w-0 flex-1 truncate text-slate-400">
-                                    {row.label}
-                                  </span>
-                                  <Link
-                                    href={buildCashflowTransactionsHref({
-                                      direction: "EXPENSE",
-                                      bucket: group.key,
-          periodStartKey,
-      periodEndKey,
-                                      categoryL1: isUncategorized ? null : row.label,
-                                      uncategorized: isUncategorized,
-                                    })}
-                                    className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    {formatRub(row.value)}
-                                  </Link>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ))
-                      ) : (
-                        (expenseBucketGroups[0]?.categories ?? []).map((row) => {
-                          const CategoryIcon =
-                            topLevelIconByLabel.get(row.label) ??
-                            CATEGORY_ICON_FALLBACK;
-                          const isUncategorized = row.label === UNCATEGORIZED_LABEL;
-                          return (
-                            <div
-                              key={row.label}
-                              className="flex items-center gap-2 text-xs"
-                            >
-                              <span style={{ color: ACCENT }}>
-                                <CategoryIcon className="h-3.5 w-3.5" />
-                              </span>
-                              <span className="min-w-0 flex-1 truncate text-slate-400">
-                                {row.label}
-                              </span>
-                              <Link
-                                href={buildCashflowTransactionsHref({
-                                  direction: "EXPENSE",
-                                  bucket: "actual",
-      periodStartKey,
-      periodEndKey,
-                                  categoryL1: isUncategorized ? null : row.label,
-                                  uncategorized: isUncategorized,
-                                })}
-                                className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {formatRub(row.value)}
-                              </Link>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex w-full items-center justify-between gap-3">
-                    <span className="flex items-center gap-1.5 text-sm text-slate-400">
-                      {plannedFreeBalance >= 0 ? (
-                        <Plus
-                          className="h-3.5 w-3.5"
-                          style={{ color: GREEN }}
-                          strokeWidth={2.5}
-                        />
-                      ) : (
-                        <Minus
-                          className="h-3.5 w-3.5"
-                          style={{ color: RED }}
-                          strokeWidth={2.5}
-                        />
-                      )}
-                      {showPlan ? "Плановый остаток" : "Фактический остаток"}
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <CurrencyChip code="RUB" />
-                      <span
-                        className="text-base font-semibold tabular-nums"
-                        style={{
-                          color: plannedFreeBalance >= 0 ? GREEN : RED,
-                        }}
-                      >
-                        {loading
-                          ? "..."
-                          : plannedFreeBalance < 0
-                            ? `−${formatRub(remainderAbs)}`
-                            : formatRub(remainderAbs)}
-                      </span>
-                    </span>
-                  </div>
-
-                  <div
-                    className="flex h-3 w-full justify-start"
-                    role="img"
-                    aria-label="Прогресс остатка"
-                  >
-                    {!loading && remainderAbs > 0 && (
-                      <div
-                        className="h-full shrink-0 rounded-full"
-                        style={{
-                          width: `${remainderBarPct}%`,
-                          backgroundColor:
-                            plannedFreeBalance >= 0 ? GREEN : RED,
-                        }}
-                        title={`Остаток: ${formatRub(remainderAbs)}`}
+                      <ChevronRight
+                        className="h-5 w-5 shrink-0 text-slate-500"
+                        strokeWidth={1.5}
                       />
-                    )}
-                  </div>
-                </div>
+                    </Link>
+                  );
+                })}
               </div>
-            </div>
+            )}
           </section>
-
-          <section>
-            <div className="mb-3 flex items-baseline justify-between px-1"><h2 className="text-lg font-semibold">Цели</h2><Link href="/goals" className="text-sm font-medium text-violet-400">Все цели</Link></div>
-            {loading ? <div className="text-sm text-slate-400">Загрузка целей...</div> : activeGoals.length === 0 ? <Link href="/goals" className="block rounded-lg overflow-hidden border border-dashed border-white/10 p-4 text-sm text-slate-400" style={{ backgroundColor: MODAL_BG }}>Добавить первую цель →</Link> : <div className="space-y-2">{activeGoals.slice(0, 2).map((goal) => {
-              const summary = goalSummaryById.get(goal.id) ?? { amount: 0, progress: 0, rangeLabel: "" };
-              const progressColor = getGoalProgressColor(summary.progress, categoryLookup.idToScope?.get(goal.category_id) === "INCOME");
-              return <Link href="/goals" key={goal.id} className={`flex items-center gap-3 ${assetCardSurfaceClass} p-3`} style={{ backgroundColor: MODAL_BG }}><span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[rgba(93,95,215,0.22)] text-violet-300"><Target className="h-5 w-5" strokeWidth={1.5} /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{goal.name}</span><span className="block truncate text-xs text-slate-400">{formatRub(summary.amount)} из {formatRub(goal.amount)}</span><span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-slate-800"><span className="block h-full rounded-full" style={{ width: `${summary.progress * 100}%`, backgroundColor: progressColor }} /></span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={1.5} /></Link>;
-            })}</div>}
-          </section>
-
         </div>
       </main>
 

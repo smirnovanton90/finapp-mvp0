@@ -20,6 +20,12 @@ import { useSidebar } from "@/components/ui/sidebar-context";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { cn } from "@/lib/utils";
 import {
+  classifyCashflowBucket,
+  getCashflowApiDateRange,
+  resolveCashflowPeriodFromParams,
+  type CashflowBucket,
+} from "@/lib/cashflow-buckets";
+import {
   ACCENT,
   ACCENT_FILL_LIGHT,
   ACCENT_FILL_MEDIUM,
@@ -2517,6 +2523,49 @@ function TransactionsView({
   const defaultShowPlannedRealized = isPlanningView;
   const defaultShowPlannedUnrealized = isPlanningView;
   const isOverduePreset = searchParams.get("preset") === "overdue-planned";
+  const isTodayPlannedPreset = searchParams.get("preset") === "today-planned";
+  const isCashflowPreset = searchParams.get("preset") === "cashflow";
+  const cashflowDirectionParam = searchParams.get("direction");
+  const cashflowBucketParam = searchParams.get("bucket");
+  const cashflowMonthParam = searchParams.get("month");
+  const cashflowDateFromParam = searchParams.get("date_from");
+  const cashflowDateToParam = searchParams.get("date_to");
+  const cashflowCategoryL1Param = searchParams.get("category_l1");
+  const cashflowUncategorized = searchParams.get("uncategorized") === "1";
+  const cashflowDirection =
+    cashflowDirectionParam === "INCOME" || cashflowDirectionParam === "EXPENSE"
+      ? cashflowDirectionParam
+      : null;
+  const cashflowBucket = ((): CashflowBucket | null => {
+    if (
+      cashflowBucketParam === "actual" ||
+      cashflowBucketParam === "planned" ||
+      cashflowBucketParam === "overdue_month" ||
+      cashflowBucketParam === "overdue_prev"
+    ) {
+      return cashflowBucketParam;
+    }
+    return null;
+  })();
+  const cashflowPeriodRange = resolveCashflowPeriodFromParams({
+    dateFrom: cashflowDateFromParam,
+    dateTo: cashflowDateToParam,
+    month: cashflowMonthParam,
+  });
+  const cashflowPresetActive =
+    isCashflowPreset &&
+    cashflowDirection != null &&
+    cashflowBucket != null &&
+    cashflowPeriodRange != null;
+  const cashflowTodayKey = new Date().toISOString().slice(0, 10);
+  const cashflowApiDates = cashflowPresetActive
+    ? getCashflowApiDateRange(
+        cashflowPeriodRange.startKey,
+        cashflowPeriodRange.endKey,
+        cashflowBucket,
+        cashflowTodayKey
+      )
+    : null;
   const chainPreset = searchParams.get("preset") === "chain";
   const chainIdParamRaw = searchParams.get("chain_id");
   const chainIdParam = chainIdParamRaw ? Number(chainIdParamRaw) : NaN;
@@ -2544,25 +2593,51 @@ function TransactionsView({
         ? true
         : false
     : false;
-  const initialShowActual = isChainPreset ? false : isOverduePreset ? false : defaultShowActual;
+  const initialShowActual = isChainPreset
+    ? false
+    : isOverduePreset || isTodayPlannedPreset
+      ? false
+      : cashflowPresetActive
+        ? cashflowBucket === "actual"
+        : defaultShowActual;
   const initialShowPlannedRealized = isChainPreset
     ? chainFilterPreset === "realized" || chainFilterPreset === "total"
-    : isOverduePreset
+    : isOverduePreset || isTodayPlannedPreset
       ? false
-      : defaultShowPlannedRealized;
+      : cashflowPresetActive
+        ? cashflowBucket === "actual"
+        : defaultShowPlannedRealized;
   const initialShowPlannedUnrealized = isChainPreset
     ? chainFilterPreset === "overdue" || chainFilterPreset === "upcoming" || chainFilterPreset === "total"
-    : isOverduePreset
+    : isOverduePreset || isTodayPlannedPreset
       ? true
-      : defaultShowPlannedUnrealized;
+      : cashflowPresetActive
+        ? cashflowBucket !== "actual"
+        : defaultShowPlannedUnrealized;
   const initialFormTransactionType = isChainPreset
     ? "PLANNED"
-    : isOverduePreset
+    : isOverduePreset || isTodayPlannedPreset
       ? "PLANNED"
-      : defaultShowActual
-        ? "ACTUAL"
-        : "PLANNED";
-  const initialDateTo = isOverduePreset ? getYesterdayDateKey() : "";
+      : cashflowPresetActive && cashflowBucket !== "actual"
+        ? "PLANNED"
+        : defaultShowActual
+          ? "ACTUAL"
+          : "PLANNED";
+  const todayPlannedDateKey = new Date().toISOString().slice(0, 10);
+  const initialDateFrom = isTodayPlannedPreset
+    ? todayPlannedDateKey
+    : cashflowApiDates?.dateFrom ?? "";
+  const initialDateTo = isOverduePreset
+    ? getYesterdayDateKey()
+    : isTodayPlannedPreset
+      ? todayPlannedDateKey
+      : cashflowApiDates?.dateTo ?? "";
+  const initialSelectedDirections = ((): Set<TransactionOut["direction"]> => {
+    if (cashflowPresetActive && cashflowDirection) {
+      return new Set([cashflowDirection]);
+    }
+    return new Set();
+  })();
 
   const [items, setItems] = useState<ItemOut[]>([]);
   const [itemTxCounts, setItemTxCounts] = useState<Map<number, number>>(new Map());
@@ -2626,7 +2701,7 @@ function TransactionsView({
   const [showPlannedUnrealized, setShowPlannedUnrealized] = useState(
     initialShowPlannedUnrealized
   );
-  const [dateFrom, setDateFrom] = useState("");
+  const [dateFrom, setDateFrom] = useState(initialDateFrom);
   const [dateTo, setDateTo] = useState(initialDateTo);
 
   // preset=chain: дополнительный фильтр по chain_id + подтип (total/realized/overdue/upcoming/deleted)
@@ -2653,7 +2728,7 @@ function TransactionsView({
   const [amountTo, setAmountTo] = useState("");
   const [selectedDirections, setSelectedDirections] = useState<
     Set<TransactionOut["direction"]>
-  >(() => new Set());
+  >(() => initialSelectedDirections);
   const [selectedCategoryFilterKeys, setSelectedCategoryFilterKeys] = useState<
     Set<string>
   >(() => new Set());
@@ -4585,7 +4660,7 @@ function TransactionsView({
     )
       return true;
     if (!showActive || showDeleted) return true;
-    if (isOverduePreset || isChainPreset) return true;
+    if (isOverduePreset || isTodayPlannedPreset || isChainPreset || cashflowPresetActive) return true;
     if (chainMissing) return true;
     return false;
   }, [
@@ -4616,7 +4691,9 @@ function TransactionsView({
     initialShowPlannedRealized,
     initialShowPlannedUnrealized,
     isOverduePreset,
+    isTodayPlannedPreset,
     isChainPreset,
+    cashflowPresetActive,
     chainMissing,
   ]);
 
@@ -4886,9 +4963,44 @@ function TransactionsView({
 
   const filteredTxs = useMemo(() => {
     const enriched = txs.map((tx) => ({ ...tx, isDeleted: Boolean(tx.deleted_at) }));
+    const todayKey = new Date().toISOString().slice(0, 10);
+
+    if (isTodayPlannedPreset) {
+      return enriched.filter((tx) => {
+        if (tx.isDeleted || tx.is_split_parent) return false;
+        if (tx.transaction_type !== "PLANNED") return false;
+        if (tx.status === "REALIZED") return false;
+        return getDateKey(tx.transaction_date) === todayKey;
+      });
+    }
+
+    if (cashflowPresetActive && cashflowDirection && cashflowBucket && cashflowPeriodRange) {
+      const { startKey, endKey } = cashflowPeriodRange;
+      return enriched.filter((tx) => {
+        if (tx.isDeleted) return false;
+        const bucket = classifyCashflowBucket(
+          tx,
+          cashflowDirection,
+          startKey,
+          endKey,
+          todayKey
+        );
+        if (bucket !== cashflowBucket) return false;
+        if (cashflowUncategorized) {
+          return !tx.category_id;
+        }
+        if (cashflowCategoryL1Param) {
+          if (!tx.category_id) return false;
+          const path = categoryLookup.idToPath.get(tx.category_id);
+          const top = path?.[0]?.trim();
+          return top === cashflowCategoryL1Param;
+        }
+        return true;
+      });
+    }
+
     if (chainMissing || !chainIdFilter) return enriched;
 
-    const todayKey = new Date().toISOString().slice(0, 10);
     const mode = chainPresetFilter ?? "total";
 
     return enriched
@@ -4909,7 +5021,20 @@ function TransactionsView({
         if (mode === "upcoming") return dateKey >= todayKey;
         return true;
       });
-  }, [txs, chainIdFilter, chainPresetFilter, chainMissing]);
+  }, [
+    txs,
+    chainIdFilter,
+    chainPresetFilter,
+    chainMissing,
+    isTodayPlannedPreset,
+    cashflowPresetActive,
+    cashflowDirection,
+    cashflowBucket,
+    cashflowPeriodRange,
+    cashflowUncategorized,
+    cashflowCategoryL1Param,
+    categoryLookup.idToPath,
+  ]);
 
   const sortedTxs = useMemo(() => {
     const list = [...filteredTxs];

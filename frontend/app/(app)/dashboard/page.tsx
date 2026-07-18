@@ -3,11 +3,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ComponentType,
 } from "react";
+import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import Link from "next/link";
@@ -16,14 +18,17 @@ import {
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
+  Calendar,
+  ChevronDown,
   ChevronRight,
+  Minus,
   PieChart,
+  Plus,
   Target,
   User,
   Wallet,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tag } from "@/components/ui/tag";
 import {
@@ -31,6 +36,8 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PeriodRangeCalendar } from "@/components/period-range-calendar";
+import { useSidebar } from "@/components/ui/sidebar-context";
 import {
   buildCategoryDescendants,
   buildCategoryLookup,
@@ -61,11 +68,63 @@ import { CategoryIconImage } from "@/components/category-icon-image";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import {
+  ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
   OVERDUE_TRANSACTIONS_GRADIENT,
   NO_OVERDUE_TRANSACTIONS_GRADIENT,
 } from "@/lib/gradients";
 import { getGoalProgressColor } from "@/lib/goal-progress-color";
-import { ACCENT, GREEN, RED } from "@/lib/colors";
+import { ACCENT, GREEN, MODAL_BG, ORANGE, RED } from "@/lib/colors";
+import { CurrencyChip } from "@/components/currency-chip";
+import { cn } from "@/lib/utils";
+import {
+  CASHFLOW_BUCKET_ORDER,
+  CASHFLOW_LABELS,
+  buildCashflowTransactionsHref,
+  classifyCashflowBucket,
+  type CashflowBucket,
+} from "@/lib/cashflow-buckets";
+
+/** Подложка в стиле карточки актива: MODAL_BG, rounded-lg, без бордера. */
+const assetCardSurfaceClass =
+  "relative rounded-lg overflow-hidden border-0 outline-none";
+
+type CashflowSegment = {
+  key: CashflowBucket;
+  label: string;
+  value: number;
+  color: string;
+};
+
+type CashflowBreakdown = {
+  actual: number;
+  planned: number;
+  overdueMonth: number;
+  overduePrev: number;
+  total: number;
+  segments: CashflowSegment[];
+};
+
+type CashflowBucketGroup = {
+  key: CashflowBucket;
+  label: string;
+  color: string;
+  total: number;
+  categories: { label: string; value: number }[];
+};
+
+const INCOME_SEGMENT_COLORS: Record<CashflowBucket, string> = {
+  actual: GREEN,
+  planned: "rgba(52, 211, 153, 0.45)",
+  overdue_month: ORANGE,
+  overdue_prev: "#E11D48",
+};
+
+const EXPENSE_SEGMENT_COLORS: Record<CashflowBucket, string> = {
+  actual: RED,
+  planned: "rgba(251, 76, 79, 0.45)",
+  overdue_month: ORANGE,
+  overdue_prev: "#BE123C",
+};
 
 type ChartPoint = {
   x: number;
@@ -382,6 +441,33 @@ function formatMonthLabel(date: Date) {
   }).format(date);
 }
 
+function getCurrentMonthRangeKeys(date: Date = new Date()) {
+  return {
+    startKey: toDateKey(new Date(date.getFullYear(), date.getMonth(), 1)),
+    endKey: toDateKey(new Date(date.getFullYear(), date.getMonth() + 1, 0)),
+  };
+}
+
+function isFullCalendarMonthRange(startKey: string, endKey: string) {
+  const start = parseDateKey(startKey);
+  if (Number.isNaN(start.getTime())) return false;
+  const expectedStart = toDateKey(
+    new Date(start.getFullYear(), start.getMonth(), 1)
+  );
+  const expectedEnd = toDateKey(
+    new Date(start.getFullYear(), start.getMonth() + 1, 0)
+  );
+  return startKey === expectedStart && endKey === expectedEnd;
+}
+
+function formatDashboardPeriodLabel(startKey: string, endKey: string) {
+  if (isFullCalendarMonthRange(startKey, endKey)) {
+    const label = formatMonthLabel(parseDateKey(startKey));
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+  return formatRangeLabel(startKey, endKey);
+}
+
 function getPreviousMonthRange(date: Date) {
   const start = new Date(date.getFullYear(), date.getMonth() - 1, 1);
   const end = new Date(date.getFullYear(), date.getMonth(), 0);
@@ -390,6 +476,141 @@ function getPreviousMonthRange(date: Date) {
 
 function isRealizedTransaction(tx: TransactionOut) {
   return tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
+}
+
+function isOpenPlannedTransaction(tx: TransactionOut) {
+  return tx.transaction_type === "PLANNED" && tx.status !== "REALIZED";
+}
+
+/** Учитывать ли транзакцию в цифрах дашборда при включённом/выключенном «Плане». */
+function isDashboardTxIncluded(tx: TransactionOut, includePlan: boolean) {
+  if (isRealizedTransaction(tx)) return true;
+  return includePlan && isOpenPlannedTransaction(tx);
+}
+
+function buildCashflowBreakdown(
+  txs: TransactionOut[],
+  direction: "INCOME" | "EXPENSE",
+  periodStartKey: string,
+  periodEndKey: string,
+  todayKey: string,
+  colors: Record<CashflowBucket, string>
+): CashflowBreakdown {
+  const totals: Record<CashflowBucket, number> = {
+    actual: 0,
+    planned: 0,
+    overdue_month: 0,
+    overdue_prev: 0,
+  };
+
+  txs.forEach((tx) => {
+    const bucket = classifyCashflowBucket(
+      tx,
+      direction,
+      periodStartKey,
+      periodEndKey,
+      todayKey
+    );
+    if (!bucket) return;
+    totals[bucket] += tx.amount;
+  });
+
+  const segments = CASHFLOW_BUCKET_ORDER.map((key) => ({
+    key,
+    label: CASHFLOW_LABELS[key],
+    value: totals[key],
+    color: colors[key],
+  })).filter((segment) => segment.value > 0);
+
+  return {
+    actual: totals.actual,
+    planned: totals.planned,
+    overdueMonth: totals.overdue_month,
+    overduePrev: totals.overdue_prev,
+    total:
+      totals.actual +
+      totals.planned +
+      totals.overdue_month +
+      totals.overdue_prev,
+    segments,
+  };
+}
+
+function withCashflowPlanFilter(
+  breakdown: CashflowBreakdown,
+  includePlan: boolean,
+  colors: Record<CashflowBucket, string>
+): CashflowBreakdown {
+  if (includePlan) return breakdown;
+  const actual = breakdown.actual;
+  return {
+    actual,
+    planned: 0,
+    overdueMonth: 0,
+    overduePrev: 0,
+    total: actual,
+    segments:
+      actual > 0
+        ? [
+            {
+              key: "actual",
+              label: CASHFLOW_LABELS.actual,
+              value: actual,
+              color: colors.actual,
+            },
+          ]
+        : [],
+  };
+}
+
+function buildCashflowBucketGroups(
+  txs: TransactionOut[],
+  direction: "INCOME" | "EXPENSE",
+  periodStartKey: string,
+  periodEndKey: string,
+  todayKey: string,
+  categoryLookup: ReturnType<typeof buildCategoryLookup>,
+  includePlan: boolean,
+  colors: Record<CashflowBucket, string>
+): CashflowBucketGroup[] {
+  const byBucket = new Map<CashflowBucket, Map<string, number>>();
+
+  txs.forEach((tx) => {
+    const bucket = classifyCashflowBucket(
+      tx,
+      direction,
+      periodStartKey,
+      periodEndKey,
+      todayKey
+    );
+    if (!bucket) return;
+    if (!includePlan && bucket !== "actual") return;
+    const label = resolveTopLevelLabel(tx.category_id, categoryLookup);
+    if (!byBucket.has(bucket)) byBucket.set(bucket, new Map());
+    const categories = byBucket.get(bucket);
+    if (!categories) return;
+    categories.set(label, (categories.get(label) ?? 0) + tx.amount);
+  });
+
+  const keys = includePlan ? CASHFLOW_BUCKET_ORDER : (["actual"] as CashflowBucket[]);
+
+  return keys
+    .map((key) => {
+      const categoriesMap = byBucket.get(key) ?? new Map<string, number>();
+      const categories = Array.from(categoriesMap.entries())
+        .map(([label, value]) => ({ label, value }))
+        .filter((row) => row.value > 0)
+        .sort((a, b) => b.value - a.value);
+      const total = categories.reduce((sum, row) => sum + row.value, 0);
+      return {
+        key,
+        label: CASHFLOW_LABELS[key],
+        color: colors[key],
+        total,
+        categories,
+      };
+    })
+    .filter((group) => group.total > 0);
 }
 
 type CategoryBreakdownRow = {
@@ -428,7 +649,8 @@ function buildCategoryBreakdown(
   startKey: string,
   endKey: string,
   categoryLookup: ReturnType<typeof buildCategoryLookup>,
-  limit: number
+  limit: number,
+  includePlan: boolean
 ): CategoryBreakdown {
   const totals = new Map<string, number>();
   let total = 0;
@@ -442,7 +664,7 @@ function buildCategoryBreakdown(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
-    if (!isRealizedTransaction(tx)) return;
+    if (!isDashboardTxIncluded(tx, includePlan)) return;
     const label = resolveLabel(tx.category_id);
     totals.set(label, (totals.get(label) ?? 0) + tx.amount);
     total += tx.amount;
@@ -476,7 +698,8 @@ function buildCategoryTotalsByLabel(
   direction: "INCOME" | "EXPENSE",
   startKey: string,
   endKey: string,
-  categoryLookup: ReturnType<typeof buildCategoryLookup>
+  categoryLookup: ReturnType<typeof buildCategoryLookup>,
+  includePlan: boolean
 ) {
   const totals = new Map<string, number>();
 
@@ -489,7 +712,7 @@ function buildCategoryTotalsByLabel(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
-    if (!isRealizedTransaction(tx)) return;
+    if (!isDashboardTxIncluded(tx, includePlan)) return;
     const label = resolveLabel(tx.category_id);
     totals.set(label, (totals.get(label) ?? 0) + tx.amount);
   });
@@ -502,7 +725,8 @@ function buildCategoryMonthlyTotals(
   direction: "INCOME" | "EXPENSE",
   startKey: string,
   endKey: string,
-  categoryLookup: ReturnType<typeof buildCategoryLookup>
+  categoryLookup: ReturnType<typeof buildCategoryLookup>,
+  includePlan: boolean
 ) {
   const totals = new Map<string, Map<string, number>>();
 
@@ -512,7 +736,7 @@ function buildCategoryMonthlyTotals(
     const dateKey = toTxDateKey(tx.transaction_date);
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
-    if (!isRealizedTransaction(tx)) return;
+    if (!isDashboardTxIncluded(tx, includePlan)) return;
     const label = resolveTopLevelLabel(tx.category_id, categoryLookup);
     const monthKey = dateKey.slice(0, 7);
     if (!totals.has(label)) totals.set(label, new Map());
@@ -622,7 +846,7 @@ function buildDeltasByDate(
   txs: TransactionOut[],
   selectedIds: Set<number>,
   itemKindById: Map<number, ItemKind>,
-  todayKey: string
+  includePlan: boolean
 ) {
   const map = new Map<string, Map<number, number>>();
   const addDelta = (dateKey: string, itemId: number, delta: number) => {
@@ -639,8 +863,7 @@ function buildDeltasByDate(
     if (tx.source === "AUTO_ITEM_OPENING" || tx.source === "AUTO_ITEM_CLOSING") {
       return;
     }
-    const isRealized = tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
-    if (dateKey <= todayKey && !isRealized) return;
+    if (!isDashboardTxIncluded(tx, includePlan)) return;
 
     const primarySelected = selectedIds.has(tx.primary_item_id);
     const counterSelected = tx.counterparty_item_id
@@ -673,6 +896,7 @@ function buildDeltasByDate(
 export default function DashboardPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
+  const { isDesktop } = useSidebar();
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [goals, setGoals] = useState<GoalOut[]>([]);
@@ -687,17 +911,37 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [incomeHover, setIncomeHover] = useState<CategorySegment | null>(null);
   const [expenseHover, setExpenseHover] = useState<CategorySegment | null>(null);
-  const [mobileDetail, setMobileDetail] = useState<"structure" | "income" | "expense" | null>(null);
+  const [mobileDetail, setMobileDetail] = useState<"structure" | null>(null);
   const [mobileDetailExpanded, setMobileDetailExpanded] = useState(false);
+  const [showPlan, setShowPlan] = useState(true);
+  const [expandedCashflow, setExpandedCashflow] = useState<
+    "income" | "expense" | null
+  >(null);
+  const [periodStartKey, setPeriodStartKey] = useState(
+    () => getCurrentMonthRangeKeys().startKey
+  );
+  const [periodEndKey, setPeriodEndKey] = useState(
+    () => getCurrentMonthRangeKeys().endKey
+  );
+  const [periodDialogOpen, setPeriodDialogOpen] = useState(false);
+  const [periodCalendarKey, setPeriodCalendarKey] = useState(0);
+  const [draftPeriodStartKey, setDraftPeriodStartKey] = useState(periodStartKey);
+  const [draftPeriodEndKey, setDraftPeriodEndKey] = useState(periodEndKey);
+  const [mobileStickyHeaderVisible, setMobileStickyHeaderVisible] = useState(false);
+  const mobileStickyHeaderVisibleRef = useRef(false);
+  const mobileHeroDissolveRef = useRef<HTMLDivElement | null>(null);
+  const mobileHeroGradientRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const [chartSize, setChartSize] = useState({ width: 240, height: 128 });
   const now = new Date();
   const todayKey = toDateKey(now);
-  const monthStartKey = toDateKey(new Date(now.getFullYear(), now.getMonth(), 1));
-  const monthEndKey = toDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-  const currentMonthLabel = formatMonthLabel(now);
-  const rangeStartKey = monthStartKey;
-  const rangeEndKey = monthEndKey;
+  const currentMonthRange = getCurrentMonthRangeKeys(now);
+  const isCurrentMonthPeriod =
+    periodStartKey === currentMonthRange.startKey &&
+    periodEndKey === currentMonthRange.endKey;
+  const periodLabel = formatDashboardPeriodLabel(periodStartKey, periodEndKey);
+  const rangeStartKey = periodStartKey;
+  const rangeEndKey = periodEndKey;
   const previousMonthRange = getPreviousMonthRange(now);
   const previousMonthEndKey = toDateKey(previousMonthRange.end);
   const priorMonthRange = getPreviousMonthRange(previousMonthRange.start);
@@ -950,86 +1194,18 @@ export default function DashboardPage() {
     [otherAssetItems, rateByCode]
   );
 
-  const assetSegments = useMemo((): AssetStructureSegment[] => {
-    const byType = new Map<string, number>();
-    activeItems.forEach((item) => {
-      if (resolveItemEffectiveKind(item) !== "ASSET") return;
-      const value = getPrimaryValueRubCents(item) ?? 0;
-      if (value <= 0) return;
-      byType.set(item.type_code, (byType.get(item.type_code) ?? 0) + value);
-    });
-    const rows = Array.from(byType.entries())
-      .map(([typeCode, value]) => ({
-        label: ITEM_TYPE_LABELS[typeCode] ?? typeCode,
-        value,
-      }))
-      .sort((a, b) => b.value - a.value);
-    const total = rows.reduce((s, x) => s + x.value, 0);
-    if (total <= 0) return [];
-    return rows.map((row, index) => ({
-      label: row.label,
-      value: row.value,
-      percent: row.value / total,
-      color: DONUT_COLORS[index % DONUT_COLORS.length],
-    }));
-  }, [activeItems, rateByCode, resolveItemEffectiveKind]);
-
-  const liabilityTotalsByType = useMemo(() => {
-    const totals: Record<string, number> = {};
-    LIABILITY_TYPES.forEach((type) => {
-      totals[type.code] = 0;
-    });
-    liabilityItems.forEach((item) => {
-      totals[item.type_code] = (totals[item.type_code] ?? 0) + (getPrimaryValueRubCents(item) ?? 0);
-    });
-    return totals;
-  }, [liabilityItems, rateByCode]);
-
-  const liabilitySegments = useMemo((): AssetStructureSegment[] => {
-    const rows = Object.entries(liabilityTotalsByType)
-      .filter(([, value]) => value > 0)
-      .map(([code]) => ({
-        label: LIABILITY_TYPES.find((t) => t.code === code)?.label ?? code,
-        value: liabilityTotalsByType[code],
-      }))
-      .sort((a, b) => b.value - a.value);
-    const total = rows.reduce((s, x) => s + x.value, 0);
-    if (total <= 0) return [];
-    return rows.map((row, index) => ({
-      label: row.label,
-      value: row.value,
-      percent: row.value / total,
-      color: DONUT_COLORS[index % DONUT_COLORS.length],
-    }));
-  }, [liabilityTotalsByType]);
-
-  const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
-    const assets = activeItems
-      .filter((x) => resolveItemEffectiveKind(x) === "ASSET")
-      .reduce((sum, x) => sum + (getPrimaryValueRubCents(x) ?? 0), 0);
-
-    const liabilities = activeItems
-      .filter((x) => resolveItemEffectiveKind(x) === "LIABILITY")
-      .reduce((sum, x) => sum + (getPrimaryValueRubCents(x) ?? 0), 0);
-
-    return {
-      totalAssets: assets,
-      totalLiabilities: liabilities,
-      netTotal: assets - liabilities,
-    };
-  }, [activeItems, rateByCode, resolveItemEffectiveKind]);
-
   const incomeBreakdown = useMemo(
     () =>
       buildCategoryBreakdown(
         txs,
         "INCOME",
-        monthStartKey,
-        monthEndKey,
+        periodStartKey,
+        periodEndKey,
         categoryLookup,
-        CATEGORY_BREAKDOWN_LIMIT
+        CATEGORY_BREAKDOWN_LIMIT,
+        showPlan
       ),
-    [categoryLookup, monthEndKey, monthStartKey, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs]
   );
 
   const expenseBreakdown = useMemo(
@@ -1037,13 +1213,101 @@ export default function DashboardPage() {
       buildCategoryBreakdown(
         txs,
         "EXPENSE",
-        monthStartKey,
-        monthEndKey,
+        periodStartKey,
+        periodEndKey,
         categoryLookup,
-        CATEGORY_BREAKDOWN_LIMIT
+        CATEGORY_BREAKDOWN_LIMIT,
+        showPlan
       ),
-    [categoryLookup, monthEndKey, monthStartKey, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs]
   );
+
+  const incomeCashflow = useMemo(
+    () =>
+      buildCashflowBreakdown(
+        txs,
+        "INCOME",
+      periodStartKey,
+      periodEndKey,
+        todayKey,
+        INCOME_SEGMENT_COLORS
+      ),
+    [periodEndKey, periodStartKey, todayKey, txs]
+  );
+
+  const expenseCashflow = useMemo(
+    () =>
+      buildCashflowBreakdown(
+        txs,
+        "EXPENSE",
+      periodStartKey,
+      periodEndKey,
+        todayKey,
+        EXPENSE_SEGMENT_COLORS
+      ),
+    [periodEndKey, periodStartKey, todayKey, txs]
+  );
+
+  const displayIncomeCashflow = useMemo(
+    () => withCashflowPlanFilter(incomeCashflow, showPlan, INCOME_SEGMENT_COLORS),
+    [incomeCashflow, showPlan]
+  );
+
+  const displayExpenseCashflow = useMemo(
+    () => withCashflowPlanFilter(expenseCashflow, showPlan, EXPENSE_SEGMENT_COLORS),
+    [expenseCashflow, showPlan]
+  );
+
+  const cashflowScale = Math.max(
+    displayIncomeCashflow.total,
+    displayExpenseCashflow.total,
+    1
+  );
+  const plannedFreeBalance =
+    displayIncomeCashflow.total - displayExpenseCashflow.total;
+  const remainderAbs = Math.abs(plannedFreeBalance);
+  const expensesExceedIncome =
+    displayExpenseCashflow.total > displayIncomeCashflow.total;
+  const incomeBarPct =
+    cashflowScale > 0 ? (displayIncomeCashflow.total / cashflowScale) * 100 : 0;
+  const expenseBarPct =
+    cashflowScale > 0 ? (displayExpenseCashflow.total / cashflowScale) * 100 : 0;
+  const remainderBarPct =
+    cashflowScale > 0 ? (remainderAbs / cashflowScale) * 100 : 0;
+
+  const incomeBucketGroups = useMemo(
+    () =>
+      buildCashflowBucketGroups(
+        txs,
+        "INCOME",
+      periodStartKey,
+      periodEndKey,
+        todayKey,
+        categoryLookup,
+        showPlan,
+        INCOME_SEGMENT_COLORS
+      ),
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, todayKey, txs]
+  );
+
+  const expenseBucketGroups = useMemo(
+    () =>
+      buildCashflowBucketGroups(
+        txs,
+        "EXPENSE",
+      periodStartKey,
+      periodEndKey,
+        todayKey,
+        categoryLookup,
+        showPlan,
+        EXPENSE_SEGMENT_COLORS
+      ),
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, todayKey, txs]
+  );
+
+  const toggleCashflowExpand = useCallback((direction: "income" | "expense") => {
+    setExpandedCashflow((prev) => (prev === direction ? null : direction));
+  }, []);
 
   const incomeSegments = useMemo(
     () => buildCategorySegments(incomeBreakdown, 0),
@@ -1060,11 +1324,12 @@ export default function DashboardPage() {
       buildCategoryTotalsByLabel(
         txs,
         "INCOME",
-        monthStartKey,
-        monthEndKey,
-        categoryLookup
+        periodStartKey,
+        periodEndKey,
+        categoryLookup,
+        showPlan
       ),
-    [categoryLookup, monthEndKey, monthStartKey, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs]
   );
 
   const expenseTotalsCurrent = useMemo(
@@ -1072,11 +1337,12 @@ export default function DashboardPage() {
       buildCategoryTotalsByLabel(
         txs,
         "EXPENSE",
-        monthStartKey,
-        monthEndKey,
-        categoryLookup
+        periodStartKey,
+        periodEndKey,
+        categoryLookup,
+        showPlan
       ),
-    [categoryLookup, monthEndKey, monthStartKey, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs]
   );
 
   const incomeTotalsPrevMonth = useMemo(
@@ -1086,9 +1352,10 @@ export default function DashboardPage() {
         "INCOME",
         priorMonthStartKey,
         priorMonthEndKey,
-        categoryLookup
+        categoryLookup,
+        showPlan
       ),
-    [categoryLookup, priorMonthEndKey, priorMonthStartKey, txs]
+    [categoryLookup, priorMonthEndKey, priorMonthStartKey, showPlan, txs]
   );
 
   const expenseTotalsPrevMonth = useMemo(
@@ -1098,9 +1365,10 @@ export default function DashboardPage() {
         "EXPENSE",
         priorMonthStartKey,
         priorMonthEndKey,
-        categoryLookup
+        categoryLookup,
+        showPlan
       ),
-    [categoryLookup, priorMonthEndKey, priorMonthStartKey, txs]
+    [categoryLookup, priorMonthEndKey, priorMonthStartKey, showPlan, txs]
   );
 
   const incomeMonthlyTotals = useMemo(
@@ -1110,9 +1378,10 @@ export default function DashboardPage() {
         "INCOME",
         twelveMonthStartKey,
         twelveMonthEndKey,
-        categoryLookup
+        categoryLookup,
+        showPlan
       ),
-    [categoryLookup, twelveMonthEndKey, twelveMonthStartKey, txs]
+    [categoryLookup, showPlan, twelveMonthEndKey, twelveMonthStartKey, txs]
   );
 
   const expenseMonthlyTotals = useMemo(
@@ -1122,9 +1391,10 @@ export default function DashboardPage() {
         "EXPENSE",
         twelveMonthStartKey,
         twelveMonthEndKey,
-        categoryLookup
+        categoryLookup,
+        showPlan
       ),
-    [categoryLookup, twelveMonthEndKey, twelveMonthStartKey, txs]
+    [categoryLookup, showPlan, twelveMonthEndKey, twelveMonthStartKey, txs]
   );
 
   const incomePrevMonthTotal = useMemo(
@@ -1221,18 +1491,34 @@ export default function DashboardPage() {
     expensePrevMonthTotal,
   ]);
 
-  const overduePlannedCount = useMemo(() => {
-    let count = 0;
-    txs.forEach((tx) => {
-      if (tx.transaction_type !== "PLANNED") return;
-      if (tx.status === "REALIZED") return;
-      const dateKey = toTxDateKey(tx.transaction_date);
-      if (!dateKey) return;
-      if (dateKey < todayKey) count += 1;
-    });
-    return count;
-  }, [todayKey, txs]);
-  const hasOverduePlanned = overduePlannedCount > 0;
+  const { overduePlannedCount, overduePlannedSum, todayPlannedCount, todayPlannedSum } =
+    useMemo(() => {
+      let overdueCount = 0;
+      let overdueSum = 0;
+      let todayCount = 0;
+      let todaySum = 0;
+      txs.forEach((tx) => {
+        if (tx.is_split_parent) return;
+        if (tx.transaction_type !== "PLANNED") return;
+        if (tx.status === "REALIZED") return;
+        const dateKey = toTxDateKey(tx.transaction_date);
+        if (!dateKey) return;
+        if (dateKey < todayKey) {
+          overdueCount += 1;
+          overdueSum += tx.amount;
+        } else if (dateKey === todayKey) {
+          todayCount += 1;
+          todaySum += tx.amount;
+        }
+      });
+      return {
+        overduePlannedCount: overdueCount,
+        overduePlannedSum: overdueSum,
+        todayPlannedCount: todayCount,
+        todayPlannedSum: todaySum,
+      };
+    }, [todayKey, txs]);
+  const hasOverduePlanned = showPlan && overduePlannedCount > 0;
 
   const resolveCategoryIcon = useCallback(
     (categoryId: number | null): CategoryIcon => {
@@ -1326,8 +1612,11 @@ export default function DashboardPage() {
     };
   }, [fxRatesByDate, needsRates, rateFetchKeys]);
 
-  const dailyRows = useMemo<DailyRow[]>(() => {
-    if (!chartItems.length || !rangeStartKey || !rangeEndKey) return [];
+  const { dailyRows, endBalancesByItemId } = useMemo(() => {
+    const emptyBalances = new Map<number, number>();
+    if (!chartItems.length || !rangeStartKey || !rangeEndKey) {
+      return { dailyRows: [] as DailyRow[], endBalancesByItemId: emptyBalances };
+    }
 
     const selectedIds = new Set(chartItems.map((item) => item.id));
     const itemKindById = new Map(chartItems.map((item) => [item.id, item.kind]));
@@ -1342,7 +1631,12 @@ export default function DashboardPage() {
       itemsByStartDate.get(startKey)?.push(item);
     });
 
-    const deltasByDate = buildDeltasByDate(txs, selectedIds, itemKindById, todayKey);
+    const deltasByDate = buildDeltasByDate(
+      txs,
+      selectedIds,
+      itemKindById,
+      showPlan
+    );
     const startKeys = chartItems.map((item) => getItemStartKey(item, accountingStartDate)).sort();
     const earliestStartKey = startKeys[0] ?? "";
     const startKey =
@@ -1424,7 +1718,10 @@ export default function DashboardPage() {
       });
     }
 
-    return rows;
+    return {
+      dailyRows: rows,
+      endBalancesByItemId: new Map(balances),
+    };
   }, [
     accountingStartDate,
     chartItems,
@@ -1433,23 +1730,198 @@ export default function DashboardPage() {
     rangeEndKey,
     rangeStartKey,
     resolveItemEffectiveKind,
+    showPlan,
     todayKey,
     txs,
   ]);
 
-  const monthStartNetTotal = useMemo(() => {
-    const row = dailyRows.find((daily) => daily.date === monthStartKey);
+  const itemRubCentsById = useMemo(() => {
+    const map = new Map<number, number>();
+    if (!showPlan) {
+      activeItems.forEach((item) => {
+        const value = getPrimaryValueRubCents(item);
+        if (value != null) map.set(item.id, value);
+      });
+      return map;
+    }
+
+    const asOfKey = rangeEndKey;
+    const rateDateKey = asOfKey > todayKey ? todayKey : asOfKey;
+    activeItems.forEach((item) => {
+      const startKeyForItem = getItemStartKey(item, accountingStartDate);
+      if (startKeyForItem && asOfKey < startKeyForItem) return;
+      const valueCents =
+        endBalancesByItemId.get(item.id) ?? item.initial_balance_minor;
+      const currency = (item.currency_code ?? "RUB").toUpperCase();
+      const rate = getRateForDate(
+        fxRatesByDate,
+        rateDateKey,
+        item.currency_code,
+        latestRatesByCurrency,
+        todayKey
+      );
+      if (rate === null && currency !== "RUB") return;
+      const rubValueCents =
+        currency !== "RUB"
+          ? valueCents
+          : Math.round((valueCents / 100) * (rate ?? 1) * 100);
+      map.set(item.id, Math.abs(rubValueCents));
+    });
+    return map;
+  }, [
+    accountingStartDate,
+    activeItems,
+    endBalancesByItemId,
+    fxRatesByDate,
+    latestRatesByCurrency,
+    rangeEndKey,
+    rateByCode,
+    showPlan,
+    todayKey,
+  ]);
+
+  const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
+    let assets = 0;
+    let liabilities = 0;
+    activeItems.forEach((item) => {
+      const value = itemRubCentsById.get(item.id) ?? 0;
+      const balanceHint = showPlan
+        ? (endBalancesByItemId.get(item.id) ?? item.initial_balance_minor)
+        : undefined;
+      const kind = resolveItemEffectiveKind(item, balanceHint);
+      if (kind === "ASSET") assets += value;
+      else liabilities += value;
+    });
+    return {
+      totalAssets: assets,
+      totalLiabilities: liabilities,
+      netTotal: assets - liabilities,
+    };
+  }, [
+    activeItems,
+    endBalancesByItemId,
+    itemRubCentsById,
+    resolveItemEffectiveKind,
+    showPlan,
+  ]);
+
+  const assetSegments = useMemo((): AssetStructureSegment[] => {
+    const byType = new Map<string, number>();
+    activeItems.forEach((item) => {
+      const balanceHint = showPlan
+        ? (endBalancesByItemId.get(item.id) ?? item.initial_balance_minor)
+        : undefined;
+      if (resolveItemEffectiveKind(item, balanceHint) !== "ASSET") return;
+      const value = itemRubCentsById.get(item.id) ?? 0;
+      if (value <= 0) return;
+      byType.set(item.type_code, (byType.get(item.type_code) ?? 0) + value);
+    });
+    const rows = Array.from(byType.entries())
+      .map(([typeCode, value]) => ({
+        label: ITEM_TYPE_LABELS[typeCode] ?? typeCode,
+        value,
+      }))
+      .sort((a, b) => b.value - a.value);
+    const total = rows.reduce((s, x) => s + x.value, 0);
+    if (total <= 0) return [];
+    return rows.map((row, index) => ({
+      label: row.label,
+      value: row.value,
+      percent: row.value / total,
+      color: DONUT_COLORS[index % DONUT_COLORS.length],
+    }));
+  }, [
+    activeItems,
+    endBalancesByItemId,
+    itemRubCentsById,
+    resolveItemEffectiveKind,
+    showPlan,
+  ]);
+
+  const liabilitySegments = useMemo((): AssetStructureSegment[] => {
+    const byType = new Map<string, number>();
+    activeItems.forEach((item) => {
+      const balanceHint = showPlan
+        ? (endBalancesByItemId.get(item.id) ?? item.initial_balance_minor)
+        : undefined;
+      if (resolveItemEffectiveKind(item, balanceHint) !== "LIABILITY") return;
+      const value = itemRubCentsById.get(item.id) ?? 0;
+      if (value <= 0) return;
+      byType.set(item.type_code, (byType.get(item.type_code) ?? 0) + value);
+    });
+    const rows = Array.from(byType.entries())
+      .map(([typeCode, value]) => ({
+        label: LIABILITY_TYPES.find((t) => t.code === typeCode)?.label
+          ?? ITEM_TYPE_LABELS[typeCode]
+          ?? typeCode,
+        value,
+      }))
+      .sort((a, b) => b.value - a.value);
+    const total = rows.reduce((s, x) => s + x.value, 0);
+    if (total <= 0) return [];
+    return rows.map((row, index) => ({
+      label: row.label,
+      value: row.value,
+      percent: row.value / total,
+      color: DONUT_COLORS[index % DONUT_COLORS.length],
+    }));
+  }, [
+    activeItems,
+    endBalancesByItemId,
+    itemRubCentsById,
+    resolveItemEffectiveKind,
+    showPlan,
+  ]);
+
+  const periodStartNetTotal = useMemo(() => {
+    const row = dailyRows.find((daily) => daily.date === periodStartKey);
     return row?.totalRubCents ?? null;
-  }, [dailyRows, monthStartKey]);
+  }, [dailyRows, periodStartKey]);
+
+  const periodEndNetTotal = useMemo(() => {
+    const row = dailyRows.find((daily) => daily.date === periodEndKey);
+    if (row?.totalRubCents != null) return row.totalRubCents;
+    // Если конец периода = сегодня и план выключен — фактический net из API-проекции.
+    if (!showPlan && periodEndKey >= todayKey) return netTotal;
+    return row?.totalRubCents ?? null;
+  }, [dailyRows, netTotal, periodEndKey, showPlan, todayKey]);
 
   const netTotalChangePercent = useMemo(() => {
     if (loading) return null;
-    if (monthStartNetTotal === null || monthStartNetTotal === 0) return null;
-    const delta = netTotal - monthStartNetTotal;
-    const percent = (delta / Math.abs(monthStartNetTotal)) * 100;
+    if (periodStartNetTotal === null || periodStartNetTotal === 0) return null;
+    if (periodEndNetTotal === null) return null;
+    const delta = periodEndNetTotal - periodStartNetTotal;
+    const percent = (delta / Math.abs(periodStartNetTotal)) * 100;
     if (!Number.isFinite(percent)) return null;
     return percent;
-  }, [loading, monthStartNetTotal, netTotal]);
+  }, [loading, periodEndNetTotal, periodStartNetTotal]);
+
+  const netTotalChangeLabel = isCurrentMonthPeriod
+    ? "С 1 числа месяца"
+    : "За период";
+
+  const openPeriodDialog = useCallback(() => {
+    setDraftPeriodStartKey(periodStartKey);
+    setDraftPeriodEndKey(periodEndKey);
+    setPeriodCalendarKey((key) => key + 1);
+    setPeriodDialogOpen(true);
+  }, [periodEndKey, periodStartKey]);
+
+  const applyPeriodRange = useCallback(
+    (range: { startKey: string; endKey: string }) => {
+      if (!range.startKey || !range.endKey) return;
+      setPeriodStartKey(range.startKey);
+      setPeriodEndKey(range.endKey);
+      setDraftPeriodStartKey(range.startKey);
+      setDraftPeriodEndKey(range.endKey);
+      setPeriodDialogOpen(false);
+    },
+    []
+  );
+
+  const resetPeriodToCurrentMonth = useCallback(() => {
+    applyPeriodRange(getCurrentMonthRangeKeys(new Date()));
+  }, [applyPeriodRange]);
 
   const chartData = useMemo(
     () =>
@@ -1519,72 +1991,620 @@ export default function DashboardPage() {
     return () => observer.disconnect();
   }, []);
 
+  // Герой: при скролле уменьшается и растворяется; затем появляется компактная шапка с чипами.
+  useLayoutEffect(() => {
+    if (isDesktop) {
+      mobileStickyHeaderVisibleRef.current = false;
+      setMobileStickyHeaderVisible(false);
+      return;
+    }
+    const root = document.querySelector("[data-app-scroll-container]");
+    if (!(root instanceof HTMLElement)) return;
+
+    const COLLAPSE_RANGE_PX = 160;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const y = root.scrollTop;
+      const p = Math.min(1, Math.max(0, y / COLLAPSE_RANGE_PX));
+      const dissolveEl = mobileHeroDissolveRef.current;
+      if (dissolveEl) {
+        dissolveEl.style.opacity = String(Math.max(0, 1 - p));
+        dissolveEl.style.transform = `translate3d(0, ${y}px, 0) scale(${1 - p * 0.42})`;
+        dissolveEl.style.pointerEvents = p > 0.85 ? "none" : "auto";
+      }
+      const gradientEl = mobileHeroGradientRef.current;
+      if (gradientEl) {
+        gradientEl.style.opacity = String(Math.max(0, 1 - p * 1.15));
+        gradientEl.style.transform = `translate3d(0, ${y}px, 0)`;
+      }
+      const showSticky = p >= 0.55;
+      if (showSticky !== mobileStickyHeaderVisibleRef.current) {
+        mobileStickyHeaderVisibleRef.current = showSticky;
+        setMobileStickyHeaderVisible(showSticky);
+      }
+    };
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(update);
+    };
+    update();
+    root.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [isDesktop, loading]);
+
+  const renderSettingsChips = (opts?: { compact?: boolean }) => (
+    <div className={cn("flex flex-wrap items-center gap-2", opts?.compact && "min-w-0 flex-1")}>
+      <button
+        type="button"
+        onClick={openPeriodDialog}
+        className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-sm text-white/90 transition-opacity active:opacity-80"
+        aria-label="Выбрать отчётный период"
+      >
+        <Calendar className="h-4 w-4 shrink-0 text-white/70" strokeWidth={1.5} />
+        <span className="truncate font-medium">{periodLabel}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-white/60" strokeWidth={1.5} />
+      </button>
+      <button
+        type="button"
+        onClick={() => setShowPlan((value) => !value)}
+        aria-pressed={showPlan}
+        aria-label={showPlan ? "План включён" : "План выключен"}
+        className={cn(
+          "inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-all active:scale-[0.98]",
+          showPlan
+            ? "border-transparent text-white shadow-[0_0_18px_-4px_rgba(127,92,255,0.85)]"
+            : "border-white/15 bg-white/10 text-white/45"
+        )}
+        style={showPlan ? { backgroundColor: ACCENT } : undefined}
+      >
+        План
+      </button>
+    </div>
+  );
+
   return (
     <>
-      <main className="min-h-0 pt-5 pb-2 text-slate-50 md:hidden">
+      <main className="min-h-0 pb-2 text-slate-50 md:hidden">
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+              @keyframes dashboard-header-gradient-shift {
+                0%, 100% { background-position: 0% 0%; }
+                50% { background-position: 25% 15%; }
+              }
+            `,
+          }}
+        />
+        {/* Шапка с анимированным градиентом от верха экрана (включая safe-area), как на странице актива */}
         <div
-          className="flex w-full flex-col gap-5"
+          className="relative mb-5 flex w-screen max-w-none flex-col gap-3 ml-[calc(-50vw+50%)] px-4 pb-4"
+          style={{
+            paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
+            opacity: loading ? 0 : 1,
+            transition: "opacity 0.3s ease-in-out",
+          }}
+        >
+          <div
+            ref={mobileHeroGradientRef}
+            className="pointer-events-none absolute inset-0 z-0 overflow-hidden will-change-transform"
+            style={{
+              background: ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
+              backgroundSize: "200% 200%",
+              backgroundPosition: "0% 0%",
+              animation: "dashboard-header-gradient-shift 18s ease-in-out infinite",
+              WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 45%, transparent 100%)",
+              maskImage: "linear-gradient(to bottom, black 0%, black 45%, transparent 100%)",
+            }}
+          />
+          <div
+            ref={mobileHeroDissolveRef}
+            className="relative z-0 flex flex-col will-change-transform"
+            style={{ transformOrigin: "center top" }}
+          >
+            <header className="relative z-10 flex items-center justify-between px-1">
+              <div>
+                <p className="text-xs text-white/65">{new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" }).format(now)}</p>
+                <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">{greetingName ? `Привет, ${greetingName}` : "Добрый день"}</h1>
+              </div>
+              <Link href="/cabinet" aria-label="Открыть личный кабинет" className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-white/10 bg-[rgba(93,95,215,0.22)] text-sm font-semibold text-violet-200 shadow-[0_10px_22px_-16px_rgba(127,92,255,0.6)] transition-transform active:scale-90">
+                {userPhotoUrl ? <img src={userPhotoUrl} alt="Фото профиля" className="h-full w-full object-cover" /> : avatarLetter ? avatarLetter : <User className="h-5 w-5" />}
+              </Link>
+            </header>
+          </div>
+          <div
+            className={cn(
+              "relative z-10 transition-opacity duration-200",
+              mobileStickyHeaderVisible && "opacity-0 pointer-events-none"
+            )}
+          >
+            {renderSettingsChips()}
+          </div>
+        </div>
+
+        <div
+          className="relative z-10 flex w-full flex-col gap-5"
           style={{ opacity: loading ? 0 : 1, transition: "opacity 0.3s ease-in-out" }}
         >
-          <header className="flex items-center justify-between px-1">
-            <div>
-              <p className="text-xs text-slate-400">{new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" }).format(now)}</p>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight">{greetingName ? `Привет, ${greetingName}` : "Добрый день"}</h1>
+          {showPlan && (todayPlannedCount > 0 || overduePlannedCount > 0) && (
+            <div
+              className={cn(
+                "grid gap-2",
+                todayPlannedCount > 0 && overduePlannedCount > 0
+                  ? "grid-cols-2"
+                  : "grid-cols-1"
+              )}
+            >
+              {todayPlannedCount > 0 && (
+                <Link
+                  href="/transactions?preset=today-planned"
+                  className={`${assetCardSurfaceClass} flex flex-col gap-2 p-3 transition-transform active:scale-[0.98]`}
+                  style={{ backgroundColor: MODAL_BG }}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-[rgba(93,95,215,0.22)] text-violet-300">
+                      <Calendar className="h-4 w-4" strokeWidth={1.5} />
+                    </span>
+                    <span className="text-sm font-semibold tabular-nums text-white">
+                      {loading ? "..." : todayPlannedCount}
+                    </span>
+                  </span>
+                  <span className="text-xs leading-snug text-slate-400">
+                    На сегодня запланировано
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-white">
+                    <CurrencyChip code="RUB" />
+                    <span className="tabular-nums">
+                      {loading ? "..." : formatRub(todayPlannedSum)}
+                    </span>
+                  </span>
+                </Link>
+              )}
+              {overduePlannedCount > 0 && (
+                <Link
+                  href="/transactions?preset=overdue-planned"
+                  className={`${assetCardSurfaceClass} flex flex-col gap-2 p-3 transition-transform active:scale-[0.98]`}
+                  style={{ backgroundColor: "rgba(255, 141, 40, 0.22)" }}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-amber-400/20 text-amber-300">
+                      <AlertTriangle className="h-4 w-4" strokeWidth={1.5} />
+                    </span>
+                    <span className="text-sm font-semibold tabular-nums text-amber-100">
+                      {loading ? "..." : overduePlannedCount}
+                    </span>
+                  </span>
+                  <span className="text-xs leading-snug text-amber-200/70">
+                    Просроченные транзакции
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-100">
+                    <CurrencyChip code="RUB" />
+                    <span className="tabular-nums">
+                      {loading ? "..." : formatRub(overduePlannedSum)}
+                    </span>
+                  </span>
+                </Link>
+              )}
             </div>
-            <Link href="/cabinet" aria-label="Открыть личный кабинет" className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-white/10 bg-[rgba(93,95,215,0.22)] text-sm font-semibold text-violet-200 shadow-[0_10px_22px_-16px_rgba(127,92,255,0.6)] transition-transform active:scale-90">
-              {userPhotoUrl ? <img src={userPhotoUrl} alt="Фото профиля" className="h-full w-full object-cover" /> : avatarLetter ? avatarLetter : <User className="h-5 w-5" />}
-            </Link>
-          </header>
-
-          <button
-            type="button"
-            onClick={() => { setMobileDetailExpanded(false); setMobileDetail("structure"); }}
-            className="relative overflow-hidden rounded-xl border border-white/10 bg-[#25243F] p-5 text-left text-white shadow-[0_16px_32px_-24px_rgba(0,0,0,0.85)] transition-transform active:scale-[0.98]"
-            aria-label="Открыть структуру активов и обязательств"
-          >
-            <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full border-[20px] border-[rgba(93,95,215,0.22)]" />
-            <div className="relative flex items-center justify-between text-sm text-white/80">
-              <span className="flex items-center gap-2"><Wallet className="h-4 w-4" /> Чистые активы</span>
-              <ChevronRight className="h-5 w-5" />
-            </div>
-            <div className="relative mt-3 text-3xl font-semibold tracking-tight">
-              {loading ? "..." : netTotal < 0 ? `-${formatRub(Math.abs(netTotal))}` : formatRub(netTotal)}
-            </div>
-            <div className="relative mt-3 inline-flex items-center gap-1 rounded-full bg-[rgba(93,95,215,0.22)] px-2.5 py-1 text-xs text-white/90">
-              <ArrowUpRight className="h-3.5 w-3.5" /> С 1 числа месяца {loading ? "..." : formatChangePercent(netTotalChangePercent)}
-            </div>
-            <div className="relative mt-5 grid grid-cols-2 border-t border-white/20 pt-3 text-sm">
-              <div><span className="block text-xs text-white/65">Активы</span><span className="font-medium">{loading ? "..." : formatRub(totalAssets)}</span></div>
-              <div><span className="block text-xs text-white/65">Обязательства</span><span className="font-medium">{loading ? "..." : `-${formatRub(totalLiabilities)}`}</span></div>
-            </div>
-          </button>
+          )}
 
           <section>
-            <div className="mb-3 flex items-baseline justify-between px-1"><h2 className="text-lg font-semibold">Деньги в {currentMonthLabel}</h2><span className="text-xs text-slate-400">По статьям</span></div>
-            <div className="grid grid-cols-2 gap-3">
-              <button type="button" onClick={() => { setMobileDetailExpanded(false); setMobileDetail("income"); }} className="rounded-xl border border-white/10 bg-[#25243F] p-4 text-left shadow-[0_12px_24px_-20px_rgba(0,0,0,0.8)] transition-transform active:scale-[0.98]">
-                <div className="flex items-center justify-between text-sm text-slate-400"><span>Доходы</span><ArrowUpRight className="h-4 w-4 text-emerald-400" /></div>
-                <div className="mt-2 text-lg font-semibold text-emerald-400">{loading ? "..." : formatRub(incomeBreakdown.total)}</div>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-emerald-950"><div className="h-full w-2/3 rounded-full bg-emerald-400" /></div>
-              </button>
-              <button type="button" onClick={() => { setMobileDetailExpanded(false); setMobileDetail("expense"); }} className="rounded-xl border border-white/10 bg-[#25243F] p-4 text-left shadow-[0_12px_24px_-20px_rgba(0,0,0,0.8)] transition-transform active:scale-[0.98]">
-                <div className="flex items-center justify-between text-sm text-slate-400"><span>Расходы</span><ArrowDownRight className="h-4 w-4 text-rose-400" /></div>
-                <div className="mt-2 text-lg font-semibold text-rose-400">{loading ? "..." : formatRub(expenseBreakdown.total)}</div>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-rose-950"><div className="h-full w-4/5 rounded-full bg-rose-400" /></div>
-              </button>
+            <div className="mb-3 flex items-baseline justify-between px-1">
+              <h2 className="text-lg font-semibold">Чистые активы</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setMobileDetailExpanded(false); setMobileDetail("structure"); }}
+              className={`${assetCardSurfaceClass} w-full p-5 text-left text-white transition-transform active:scale-[0.98]`}
+              style={{ backgroundColor: MODAL_BG }}
+              aria-label="Открыть структуру активов и обязательств"
+            >
+              <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full border-[20px] border-[rgba(93,95,215,0.22)]" />
+              <div className="relative text-3xl font-semibold tracking-tight">
+                {loading ? "..." : netTotal < 0 ? `-${formatRub(Math.abs(netTotal))}` : formatRub(netTotal)}
+              </div>
+              <div className="relative mt-3 inline-flex items-center gap-1 rounded-full bg-[rgba(93,95,215,0.22)] px-2.5 py-1 text-xs text-white/90">
+                <ArrowUpRight className="h-3.5 w-3.5" /> {netTotalChangeLabel}{" "}
+                {loading ? "..." : formatChangePercent(netTotalChangePercent)}
+              </div>
+              <div className="relative mt-5 grid grid-cols-2 border-t border-white/20 pt-3 text-sm">
+                <div><span className="block text-xs text-white/65">Активы</span><span className="font-medium">{loading ? "..." : formatRub(totalAssets)}</span></div>
+                <div><span className="block text-xs text-white/65">Обязательства</span><span className="font-medium">{loading ? "..." : `-${formatRub(totalLiabilities)}`}</span></div>
+              </div>
+            </button>
+          </section>
+
+          <section>
+            <div className="mb-3 flex items-baseline justify-between px-1">
+              <h2 className="text-lg font-semibold">Доходы и расходы</h2>
+            </div>
+            <div
+              className={`${assetCardSurfaceClass} p-4`}
+              style={{ backgroundColor: MODAL_BG }}
+            >
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleCashflowExpand("income")}
+                    className="flex w-full items-center justify-between gap-3 text-left transition-opacity active:opacity-80"
+                  >
+                    <span className="flex items-center gap-1.5 text-sm text-slate-400">
+                      <ArrowUpRight className="h-4 w-4 text-emerald-400" />
+                      Доходы
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <CurrencyChip code="RUB" />
+                      <span
+                        className="text-base font-semibold tabular-nums"
+                        style={{ color: GREEN }}
+                      >
+                        {loading ? "..." : formatRub(displayIncomeCashflow.total)}
+                      </span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleCashflowExpand("income")}
+                    className="flex h-3 w-full justify-end"
+                    aria-label="Прогресс доходов"
+                  >
+                    {!loading && displayIncomeCashflow.total > 0 && (
+                      <div
+                        className="flex h-full shrink-0 overflow-hidden rounded-full"
+                        style={{ width: `${incomeBarPct}%` }}
+                      >
+                        {displayIncomeCashflow.segments.map((segment) => (
+                          <div
+                            key={`income-bar-${segment.key}`}
+                            title={`${segment.label}: ${formatRub(segment.value)}`}
+                            className="h-full min-w-[3px] shrink-0"
+                            style={{
+                              width: `${(segment.value / displayIncomeCashflow.total) * 100}%`,
+                              backgroundColor: segment.color,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </button>
+
+                  {expandedCashflow === "income" && (
+                    <div className={cn("pt-1", showPlan ? "space-y-2" : "space-y-1")}>
+                      {incomeBucketGroups.length === 0 ? (
+                        <p className="text-xs text-slate-500">Нет операций</p>
+                      ) : showPlan ? (
+                        incomeBucketGroups.map((group) => (
+                          <div key={group.key} className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: group.color }}
+                              />
+                              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-200">
+                                {group.label}
+                              </span>
+                              <Link
+                                href={buildCashflowTransactionsHref({
+                                  direction: "INCOME",
+                                  bucket: group.key,
+      periodStartKey,
+      periodEndKey,
+                                })}
+                                className="inline-flex items-center gap-1 transition-opacity active:opacity-70"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <CurrencyChip code="RUB" className="scale-90" />
+                                <span
+                                  className="text-sm font-semibold tabular-nums underline-offset-2 hover:underline"
+                                  style={{ color: GREEN }}
+                                >
+                                  {formatRub(group.total)}
+                                </span>
+                              </Link>
+                            </div>
+                            {group.categories.map((row) => {
+                              const CategoryIcon =
+                                topLevelIconByLabel.get(row.label) ??
+                                CATEGORY_ICON_FALLBACK;
+                              const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+                              return (
+                                <div
+                                  key={`${group.key}-${row.label}`}
+                                  className="flex items-center gap-2 pl-4 text-xs"
+                                >
+                                  <span style={{ color: ACCENT }}>
+                                    <CategoryIcon className="h-3.5 w-3.5" />
+                                  </span>
+                                  <span className="min-w-0 flex-1 truncate text-slate-400">
+                                    {row.label}
+                                  </span>
+                                  <Link
+                                    href={buildCashflowTransactionsHref({
+                                      direction: "INCOME",
+                                      bucket: group.key,
+          periodStartKey,
+      periodEndKey,
+                                      categoryL1: isUncategorized ? null : row.label,
+                                      uncategorized: isUncategorized,
+                                    })}
+                                    className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {formatRub(row.value)}
+                                  </Link>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))
+                      ) : (
+                        (incomeBucketGroups[0]?.categories ?? []).map((row) => {
+                          const CategoryIcon =
+                            topLevelIconByLabel.get(row.label) ??
+                            CATEGORY_ICON_FALLBACK;
+                          const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+                          return (
+                            <div
+                              key={row.label}
+                              className="flex items-center gap-2 text-xs"
+                            >
+                              <span style={{ color: ACCENT }}>
+                                <CategoryIcon className="h-3.5 w-3.5" />
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-slate-400">
+                                {row.label}
+                              </span>
+                              <Link
+                                href={buildCashflowTransactionsHref({
+                                  direction: "INCOME",
+                                  bucket: "actual",
+      periodStartKey,
+      periodEndKey,
+                                  categoryL1: isUncategorized ? null : row.label,
+                                  uncategorized: isUncategorized,
+                                })}
+                                className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {formatRub(row.value)}
+                              </Link>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleCashflowExpand("expense")}
+                    className="flex w-full items-center justify-between gap-3 text-left transition-opacity active:opacity-80"
+                  >
+                    <span className="flex items-center gap-1.5 text-sm text-slate-400">
+                      <ArrowDownRight className="h-4 w-4 text-rose-400" />
+                      Расходы
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <CurrencyChip code="RUB" />
+                      <span
+                        className="text-base font-semibold tabular-nums"
+                        style={{ color: RED }}
+                      >
+                        {loading ? "..." : formatRub(displayExpenseCashflow.total)}
+                      </span>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleCashflowExpand("expense")}
+                    className={cn(
+                      "flex h-3 w-full",
+                      expensesExceedIncome ? "justify-start" : "justify-end"
+                    )}
+                    aria-label="Прогресс расходов"
+                  >
+                    {!loading && displayExpenseCashflow.total > 0 && (
+                      <div
+                        className="flex h-full shrink-0 flex-row-reverse overflow-hidden rounded-full"
+                        style={{ width: `${expenseBarPct}%` }}
+                      >
+                        {displayExpenseCashflow.segments.map((segment) => (
+                          <div
+                            key={`expense-bar-${segment.key}`}
+                            title={`${segment.label}: ${formatRub(segment.value)}`}
+                            className="h-full min-w-[3px] shrink-0"
+                            style={{
+                              width: `${(segment.value / displayExpenseCashflow.total) * 100}%`,
+                              backgroundColor: segment.color,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </button>
+
+                  {expandedCashflow === "expense" && (
+                    <div className={cn("pt-1", showPlan ? "space-y-2" : "space-y-1")}>
+                      {expenseBucketGroups.length === 0 ? (
+                        <p className="text-xs text-slate-500">Нет операций</p>
+                      ) : showPlan ? (
+                        expenseBucketGroups.map((group) => (
+                          <div key={group.key} className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: group.color }}
+                              />
+                              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-200">
+                                {group.label}
+                              </span>
+                              <Link
+                                href={buildCashflowTransactionsHref({
+                                  direction: "EXPENSE",
+                                  bucket: group.key,
+      periodStartKey,
+      periodEndKey,
+                                })}
+                                className="inline-flex items-center gap-1 transition-opacity active:opacity-70"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <CurrencyChip code="RUB" className="scale-90" />
+                                <span
+                                  className="text-sm font-semibold tabular-nums underline-offset-2 hover:underline"
+                                  style={{ color: RED }}
+                                >
+                                  {formatRub(group.total)}
+                                </span>
+                              </Link>
+                            </div>
+                            {group.categories.map((row) => {
+                              const CategoryIcon =
+                                topLevelIconByLabel.get(row.label) ??
+                                CATEGORY_ICON_FALLBACK;
+                              const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+                              return (
+                                <div
+                                  key={`${group.key}-${row.label}`}
+                                  className="flex items-center gap-2 pl-4 text-xs"
+                                >
+                                  <span style={{ color: ACCENT }}>
+                                    <CategoryIcon className="h-3.5 w-3.5" />
+                                  </span>
+                                  <span className="min-w-0 flex-1 truncate text-slate-400">
+                                    {row.label}
+                                  </span>
+                                  <Link
+                                    href={buildCashflowTransactionsHref({
+                                      direction: "EXPENSE",
+                                      bucket: group.key,
+          periodStartKey,
+      periodEndKey,
+                                      categoryL1: isUncategorized ? null : row.label,
+                                      uncategorized: isUncategorized,
+                                    })}
+                                    className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {formatRub(row.value)}
+                                  </Link>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))
+                      ) : (
+                        (expenseBucketGroups[0]?.categories ?? []).map((row) => {
+                          const CategoryIcon =
+                            topLevelIconByLabel.get(row.label) ??
+                            CATEGORY_ICON_FALLBACK;
+                          const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+                          return (
+                            <div
+                              key={row.label}
+                              className="flex items-center gap-2 text-xs"
+                            >
+                              <span style={{ color: ACCENT }}>
+                                <CategoryIcon className="h-3.5 w-3.5" />
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-slate-400">
+                                {row.label}
+                              </span>
+                              <Link
+                                href={buildCashflowTransactionsHref({
+                                  direction: "EXPENSE",
+                                  bucket: "actual",
+      periodStartKey,
+      periodEndKey,
+                                  categoryL1: isUncategorized ? null : row.label,
+                                  uncategorized: isUncategorized,
+                                })}
+                                className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {formatRub(row.value)}
+                              </Link>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex w-full items-center justify-between gap-3">
+                    <span className="flex items-center gap-1.5 text-sm text-slate-400">
+                      {plannedFreeBalance >= 0 ? (
+                        <Plus
+                          className="h-3.5 w-3.5"
+                          style={{ color: GREEN }}
+                          strokeWidth={2.5}
+                        />
+                      ) : (
+                        <Minus
+                          className="h-3.5 w-3.5"
+                          style={{ color: RED }}
+                          strokeWidth={2.5}
+                        />
+                      )}
+                      {showPlan ? "Плановый остаток" : "Фактический остаток"}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <CurrencyChip code="RUB" />
+                      <span
+                        className="text-base font-semibold tabular-nums"
+                        style={{
+                          color: plannedFreeBalance >= 0 ? GREEN : RED,
+                        }}
+                      >
+                        {loading
+                          ? "..."
+                          : plannedFreeBalance < 0
+                            ? `−${formatRub(remainderAbs)}`
+                            : formatRub(remainderAbs)}
+                      </span>
+                    </span>
+                  </div>
+
+                  <div
+                    className="flex h-3 w-full justify-start"
+                    role="img"
+                    aria-label="Прогресс остатка"
+                  >
+                    {!loading && remainderAbs > 0 && (
+                      <div
+                        className="h-full shrink-0 rounded-full"
+                        style={{
+                          width: `${remainderBarPct}%`,
+                          backgroundColor:
+                            plannedFreeBalance >= 0 ? GREEN : RED,
+                        }}
+                        title={`Остаток: ${formatRub(remainderAbs)}`}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
           <section>
             <div className="mb-3 flex items-baseline justify-between px-1"><h2 className="text-lg font-semibold">Цели</h2><Link href="/goals" className="text-sm font-medium text-violet-400">Все цели</Link></div>
-            {loading ? <div className="text-sm text-slate-400">Загрузка целей...</div> : activeGoals.length === 0 ? <Link href="/goals" className="block rounded-xl border border-dashed border-white/10 bg-[#25243F] p-4 text-sm text-slate-400">Добавить первую цель →</Link> : <div className="space-y-2">{activeGoals.slice(0, 2).map((goal) => {
+            {loading ? <div className="text-sm text-slate-400">Загрузка целей...</div> : activeGoals.length === 0 ? <Link href="/goals" className="block rounded-lg overflow-hidden border border-dashed border-white/10 p-4 text-sm text-slate-400" style={{ backgroundColor: MODAL_BG }}>Добавить первую цель →</Link> : <div className="space-y-2">{activeGoals.slice(0, 2).map((goal) => {
               const summary = goalSummaryById.get(goal.id) ?? { amount: 0, progress: 0, rangeLabel: "" };
               const progressColor = getGoalProgressColor(summary.progress, categoryLookup.idToScope?.get(goal.category_id) === "INCOME");
-              return <Link href="/goals" key={goal.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#25243F] p-3 shadow-[0_12px_24px_-20px_rgba(0,0,0,0.8)]"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[rgba(93,95,215,0.22)] text-violet-300"><Target className="h-5 w-5" strokeWidth={1.5} /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{goal.name}</span><span className="block truncate text-xs text-slate-400">{formatRub(summary.amount)} из {formatRub(goal.amount)}</span><span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-slate-800"><span className="block h-full rounded-full" style={{ width: `${summary.progress * 100}%`, backgroundColor: progressColor }} /></span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={1.5} /></Link>;
+              return <Link href="/goals" key={goal.id} className={`flex items-center gap-3 ${assetCardSurfaceClass} p-3`} style={{ backgroundColor: MODAL_BG }}><span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[rgba(93,95,215,0.22)] text-violet-300"><Target className="h-5 w-5" strokeWidth={1.5} /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{goal.name}</span><span className="block truncate text-xs text-slate-400">{formatRub(summary.amount)} из {formatRub(goal.amount)}</span><span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-slate-800"><span className="block h-full rounded-full" style={{ width: `${summary.progress * 100}%`, backgroundColor: progressColor }} /></span></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={1.5} /></Link>;
             })}</div>}
           </section>
 
-          {hasOverduePlanned && <Link href="/transactions?preset=overdue-planned" className="flex items-center gap-3 rounded-xl border border-[rgba(255,141,40,0.22)] bg-[rgba(255,141,40,0.22)] p-3 text-amber-100 shadow-[0_12px_24px_-20px_rgba(0,0,0,0.8)]"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-400/20 text-amber-300"><AlertTriangle className="h-5 w-5" strokeWidth={1.5} /></span><span className="flex-1"><span className="block text-sm font-semibold">Просроченные операции</span><span className="block text-xs text-amber-200/70">{overduePlannedCount} требуют вашего внимания</span></span><ChevronRight className="h-5 w-5 text-amber-300" strokeWidth={1.5} /></Link>}
         </div>
       </main>
 
@@ -1596,6 +2616,36 @@ export default function DashboardPage() {
           transition: "opacity 0.3s ease-in-out",
         }}
       >
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={openPeriodDialog}
+            className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/15 px-3 py-1.5 text-sm text-white/90 transition-opacity hover:opacity-90"
+            style={{ backgroundColor: MODAL_BG }}
+            aria-label="Выбрать отчётный период"
+          >
+            <Calendar className="h-4 w-4 shrink-0 text-slate-400" strokeWidth={1.5} />
+            <span className="truncate font-medium text-white">{periodLabel}</span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPlan((value) => !value)}
+            aria-pressed={showPlan}
+            aria-label={showPlan ? "План включён" : "План выключен"}
+            className={cn(
+              "inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-all hover:opacity-90",
+              showPlan
+                ? "border-transparent text-white shadow-[0_0_18px_-4px_rgba(127,92,255,0.85)]"
+                : "border-white/15 text-white/45"
+            )}
+            style={{
+              backgroundColor: showPlan ? ACCENT : MODAL_BG,
+            }}
+          >
+            План
+          </button>
+        </div>
 
         <div className="grid gap-4 items-stretch md:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)]">
           <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500 text-white shadow-[0_20px_50px_-28px_rgba(76,29,149,0.8)]">
@@ -1655,7 +2705,7 @@ export default function DashboardPage() {
                   : formatRub(netTotal)}
               </div>
               <div className="flex items-center gap-2 text-xs text-white/80">
-                <span>С 1 числа месяца</span>
+                <span>{netTotalChangeLabel}</span>
                 <Tag variant={getChangeVariant(netTotalChangePercent, "income")}>
                   {loading ? "..." : formatChangePercent(netTotalChangePercent)}
                 </Tag>
@@ -1734,10 +2784,7 @@ export default function DashboardPage() {
         <div className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium text-foreground">
-                Доходы за{" "}
-                <span style={{ color: ACCENT }}>{currentMonthLabel}</span>
-              </div>
+              <div className="text-sm font-medium text-foreground">Доходы</div>
               <div
                 className="text-lg font-semibold whitespace-nowrap"
                 style={{ color: GREEN }}
@@ -1749,7 +2796,7 @@ export default function DashboardPage() {
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : incomeSegments.length === 0 ? (
               <div className="text-sm text-muted-foreground">
-                Нет данных за {currentMonthLabel}
+                Нет данных за период
               </div>
             ) : (
               <>
@@ -1829,8 +2876,7 @@ export default function DashboardPage() {
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium text-foreground">
-                Расходы за{" "}
-                <span style={{ color: ACCENT }}>{currentMonthLabel}</span>
+                Расходы
               </div>
               <div
                 className="text-lg font-semibold whitespace-nowrap"
@@ -1843,7 +2889,7 @@ export default function DashboardPage() {
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : expenseSegments.length === 0 ? (
               <div className="text-sm text-muted-foreground">
-                Нет данных за {currentMonthLabel}
+                Нет данных за период
               </div>
             ) : (
               <>
@@ -2169,6 +3215,40 @@ export default function DashboardPage() {
       </div>
     </main>
 
+    {typeof document !== "undefined" &&
+      !isDesktop &&
+      createPortal(
+        <>
+          <div
+            className={cn(
+              "pointer-events-none fixed inset-x-0 top-0 z-40 transition-opacity duration-200 ease-out",
+              mobileStickyHeaderVisible ? "opacity-100" : "opacity-0"
+            )}
+            style={{
+              height: "calc(5.75rem + env(safe-area-inset-top, 0px))",
+              background:
+                "linear-gradient(to bottom, rgba(25, 23, 50, 0.45) 0%, rgba(25, 23, 50, 0.18) 40%, transparent 100%)",
+            }}
+            aria-hidden
+          />
+          <div
+            className={cn(
+              "fixed z-40 flex min-h-12 items-center gap-2 px-3 py-2 transition-all duration-200 ease-out",
+              "left-[calc(0.75rem+env(safe-area-inset-left))] right-[calc(0.75rem+env(safe-area-inset-right))]",
+              "top-[calc(0.75rem+env(safe-area-inset-top))]",
+              "rounded-2xl border border-sidebar-border/70 bg-sidebar/70 shadow-[0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/55",
+              mobileStickyHeaderVisible
+                ? "opacity-100 translate-y-0 pointer-events-auto"
+                : "opacity-0 -translate-y-2 pointer-events-none"
+            )}
+            aria-hidden={!mobileStickyHeaderVisible}
+          >
+            {renderSettingsChips({ compact: true })}
+          </div>
+        </>,
+        document.body
+      )}
+
     <Dialog open={mobileDetail !== null} onOpenChange={(open) => !open && setMobileDetail(null)}>
       <DialogContent
         title="Детализация"
@@ -2178,34 +3258,52 @@ export default function DashboardPage() {
         overlayClassName="bg-black/55"
       >
         <div className="mx-auto -mt-2 h-1.5 w-10 rounded-full bg-slate-600" />
-        <DialogTitle className="pr-10 text-xl">
-          {mobileDetail === "structure" ? "Активы и обязательства" : mobileDetail === "income" ? `Доходы за ${currentMonthLabel}` : `Расходы за ${currentMonthLabel}`}
-        </DialogTitle>
+        <DialogTitle className="pr-10 text-xl">Активы и обязательства</DialogTitle>
 
-        {mobileDetail === "structure" ? (
-          <div className="space-y-5">
-            <div className="rounded-xl border border-white/10 bg-[#25243F] p-3">
-              <div className="mb-3 flex items-center justify-between"><span className="font-medium">Активы</span><span className="font-semibold text-emerald-400">{formatRub(totalAssets)}</span></div>
-              <div className="space-y-3">{assetSegments.length === 0 ? <p className="text-sm text-slate-400">Активов пока нет</p> : assetSegments.slice(0, mobileDetailExpanded ? assetSegments.length : 4).map((segment) => <div key={segment.label} className="flex items-center gap-2 text-sm"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} /><span className="flex-1 truncate">{segment.label}</span><span className="font-medium">{formatRub(segment.value)}</span><span className="w-10 text-right text-xs text-slate-400">{formatPercent(segment.percent * 100)}%</span></div>)}</div>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-[#25243F] p-3">
-              <div className="mb-3 flex items-center justify-between"><span className="font-medium">Обязательства</span><span className="font-semibold text-rose-400">−{formatRub(totalLiabilities)}</span></div>
-              <div className="space-y-3">{liabilitySegments.length === 0 ? <p className="text-sm text-slate-400">Обязательств нет</p> : liabilitySegments.slice(0, mobileDetailExpanded ? liabilitySegments.length : 4).map((segment) => <div key={segment.label} className="flex items-center gap-2 text-sm"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} /><span className="flex-1 truncate">{segment.label}</span><span className="font-medium">{formatRub(segment.value)}</span><span className="w-10 text-right text-xs text-slate-400">{formatPercent(segment.percent * 100)}%</span></div>)}</div>
-            </div>
-            {(assetSegments.length > 4 || liabilitySegments.length > 4) && <button type="button" onClick={() => setMobileDetailExpanded((value) => !value)} className="w-full rounded-xl bg-[rgba(93,95,215,0.22)] py-3 text-sm font-medium text-violet-200">{mobileDetailExpanded ? "Свернуть список" : "Показать все категории"}</button>}
-            <Link href="/assets" className="flex items-center justify-center gap-2 rounded-xl bg-[#7F5CFF] py-3.5 text-sm font-semibold text-white">Открыть активы <ArrowRight className="h-4 w-4" strokeWidth={1.5} /></Link>
+        <div className="space-y-5">
+          <div className={`${assetCardSurfaceClass} p-3`} style={{ backgroundColor: MODAL_BG }}>
+            <div className="mb-3 flex items-center justify-between"><span className="font-medium">Активы</span><span className="font-semibold text-emerald-400">{formatRub(totalAssets)}</span></div>
+            <div className="space-y-3">{assetSegments.length === 0 ? <p className="text-sm text-slate-400">Активов пока нет</p> : assetSegments.slice(0, mobileDetailExpanded ? assetSegments.length : 4).map((segment) => <div key={segment.label} className="flex items-center gap-2 text-sm"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} /><span className="flex-1 truncate">{segment.label}</span><span className="font-medium">{formatRub(segment.value)}</span><span className="w-10 text-right text-xs text-slate-400">{formatPercent(segment.percent * 100)}%</span></div>)}</div>
           </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-white/10 bg-[#25243F] p-3">
-              <div className="space-y-2">{(mobileDetail === "income" ? incomeLegendRows : expenseLegendRows).length === 0 ? <p className="text-sm text-slate-400">Нет операций за этот месяц</p> : (mobileDetail === "income" ? incomeLegendRows : expenseLegendRows).slice(0, mobileDetailExpanded ? undefined : 5).map((row) => <div key={row.label} className="flex items-center gap-3 py-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: row.color }} /><span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span><span className="text-sm font-semibold">{formatRub(row.value)}</span><span className="w-9 text-right text-xs text-slate-400">{formatPercent(row.percent * 100)}%</span></div>)}</div>
-            </div>
-            {(mobileDetail === "income" ? incomeLegendRows : expenseLegendRows).length > 5 && <button type="button" onClick={() => setMobileDetailExpanded((value) => !value)} className="w-full rounded-xl bg-[rgba(93,95,215,0.22)] py-3 text-sm font-medium text-violet-200">{mobileDetailExpanded ? "Свернуть список" : "Показать все статьи"}</button>}
-            <Link href="/transactions" className="flex items-center justify-center gap-2 rounded-xl bg-[#7F5CFF] py-3.5 text-sm font-semibold text-white">Открыть операции <ArrowRight className="h-4 w-4" strokeWidth={1.5} /></Link>
+          <div className={`${assetCardSurfaceClass} p-3`} style={{ backgroundColor: MODAL_BG }}>
+            <div className="mb-3 flex items-center justify-between"><span className="font-medium">Обязательства</span><span className="font-semibold text-rose-400">−{formatRub(totalLiabilities)}</span></div>
+            <div className="space-y-3">{liabilitySegments.length === 0 ? <p className="text-sm text-slate-400">Обязательств нет</p> : liabilitySegments.slice(0, mobileDetailExpanded ? liabilitySegments.length : 4).map((segment) => <div key={segment.label} className="flex items-center gap-2 text-sm"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} /><span className="flex-1 truncate">{segment.label}</span><span className="font-medium">{formatRub(segment.value)}</span><span className="w-10 text-right text-xs text-slate-400">{formatPercent(segment.percent * 100)}%</span></div>)}</div>
           </div>
-        )}
+          {(assetSegments.length > 4 || liabilitySegments.length > 4) && <button type="button" onClick={() => setMobileDetailExpanded((value) => !value)} className="w-full rounded-xl bg-[rgba(93,95,215,0.22)] py-3 text-sm font-medium text-violet-200">{mobileDetailExpanded ? "Свернуть список" : "Показать все категории"}</button>}
+          <Link href="/assets" className="flex items-center justify-center gap-2 rounded-xl bg-[#7F5CFF] py-3.5 text-sm font-semibold text-white">Открыть активы <ArrowRight className="h-4 w-4" strokeWidth={1.5} /></Link>
+        </div>
       </DialogContent>
     </Dialog>
+
+    <Dialog open={periodDialogOpen} onOpenChange={setPeriodDialogOpen}>
+      <DialogContent
+        title="Отчётный период"
+        className="max-w-sm gap-4 border-white/10 bg-[#1C1B2E] text-slate-50"
+        overlayClassName="bg-black/55"
+      >
+        <DialogTitle className="pr-10 text-xl">Отчётный период</DialogTitle>
+        {periodDialogOpen && (
+          <PeriodRangeCalendar
+            key={periodCalendarKey}
+            startKey={draftPeriodStartKey}
+            endKey={draftPeriodEndKey}
+            onChange={(range) => {
+              setDraftPeriodStartKey(range.startKey);
+              setDraftPeriodEndKey(range.endKey);
+            }}
+            onComplete={applyPeriodRange}
+          />
+        )}
+        <button
+          type="button"
+          onClick={resetPeriodToCurrentMonth}
+          className="text-sm font-medium text-violet-400 transition-opacity active:opacity-80"
+        >
+          Текущий месяц
+        </button>
+      </DialogContent>
+    </Dialog>
+
     </>
   );
 }

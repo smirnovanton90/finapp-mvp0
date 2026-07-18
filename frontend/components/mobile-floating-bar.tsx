@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
-import { LayoutDashboard, Wallet, ArrowLeftRight, Plus } from "lucide-react";
+import { LayoutDashboard, Wallet, ArrowLeftRight, Plus, LineChart } from "lucide-react";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { cn } from "@/lib/utils";
-import { PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
+import { ACCENT, PLACEHOLDER_COLOR_DARK } from "@/lib/colors";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
 
 const ASSETS_HREF = "/assets";
 const TRANSACTIONS_HREF = "/transactions";
 const DASHBOARD_HREF = "/dashboard";
+const PLANNING_HREF = "/financial-planning";
 const ADD_ASSET_HREF = "/assets?openCreate=1";
 const ADD_TRANSACTION_HREF = "/transactions?openCreate=1";
 
@@ -34,11 +35,12 @@ function NavButton({
       <Link
         href={href}
         aria-label={label}
+        aria-current={active ? "page" : undefined}
         className={cn(
           "flex flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-2 transition-colors min-w-0",
           "hover:bg-white/8"
         )}
-        style={{ color: active ? "rgba(197, 191, 241, 0.95)" : PLACEHOLDER_COLOR_DARK }}
+        style={{ color: active ? ACCENT : PLACEHOLDER_COLOR_DARK }}
       >
         <Icon className="size-5" strokeWidth={1.6} />
         <span className="text-[10px] font-medium leading-tight">{label}</span>
@@ -59,6 +61,8 @@ export function MobileFloatingBar() {
     pathname === ASSETS_HREF || (pathname?.startsWith(ASSETS_HREF + "/") ?? false);
   const isDashboard =
     pathname === DASHBOARD_HREF || (pathname?.startsWith(DASHBOARD_HREF + "/") ?? false);
+  const isPlanning =
+    pathname === PLANNING_HREF || (pathname?.startsWith(PLANNING_HREF + "/") ?? false);
   const isTransactions =
     pathname === TRANSACTIONS_HREF ||
     (pathname?.startsWith(TRANSACTIONS_HREF + "/") ?? false);
@@ -114,10 +118,10 @@ export function MobileFloatingBar() {
             active={!!isDashboard}
           />
           <NavButton
-            href={ASSETS_HREF}
-            icon={Wallet}
-            label="Активы"
-            active={!!isAssets}
+            href={PLANNING_HREF}
+            icon={LineChart}
+            label="Планирование"
+            active={!!isPlanning}
           />
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
             <MobileTapScale>
@@ -144,11 +148,17 @@ export function MobileFloatingBar() {
             </MobileTapScale>
           </div>
           <NavButton
+            href={ASSETS_HREF}
+            icon={Wallet}
+            label="Активы"
+            active={!!isAssets}
+            className="col-start-4"
+          />
+          <NavButton
             href={TRANSACTIONS_HREF}
             icon={ArrowLeftRight}
             label="Транзакции"
             active={!!isTransactions}
-            className="col-start-5"
           />
         </div>
       </nav>

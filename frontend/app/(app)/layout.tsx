@@ -34,6 +34,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const isAssetsPage = pathname === "/assets" || pathname?.startsWith("/assets/");
   const isAssetDetailPage =
     pathname?.startsWith("/assets/") && (pathname.split("/").filter(Boolean).length === 2);
+  const isDashboardPage = pathname === "/dashboard" || pathname?.startsWith("/dashboard/");
   const isAssetsPageWithFilters = isAssetsPage && !isAssetDetailPage;
   const isFinancialPlanningPage = pathname === "/financial-planning" || pathname?.startsWith("/financial-planning/");
   const isGoalsPage = pathname === "/goals" || pathname?.startsWith("/goals/");
@@ -152,9 +153,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           !isDesktop
             ? ({
                 "--app-bg": SIDEBAR_BG,
-                // На странице актива safe-area рисует сама страница (градиент шапки).
+                // На странице актива и дашборде safe-area рисует сама страница (градиент шапки).
                 // Иначе padding + сплошной SIDEBAR_BG дают тёмную полосу над градиентом.
-                paddingTop: isAssetDetailPage ? 0 : "env(safe-area-inset-top, 0px)",
+                paddingTop: isAssetDetailPage || isDashboardPage ? 0 : "env(safe-area-inset-top, 0px)",
                 paddingLeft: "env(safe-area-inset-left, 0px)",
                 paddingRight: "env(safe-area-inset-right, 0px)",
                 backgroundColor: SIDEBAR_BG,

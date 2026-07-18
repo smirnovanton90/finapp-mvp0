@@ -227,7 +227,15 @@ import {
 import { ImportAccountsOperationsModal } from "@/components/import-accounts-operations-modal";
 
 type TransactionsViewMode = "actual" | "planning";
-type MobileFilterKey = "direction" | "amount" | "date" | "item" | "category" | "counterparty" | "comment";
+type MobileFilterKey =
+  | "direction"
+  | "amount"
+  | "date"
+  | "item"
+  | "category"
+  | "counterparty"
+  | "comment"
+  | "checkpoints";
 
 type TransactionCard = TransactionOut & { isDeleted?: boolean };
 
@@ -269,6 +277,7 @@ const MOBILE_FILTER_LABELS: Record<MobileFilterKey, string> = {
   category: "Категория",
   counterparty: "Контрагент",
   comment: "Комментарий",
+  checkpoints: "Контрольные точки",
 };
 const EMPTY_NUMBER_ARRAY: number[] = [];
 const EMPTY_DIRECTION_ARRAY: TransactionOut["direction"][] = [];
@@ -2663,6 +2672,7 @@ function TransactionsView({
   const [showDeleted, setShowDeleted] = useState(initialShowDeleted);
   const [showConfirmed, setShowConfirmed] = useState(true);
   const [showUnconfirmed, setShowUnconfirmed] = useState(true);
+  const [showCheckpoints, setShowCheckpoints] = useState(false);
   const [formTransactionType, setFormTransactionType] = useState<
     TransactionOut["transaction_type"]
   >(() => initialFormTransactionType);
@@ -5179,6 +5189,7 @@ function TransactionsView({
   }, [mergedRows]);
 
   const checkpointsVisible = useMemo(() => {
+    if (!showCheckpoints) return false;
     const hasOtherFilter =
       selectedDirections.size > 0 ||
       !!amountFrom ||
@@ -5202,6 +5213,7 @@ function TransactionsView({
       showDeleted;
     return !hasOtherFilter;
   }, [
+    showCheckpoints,
     selectedDirections.size,
     amountFrom,
     amountTo,
@@ -5370,6 +5382,7 @@ function TransactionsView({
   };
   const addMobileFilter = (key: MobileFilterKey) => {
     setMobileFilterKeys((prev) => new Set(prev).add(key));
+    if (key === "checkpoints") setShowCheckpoints(true);
   };
   const removeMobileFilter = (key: MobileFilterKey) => {
     setMobileFilterKeys((prev) => {
@@ -5384,6 +5397,7 @@ function TransactionsView({
     if (key === "category") setSelectedCategoryFilterKeys(new Set());
     if (key === "counterparty") resetCounterpartyFilters();
     if (key === "comment") setCommentFilter("");
+    if (key === "checkpoints") setShowCheckpoints(false);
   };
 
   const deleteCount = deleteIds?.length ?? 0;
@@ -5928,6 +5942,19 @@ function TransactionsView({
                 />
               </div>
           </FilterSection>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                Контрольные точки
+              </span>
+              <Switch
+                checked={showCheckpoints}
+                onCheckedChange={setShowCheckpoints}
+                aria-label="Показывать контрольные точки"
+              />
+            </div>
+          </div>
           </div>,
           el
         ) : null;
@@ -5989,6 +6016,20 @@ function TransactionsView({
             {mobileFilterKeys.has("comment") && (
               <FilterSection label="Комментарий" onReset={() => removeMobileFilter("comment")} showReset>
                 <AuthInput type="text" placeholder="Введите текст" value={commentFilter} onChange={(event) => setCommentFilter(event.target.value)} />
+              </FilterSection>
+            )}
+            {mobileFilterKeys.has("checkpoints") && (
+              <FilterSection label="Контрольные точки" onReset={() => removeMobileFilter("checkpoints")} showReset>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm font-medium" style={{ color: SIDEBAR_TEXT_ACTIVE }}>
+                    Показывать контрольные точки
+                  </span>
+                  <Switch
+                    checked={showCheckpoints}
+                    onCheckedChange={setShowCheckpoints}
+                    aria-label="Показывать контрольные точки"
+                  />
+                </div>
               </FilterSection>
             )}
           </div>,

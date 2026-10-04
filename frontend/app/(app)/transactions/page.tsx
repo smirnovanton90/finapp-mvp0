@@ -2818,6 +2818,7 @@ function TransactionsView({
   const receiptToolbarInputRef = useRef<HTMLInputElement>(null);
   /** На мобильной: меню выбора типа добавления (Простая транзакция / Погашение кредита / Долг / Чек) по нажатию "+". */
   const [mobileAddMenuOpen, setMobileAddMenuOpen] = useState(false);
+  const [wizardEntry, setWizardEntry] = useState<"LOAN_REPAYMENT" | "DEBTS" | null>(null);
   /** На мобильной: полноэкранный визард добавления транзакции (открывается по "+", контекст скрывает нижнюю панель). */
   const { mobileWizardOpen, setMobileWizardOpen } = useMobileWizardOpen() ?? { mobileWizardOpen: false, setMobileWizardOpen: () => {} };
 
@@ -3830,6 +3831,7 @@ function TransactionsView({
     if (isDesktop) {
       openCreateDialog();
     } else {
+      setWizardEntry(null);
       setMobileWizardOpen(true);
     }
   }, [pathname, searchParams, router, isDesktop, openCreateDialog]);
@@ -6167,11 +6169,13 @@ function TransactionsView({
               }}
               onLoanRepayment={() => {
                 setMobileAddMenuOpen(false);
-                openLoanRepaymentModal();
+                setWizardEntry("LOAN_REPAYMENT");
+                setMobileWizardOpen(true);
               }}
               onDebt={() => {
                 setMobileAddMenuOpen(false);
-                openCreateDialog("DEBTS");
+                setWizardEntry("DEBTS");
+                setMobileWizardOpen(true);
               }}
               onReceipt={() => {
                 setMobileAddMenuOpen(false);
@@ -6185,8 +6189,7 @@ function TransactionsView({
               <MobileAddTransactionWizard
                 open={mobileWizardOpen}
                 onClose={() => setMobileWizardOpen(false)}
-                onSelectLoanRepayment={openLoanRepaymentModal}
-                onSelectDebt={() => openCreateDialog("DEBTS")}
+                entryFlow={wizardEntry}
                 onSelectReceipt={() => setTimeout(() => receiptToolbarInputRef.current?.click(), 0)}
                 items={items}
                 categoryNodes={categoryNodes}

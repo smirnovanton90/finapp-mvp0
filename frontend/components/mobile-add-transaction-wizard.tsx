@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronDown, ArrowLeftRight, ArrowRight, ArrowUpDown, Building2, Coins, HandCoins, Receipt, QrCode, Banknote, Calendar, Wallet, Tag, User, MessageSquare, Link2, X, Plus, Trash2, SplitSquareVertical } from "lucide-react";
+import { ChevronLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Building2, Coins, HandCoins, Receipt, QrCode, Banknote, Calendar, Wallet, Tag, User, MessageSquare, Link2, X, Plus, Trash2, SplitSquareVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MODAL_BG, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, GREEN, GREEN_TRANSACTION, RED, ACCENT2, ACCENT, BACKGROUND_DT } from "@/lib/colors";
 import { MobileTapScale } from "@/components/mobile-tap-scale";
@@ -36,6 +36,14 @@ import { getEffectiveItemKind, getItemPrimaryValueCents } from "@/lib/item-utils
 import { buildOrderedItemsLikeAssetsPage } from "@/lib/order-items-like-assets";
 import { formatCentsForInput, formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
 import { formatAmount } from "@/lib/item-utils";
+import { MobileSpecialTransactionStep } from "@/components/mobile-special-transaction-step";
+import {
+  SPECIAL_STEP_TITLES,
+  specialStepError,
+  specialWizardSteps,
+  submitSpecialWizard,
+  type SpecialWizardInput,
+} from "@/lib/special-transaction-wizard";
 import {
   createTransaction,
   splitTransaction,
@@ -47,14 +55,48 @@ import {
   type TransactionOut,
   type AssetLinkType,
   type TransactionSplitPartCreate,
+  type DebtDirection,
+  type TransactionType,
 } from "@/lib/api";
 
-const SIMPLE_WIZARD_STEPS = 10;
+/** Последний шаг простой транзакции — превью перед сохранением. */
+const STEP_PREVIEW = 11;
+/** Для перевода: куда зачислить. Идёт сразу после шага «откуда». */
+const STEP_ASSET_TO = 12;
+
+/**
+ * Экраны простой транзакции.
+ * Перевод пропускает категорию, контрагента, связанный актив и разделение.
+ */
+function visibleWizardSteps(isTransfer: boolean): number[] {
+  if (isTransfer) return [1, 2, 3, 4, STEP_ASSET_TO, 5, 8, STEP_PREVIEW];
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, STEP_PREVIEW];
+}
 
 function buildTransactionDate(dateKey: string, timeHHmm: string): string {
   const t = /^\d{1,2}:\d{2}$/.test(timeHHmm) ? timeHHmm : "00:00";
   return `${dateKey}T${t}:00`;
 }
+
+function formatWizardDateLabel(dateKey: string, timeHHmm: string): string {
+  const [y, m, d] = dateKey.split("-");
+  if (!d || !m || !y) return dateKey;
+  const clock = /^\d{1,2}:\d{2}$/.test(timeHHmm) && timeHHmm !== "00:00" ? `, ${timeHHmm}` : "";
+  return `${d}.${m}.${y}${clock}`;
+}
+
+const ASSET_LINK_LABELS: Record<string, string> = {
+  ASSET_PURCHASE: "Приобретение актива",
+  ASSET_INVESTMENT: "Вложение в актив",
+  ASSET_EXPENSE: "Расход по активу",
+  ASSET_SALE: "Продажа актива",
+  ASSET_INCOME: "Доход от актива",
+};
+
+const WIZARD_PRIMARY_BTN_STYLE = {
+  "--auth-primary-bg": "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #6C5DD7 79%, #9487F3 100%)",
+  "--auth-primary-bg-hover": "linear-gradient(315deg, #9487F3 0%, #6C5DD7 43%, #483BA6 100%)",
+} as React.CSSProperties;
 
 const MOEX_TYPE_CODES = new Set(["securities", "bonds", "etf", "bpif", "pif", "precious_metals"]);
 function isMoexItem(item?: ItemOut | null) {
@@ -79,8 +121,8 @@ export type WizardFlowType = "SIMPLE" | "LOAN_REPAYMENT" | "DEBTS" | "RECEIPT";
 export interface MobileAddTransactionWizardProps {
   open: boolean;
   onClose: () => void;
-  onSelectLoanRepayment: () => void;
-  onSelectDebt: () => void;
+  /** Если задан, визард сразу открывает этот сценарий, минуя выбор типа. */
+  entryFlow?: "LOAN_REPAYMENT" | "DEBTS" | null;
   onSelectReceipt: () => void;
   items: ItemOut[];
   categoryNodes: CategoryNode[];
@@ -95,8 +137,7 @@ export interface MobileAddTransactionWizardProps {
 export function MobileAddTransactionWizard({
   open,
   onClose,
-  onSelectLoanRepayment,
-  onSelectDebt,
+  entryFlow = null,
   onSelectReceipt,
   items,
   categoryNodes,
@@ -109,6 +150,8 @@ export function MobileAddTransactionWizard({
 }: MobileAddTransactionWizardProps) {
   const [flowType, setFlowType] = useState<WizardFlowType | null>(null);
   const [step, setStep] = useState(0);
+  const [flowStepId, setFlowStepId] = useState("type");
+  const [stepMotion, setStepMotion] = useState<"forward" | "back">("forward");
   const [formError, setFormError] = useState<string | null>(null);
   const [formErrorStep, setFormErrorStep] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -137,12 +180,26 @@ export function MobileAddTransactionWizard({
   const [counterpartyQuantityLots, setCounterpartyQuantityLots] = useState("");
   const [primaryQuantityUnitsStr, setPrimaryQuantityUnitsStr] = useState("");
   const [counterpartyQuantityUnitsStr, setCounterpartyQuantityUnitsStr] = useState("");
+  const [debtDirection, setDebtDirection] = useState<DebtDirection>("I_PAID");
+  const [loanTotalStr, setLoanTotalStr] = useState("");
+  const [loanInterestStr, setLoanInterestStr] = useState("");
+  const [debtSettlementMode, setDebtSettlementMode] = useState<"existing" | "new">("existing");
+  const [debtSettlementItemId, setDebtSettlementItemId] = useState<number | null>(null);
+  const [debtSettlementNewName, setDebtSettlementNewName] = useState("");
+  const [debtPayForCounterpartyId, setDebtPayForCounterpartyId] = useState<number | null>(null);
+  const [wherePaidCounterpartyId, setWherePaidCounterpartyId] = useState<number | null>(null);
+  const [debtAmountStr, setDebtAmountStr] = useState("");
+  const [debtSplitAmountStr, setDebtSplitAmountStr] = useState("");
+
+  const entryFlowRef = React.useRef(entryFlow);
+  entryFlowRef.current = entryFlow;
 
   const prevOpenRef = React.useRef(false);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
       setFlowType(null);
       setStep(0);
+      setStepMotion("forward");
       setFormError(null);
       setFormErrorStep(null);
       setAmountStr("");
@@ -166,6 +223,22 @@ export function MobileAddTransactionWizard({
       setCounterpartyQuantityLots("");
       setPrimaryQuantityUnitsStr("");
       setCounterpartyQuantityUnitsStr("");
+      setDebtDirection("I_PAID");
+      setLoanTotalStr("");
+      setLoanInterestStr("");
+      setDebtSettlementMode("existing");
+      setDebtSettlementItemId(null);
+      setDebtSettlementNewName("");
+      setDebtPayForCounterpartyId(null);
+      setWherePaidCounterpartyId(null);
+      setDebtAmountStr("");
+      setDebtSplitAmountStr("");
+      setFlowStepId("type");
+      const entry = entryFlowRef.current;
+      if (entry === "LOAN_REPAYMENT" || entry === "DEBTS") {
+        setFlowType(entry);
+        setDirection("EXPENSE");
+      }
     }
     prevOpenRef.current = open;
   }, [open, displayTimezone]);
@@ -219,6 +292,43 @@ export function MobileAddTransactionWizard({
     !!primaryCurrencyCode &&
     !!counterpartyCurrencyCode &&
     primaryCurrencyCode !== counterpartyCurrencyCode;
+  const assetOnlyItems = useMemo(
+    () => itemsForSelector.filter((it) => getEffectiveItemKind(it, it.current_value_rub) === "ASSET"),
+    [itemsForSelector]
+  );
+  const liabilityOnlyItems = useMemo(
+    () => itemsForSelector.filter((it) => getEffectiveItemKind(it, it.current_value_rub) === "LIABILITY"),
+    [itemsForSelector]
+  );
+  const settlementAssetItems = useMemo(
+    () => itemsForSelector.filter((it) => it.type_code === "counterparty_settlements" && (it.current_value_rub ?? 0) > 0 && it.archived_at == null),
+    [itemsForSelector]
+  );
+  const settlementLiabilityItems = useMemo(
+    () => itemsForSelector.filter((it) => it.type_code === "counterparty_settlements" && (it.current_value_rub ?? 0) < 0 && it.archived_at == null),
+    [itemsForSelector]
+  );
+  const debtSettlementCounterpartyId = debtDirection === "I_PAID_FOR_SOMEONE" ? debtPayForCounterpartyId : counterpartyId;
+  const settlementItemsForCounterparty = useMemo(() => {
+    if (debtSettlementCounterpartyId == null) return [];
+    return itemsForSelector.filter(
+      (it) => it.type_code === "counterparty_settlements" && it.counterparty_id === debtSettlementCounterpartyId && it.archived_at == null
+    );
+  }, [itemsForSelector, debtSettlementCounterpartyId]);
+  const debtCurrencyCode =
+    debtSettlementMode === "existing" && debtSettlementItemId != null
+      ? itemsById.get(debtSettlementItemId)?.currency_code ?? primaryCurrencyCode
+      : primaryCurrencyCode;
+  const isDebtCross =
+    (debtDirection === "I_PAID" || debtDirection === "THEY_PAID") &&
+    !!primaryCurrencyCode &&
+    !!debtCurrencyCode &&
+    primaryCurrencyCode !== debtCurrencyCode;
+  const offsetCross =
+    debtDirection === "DEBT_OFFSET" &&
+    !!primaryCurrencyCode &&
+    !!counterpartyCurrencyCode &&
+    primaryCurrencyCode !== counterpartyCurrencyCode;
 
   const normalizeCategoryValue = useCallback((value: string) => {
     const trimmed = value.trim();
@@ -239,6 +349,82 @@ export function MobileAddTransactionWizard({
   const cat1 = selectedCategoryPath?.l1 || "";
   const cat2 = selectedCategoryPath?.l2 || "";
   const cat3 = selectedCategoryPath?.l3 || "";
+
+  const buildSpecialInput = useCallback((): SpecialWizardInput | null => {
+    if (flowType !== "LOAN_REPAYMENT" && flowType !== "DEBTS") return null;
+    const primaryMeta = getEffectiveItemMeta(primaryItemId);
+    const counterMeta = getEffectiveItemMeta(counterpartyItemId);
+    const txType: TransactionType = formTransactionType === "PLANNED" ? "PLANNED" : "ACTUAL";
+    return {
+      flow: flowType,
+      debtDirection,
+      debtCross: isDebtCross,
+      offsetCross,
+      transactionType: txType,
+      date,
+      time,
+      timezone: txTimezone,
+      todayKey: nowInTimezone(txTimezone).dateKey,
+      primaryItemId,
+      counterpartyItemId,
+      counterpartyId,
+      debtPayForCounterpartyId,
+      wherePaidCounterpartyId,
+      debtSettlementMode,
+      debtSettlementItemId,
+      debtSettlementNewName,
+      loanTotalStr,
+      loanInterestStr,
+      amountStr,
+      amountCounterpartyStr,
+      debtAmountStr,
+      debtSplitAmountStr,
+      categoryId: resolveCategoryId(cat1, cat2, cat3),
+      comment,
+      primaryIsMoex: isMoexItem(primaryItem),
+      counterpartyIsMoex: isMoexItem(counterpartyItem),
+      primaryMinDate: primaryMeta?.minDate ?? "",
+      counterpartyMinDate: counterMeta?.minDate ?? "",
+      primaryCurrency: primaryCurrencyCode,
+      counterpartyCurrency: counterpartyCurrencyCode,
+      primarySkipsMinDate: primaryMeta?.typeCode === "counterparty_settlements",
+      counterpartySkipsMinDate: counterMeta?.typeCode === "counterparty_settlements",
+    };
+  }, [
+    flowType,
+    debtDirection,
+    isDebtCross,
+    offsetCross,
+    formTransactionType,
+    date,
+    time,
+    txTimezone,
+    primaryItemId,
+    counterpartyItemId,
+    counterpartyId,
+    debtPayForCounterpartyId,
+    wherePaidCounterpartyId,
+    debtSettlementMode,
+    debtSettlementItemId,
+    debtSettlementNewName,
+    loanTotalStr,
+    loanInterestStr,
+    amountStr,
+    amountCounterpartyStr,
+    debtAmountStr,
+    debtSplitAmountStr,
+    cat1,
+    cat2,
+    cat3,
+    comment,
+    primaryItem,
+    counterpartyItem,
+    primaryCurrencyCode,
+    counterpartyCurrencyCode,
+    getEffectiveItemMeta,
+    resolveCategoryId,
+  ]);
+
   const applyCategorySelection = useCallback((l1: string, l2: string, l3: string) => {
     if (!l1 || (l1 === "—" && !l2 && !l3)) setSelectedCategoryPath(null);
     else setSelectedCategoryPath({ l1, l2, l3 });
@@ -342,19 +528,31 @@ export function MobileAddTransactionWizard({
 
   const handleSelectSimple = useCallback(() => {
     setFlowType("SIMPLE");
+    setStepMotion("forward");
     setStep(1);
     setFormError(null);
   }, []);
 
   const handleSelectLoanRepayment = useCallback(() => {
-    handleClose();
-    onSelectLoanRepayment();
-  }, [handleClose, onSelectLoanRepayment]);
+    setFlowType("LOAN_REPAYMENT");
+    setDirection("EXPENSE");
+    setFlowStepId("type");
+    setStepMotion("forward");
+    setFormError(null);
+    setFormErrorStep(null);
+    setSelectedCategoryPath(null);
+  }, []);
 
   const handleSelectDebt = useCallback(() => {
-    handleClose();
-    onSelectDebt();
-  }, [handleClose, onSelectDebt]);
+    setFlowType("DEBTS");
+    setDebtDirection("I_PAID");
+    setDirection("EXPENSE");
+    setFlowStepId("type");
+    setStepMotion("forward");
+    setFormError(null);
+    setFormErrorStep(null);
+    setSelectedCategoryPath(null);
+  }, []);
 
   const handleSelectReceipt = useCallback(() => {
     onSelectReceipt();
@@ -363,25 +561,56 @@ export function MobileAddTransactionWizard({
   const goNext = useCallback(() => {
     setFormError(null);
     setFormErrorStep(null);
-    if (flowType === "SIMPLE" && step < SIMPLE_WIZARD_STEPS) {
-      if (step === 5 && isTransfer) setStep(8);
-      else if (step === 8 && isTransfer) setStep(10);
-      else setStep((s) => s + 1);
+    if (flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") {
+      const special = buildSpecialInput();
+      if (!special) return;
+      const steps = specialWizardSteps(special);
+      const idx = steps.indexOf(flowStepId);
+      if (idx >= 0 && idx < steps.length - 1) {
+        setStepMotion("forward");
+        setFlowStepId(steps[idx + 1]);
+      }
+      return;
     }
-  }, [flowType, step, isTransfer]);
+    if (flowType !== "SIMPLE") return;
+    const steps = visibleWizardSteps(isTransfer);
+    const idx = steps.indexOf(step);
+    if (idx >= 0 && idx < steps.length - 1) {
+      setStepMotion("forward");
+      setStep(steps[idx + 1]);
+    }
+  }, [flowType, step, isTransfer, buildSpecialInput, flowStepId]);
 
   const goBack = useCallback(() => {
     setFormError(null);
     setFormErrorStep(null);
-    if (step > 1) {
-      if (step === 8 && isTransfer) setStep(5);
-      else if (step === 10 && isTransfer) setStep(8);
-      else setStep((s) => s - 1);
-    } else if (flowType === "SIMPLE" && step === 1) {
+    if (flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") {
+      const special = buildSpecialInput();
+      if (!special) return;
+      const steps = specialWizardSteps(special);
+      const idx = steps.indexOf(flowStepId);
+      if (idx > 0) {
+        setStepMotion("back");
+        setFlowStepId(steps[idx - 1]);
+      } else {
+        setStepMotion("forward");
+        setFlowType(null);
+        setFlowStepId("type");
+      }
+      return;
+    }
+    if (flowType !== "SIMPLE") return;
+    const steps = visibleWizardSteps(isTransfer);
+    const idx = steps.indexOf(step);
+    if (idx > 0) {
+      setStepMotion("back");
+      setStep(steps[idx - 1]);
+    } else {
+      setStepMotion("forward");
       setFlowType(null);
       setStep(0);
     }
-  }, [flowType, step, isTransfer]);
+  }, [flowType, step, isTransfer, buildSpecialInput, flowStepId]);
 
   const canGoNext = useCallback(() => {
     if (flowType !== "SIMPLE") return true;
@@ -391,8 +620,9 @@ export function MobileAddTransactionWizard({
       case 3:
         return true;
       case 4:
-        if (isTransfer) return !!primaryItemId && !!counterpartyItemId && primaryItemId !== counterpartyItemId;
         return !!primaryItemId;
+      case STEP_ASSET_TO:
+        return !!counterpartyItemId && counterpartyItemId !== primaryItemId;
       case 5: {
         const cents = parseRubToCents(normalizeRubOnBlur(amountStr));
         if (isCrossCurrencyTransfer) {
@@ -409,6 +639,8 @@ export function MobileAddTransactionWizard({
         return true;
       case 9:
         if (!relatedItemId) return true;
+        return true;
+      case STEP_PREVIEW:
         return true;
       case 10:
         if (!splitEnabled) return true;
@@ -452,32 +684,36 @@ export function MobileAddTransactionWizard({
     8: "Комментарий",
     9: "Связанный актив",
     10: "Разделение",
+    [STEP_PREVIEW]: "Проверка",
+    [STEP_ASSET_TO]: "Куда",
   };
 
   const handleSubmit = useCallback(async () => {
-    if (flowType !== "SIMPLE" || step !== SIMPLE_WIZARD_STEPS) return;
+    if (flowType !== "SIMPLE" || step !== STEP_PREVIEW) return;
     setFormError(null);
     setFormErrorStep(null);
+    const fail = (message: string, errorStep: number) => {
+      setFormError(message);
+      setFormErrorStep(errorStep);
+      setStepMotion("back");
+      setStep(errorStep);
+    };
     const cents = parseRubToCents(normalizeRubOnBlur(amountStr));
     if (!Number.isFinite(cents) || cents <= 0) {
-      setFormError("Введите корректную сумму.");
-      setFormErrorStep(5);
+      fail("Введите корректную сумму.", 5);
       return;
     }
     if (!primaryItemId) {
-      setFormError("Выберите актив/обязательство.");
-      setFormErrorStep(4);
+      fail("Выберите актив/обязательство.", 4);
       return;
     }
     if (isTransfer && !counterpartyItemId) {
-      setFormError("Выберите корреспондирующий актив.");
-      setFormErrorStep(4);
+      fail("Выберите, куда зачислить.", STEP_ASSET_TO);
       return;
     }
     const resolvedCategoryId = isTransfer ? null : resolveCategoryId(cat1, cat2, cat3);
     if (!isTransfer && !resolvedCategoryId) {
-      setFormError("Выберите категорию.");
-      setFormErrorStep(6);
+      fail("Выберите категорию.", 6);
       return;
     }
     const transactionDate = buildTransactionDate(date, time);
@@ -518,8 +754,7 @@ export function MobileAddTransactionWizard({
         Math.max(0, parseRubToCents(normalizeRubOnBlur(p.amountStr)) ?? 0);
       const filledSum = splitParts.reduce((s, p) => s + partCents(p), 0);
       if (filledSum !== totalCents) {
-        setFormError("Сумма частей должна совпадать с суммой транзакции.");
-        setFormErrorStep(10);
+        fail("Сумма частей должна совпадать с суммой транзакции.", 10);
         return;
       }
       const partsForApi: TransactionSplitPartCreate[] = splitParts
@@ -535,7 +770,7 @@ export function MobileAddTransactionWizard({
         onCreateSuccess();
       } catch (e: unknown) {
         setFormError((e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : "Не удалось создать транзакцию."));
-        setFormErrorStep(10);
+        setFormErrorStep(STEP_PREVIEW);
       } finally {
         setSubmitting(false);
       }
@@ -549,7 +784,7 @@ export function MobileAddTransactionWizard({
       onCreateSuccess();
     } catch (e: unknown) {
       setFormError((e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : "Не удалось создать транзакцию."));
-      setFormErrorStep(10);
+      setFormErrorStep(STEP_PREVIEW);
     } finally {
       setSubmitting(false);
     }
@@ -590,19 +825,66 @@ export function MobileAddTransactionWizard({
     onCreateSuccess,
   ]);
 
+  const submitSpecial = useCallback(async () => {
+    const special = buildSpecialInput();
+    if (!special) return;
+    setFormError(null);
+    setSubmitting(true);
+    try {
+      await submitSpecialWizard(special);
+      handleClose();
+      onCreateSuccess();
+    } catch (e: unknown) {
+      setFormError(e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : "Не удалось создать транзакцию.");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [buildSpecialInput, handleClose, onCreateSuccess]);
+
   const handleNextOrSubmit = useCallback(() => {
+    if (flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") {
+      const special = buildSpecialInput();
+      if (!special) return;
+      const steps = specialWizardSteps(special);
+      const idx = steps.indexOf(flowStepId);
+      const last = idx >= 0 && idx === steps.length - 1;
+      if (!last) {
+        const error = specialStepError(flowStepId, special);
+        if (error) {
+          setFormError(error);
+          return;
+        }
+        goNext();
+        return;
+      }
+      void submitSpecial();
+      return;
+    }
     if (flowType !== "SIMPLE") return;
-    if (step < SIMPLE_WIZARD_STEPS) {
+    const steps = visibleWizardSteps(isTransfer);
+    const idx = steps.indexOf(step);
+    const last = idx >= 0 && idx === steps.length - 1;
+    if (!last) {
       if (!canGoNext()) {
         if (step === 4) {
-          setFormError(isTransfer ? "Выберите откуда и куда." : "Выберите актив.");
+          setFormError("Выберите актив.");
           setFormErrorStep(4);
+        } else if (step === STEP_ASSET_TO) {
+          setFormError(
+            counterpartyItemId != null && counterpartyItemId === primaryItemId
+              ? "Выберите другой актив."
+              : "Выберите, куда зачислить."
+          );
+          setFormErrorStep(STEP_ASSET_TO);
         } else if (step === 5) {
           setFormError("Введите сумму.");
           setFormErrorStep(5);
         } else if (step === 6 && !isTransfer) {
           setFormError("Выберите категорию.");
           setFormErrorStep(6);
+        } else if (step === 10) {
+          setFormError("Сумма частей должна совпадать с суммой транзакции.");
+          setFormErrorStep(10);
         }
         return;
       }
@@ -610,60 +892,10 @@ export function MobileAddTransactionWizard({
     } else {
       handleSubmit();
     }
-  }, [flowType, step, canGoNext, goNext, handleSubmit, isTransfer]);
-
-  const canGoNextRef = React.useRef(canGoNext);
-  const goNextRef = React.useRef(goNext);
-  canGoNextRef.current = canGoNext;
-  goNextRef.current = goNext;
-
-  const tryAutoAdvance = useCallback(() => {
-    setTimeout(() => {
-      if (flowType === "SIMPLE" && step < SIMPLE_WIZARD_STEPS && canGoNextRef.current()) goNextRef.current();
-    }, 0);
-  }, [flowType, step]);
-
-  const tryAutoAdvanceRef = React.useRef(tryAutoAdvance);
-  tryAutoAdvanceRef.current = tryAutoAdvance;
-
-  const handleAdvanceFromStep = useCallback(() => {
-    setFormError(null);
-    setFormErrorStep(null);
-    if (!canGoNext()) {
-      if (step === 4) {
-        setFormError(isTransfer ? "Выберите откуда и куда." : "Выберите актив.");
-        setFormErrorStep(4);
-      } else if (step === 5) {
-        setFormError("Введите сумму.");
-        setFormErrorStep(5);
-      } else if (step === 6 && !isTransfer) {
-        setFormError("Выберите категорию.");
-        setFormErrorStep(6);
-      }
-      return;
-    }
-    goNext();
-  }, [step, canGoNext, goNext, isTransfer]);
+  }, [flowType, step, canGoNext, goNext, handleSubmit, isTransfer, counterpartyItemId, primaryItemId, buildSpecialInput, flowStepId, submitSpecial]);
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-
-  const stepRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const prevStepRef = React.useRef(0);
-  useEffect(() => {
-    if (flowType !== "SIMPLE" || step < 1) return;
-    if (step > prevStepRef.current) {
-      const el = stepRefs.current[step - 1];
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-    prevStepRef.current = step;
-  }, [flowType, step]);
-
-  useEffect(() => {
-    if (formError == null || formErrorStep == null) return;
-    const el = stepRefs.current[formErrorStep - 1];
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [formError, formErrorStep]);
 
   // Только для мобильной: при открытом визарде блокируем скролл страницы (в т.ч. iOS)
   useEffect(() => {
@@ -696,12 +928,36 @@ export function MobileAddTransactionWizard({
   if (!open) return null;
 
   const isTypeSelection = flowType === null && step === 0;
+  const isSpecialFlow = flowType === "LOAN_REPAYMENT" || flowType === "DEBTS";
+  const isFieldFlow = flowType === "SIMPLE" || isSpecialFlow;
+  const specialNow = isSpecialFlow ? buildSpecialInput() : null;
+  const progressIds = flowType === "SIMPLE"
+    ? visibleWizardSteps(isTransfer).map(String)
+    : specialNow
+      ? specialWizardSteps(specialNow)
+      : [];
+  const activeStepKey = flowType === "SIMPLE" ? String(step) : flowStepId;
+  const stepIndex = Math.max(0, progressIds.indexOf(activeStepKey));
+  const isLastStep = progressIds.length > 0 && activeStepKey === progressIds[progressIds.length - 1];
+  const stepAnimClass = stepMotion === "back" ? "wizard-step-back" : "wizard-step-enter";
+  const progressTitle = flowType === "SIMPLE"
+    ? (step === 4 && isTransfer ? "Откуда" : (stepTitles[step] ?? ""))
+    : (SPECIAL_STEP_TITLES[flowStepId] ?? "");
+  const optionalEmpty =
+    (flowType === "SIMPLE" && (
+      (step === 7 && counterpartyId == null) ||
+      (step === 8 && !comment.trim()) ||
+      (step === 9 && relatedItemId == null) ||
+      (step === 10 && !splitEnabled)
+    )) ||
+    (isSpecialFlow && flowStepId === "comment" && !comment.trim());
+  const nextLabel = isLastStep ? (submitting ? "Создание…" : "Добавить") : optionalEmpty ? "Пропустить" : "Далее";
 
   const wizardContent = (
     <div
       className="fixed inset-0 flex flex-col"
       style={{
-        backgroundColor: isTypeSelection ? ACCENT : MODAL_BG,
+        backgroundColor: isTypeSelection ? ACCENT : "#000000",
         zIndex: 100,
         minHeight: "100dvh",
         marginTop: "calc(-1 * env(safe-area-inset-top, 0px))",
@@ -710,36 +966,60 @@ export function MobileAddTransactionWizard({
       aria-modal
       aria-label={isTypeSelection ? "Добавить транзакцию" : `Добавить транзакцию — ${stepTitles[step] ?? ""}`}
     >
-      <header className="shrink-0 flex items-center justify-between gap-2 px-3 py-2">
-        {!isTypeSelection ? (
-          <div className="flex items-center gap-2 min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>
-            <ArrowLeftRight className="h-5 w-5 shrink-0" strokeWidth={1.5} />
-            <span className="text-lg font-medium truncate">Новая транзакция</span>
+      <header className="shrink-0 relative flex items-center min-h-12 px-5 py-2">
+        {isFieldFlow && progressIds.length > 0 && (
+          <div
+            className="flex min-w-0 flex-1 items-center gap-1 pr-12"
+            role="progressbar"
+            aria-valuenow={stepIndex + 1}
+            aria-valuemin={1}
+            aria-valuemax={progressIds.length}
+            aria-valuetext={`${progressTitle}, ${stepIndex + 1} из ${progressIds.length}`}
+          >
+            {progressIds.map((id, i) => (
+              <span
+                key={id}
+                className="rounded-full transition-all duration-300 ease-out"
+                style={{
+                  flex: i === stepIndex ? 2.4 : 1,
+                  height: i === stepIndex ? 8 : 6,
+                  backgroundColor:
+                    i < stepIndex ? "rgba(127, 92, 255, 0.55)" : i === stepIndex ? "#7F5CFF" : "rgba(255,255,255,0.16)",
+                }}
+              />
+            ))}
           </div>
-        ) : (
-          <span />
         )}
         <IconButton
           type="button"
           aria-label="Закрыть"
           onClick={handleClose}
           appearance="default"
+          className="absolute right-3 top-2"
         >
           <X className="size-5" strokeWidth={1.5} />
         </IconButton>
       </header>
 
       <div
-        className={cn(
-          "flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pt-4 flex flex-col gap-8",
-          flowType === "SIMPLE" && "[&_input]:text-base [&_input::placeholder]:text-base [&_button]:text-base"
-        )}
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain"
         style={{
           WebkitOverflowScrolling: "touch",
           touchAction: "pan-y",
-          paddingBottom: "calc(6rem + env(safe-area-inset-bottom, 0px))",
         }}
       >
+        <div
+          className={cn(
+            "flex flex-col px-5",
+            isFieldFlow ? "min-h-full justify-center py-6" : "min-h-full pt-4",
+            isFieldFlow && "[&_input]:text-base [&_input::placeholder]:text-base [&_button]:text-base"
+          )}
+          style={
+            flowType !== "SIMPLE"
+              ? { paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))" }
+              : undefined
+          }
+        >
         {isTypeSelection && (
           <div
             className="flex flex-col justify-center px-6 pb-6 flex-1 min-h-0 transition-opacity duration-200 ease-out"
@@ -834,9 +1114,93 @@ export function MobileAddTransactionWizard({
           </div>
         )}
 
-        {flowType === "SIMPLE" && step >= 1 && (
-          <div ref={(el) => { stepRefs.current[0] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>Какую транзакцию хотите добавить?</p>
+        {(flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") && (
+          <MobileSpecialTransactionStep
+            stepId={flowStepId}
+            animClass={stepAnimClass}
+            error={formError}
+            flow={flowType}
+            debtDirection={debtDirection}
+            onDebtDirection={(value) => {
+              setDebtDirection(value);
+              setDirection(value === "DEBT_OFFSET" ? "TRANSFER" : "EXPENSE");
+              setPrimaryItemId(null);
+              setCounterpartyItemId(null);
+              setCounterpartyId(null);
+              setDebtPayForCounterpartyId(null);
+              setWherePaidCounterpartyId(null);
+              setDebtSettlementItemId(null);
+              setDebtSettlementNewName("");
+              setDebtSettlementMode("existing");
+            }}
+            transactionType={formTransactionType}
+            onTransactionType={setFormTransactionType}
+            date={date}
+            time={time}
+            timezone={txTimezone}
+            onDate={setDate}
+            onTime={setTime}
+            onTimezone={setTxTimezone}
+            items={itemsForSelector}
+            itemsById={itemsById}
+            assetItems={assetOnlyItems}
+            liabilityItems={liabilityOnlyItems}
+            settlementAssetItems={settlementAssetItems}
+            settlementLiabilityItems={settlementLiabilityItems}
+            settlementItems={settlementItemsForCounterparty}
+            primaryItemId={primaryItemId}
+            counterpartyItemId={counterpartyItemId}
+            onPrimaryItem={setPrimaryItemId}
+            onCounterpartyItem={setCounterpartyItemId}
+            counterparties={selectableCounterparties}
+            counterpartyId={counterpartyId}
+            debtPayForCounterpartyId={debtPayForCounterpartyId}
+            wherePaidCounterpartyId={wherePaidCounterpartyId}
+            onCounterparty={setCounterpartyId}
+            onPayFor={setDebtPayForCounterpartyId}
+            onWherePaid={setWherePaidCounterpartyId}
+            counterpartyName={buildCounterpartyName}
+            debtSettlementMode={debtSettlementMode}
+            onDebtSettlementMode={(value) => {
+              setDebtSettlementMode(value);
+              if (value === "existing") setDebtSettlementNewName("");
+              else setDebtSettlementItemId(null);
+            }}
+            debtSettlementItemId={debtSettlementItemId}
+            onDebtSettlementItem={setDebtSettlementItemId}
+            debtSettlementNewName={debtSettlementNewName}
+            onDebtSettlementNewName={setDebtSettlementNewName}
+            loanTotalStr={loanTotalStr}
+            loanInterestStr={loanInterestStr}
+            onLoanTotal={setLoanTotalStr}
+            onLoanInterest={setLoanInterestStr}
+            amountStr={amountStr}
+            amountCounterpartyStr={amountCounterpartyStr}
+            debtAmountStr={debtAmountStr}
+            debtSplitAmountStr={debtSplitAmountStr}
+            onAmount={setAmountStr}
+            onAmountCounterparty={setAmountCounterpartyStr}
+            onDebtAmount={setDebtAmountStr}
+            onDebtSplit={setDebtSplitAmountStr}
+            primaryCurrency={primaryCurrencyCode}
+            counterpartyCurrency={counterpartyCurrencyCode}
+            debtCurrency={debtCurrencyCode}
+            categoryOptions={categoryOptionsForOverlay}
+            categoryLookup={categoryLookup}
+            selectedCategory={selectedCategoryOption}
+            onCategory={(path) => applyCategorySelection(path[0], path[1], path[2])}
+            comment={comment}
+            onComment={setComment}
+            accountingStartDate={accountingStartDate}
+            getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+            getItemCounterparty={getItemCounterparty}
+            counterpartiesById={counterpartiesById}
+          />
+        )}
+
+        {flowType === "SIMPLE" && step === 1 && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>Какую транзакцию хотите добавить?</p>
             <FormField label="" inlineLabel>
               <MobileTapScale className="block w-full">
                 <SegmentedSelector
@@ -847,24 +1211,17 @@ export function MobileAddTransactionWizard({
                 value={formTransactionType}
                 onChange={(v) => {
                   setFormTransactionType(v as TransactionOut["transaction_type"]);
-                  if (step === 1) tryAutoAdvanceRef.current();
+
                 }}
               />
               </MobileTapScale>
             </FormField>
-            {step === 1 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
-              </div>
-            )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step >= 2 && (
-          <div ref={(el) => { stepRefs.current[1] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>Это доход, расход или перевод?</p>
+        {flowType === "SIMPLE" && step === 2 && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>Это доход, расход или перевод?</p>
             <FormField label="" inlineLabel>
               <MobileTapScale className="block w-full">
                 <SegmentedSelector
@@ -878,24 +1235,17 @@ export function MobileAddTransactionWizard({
                   setDirection(v as "INCOME" | "EXPENSE" | "TRANSFER");
                   setCounterpartyItemId(null);
                   applyCategorySelection("", "", "");
-                  if (step === 2) tryAutoAdvanceRef.current();
+
                 }}
               />
               </MobileTapScale>
             </FormField>
-            {step === 2 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
-              </div>
-            )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step >= 3 && (
-          <div ref={(el) => { stepRefs.current[2] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+        {flowType === "SIMPLE" && step === 3 && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
               <Calendar className="h-5 w-5 shrink-0" />
               Выберите дату и время (по желанию)
             </p>
@@ -907,16 +1257,14 @@ export function MobileAddTransactionWizard({
                     value={date}
                     onChange={(next) => {
                       setDate(next);
-                      if (step === 3) tryAutoAdvanceRef.current();
+
                     }}
-                    onBlur={() => { if (step === 3) tryAutoAdvanceRef.current(); }}
                   />
                 </div>
                 <div className="relative flex items-center min-h-[40px] shrink-0">
                   <TimeInput
                     value={time}
                     onChange={setTime}
-                    onBlur={() => { if (step === 3) tryAutoAdvanceRef.current(); }}
                   />
                 </div>
               </div>
@@ -925,21 +1273,14 @@ export function MobileAddTransactionWizard({
             <FormField label="Часовой пояс">
               <TimezoneSelector value={txTimezone} onChange={setTxTimezone} />
             </FormField>
-            {step === 3 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
-              </div>
-            )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step >= 4 && (
-          <div ref={(el) => { stepRefs.current[3] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+        {flowType === "SIMPLE" && step === 4 && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
               <Wallet className="h-5 w-5 shrink-0" />
-              {isTransfer ? "Откуда и куда" : "Актив / обязательство"}
+              {isTransfer ? "Откуда списать?" : "С какого актива?"}
             </p>
           <div className="grid gap-4">
             {isTransfer ? (
@@ -953,66 +1294,9 @@ export function MobileAddTransactionWizard({
                     getOptionKey={(item) => item.id}
                     onSelect={(item) => {
                       setPrimaryItemId(item.id);
-                      if (step === 4) tryAutoAdvanceRef.current();
+
                     }}
                     placeholder="Откуда"
-                    searchPlaceholder="Поиск актива"
-                    renderTriggerContent={(item) => (
-                      <>
-                        <AssetItemIcon item={item} counterparty={getItemCounterparty(item.id)} apiBase={API_BASE} size={20} />
-                        <span className="truncate">{item.name}</span>
-                      </>
-                    )}
-                    renderOption={(item) => (
-                      <div
-                        className="rounded-lg overflow-hidden border-0 outline-none shadow-lg p-4"
-                        style={{ backgroundColor: MODAL_BG }}
-                      >
-                        <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b-0">
-                          <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
-                            <AssetCard
-                              item={item}
-                              layout="tableRow"
-                              accountingStartDate={accountingStartDate}
-                              getItemDisplayBalanceCents={getItemDisplayBalanceCents}
-                              counterparty={getItemCounterparty(item.id)}
-                              counterpartiesById={counterpartiesById}
-                              showRubEquivalent={false}
-                              primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
-                            />
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-                  />
-                  </MobileTapScale>
-                </FormField>
-                <div className="flex justify-center py-1">
-                  <IconButton
-                    type="button"
-                    aria-label="Поменять откуда и куда местами"
-                    onClick={() => {
-                      setPrimaryItemId(counterpartyItemId);
-                      setCounterpartyItemId(primaryItemId);
-                      setAmountStr(amountCounterpartyStr);
-                      setAmountCounterpartyStr(amountStr);
-                    }}
-                  >
-                    <ArrowUpDown className="h-5 w-5" />
-                  </IconButton>
-                </div>
-                <FormField label="Куда" inlineLabel>
-                  <MobileTapScale className="block w-full">
-                  <MobileSearchSelectOverlay
-                    value={counterpartyItemId != null ? itemsById.get(counterpartyItemId) ?? null : null}
-                    options={counterpartySelectItems.filter((it) => it.id !== primaryItemId)}
-                    getOptionLabel={(item) => item.name}
-                    getOptionKey={(item) => item.id}
-                    onSelect={(item) => {
-                      setCounterpartyItemId(item.id);
-                      if (step === 4) tryAutoAdvanceRef.current();
-                    }}
-                    placeholder="Куда"
                     searchPlaceholder="Поиск актива"
                     renderTriggerContent={(item) => (
                       <>
@@ -1055,7 +1339,7 @@ export function MobileAddTransactionWizard({
                   getOptionKey={(item) => item.id}
                   onSelect={(item) => {
                     setPrimaryItemId(item.id);
-                    if (step === 4) tryAutoAdvanceRef.current();
+
                   }}
                   placeholder="Выберите"
                   searchPlaceholder="Поиск актива"
@@ -1112,28 +1396,6 @@ export function MobileAddTransactionWizard({
                 />
               </MobileTapScale>
             )}
-            {isTransfer && counterpartyIsMoex && (
-              <MobileTapScale className="block w-full">
-                <TextField
-                  label="Количество лотов (куда)"
-                  value={counterpartyQuantityLots}
-                  onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="Например: 10"
-                />
-              </MobileTapScale>
-            )}
-            {isTransfer && counterpartyIsCrypto && (
-              <MobileTapScale className="block w-full">
-                <TextField
-                  label="Количество (единиц) — куда"
-                  value={counterpartyQuantityUnitsStr}
-                  onChange={(e) => setCounterpartyQuantityUnitsStr(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="Например: 0.5"
-                />
-              </MobileTapScale>
-            )}
           </div>
             {formError && formErrorStep === 4 && (
               <div
@@ -1147,21 +1409,106 @@ export function MobileAddTransactionWizard({
                 {formError}
               </div>
             )}
-            {step === 4 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
+          </div>
+        )}
+
+        {flowType === "SIMPLE" && step === STEP_ASSET_TO && isTransfer && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Wallet className="h-5 w-5 shrink-0" strokeWidth={1.5} />
+              Куда зачислить?
+            </p>
+            <div className="grid gap-4">
+              <FormField label="" inlineLabel>
+                <MobileTapScale className="block w-full">
+                  <MobileSearchSelectOverlay
+                    value={counterpartyItemId != null ? itemsById.get(counterpartyItemId) ?? null : null}
+                    options={counterpartySelectItems.filter((it) => it.id !== primaryItemId)}
+                    getOptionLabel={(item) => item.name}
+                    getOptionKey={(item) => item.id}
+                    onSelect={(item) => setCounterpartyItemId(item.id)}
+                    placeholder="Куда"
+                    searchPlaceholder="Поиск актива"
+                    renderTriggerContent={(item) => (
+                      <>
+                        <AssetItemIcon item={item} counterparty={getItemCounterparty(item.id)} apiBase={API_BASE} size={20} />
+                        <span className="truncate">{item.name}</span>
+                      </>
+                    )}
+                    renderOption={(item) => (
+                      <div className="rounded-lg overflow-hidden border-0 outline-none shadow-lg p-4" style={{ backgroundColor: MODAL_BG }}>
+                        <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b-0">
+                          <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
+                            <AssetCard
+                              item={item}
+                              layout="tableRow"
+                              accountingStartDate={accountingStartDate}
+                              getItemDisplayBalanceCents={getItemDisplayBalanceCents}
+                              counterparty={getItemCounterparty(item.id)}
+                              counterpartiesById={counterpartiesById}
+                              showRubEquivalent={false}
+                              primaryValueLabel={getPrimaryValueLabel(item.primary_value_kind)}
+                            />
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  />
+                </MobileTapScale>
+              </FormField>
+              <button
+                type="button"
+                className="flex items-center justify-center gap-2 min-h-11 rounded-lg text-sm font-medium active:opacity-80"
+                style={{ color: ACTIVE_TEXT_DARK, backgroundColor: "rgba(255,255,255,0.06)" }}
+                onClick={() => {
+                  setPrimaryItemId(counterpartyItemId);
+                  setCounterpartyItemId(primaryItemId);
+                  setAmountStr(amountCounterpartyStr);
+                  setAmountCounterpartyStr(amountStr);
+                }}
+              >
+                <ArrowUpDown className="h-4 w-4" strokeWidth={1.5} />
+                Поменять местами
+              </button>
+              {counterpartyIsMoex && (
+                <MobileTapScale className="block w-full">
+                  <TextField
+                    label="Количество лотов"
+                    value={counterpartyQuantityLots}
+                    onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="Например: 10"
+                  />
+                </MobileTapScale>
+              )}
+              {counterpartyIsCrypto && (
+                <MobileTapScale className="block w-full">
+                  <TextField
+                    label="Количество (единиц)"
+                    value={counterpartyQuantityUnitsStr}
+                    onChange={(e) => setCounterpartyQuantityUnitsStr(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="Например: 0.5"
+                  />
+                </MobileTapScale>
+              )}
+            </div>
+            {formError && formErrorStep === STEP_ASSET_TO && (
+              <div
+                className="text-base rounded-md border p-2 mt-4"
+                style={{ color: "#FB4C4F", backgroundColor: "rgba(251, 76, 79, 0.08)", borderColor: "rgba(251, 76, 79, 0.3)" }}
+              >
+                {formError}
               </div>
             )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step >= 5 && (
-          <div ref={(el) => { stepRefs.current[4] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
-              <Banknote className="h-5 w-5 shrink-0" />
-              Сумма
+        {flowType === "SIMPLE" && step === 5 && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Banknote className="h-5 w-5 shrink-0" strokeWidth={1.5} />
+              Какая сумма?
             </p>
             <div className="grid gap-4">
               <FormField label="" inlineLabel>
@@ -1174,7 +1521,7 @@ export function MobileAddTransactionWizard({
                     onChange={(e) => setAmountStr(formatRubInput(e.target.value))}
                     onBlur={() => {
                       setAmountStr((prev) => normalizeRubOnBlur(prev));
-                      if (step === 5) tryAutoAdvanceRef.current();
+
                     }}
                     inputMode="decimal"
                     placeholder="Сумма"
@@ -1209,7 +1556,7 @@ export function MobileAddTransactionWizard({
                       onChange={(e) => setAmountCounterpartyStr(formatRubInput(e.target.value))}
                       onBlur={() => {
                         setAmountCounterpartyStr((prev) => normalizeRubOnBlur(prev));
-                        if (step === 5) tryAutoAdvanceRef.current();
+
                       }}
                       inputMode="decimal"
                       placeholder="Сумма поступления"
@@ -1247,21 +1594,14 @@ export function MobileAddTransactionWizard({
                 {formError}
               </div>
             )}
-            {step === 5 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
-              </div>
-            )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step >= 6 && !isTransfer && (
-          <div ref={(el) => { stepRefs.current[5] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
-              <Tag className="h-5 w-5 shrink-0" />
-              Категория
+        {flowType === "SIMPLE" && step === 6 && !isTransfer && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Tag className="h-5 w-5 shrink-0" strokeWidth={1.5} />
+              Какая категория?
             </p>
           <FormField label="" inlineLabel>
             <MobileTapScale className="block w-full">
@@ -1272,7 +1612,7 @@ export function MobileAddTransactionWizard({
               getOptionKey={(opt) => opt.id}
               onSelect={(opt) => {
                 applyCategorySelection(opt.path[0], opt.path[1], opt.path[2]);
-                if (step === 6) tryAutoAdvanceRef.current();
+
               }}
               placeholder="Категория"
               searchPlaceholder="Поиск категории"
@@ -1305,22 +1645,16 @@ export function MobileAddTransactionWizard({
                 {formError}
               </div>
             )}
-            {step === 6 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
-              </div>
-            )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step >= 7 && !isTransfer && (
-          <div ref={(el) => { stepRefs.current[6] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
-              <User className="h-5 w-5 shrink-0" />
+        {flowType === "SIMPLE" && step === 7 && !isTransfer && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-2 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <User className="h-5 w-5 shrink-0" strokeWidth={1.5} />
               Контрагент
             </p>
+            <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно пропустить</p>
           <FormField label="" inlineLabel>
             <MobileTapScale className="block w-full">
             <MobileSearchSelectOverlay
@@ -1330,7 +1664,7 @@ export function MobileAddTransactionWizard({
               getOptionKey={(c) => c.id}
               onSelect={(c) => {
                 setCounterpartyId(c.id);
-                if (step === 7) tryAutoAdvanceRef.current();
+
               }}
               placeholder="Контрагент"
               searchPlaceholder="Поиск контрагента"
@@ -1345,29 +1679,22 @@ export function MobileAddTransactionWizard({
             />
             </MobileTapScale>
           </FormField>
-            {step === 7 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
-              </div>
-            )}
           </div>
         )}
 
-        {flowType === "SIMPLE" && step >= 8 && (
-          <div ref={(el) => { stepRefs.current[7] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
-              <MessageSquare className="h-5 w-5 shrink-0" />
+        {flowType === "SIMPLE" && step === 8 && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-2 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <MessageSquare className="h-5 w-5 shrink-0" strokeWidth={1.5} />
               Комментарий
             </p>
+            <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно пропустить</p>
           <FormField label="" inlineLabel>
             <MobileTapScale className="block w-full">
             <div className="relative [&_div.relative.flex.items-center]:h-10 [&_input]:!text-base">
               <AuthInput
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                onBlur={() => { if (step === 8) tryAutoAdvanceRef.current(); }}
                 placeholder="Комментарий"
                 className={cn("w-full text-base", comment ? "pr-14" : undefined)}
               />
@@ -1389,22 +1716,16 @@ export function MobileAddTransactionWizard({
             </div>
             </MobileTapScale>
           </FormField>
-            {step === 8 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
-              </div>
-            )}
           </div>
         )}
 
         {flowType === "SIMPLE" && step === 9 && !isTransfer && (
-          <div ref={(el) => { stepRefs.current[8] = el; }} className="wizard-step-enter">
-            <p className="text-base font-medium mb-3 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
-              <Link2 className="h-5 w-5 shrink-0" />
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-2 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              <Link2 className="h-5 w-5 shrink-0" strokeWidth={1.5} />
               Связанный актив
             </p>
+            <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно пропустить</p>
           <div className="grid gap-4">
             <FormField label="" inlineLabel>
               <MobileTapScale className="block w-full">
@@ -1415,7 +1736,7 @@ export function MobileAddTransactionWizard({
                 getOptionKey={(item) => item.id}
                 onSelect={(item) => {
                   setRelatedItemId(item.id);
-                  if (step === 9) tryAutoAdvanceRef.current();
+
                 }}
                 placeholder="Выберите"
                 searchPlaceholder="Поиск актива"
@@ -1469,7 +1790,7 @@ export function MobileAddTransactionWizard({
                     onChange={(v) => {
                       const next = (typeof v === "string" ? v : effectiveAssetLinkType) as AssetLinkType;
                       setAssetLinkType(next);
-                      if (step === 9) tryAutoAdvanceRef.current();
+
                     }}
                     colorScheme="purple"
                   />
@@ -1477,18 +1798,11 @@ export function MobileAddTransactionWizard({
               </FormField>
             )}
           </div>
-            {step === 9 && (
-              <div className="flex justify-center pt-6 pb-2">
-                <IconButton type="button" aria-label="Следующий шаг" onClick={handleAdvanceFromStep}>
-                  <ChevronDown className="size-5" />
-                </IconButton>
-              </div>
-            )}
           </div>
         )}
 
         {flowType === "SIMPLE" && step === 10 && (
-          <div ref={(el) => { stepRefs.current[9] = el; }} className="wizard-step-enter">
+          <div className={stepAnimClass}>
           {formError && formErrorStep === 10 && (
             <div
               className="text-base rounded-md border p-2 mb-2"
@@ -1501,12 +1815,14 @@ export function MobileAddTransactionWizard({
               {formError}
             </div>
           )}
+          <p className="text-[22px] font-medium leading-snug mb-2 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+            <SplitSquareVertical className="h-5 w-5 shrink-0" strokeWidth={1.5} />
+            Разделить транзакцию?
+          </p>
+          <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно оставить одной суммой</p>
           <div className="grid gap-4">
-            <div className="flex w-full items-center justify-between gap-2">
-              <p className="text-base font-medium flex items-center gap-2 mb-0" style={{ color: ACTIVE_TEXT_DARK }}>
-                <SplitSquareVertical className="h-5 w-5 shrink-0" />
-                Разделить на несколько
-              </p>
+            <div className="flex w-full items-center justify-between gap-3 min-h-11">
+              <span className="text-base" style={{ color: ACTIVE_TEXT_DARK }}>Разделить на несколько</span>
               <Switch
                 checked={splitEnabled}
                 onCheckedChange={(checked) => {
@@ -1672,7 +1988,26 @@ export function MobileAddTransactionWizard({
               );
             })()}
           </div>
-            {step === 10 && (() => {
+          </div>
+        )}
+
+        {flowType === "SIMPLE" && step === STEP_PREVIEW && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-2" style={{ color: "rgba(255,255,255,0.95)" }}>
+              Проверьте транзакцию
+            </p>
+            <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+              Так она появится в списке
+            </p>
+            {formError && formErrorStep === STEP_PREVIEW && (
+              <div
+                className="text-base rounded-md border p-2 mb-4"
+                style={{ color: "#FB4C4F", backgroundColor: "rgba(251, 76, 79, 0.08)", borderColor: "rgba(251, 76, 79, 0.3)" }}
+              >
+                {formError}
+              </div>
+            )}
+            {(() => {
               const primaryAmountCents = Math.max(0, parseRubToCents(normalizeRubOnBlur(amountStr)) ?? 0);
               const counterpartyAmountCents = isCrossCurrencyTransfer
                 ? Math.max(0, parseRubToCents(normalizeRubOnBlur(amountCounterpartyStr)) ?? 0)
@@ -1692,21 +2027,42 @@ export function MobileAddTransactionWizard({
               const accountToName = counterpartyItemId ? itemsById.get(counterpartyItemId)?.name ?? "—" : "—";
               const counterpartyName = previewCounterparty ? buildCounterpartyName(previewCounterparty) : "—";
               const commentText = comment?.trim() || null;
+              const relatedName = !isTransfer && relatedItemId != null ? itemsById.get(relatedItemId)?.name ?? null : null;
+              const typeLabel = formTransactionType === "PLANNED" ? "Плановая" : "Фактическая";
+              const linkLabel = relatedName ? ASSET_LINK_LABELS[effectiveAssetLinkType] ?? null : null;
+              const splitCount = splitEnabled && !isTransfer
+                ? splitParts.filter((p) => (parseRubToCents(normalizeRubOnBlur(p.amountStr)) ?? 0) > 0).length
+                : 0;
+              const previewRows: { label: string; value: string }[] = [
+                { label: "Дата", value: formatWizardDateLabel(date, time) },
+                { label: "Тип", value: typeLabel },
+              ];
+              if (relatedName) previewRows.push({ label: "Связанный актив", value: linkLabel ? `${relatedName} · ${linkLabel}` : relatedName });
+              if (splitCount > 0) {
+                const n10 = splitCount % 10;
+                const n100 = splitCount % 100;
+                const word =
+                  n10 === 1 && n100 !== 11
+                    ? "часть"
+                    : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)
+                      ? "части"
+                      : "частей";
+                previewRows.push({ label: "Разделение", value: `${splitCount} ${word}` });
+              }
               const primaryItem = primaryItemId ? itemsById.get(primaryItemId) ?? null : null;
               const counterpartyItem = counterpartyItemId ? itemsById.get(counterpartyItemId) ?? null : null;
               const primaryCounterparty = getItemCounterparty(primaryItemId);
               const counterpartyItemCounterparty = getItemCounterparty(counterpartyItemId);
               const CounterpartyFallbackIcon = previewCounterparty?.entity_type === "PERSON" ? User : Building2;
               return (
-                <div className="flex flex-col gap-4 pt-10">
-                <div className="flex flex-col gap-0 rounded-lg overflow-hidden min-w-0 w-full border border-border">
+                <div className="flex flex-col gap-5">
+                <div className="flex flex-col gap-0 rounded-lg overflow-hidden min-w-0 w-full">
                   <div className="flex items-stretch rounded-lg min-w-0 w-full">
                     <div
                       className="shrink-0 rounded-l-lg"
                       style={{
-                        width: 10,
+                        width: 6,
                         backgroundColor: row1HighlightColor,
-                        boxShadow: `0 0 250px 50px ${row1HighlightColor}`,
                       }}
                     />
                     <div
@@ -1854,24 +2210,55 @@ export function MobileAddTransactionWizard({
                     </div>
                   )}
                 </div>
-                <MobileTapScale className="block w-full pt-4">
-                  <Button
-                    type="button"
-                    variant="authPrimary"
-                    disabled={submitting}
-                    className="w-full rounded-lg border-0 text-sm min-h-12 py-4"
-                    onClick={handleSubmit}
-                    style={{ "--auth-primary-bg": "linear-gradient(135deg, #483BA6 0%, #6C5DD7 57%, #9487F3 100%)", "--auth-primary-bg-hover": "linear-gradient(315deg, #9487F3 0%, #6C5DD7 79%, #483BA6 100%)" } as React.CSSProperties}
-                  >
-                    {submitting ? "Создание…" : "Добавить"}
-                  </Button>
-                </MobileTapScale>
+                <dl className="grid gap-3">
+                  {previewRows.map((row) => (
+                    <div key={row.label} className="flex items-baseline justify-between gap-4">
+                      <dt className="text-sm shrink-0" style={{ color: PLACEHOLDER_COLOR_DARK }}>{row.label}</dt>
+                      <dd className="text-sm text-right min-w-0" style={{ color: ACTIVE_TEXT_DARK }}>{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
               );
             })()}
           </div>
         )}
+        </div>
       </div>
+
+      {isFieldFlow && progressIds.length > 0 && (
+        <footer
+          className="shrink-0 px-5 pt-3"
+          style={{
+            paddingBottom: "calc(12px + env(safe-area-inset-bottom, 0px))",
+            backgroundColor: "#000000",
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-h-12 px-4 rounded-lg text-base font-medium"
+              style={{ color: ACTIVE_TEXT_DARK, backgroundColor: "rgba(255,255,255,0.08)" }}
+              disabled={submitting}
+              onClick={goBack}
+            >
+              <ChevronLeft className="size-5" strokeWidth={1.5} />
+              Назад
+            </Button>
+            <Button
+              type="button"
+              variant="authPrimary"
+              className="min-h-12 flex-1 rounded-lg text-base font-medium"
+              style={WIZARD_PRIMARY_BTN_STYLE}
+              disabled={submitting}
+              onClick={handleNextOrSubmit}
+            >
+              {nextLabel}
+            </Button>
+          </div>
+        </footer>
+      )}
     </div>
   );
 

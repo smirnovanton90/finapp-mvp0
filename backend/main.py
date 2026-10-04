@@ -3106,11 +3106,15 @@ def _item_balance_currency_and_rub(
 _MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 
-def _at_as_moscow_naive(dt: datetime) -> datetime:
-    """Приводит момент времени к «наивному» datetime в поясе Москвы для сравнения с transaction_date (хранятся как Москва)."""
-    if dt.tzinfo is not None:
-        return dt.astimezone(_MOSCOW_TZ).replace(tzinfo=None)
-    return dt
+def _as_utc(dt: datetime) -> datetime:
+    """Наивный момент считаем московским — так приходили старые запросы без пояса."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=_MOSCOW_TZ).astimezone(timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _tx_instant(tx: Transaction) -> datetime:
+    return transaction_instant(tx.transaction_date, getattr(tx, "timezone", None))
 
 
 def _compute_balance_in_item_currency_cents(
@@ -3120,25 +3124,28 @@ def _compute_balance_in_item_currency_cents(
     at: datetime,
 ) -> int:
     """Баланс по активу в валюте счёта (минорные единицы) на момент at. Считается по цепочке транзакций без учёта курсов; курс применяется только при переводе в рубли для отображения."""
-    at = _at_as_moscow_naive(at)
+    at_utc = _as_utc(at)
     item_id = item.id
     item_currency = (item.currency_code or "RUB").upper()
-    balance_txs = (
-        db.query(Transaction)
-        .filter(
-            Transaction.user_id == user_id,
-            Transaction.transaction_type == "ACTUAL",
-            Transaction.deleted_at.is_(None),
-            Transaction.is_split_parent.is_(False),
-            Transaction.transaction_date <= at,
-            or_(
-                Transaction.primary_item_id == item_id,
-                Transaction.counterparty_item_id == item_id,
-            ),
+    balance_txs = [
+        tx
+        for tx in (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.deleted_at.is_(None),
+                Transaction.is_split_parent.is_(False),
+                or_(
+                    Transaction.primary_item_id == item_id,
+                    Transaction.counterparty_item_id == item_id,
+                ),
+            )
+            .all()
         )
-        .order_by(Transaction.transaction_date.asc())
-        .all()
-    )
+        if _tx_instant(tx) <= at_utc
+    ]
+    balance_txs.sort(key=_tx_instant)
     items_by_id: dict[int, Item] = {}
     if balance_txs:
         all_ids = {t.primary_item_id for t in balance_txs} | {
@@ -3216,7 +3223,7 @@ def _compute_balance_rub_at(
     item_currency = (item.currency_code or "RUB").upper()
     if item_currency == "RUB":
         return balance_cents
-    at_date = at.date() if hasattr(at, "date") else at
+    at_date = _as_utc(at).astimezone(_MOSCOW_TZ).date()
     return _convert_amount_between_currencies(
         balance_cents, item_currency, "RUB", at_date, db
     )
@@ -3236,7 +3243,7 @@ def _item_balance_currency_and_rub_consistent(
     """
     primary = (item.primary_value_kind or "BALANCE").upper()
     if primary == "BALANCE" and not is_moex_item(item) and not is_crypto_item(item):
-        at = datetime.now(_MOSCOW_TZ)
+        at = datetime.now(timezone.utc)
         bc = _compute_balance_cents_at(db, user_id, item, at)
         br = _compute_balance_rub_at(db, user_id, item, at)
         return bc, br
@@ -3281,6 +3288,7 @@ def _build_item_cost_history(
     item: Item,
     date_from: date_type,
     date_to: date_type,
+    zone_name: str = "Europe/Moscow",
 ) -> list[ItemCostHistoryPoint]:
     """Build daily cost history for one item from date_from to date_to (inclusive)."""
     item_id = item.id
@@ -3307,9 +3315,9 @@ def _build_item_cost_history(
                 Transaction.counterparty_item_id == item_id,
             ),
         )
-        .order_by(Transaction.transaction_date.asc())
         .all()
     )
+    balance_txs.sort(key=_tx_instant)
     primary_ids = {t.primary_item_id for t in balance_txs}
     counter_ids = {t.counterparty_item_id for t in balance_txs if t.counterparty_item_id is not None}
     all_ids = primary_ids | counter_ids
@@ -3469,12 +3477,17 @@ def _build_item_cost_history(
     lot_tx_index = 0
     units_balance = units_initial
     units_tx_index = 0
+    history_zone = ZoneInfo(zone_name or "Europe/Moscow")
+    today_in_zone = datetime.now(history_zone).date()
+    now_utc = datetime.now(timezone.utc)
     for d_str in dates:
         d = date_type.fromisoformat(d_str)
+        # Сегодня — сальдо на текущий момент, чтобы шапка и последняя точка графика совпали.
+        # Прошлый день — конец этого дня в поясе пользователя.
+        cutoff = now_utc if d == today_in_zone else datetime.combine(d, time.max, tzinfo=history_zone)
         while balance_tx_index < len(balance_txs):
             tx = balance_txs[balance_tx_index]
-            tx_d = tx.transaction_date.date() if hasattr(tx.transaction_date, "date") else tx.transaction_date
-            if tx_d > d:
+            if _tx_instant(tx) > cutoff:
                 break
             balance_cumul += delta_in_item_currency(tx)
             balance_tx_index += 1
@@ -3645,7 +3658,8 @@ def get_item_cost_history(
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
     open_date = item.open_date
-    today = date_type.today()
+    zone_name = effective_timezone(user)
+    today = datetime.now(ZoneInfo(zone_name)).date()
     start = open_date
     if date_from:
         try:
@@ -3661,7 +3675,7 @@ def get_item_cost_history(
             pass
     if start > end:
         return ItemCostHistoryOut(points=[])
-    points = _build_item_cost_history(db, user.id, item, start, end)
+    points = _build_item_cost_history(db, user.id, item, start, end, zone_name)
     return ItemCostHistoryOut(points=points)
 
 

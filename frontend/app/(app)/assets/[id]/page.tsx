@@ -451,7 +451,7 @@ export default function AssetDetailPage() {
     setLoadingCostHistory(true);
     try {
       const dateFrom = item.open_date ?? undefined;
-      const dateTo = item.closed_at ? item.closed_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const dateTo = item.closed_at ? item.closed_at.slice(0, 10) : todayDateKey(displayTimezone);
       const data = await fetchItemCostHistory(item.id, { date_from: dateFrom, date_to: dateTo });
       setCostHistoryData(data);
     } catch {
@@ -459,7 +459,7 @@ export default function AssetDetailPage() {
     } finally {
       setLoadingCostHistory(false);
     }
-  }, [item?.id, item?.open_date, item?.closed_at]);
+  }, [item?.id, item?.open_date, item?.closed_at, displayTimezone]);
 
   /** Местные цифры контрольной точки. Пояс задаётся отдельно и не сдвигает часы. */
   const buildCheckpointWall = useCallback((dateStr: string, timeStr: string) => {
@@ -478,7 +478,7 @@ export default function AssetDetailPage() {
   /** Границы текущего календарного периода для мобильного графика стоимости. Возвращает [startDateKey, endDateKey] в формате YYYY-MM-DD. */
   const mobileCostPeriodBounds = useMemo((): [string, string] => {
     if (mobileCostPeriod === "all") {
-      const end = item?.closed_at ? item.closed_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const end = item?.closed_at ? item.closed_at.slice(0, 10) : todayDateKey(displayTimezone);
       const start = item?.open_date ?? end;
       return [start, end];
     }
@@ -501,7 +501,7 @@ export default function AssetDetailPage() {
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     return [toLocalDateKey(monday), toLocalDateKey(sunday)];
-  }, [mobileCostPeriod, toLocalDateKey, item?.open_date, item?.closed_at]);
+  }, [mobileCostPeriod, toLocalDateKey, item?.open_date, item?.closed_at, displayTimezone]);
 
   const openCheckpointModal = useCallback((editId: number | null) => {
     setCheckpointEditId(editId);
@@ -603,7 +603,7 @@ export default function AssetDetailPage() {
     let cancelled = false;
     setLoadingCostHistory(true);
     const dateFrom = item.open_date ?? undefined;
-    const dateTo = item.closed_at ? item.closed_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const dateTo = item.closed_at ? item.closed_at.slice(0, 10) : todayDateKey(displayTimezone);
     fetchItemCostHistory(item.id, { date_from: dateFrom, date_to: dateTo })
       .then((data) => {
         if (!cancelled) setCostHistoryData(data);
@@ -617,7 +617,7 @@ export default function AssetDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [item?.id, item?.open_date, item?.closed_at]);
+  }, [item?.id, item?.open_date, item?.closed_at, displayTimezone]);
 
   useEffect(() => {
     if (!item?.id) {
@@ -683,7 +683,7 @@ export default function AssetDetailPage() {
     };
   }, [item?.id, item?.currency_code, costHistoryData?.points, fxRatesByDate]);
 
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = todayDateKey(displayTimezone);
   /** Конечная дата периода: для закрытого актива — дата закрытия, иначе сегодня (для графика, рентабельности, доходности). */
   const effectiveEndDate = item?.closed_at ? item.closed_at.slice(0, 10) : todayKey;
   const sortedFxRateDateKeys = useMemo(() => Object.keys(fxRatesByDate).sort(), [fxRatesByDate]);

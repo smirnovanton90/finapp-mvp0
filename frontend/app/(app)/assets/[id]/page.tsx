@@ -90,7 +90,7 @@ import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip"
 import { LinkedBrokerageAccountsMeta } from "@/components/linked-brokerage-accounts-meta";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
-import { formatTransactionDateLabel, todayDateKey } from "@/lib/timezone";
+import { formatTransactionDateLabel, formatTransactionTimeLabel, todayDateKey } from "@/lib/timezone";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
@@ -750,27 +750,16 @@ export default function AssetDetailPage() {
     return merged.sort((a, b) => (toTxDateKey(b.transaction_date, b.timezone)).localeCompare(toTxDateKey(a.transaction_date, a.timezone)));
   }, [purchaseTxsForAsset, investmentTxsForAsset]);
 
-  /** Дата транзакции; время (HH:mm или HH:mm:ss) — только если есть в строке и не 00:00:00. */
-  function formatTxDateCell(transactionDate: string | null | undefined) {
+  /** Дата и время транзакции в текущем поясе. Полночь без отдельного времени. */
+  function formatTxDateCell(transactionDate: string | null | undefined, txTimezone?: string | null) {
     if (!transactionDate?.trim()) return "—";
     const raw = transactionDate.trim();
-    const dateKey = toTxDateKey(raw);
+    const dateKey = toTxDateKey(raw, txTimezone);
     if (!dateKey) return "—";
     const [y, m, d] = dateKey.split("-");
     const dateLabel = y && m && d ? `${d}.${m}.${y}` : raw;
-    const tIdx = raw.indexOf("T");
-    if (tIdx === -1) return dateLabel;
-    const timePart = raw.slice(tIdx + 1);
-    const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(timePart);
-    if (!match) return dateLabel;
-    const hours = parseInt(match[1], 10);
-    const minutes = parseInt(match[2], 10);
-    const seconds = match[3] != null ? parseInt(match[3], 10) : 0;
-    if (hours === 0 && minutes === 0 && seconds === 0) return dateLabel;
-    const hh = match[1].padStart(2, "0");
-    const mm = match[2].padStart(2, "0");
-    const timeLabel =
-      seconds !== 0 ? `${hh}:${mm}:${String(seconds).padStart(2, "0")}` : `${hh}:${mm}`;
+    const timeLabel = formatTransactionTimeLabel(raw, txTimezone);
+    if (!timeLabel) return dateLabel;
     return (
       <>
         {dateLabel}

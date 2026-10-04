@@ -652,6 +652,7 @@ export type TransactionDebtsCreate = {
   transaction_counterparty_id?: number | null;
   primary_item_id: number;
   transaction_date: string;
+  timezone?: string | null;
   /** Сумма в копейках (рубли) — валюта платежа/счёта. */
   amount: number;
   /** Сумма в копейках/центах в валюте долга (для перекрёстной валюты). */

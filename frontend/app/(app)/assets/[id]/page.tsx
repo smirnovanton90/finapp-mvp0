@@ -90,7 +90,9 @@ import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip"
 import { LinkedBrokerageAccountsMeta } from "@/components/linked-brokerage-accounts-meta";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
-import { formatTransactionDateLabel, formatTransactionTimeLabel, todayDateKey } from "@/lib/timezone";
+import { dateKeyInTimezone, formatInstantDateTimeLabel, formatTransactionDateLabel, formatTransactionTimeLabel, instantWallClock, nowInTimezone, timeInTimezone, todayDateKey, zonedWallTimeToUtc } from "@/lib/timezone";
+import { useDisplayTimezone } from "@/components/timezone-context";
+import { TimezoneSelector } from "@/components/timezone-selector";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
@@ -322,8 +324,10 @@ export default function AssetDetailPage() {
   const mobileStickyHeaderVisibleRef = useRef(false);
   const [checkpointModalOpen, setCheckpointModalOpen] = useState(false);
   const [checkpointEditId, setCheckpointEditId] = useState<number | null>(null);
+  const { timezone: displayTimezone } = useDisplayTimezone();
   const [checkpointDateStr, setCheckpointDateStr] = useState("");
   const [checkpointTimeStr, setCheckpointTimeStr] = useState("");
+  const [checkpointTimezone, setCheckpointTimezone] = useState(displayTimezone);
   const [checkpointAmountStr, setCheckpointAmountStr] = useState("");
   const [checkpointComputedCents, setCheckpointComputedCents] = useState<number | null>(null);
   const [checkpointBalanceAtLoading, setCheckpointBalanceAtLoading] = useState(false);
@@ -457,21 +461,11 @@ export default function AssetDetailPage() {
     }
   }, [item?.id, item?.open_date, item?.closed_at]);
 
-  /** Собирает ISO datetime в UTC из локальных даты и времени (чтобы бэкенд и отображение совпадали). */
-  const buildCheckpointAtIso = useCallback((dateStr: string, timeStr: string) => {
-    const [y, mo, day] = dateStr.split("-").map((x) => parseInt(x, 10));
+  /** Местные цифры контрольной точки. Пояс задаётся отдельно и не сдвигает часы. */
+  const buildCheckpointWall = useCallback((dateStr: string, timeStr: string) => {
     const t = timeStr && /^\d{1,2}:\d{2}$/.test(timeStr.trim()) ? timeStr.trim() : "00:00";
-    const [h, m] = t.split(":").map((x) => parseInt(x, 10));
-    const localDate = new Date(
-      Number.isFinite(y) ? y : 0,
-      Number.isFinite(mo) ? mo - 1 : 0,
-      Number.isFinite(day) ? day : 1,
-      Number.isFinite(h) ? h : 0,
-      Number.isFinite(m) ? m : 0,
-      0,
-      0
-    );
-    return localDate.toISOString();
+    const [h = "0", m = "0"] = t.split(":");
+    return `${dateStr}T${h.padStart(2, "0")}:${m.padStart(2, "0")}:00`;
   }, []);
 
   const toLocalDateKey = useCallback((d: Date) => {
@@ -515,29 +509,27 @@ export default function AssetDetailPage() {
     if (editId != null) {
       const cp = checkpoints.find((c) => c.id === editId);
       if (cp) {
-        const d = new Date(cp.checkpoint_at);
-        const dateStr = toLocalDateKey(d);
-        const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-        setCheckpointDateStr(dateStr);
-        setCheckpointTimeStr(timeStr);
+        const wall = instantWallClock(cp.checkpoint_at, cp.timezone || displayTimezone);
+        setCheckpointDateStr(wall.dateKey);
+        setCheckpointTimeStr(wall.time);
+        setCheckpointTimezone(cp.timezone || displayTimezone);
         setCheckpointAmountStr(formatCentsForInput(cp.stated_balance_cents));
         setCheckpointComputedCents(cp.computed_balance_cents);
       }
     } else {
-      const now = new Date();
-      const dateStr = toLocalDateKey(now);
-      const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-      setCheckpointDateStr(dateStr);
-      setCheckpointTimeStr(timeStr);
+      const now = nowInTimezone(displayTimezone);
+      setCheckpointDateStr(now.dateKey);
+      setCheckpointTimeStr(now.time);
+      setCheckpointTimezone(displayTimezone);
       setCheckpointAmountStr("");
       setCheckpointComputedCents(null);
     }
     setCheckpointModalOpen(true);
-  }, [checkpoints, toLocalDateKey]);
+  }, [checkpoints, displayTimezone]);
 
   useEffect(() => {
     if (!checkpointModalOpen || !item?.id || !checkpointDateStr) return;
-    const at = buildCheckpointAtIso(checkpointDateStr, checkpointTimeStr);
+    const at = zonedWallTimeToUtc(buildCheckpointWall(checkpointDateStr, checkpointTimeStr), checkpointTimezone).toISOString();
     let cancelled = false;
     setCheckpointBalanceAtLoading(true);
     fetchItemBalanceAt(item.id, at)
@@ -553,12 +545,12 @@ export default function AssetDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [checkpointModalOpen, item?.id, checkpointDateStr, checkpointTimeStr, buildCheckpointAtIso]);
+  }, [checkpointModalOpen, item?.id, checkpointDateStr, checkpointTimeStr, checkpointTimezone, buildCheckpointWall]);
 
   const saveCheckpoint = useCallback(async () => {
     if (!item?.id || !checkpointDateStr) return;
     setCheckpointModalError(null);
-    const at = buildCheckpointAtIso(checkpointDateStr, checkpointTimeStr);
+    const at = buildCheckpointWall(checkpointDateStr, checkpointTimeStr);
     const cents = parseRubToCents(checkpointAmountStr);
     if (!Number.isFinite(cents)) {
       setCheckpointModalError("Введите корректную сумму.");
@@ -569,11 +561,16 @@ export default function AssetDetailPage() {
       if (checkpointEditId != null) {
         await updateBalanceCheckpoint(item.id, checkpointEditId, {
           checkpoint_at: at,
+          timezone: checkpointTimezone,
           stated_balance_cents: cents,
           source: "MANUAL",
         });
       } else {
-        await createBalanceCheckpoint(item.id, { checkpoint_at: at, stated_balance_cents: cents });
+        await createBalanceCheckpoint(item.id, {
+          checkpoint_at: at,
+          timezone: checkpointTimezone,
+          stated_balance_cents: cents,
+        });
       }
       const list = await fetchItemBalanceCheckpoints(item.id);
       setCheckpoints(list);
@@ -584,7 +581,7 @@ export default function AssetDetailPage() {
     } finally {
       setCheckpointSaving(false);
     }
-  }, [item?.id, checkpointDateStr, checkpointTimeStr, checkpointAmountStr, checkpointEditId, buildCheckpointAtIso, refetchCostHistory]);
+  }, [item?.id, checkpointDateStr, checkpointTimeStr, checkpointTimezone, checkpointAmountStr, checkpointEditId, buildCheckpointWall, refetchCostHistory]);
 
   const deleteCheckpoint = useCallback(async (checkpointId: number) => {
     if (!item?.id) return;
@@ -1999,7 +1996,7 @@ export default function AssetDetailPage() {
     const { padding, innerWidth } = costChartGeometry;
     const byDate = new Map<string, BalanceCheckpointOut[]>();
     for (const cp of checkpoints) {
-      const dateKey = cp.checkpoint_at.slice(0, 10);
+      const dateKey = dateKeyInTimezone(new Date(cp.checkpoint_at), displayTimezone);
       if (!byDate.has(dateKey)) byDate.set(dateKey, []);
       byDate.get(dateKey)!.push(cp);
     }
@@ -2012,7 +2009,7 @@ export default function AssetDetailPage() {
       result.push({ dateKey, x, checkpoints: cps });
     }
     return result;
-  }, [costHistoryOpen, checkpoints, costChartGeometry, costChartDisplaySeries]);
+  }, [costHistoryOpen, checkpoints, costChartGeometry, costChartDisplaySeries, displayTimezone]);
 
   /** График количества без правой колонки значений — не наследуем right:120 от графика стоимости. */
   const qtyChartPadding = useMemo(
@@ -2671,7 +2668,7 @@ export default function AssetDetailPage() {
                         {lineData.checkpoints.map((cp) => (
                           <div key={cp.id} className="mt-2 pt-2 border-t border-white/10 space-y-1">
                             <div className="flex items-center justify-between gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
-                              <span>{new Date(cp.checkpoint_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+                              <span>{timeInTimezone(new Date(cp.checkpoint_at), displayTimezone)}</span>
                               <span className="text-xs" style={{ color: cp.status === "OK" ? GREEN : RED }}>{cp.status === "OK" ? "ОК" : "Расхождение"}</span>
                             </div>
                             <div className="flex justify-between gap-2 text-xs" style={{ color: PLACEHOLDER_COLOR_DARK }}>
@@ -3199,14 +3196,7 @@ export default function AssetDetailPage() {
                   )}
                   <div className="flex flex-col gap-2">
                     {checkpointsPreview.map((cp) => {
-                      const dt = new Date(cp.checkpoint_at);
-                      const dateTimeLabel = dt.toLocaleString("ru-RU", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      });
+                      const dateTimeLabel = formatInstantDateTimeLabel(cp.checkpoint_at, displayTimezone);
                       const diffCents = cp.stated_balance_cents - cp.computed_balance_cents;
                       const isOk = cp.status === "OK";
                       return (
@@ -3928,8 +3918,7 @@ export default function AssetDetailPage() {
                     </thead>
                     <tbody>
                       {checkpoints.map((cp) => {
-                        const dt = new Date(cp.checkpoint_at);
-                        const dateTimeLabel = dt.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                        const dateTimeLabel = formatInstantDateTimeLabel(cp.checkpoint_at, displayTimezone);
                         return (
                           <tr key={cp.id} className="border-t border-white/10" style={{ backgroundColor: MODAL_BG }}>
                             <td className="pl-6 pr-4 py-2 text-sm" style={{ color: ACTIVE_TEXT_DARK }}>{dateTimeLabel}</td>
@@ -4266,6 +4255,9 @@ export default function AssetDetailPage() {
                   <div className="relative flex items-center min-h-[40px] shrink-0">
                     <TimeInput value={checkpointTimeStr} onChange={setCheckpointTimeStr} />
                   </div>
+                  <div className="relative min-h-[40px] min-w-[12rem] flex-1">
+                    <TimezoneSelector value={checkpointTimezone} onChange={setCheckpointTimezone} />
+                  </div>
                 </div>
               </FormField>
               <TextField
@@ -4488,14 +4480,7 @@ export default function AssetDetailPage() {
               <p className="text-sm py-4" style={{ color: PLACEHOLDER_COLOR_DARK }}>Нет контрольных точек.</p>
             ) : (
               checkpointsSortedDesc.map((cp) => {
-                const dt = new Date(cp.checkpoint_at);
-                const dateTimeLabel = dt.toLocaleString("ru-RU", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                });
+                const dateTimeLabel = formatInstantDateTimeLabel(cp.checkpoint_at, displayTimezone);
                 return (
                   <div
                     key={cp.id}

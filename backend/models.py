@@ -683,6 +683,9 @@ class ItemBalanceCheckpoint(Base):
     item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
     item: Mapped["Item"] = relationship(back_populates="balance_checkpoints")
     checkpoint_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default="Europe/Moscow", default="Europe/Moscow"
+    )
     stated_balance_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     """Указанное пользователем сальдо в валюте актива (копейки/центы)."""
     source: Mapped[str] = mapped_column(String(20), nullable=False, server_default="MANUAL")

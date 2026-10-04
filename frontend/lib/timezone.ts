@@ -96,6 +96,27 @@ export function todayDateKey(timeZone?: string | null): string {
   return dateKeyInTimezone(new Date(), timeZone || getActiveDisplayTimezone());
 }
 
+/** Абсолютный момент в подписи выбранного пояса: «04.10.2026 16:30». Полночь без времени. */
+export function formatInstantDateTimeLabel(value: string, timeZone?: string | null): string {
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return value;
+  const zone = timeZone || getActiveDisplayTimezone();
+  const key = dateKeyInTimezone(instant, zone);
+  const [year, month, day] = key.split("-");
+  const time = timeInTimezone(instant, zone);
+  const dateLabel = year && month && day ? `${day}.${month}.${year}` : value;
+  if (!time || time === "00:00") return dateLabel;
+  return `${dateLabel} ${time}`;
+}
+
+/** Местные цифры контрольной точки в её поясе — для формы редактирования. */
+export function instantWallClock(value: string, timeZone?: string | null): { dateKey: string; time: string } {
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return splitWallClock(value);
+  const zone = timeZone || getActiveDisplayTimezone();
+  return { dateKey: dateKeyInTimezone(instant, zone), time: timeInTimezone(instant, zone) };
+}
+
 export function nowInTimezone(timeZone?: string | null): { dateKey: string; time: string } {
   const zone = timeZone || getActiveDisplayTimezone();
   const now = new Date();

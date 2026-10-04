@@ -101,7 +101,7 @@ from item_plan_service import (
     rebuild_item_chains,
     upsert_plan_settings,
 )
-from timezones import validate_timezone
+from timezones import effective_timezone, transaction_instant, validate_timezone
 from item_opening_service import (
     create_commission_transaction,
     create_opening_transactions,
@@ -3243,6 +3243,17 @@ def _item_balance_currency_and_rub_consistent(
     return _item_balance_currency_and_rub(db, item, as_of_date)
 
 
+def _checkpoint_zone_and_instant(value: datetime, timezone_name: str | None, user: User) -> tuple[str, datetime]:
+    """Цифры без пояса читаются в указанном поясе. Момент с поясом сохраняется как есть."""
+    if timezone_name and timezone_name.strip():
+        tz_name = validate_timezone(timezone_name)
+    else:
+        tz_name = effective_timezone(user)
+    if value.tzinfo is not None:
+        return tz_name, value.astimezone(timezone.utc)
+    return tz_name, transaction_instant(value, tz_name)
+
+
 def _checkpoint_to_out(
     row: "ItemBalanceCheckpoint",
     item: Item,
@@ -3256,6 +3267,7 @@ def _checkpoint_to_out(
     return BalanceCheckpointOut(
         id=row.id,
         checkpoint_at=row.checkpoint_at,
+        timezone=row.timezone or "Europe/Moscow",
         stated_balance_cents=row.stated_balance_cents,
         computed_balance_cents=computed,
         status=status,
@@ -3708,10 +3720,12 @@ def create_balance_checkpoint(
     source = (payload.source or "MANUAL").upper()
     if source not in ("MANUAL", "IMPORTED"):
         source = "MANUAL"
+    tz_name, moment = _checkpoint_zone_and_instant(payload.checkpoint_at, payload.timezone, user)
     row = ItemBalanceCheckpoint(
         user_id=user.id,
         item_id=item_id,
-        checkpoint_at=payload.checkpoint_at,
+        checkpoint_at=moment,
+        timezone=tz_name,
         stated_balance_cents=payload.stated_balance_cents,
         source=source,
     )
@@ -3735,8 +3749,14 @@ def update_balance_checkpoint(
     row = db.get(ItemBalanceCheckpoint, checkpoint_id)
     if not row or row.item_id != item_id or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Checkpoint not found")
-    if payload.checkpoint_at is not None:
-        row.checkpoint_at = payload.checkpoint_at
+    if payload.checkpoint_at is not None or payload.timezone is not None:
+        tz_name, moment = _checkpoint_zone_and_instant(
+            payload.checkpoint_at or row.checkpoint_at,
+            payload.timezone or row.timezone,
+            user,
+        )
+        row.checkpoint_at = moment
+        row.timezone = tz_name
     if payload.stated_balance_cents is not None:
         row.stated_balance_cents = payload.stated_balance_cents
     if payload.source is not None:

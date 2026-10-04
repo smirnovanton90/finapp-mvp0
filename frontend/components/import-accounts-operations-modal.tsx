@@ -293,6 +293,7 @@ export function ImportAccountsOperationsModal({
     selectedItemId: number | null;
     dateKey: string;
     timeStr: string;
+    timezone: string;
     amountStr: string;
   };
   const [checkpointStepState, setCheckpointStepState] = React.useState<Map<string, CheckpointBlockState>>(new Map());
@@ -769,6 +770,7 @@ export function ImportAccountsOperationsModal({
           selectedItemId: linkedItemId,
           dateKey: candidate?.dateKey ?? "",
           timeStr: candidate?.time?.slice(0, 5) ?? "23:59",
+          timezone: importTimezone,
           amountStr: candidate != null ? formatCentsForInput(candidate.balanceCents) : "",
         });
       }
@@ -782,6 +784,7 @@ export function ImportAccountsOperationsModal({
     parsedData?.balanceCheckpointCandidates,
     importSource,
     accountCardStates,
+    importTimezone,
   ]);
 
   React.useEffect(() => {
@@ -1331,28 +1334,16 @@ export function ImportAccountsOperationsModal({
           timezone: importTimezone,
         });
         if (result.success && isBankImport) {
-          const buildCheckpointAtIso = (dateStr: string, timeStr: string) => {
-            const [y, mo, day] = dateStr.split("-").map((x) => parseInt(x, 10));
-            const t = timeStr && /^\d{1,2}:\d{2}$/.test(timeStr.trim()) ? timeStr.trim() : "00:00";
-            const [h, m] = t.split(":").map((x) => parseInt(x, 10));
-            const localDate = new Date(
-              Number.isFinite(y) ? y : 0,
-              Number.isFinite(mo) ? mo - 1 : 0,
-              Number.isFinite(day) ? day : 1,
-              Number.isFinite(h) ? h : 0,
-              Number.isFinite(m) ? m : 0,
-              0,
-              0
-            );
-            return localDate.toISOString();
-          };
           for (const [, block] of checkpointStepState) {
             if (!block.createCheckpoint || !block.selectedItemId || !block.dateKey) continue;
             const cents = parseRubToCents(normalizeRubOnBlur(block.amountStr));
             if (cents == null || !Number.isFinite(cents)) continue;
+            const timePart = block.timeStr && /^\d{1,2}:\d{2}$/.test(block.timeStr.trim()) ? block.timeStr.trim() : "00:00";
+            const [hour = "0", minute = "0"] = timePart.split(":");
             try {
               await createBalanceCheckpoint(block.selectedItemId, {
-                checkpoint_at: buildCheckpointAtIso(block.dateKey, block.timeStr),
+                checkpoint_at: `${block.dateKey}T${hour.padStart(2, "0")}:${minute.padStart(2, "0")}:00`,
+                timezone: block.timezone || importTimezone,
                 stated_balance_cents: cents,
                 source: "IMPORTED",
               });
@@ -2473,6 +2464,7 @@ export function ImportAccountsOperationsModal({
                     selectedItemId: null,
                     dateKey: "",
                     timeStr: "23:59",
+                    timezone: importTimezone,
                     amountStr: "",
                   };
                   const balanceItems = items.filter(
@@ -2552,6 +2544,19 @@ export function ImportAccountsOperationsModal({
                                     const next = new Map(prev);
                                     const cur = next.get(accountKey) ?? block;
                                     next.set(accountKey, { ...cur, timeStr: v });
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </FormField>
+                            <FormField label="Часовой пояс" required>
+                              <TimezoneSelector
+                                value={block.timezone || importTimezone}
+                                onChange={(v) => {
+                                  setCheckpointStepState((prev) => {
+                                    const next = new Map(prev);
+                                    const cur = next.get(accountKey) ?? block;
+                                    next.set(accountKey, { ...cur, timezone: v });
                                     return next;
                                   });
                                 }}

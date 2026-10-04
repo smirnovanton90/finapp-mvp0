@@ -165,6 +165,7 @@ export type CheckpointSource = "MANUAL" | "IMPORTED";
 export type BalanceCheckpointOut = {
   id: number;
   checkpoint_at: string;
+  timezone?: string | null;
   stated_balance_cents: number;
   computed_balance_cents: number;
   status: CheckpointStatus;
@@ -173,12 +174,14 @@ export type BalanceCheckpointOut = {
 
 export type BalanceCheckpointCreate = {
   checkpoint_at: string;
+  timezone?: string | null;
   stated_balance_cents: number;
   source?: CheckpointSource | null;
 };
 
 export type BalanceCheckpointUpdate = {
   checkpoint_at?: string | null;
+  timezone?: string | null;
   stated_balance_cents?: number | null;
   source?: CheckpointSource | null;
 };

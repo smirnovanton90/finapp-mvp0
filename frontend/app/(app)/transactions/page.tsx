@@ -19,10 +19,13 @@ import { useDisplayTimezone } from "@/components/timezone-context";
 import { TimezoneSelector } from "@/components/timezone-selector";
 import {
   DEFAULT_TIMEZONE,
+  dateKeyInTimezone,
+  formatInstantDateTimeLabel,
   formatTransactionDateLabel,
   formatTransactionTimeLabel,
   nowInTimezone,
   splitWallClock,
+  timeInTimezone,
   todayDateKey,
   transactionDateKey,
   timezoneOptions,
@@ -5125,17 +5128,17 @@ function TransactionsView({
       .map((tx) => getDateKey(tx.transaction_date, tx.timezone))
       .filter((d): d is string => !!d);
     const cpDates = checkpoints
-      .map((cp) => cp.checkpoint_at.slice(0, 10))
+      .map((cp) => dateKeyInTimezone(new Date(cp.checkpoint_at), displayTimezone))
       .filter((d): d is string => !!d);
     const allDates = [...txDates, ...cpDates];
     if (allDates.length === 0) return [];
     const minDate = allDates.reduce((a, b) => (a < b ? a : b));
     const maxDate = allDates.reduce((a, b) => (a > b ? a : b));
     return checkpoints.filter((cp) => {
-      const d = cp.checkpoint_at.slice(0, 10);
+      const d = dateKeyInTimezone(new Date(cp.checkpoint_at), displayTimezone);
       return d >= minDate && d <= maxDate;
     });
-  }, [checkpoints, dateFrom, dateTo, sortedTxs]);
+  }, [checkpoints, dateFrom, dateTo, sortedTxs, displayTimezone]);
 
   type MergedRow =
     | { type: "date_header"; dateKey: string }
@@ -5150,7 +5153,7 @@ function TransactionsView({
       if (d) dateKeys.add(d);
     });
     checkpointsInWindow.forEach((cp) => {
-      dateKeys.add(cp.checkpoint_at.slice(0, 10));
+      dateKeys.add(dateKeyInTimezone(new Date(cp.checkpoint_at), displayTimezone));
     });
     const sortedDates = Array.from(dateKeys).sort((a, b) => b.localeCompare(a));
     const rows: MergedRow[] = [];
@@ -5181,11 +5184,11 @@ function TransactionsView({
       const pending: PendingDayRow[] = [];
 
       const cpsOnDate = checkpointsInWindow.filter(
-        (c) => c.checkpoint_at.slice(0, 10) === dateKey
+        (c) => dateKeyInTimezone(new Date(c.checkpoint_at), displayTimezone) === dateKey
       );
       const byTime = new Map<string, BalanceCheckpointWithItemOut[]>();
       for (const cp of cpsOnDate) {
-        const timeKey = cp.checkpoint_at.slice(11, 16) || "00:00";
+        const timeKey = timeInTimezone(new Date(cp.checkpoint_at), displayTimezone);
         if (!byTime.has(timeKey)) byTime.set(timeKey, []);
         byTime.get(timeKey)!.push(cp);
       }
@@ -5196,7 +5199,7 @@ function TransactionsView({
           kind: "checkpoint_line",
           sortKey,
           tie: `cp:${first.id}`,
-          timeKey: first.checkpoint_at.slice(11, 16) || "00:00",
+          timeKey: timeInTimezone(new Date(first.checkpoint_at), displayTimezone),
           checkpoints: cps,
         });
       }
@@ -8449,8 +8452,7 @@ function TransactionsView({
                               {row.checkpoints.map((cp) => {
                                 const item = itemsById.get(cp.item_id);
                                 const currencyCode = item?.currency_code ?? "RUB";
-                                const d = new Date(cp.checkpoint_at);
-                                const dateTimeLabel = `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+                                const dateTimeLabel = formatInstantDateTimeLabel(cp.checkpoint_at, displayTimezone);
                                 const cpOk = cp.status === "OK";
                                 return (
                                   <div key={cp.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
@@ -8619,8 +8621,7 @@ function TransactionsView({
                                         {row.checkpoints.map((cp) => {
                                           const item = itemsById.get(cp.item_id);
                                           const currencyCode = item?.currency_code ?? "RUB";
-                                          const d = new Date(cp.checkpoint_at);
-                                          const dateTimeLabel = `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+                                          const dateTimeLabel = formatInstantDateTimeLabel(cp.checkpoint_at, displayTimezone);
                                           const cpOk = cp.status === "OK";
                                           return (
                                             <div key={cp.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
@@ -8766,8 +8767,7 @@ function TransactionsView({
                           {row.checkpoints.map((cp) => {
                             const item = itemsById.get(cp.item_id);
                             const currencyCode = item?.currency_code ?? "RUB";
-                            const d = new Date(cp.checkpoint_at);
-                            const dateTimeLabel = `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+                            const dateTimeLabel = formatInstantDateTimeLabel(cp.checkpoint_at, displayTimezone);
                             const cpOk = cp.status === "OK";
                             return (
                               <div key={cp.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">

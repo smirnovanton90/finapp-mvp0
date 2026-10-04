@@ -701,12 +701,14 @@ CheckpointSource = Literal["MANUAL", "IMPORTED"]
 
 class BalanceCheckpointCreate(BaseModel):
     checkpoint_at: datetime
+    timezone: str | None = None
     stated_balance_cents: int
     source: CheckpointSource | None = None
 
 
 class BalanceCheckpointUpdate(BaseModel):
     checkpoint_at: datetime | None = None
+    timezone: str | None = None
     stated_balance_cents: int | None = None
     source: CheckpointSource | None = None
 
@@ -714,6 +716,7 @@ class BalanceCheckpointUpdate(BaseModel):
 class BalanceCheckpointOut(BaseModel):
     id: int
     checkpoint_at: datetime
+    timezone: str = "Europe/Moscow"
     stated_balance_cents: int
     computed_balance_cents: int
     status: CheckpointStatus

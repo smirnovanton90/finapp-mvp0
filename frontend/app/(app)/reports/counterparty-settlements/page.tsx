@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { transactionDateKey } from "@/lib/timezone";
-import { transactionDateKey } from "@/lib/timezone";
 import { useSession } from "next-auth/react";
 import {
   fetchCounterparties,

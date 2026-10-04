@@ -50,7 +50,7 @@ class ViewModelFactory(private val context: Context) : ViewModelProvider.Factory
                 ) as T
             }
             modelClass.isAssignableFrom(TransactionFormViewModel::class.java) -> {
-                TransactionFormViewModel(transactionsRepository, itemsRepository) as T
+                TransactionFormViewModel(transactionsRepository, itemsRepository, usersRepository) as T
             }
             modelClass.isAssignableFrom(CounterpartiesListViewModel::class.java) -> {
                 CounterpartiesListViewModel(counterpartiesRepository) as T

@@ -96,6 +96,9 @@ class UserMeOut(BaseModel):
     telegram_notify_hour: int | None = None
     telegram_notify_minute: int | None = None
     telegram_notify_enabled: bool = True
+    timezone: str = "Europe/Moscow"
+    timezone_auto: bool = True
+    timezone_detected: str | None = None
 
     class Config:
         from_attributes = True
@@ -210,6 +213,9 @@ class UserProfileUpdate(BaseModel):
     first_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)
     birth_date: date | None = None
+    timezone: str | None = Field(default=None, max_length=64)
+    timezone_auto: bool | None = None
+    timezone_detected: str | None = Field(default=None, max_length=64)
 
 class AccountingStartDateUpdate(BaseModel):
     accounting_start_date: date
@@ -750,6 +756,7 @@ class TransactionBase(BaseModel):
     comment: str | None = None
     related_item_id: int | None = None
     asset_link_type: AssetLinkType | None = None
+    timezone: str | None = None
 
     @model_validator(mode="after")
     def validate_category_for_direction(self) -> "TransactionBase":
@@ -822,6 +829,7 @@ class TransactionDebtsCreate(BaseModel):
     transaction_type: TransactionType = "ACTUAL"
     comment: str | None = None
     status: TransactionStatus | None = None
+    timezone: str | None = None
     parent_transaction_id: int | None = None
     counterparty_settlements_item_id: int | None = None  # Existing settlement item; use this OR new_settlement_name
     new_settlement_name: str | None = None  # Create new settlement item with this name; use this OR counterparty_settlements_item_id
@@ -842,6 +850,7 @@ class TransactionTheyPaidForMeCreate(BaseModel):
     transaction_date: datetime | None = None
     category_id: int | None = None
     comment: str | None = None
+    timezone: str | None = None
     counterparty_settlements_item_id: int | None = None  # Existing settlement item (who paid); use this OR new_settlement_name
     new_settlement_name: str | None = None  # Create new settlement item with this name; use this OR counterparty_settlements_item_id
 

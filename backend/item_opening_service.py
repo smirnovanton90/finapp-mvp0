@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from category_service import resolve_category_or_400
 from models import Category, Item, Transaction, User
 from market_utils import is_crypto_item, is_moex_item
+from timezones import effective_timezone, is_occurred
 from transactions import (
     ResolvedSide,
     _apply_position_delta,
@@ -184,7 +185,10 @@ def _create_transfer(
     counter_is_moex = is_moex_item(counter)
     primary_is_crypto = is_crypto_item(primary)
     counter_is_crypto = is_crypto_item(counter)
-    if transaction_type == "ACTUAL":
+    wall = datetime.combine(tx_date, datetime.min.time())
+    tz_name = effective_timezone(user)
+    apply_now = transaction_type == "ACTUAL" and is_occurred(wall, tz_name)
+    if apply_now:
         if primary_is_moex and primary_quantity_lots:
             _apply_position_delta(primary, -(primary_quantity_lots or 0), tx_date)
         elif primary_is_crypto and primary_quantity_units is not None:
@@ -218,7 +222,9 @@ def _create_transfer(
     tx = Transaction(
         user_id=user.id,
         related_item_id=related_item_id,
-        transaction_date=datetime.combine(tx_date, datetime.min.time()),
+        transaction_date=wall,
+        timezone=tz_name,
+        balance_applied=apply_now,
         primary_item_id=primary.id,
         primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
         counterparty_item_id=counter.id,
@@ -263,9 +269,12 @@ def _create_income_expense(
     primary_side = _resolve_effective_side(db, user, item_id, True, "primary")
     _validate_tx_date(tx_date, primary_side, "Transaction")
     primary = primary_side.effective_item
+    wall = datetime.combine(tx_date, datetime.min.time())
+    tz_name = effective_timezone(user)
+    apply_now = is_occurred(wall, tz_name)
 
     # amount_primary_minor — сумма в валюте актива (минорные единицы)
-    if direction == "INCOME":
+    if apply_now and direction == "INCOME":
         if is_moex_item(primary):
             if primary_quantity_lots:
                 _apply_position_delta(primary, primary_quantity_lots or 0, tx_date)
@@ -275,7 +284,7 @@ def _create_income_expense(
             primary.current_balance_minor += amount_primary_minor
             if (primary.currency_code or "RUB").upper() == "RUB":
                 primary.current_value_rub = primary.current_balance_minor
-    else:
+    elif apply_now:
         if is_moex_item(primary):
             if primary_quantity_lots:
                 _apply_position_delta(primary, -(primary_quantity_lots or 0), tx_date)
@@ -300,7 +309,9 @@ def _create_income_expense(
     tx = Transaction(
         user_id=user.id,
         related_item_id=related_item_id,
-        transaction_date=datetime.combine(tx_date, datetime.min.time()),
+        transaction_date=wall,
+        timezone=tz_name,
+        balance_applied=apply_now,
         primary_item_id=primary.id,
         primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
         counterparty_item_id=None,

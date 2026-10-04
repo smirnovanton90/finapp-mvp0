@@ -17,6 +17,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.finapp.utils.DisplayTimezone
+import com.finapp.utils.deviceTimezone
+import com.finapp.utils.transactionDateInZone
+import com.finapp.data.models.UserProfileUpdate
 import java.time.LocalDate
 
 data class LimitWithProgress(
@@ -65,6 +69,12 @@ class DashboardViewModel(
 
                 // Обрабатываем результаты
                 val user = userResult.getOrNull()
+                if (user != null) {
+                    DisplayTimezone.apply(user)
+                    if (user.timezoneAuto && user.timezoneDetected != deviceTimezone()) {
+                        usersRepository.updateProfile(UserProfileUpdate(timezoneDetected = deviceTimezone()))
+                    }
+                }
                 val items = itemsResult.getOrNull() ?: emptyList()
                 val transactions = transactionsResult.getOrNull() ?: emptyList()
                 val limits = limitsResult.getOrNull() ?: emptyList()
@@ -78,10 +88,14 @@ class DashboardViewModel(
                 val netAssets = assets - liabilities
 
                 // Вычисляем просроченные транзакции
-                val today = LocalDate.now()
+                val today = LocalDate.now(com.finapp.utils.zoneOrDefault(DisplayTimezone.zoneId))
                 val overdueCount = transactions.count { transaction ->
                     val transactionDate = try {
-                        LocalDate.parse(transaction.transactionDate.split("T")[0])
+                        transactionDateInZone(
+                            transaction.transactionDate,
+                            transaction.timezone,
+                            DisplayTimezone.zoneId,
+                        )
                     } catch (e: Exception) {
                         null
                     }
@@ -170,7 +184,11 @@ class DashboardViewModel(
             }
             .filter { transaction ->
                 try {
-                    val transactionDate = LocalDate.parse(transaction.transactionDate.split("T")[0])
+                    val transactionDate = transactionDateInZone(
+                        transaction.transactionDate,
+                        transaction.timezone,
+                        DisplayTimezone.zoneId,
+                    )
                     !transactionDate.isBefore(startDate) && !transactionDate.isAfter(endDate)
                 } catch (e: Exception) {
                     false

@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from db import SessionLocal
 from models import User
+from timezones import effective_timezone
 from tg_bot.bot import get_bot
 from tg_bot.services.notify import (
     build_notification_text,
@@ -20,17 +21,15 @@ _scheduler: AsyncIOScheduler | None = None
 _default_tz = "Europe/Moscow"
 
 
-def _get_users_to_notify(db, now: datetime) -> list[User]:
-    """Get users who should receive notification at this time."""
-    hour = now.hour
-    minute = now.minute
+def _get_users_to_notify(db) -> list[User]:
+    """Пользователи с включёнными уведомлениями. Час сверяется в их поясе."""
     return (
         db.query(User)
         .filter(
             User.telegram_chat_id.isnot(None),
             User.telegram_notify_enabled == True,
-            User.telegram_notify_hour == hour,
-            User.telegram_notify_minute == minute,
+            User.telegram_notify_hour.isnot(None),
+            User.telegram_notify_minute.isnot(None),
         )
         .all()
     )
@@ -44,13 +43,15 @@ async def _send_notifications_job() -> None:
 
     db = SessionLocal()
     try:
-        tz = ZoneInfo(_default_tz)
-        now = datetime.now(tz)
-        target_date = now.date()
-        users = _get_users_to_notify(db, now)
+        users = _get_users_to_notify(db)
 
         for user in users:
             try:
+                tz = ZoneInfo(effective_timezone(user))
+                now = datetime.now(tz)
+                if user.telegram_notify_hour != now.hour or user.telegram_notify_minute != now.minute:
+                    continue
+                target_date = now.date()
                 today_txs, overdue_txs = get_planned_transactions_for_notification(
                     db, user, target_date
                 )

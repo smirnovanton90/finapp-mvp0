@@ -15,6 +15,18 @@ import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useAccountingStart } from "@/components/accounting-start-context";
+import { useDisplayTimezone } from "@/components/timezone-context";
+import { TimezoneSelector } from "@/components/timezone-selector";
+import {
+  DEFAULT_TIMEZONE,
+  formatTransactionDateLabel,
+  formatTransactionTimeLabel,
+  nowInTimezone,
+  splitWallClock,
+  todayDateKey,
+  transactionDateKey,
+  timezoneOptions,
+} from "@/lib/timezone";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
@@ -113,6 +125,8 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { AuthInput } from "@/components/ui/auth-input";
+import { TimeInput } from "@/components/ui/time-input";
+import { DateInput } from "@/components/ui/date-input";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AssetItemIcon } from "@/components/asset-item-icon";
@@ -201,7 +215,6 @@ import {
   parseRubToCents,
   formatCentsForInput,
 } from "@/lib/format-rub";
-import { formatTimeInput } from "@/lib/format-time";
 import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
@@ -336,12 +349,14 @@ function formatRate(value: number) {
   }).format(value);
 }
 
-function getDateKey(value: string) {
-  return value ? value.slice(0, 10) : "";
+function getDateKey(value: string, txTimezone?: string | null) {
+  return transactionDateKey(value, txTimezone);
 }
 
-function formatDate(value: string) {
-  const dateKey = getDateKey(value);
+function formatDate(value: string, txTimezone?: string | null) {
+  const labeled = formatTransactionDateLabel(value, txTimezone);
+  if (labeled && labeled !== value) return labeled;
+  const dateKey = getDateKey(value, txTimezone);
   const parts = dateKey ? dateKey.split("-") : [];
   if (parts.length === 3) {
     const [year, month, day] = parts;
@@ -362,18 +377,15 @@ function formatDate(value: string) {
   });
 }
 
-function formatTime(value: string) {
-  const hasTime = /[T\s]\d{1,2}:\d{2}/.test(value);
-  if (!hasTime) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  if (date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0) {
-    return "";
-  }
-  return date.toLocaleTimeString("ru-RU", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function formatTime(value: string, txTimezone?: string | null) {
+  return formatTransactionTimeLabel(value, txTimezone);
+}
+
+function composeTransactionDate(dateValue: string, timeValue: string) {
+  if (!dateValue) return dateValue;
+  if (!timeValue) return dateValue;
+  const [hours = "00", minutes = "00"] = timeValue.split(":");
+  return `${dateValue}T${hours.padStart(2, "0")}:${minutes.padStart(2, "0")}:00`;
 }
 
 /** Собирает transaction_date: YYYY-MM-DDTHH:mm:00 (время не указано → 00:00:00). */
@@ -402,7 +414,7 @@ function formatDateSectionHeader(dateKey: string): string {
   if (!dateKey) return "";
   const date = new Date(dateKey + "T12:00:00");
   if (Number.isNaN(date.getTime())) return dateKey;
-  const currentYear = new Date().getFullYear();
+  const currentYear = Number(todayDateKey().slice(0, 4));
   const year = date.getFullYear();
   if (year === currentYear) {
     return date.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
@@ -1720,10 +1732,10 @@ function TransactionCardRow({
     isCrossWithRub && foreignAmountCents > 0
       ? rubAmountCents / foreignAmountCents
       : null;
-  const timeValue = formatTime(tx.transaction_date);
+  const timeValue = formatTime(tx.transaction_date, tx.timezone);
 
-  const dateKey = getDateKey(tx.transaction_date);
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const dateKey = getDateKey(tx.transaction_date, tx.timezone);
+  const todayKey = todayDateKey();
   const isOverduePlanned = isPlanned && !isRealized && dateKey < todayKey;
 
   // Цвета и заливки по новому дизайну карточки
@@ -1982,7 +1994,7 @@ function TransactionCardRow({
                 : "none",
             }}
           >
-            {formatDate(tx.transaction_date)}
+            {formatDate(tx.transaction_date, tx.timezone)}
           </div>
           {timeValue && (
             <div
@@ -2509,6 +2521,8 @@ function TransactionsView({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { accountingStartDate } = useAccountingStart();
+  const { timezone: displayTimezone } = useDisplayTimezone();
+  const zoneChoices = useMemo(() => timezoneOptions(), []);
   const { activeStep, isWizardOpen } = useOnboarding();
   const {
     isCollapsed,
@@ -2750,8 +2764,9 @@ function TransactionsView({
     }
   );
 
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [time, setTime] = useState("");
+  const [date, setDate] = useState(() => todayDateKey());
+  const [time, setTime] = useState(() => nowInTimezone().time);
+  const [txTimezone, setTxTimezone] = useState(DEFAULT_TIMEZONE);
   const [direction, setDirection] = useState<"INCOME" | "EXPENSE" | "TRANSFER">(
     "EXPENSE"
   );
@@ -3401,11 +3416,10 @@ function TransactionsView({
 
 
   const resetForm = () => {
-    const now = new Date();
-    setDate(now.toISOString().slice(0, 10));
-    setTime(
-      `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
-    );
+    const now = nowInTimezone(displayTimezone);
+    setDate(now.dateKey);
+    setTime(now.time);
+    setTxTimezone(displayTimezone);
     setDirection("EXPENSE");
     setFormMode("STANDARD");
     setDebtDirection("I_PAID");
@@ -3552,7 +3566,7 @@ function TransactionsView({
     }
     const isPlanned = formTransactionType === "PLANNED";
     if (isPlanned) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayDateKey();
       if (date < today) {
         setFormError(
           "Плановая транзакция не может быть создана ранее текущего дня."
@@ -3567,7 +3581,8 @@ function TransactionsView({
     }
     try {
       const basePayload = {
-        transaction_date: date,
+        transaction_date: buildTransactionDate(date, time),
+        timezone: txTimezone,
         primary_item_id: primaryItemId,
         counterparty_id: counterpartyId ?? null,
         transaction_type: formTransactionType,
@@ -3760,7 +3775,7 @@ function TransactionsView({
           getEffectiveItemKind(item, item.current_value_rub) === "ASSET" &&
           !isMoexItem(item)
       ) ?? null;
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayKey = todayDateKey();
     let targetDate = accountingStartDate ?? todayKey;
     if (demoItem?.open_date && demoItem.open_date > targetDate) {
       targetDate = demoItem.open_date;
@@ -3838,8 +3853,10 @@ function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setDialogMode("edit");
-    setDate(getDateKey(tx.transaction_date));
-    setTime(formatTime(tx.transaction_date));
+    const wall = splitWallClock(tx.transaction_date);
+    setDate(wall.dateKey);
+    setTime(wall.time === "00:00" ? "" : wall.time);
+    setTxTimezone(tx.timezone || DEFAULT_TIMEZONE);
     setFormTransactionType(tx.transaction_type);
     // Суммы в форме всегда по отображаемым сторонам: Откуда = первый селектор, Куда = второй.
     const displayPrimaryId = getDisplayPrimaryItemId(tx);
@@ -3910,8 +3927,10 @@ function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setDialogMode("create");
-    setDate(getDateKey(tx.transaction_date));
-    setTime(formatTime(tx.transaction_date));
+    const wall = splitWallClock(tx.transaction_date);
+    setDate(wall.dateKey);
+    setTime(wall.time === "00:00" ? "" : wall.time);
+    setTxTimezone(tx.timezone || DEFAULT_TIMEZONE);
     setDirection(tx.direction);
     setFormTransactionType(tx.transaction_type);
     setPrimaryItemId(getDisplayPrimaryItemId(tx));
@@ -3963,8 +3982,10 @@ function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setDialogMode("create");
-    setDate(getDateKey(tx.transaction_date));
-    setTime(formatTime(tx.transaction_date));
+    const wall = splitWallClock(tx.transaction_date);
+    setDate(wall.dateKey);
+    setTime(wall.time === "00:00" ? "" : wall.time);
+    setTxTimezone(tx.timezone || DEFAULT_TIMEZONE);
     setDirection(tx.direction);
     setFormTransactionType(tx.transaction_type);
     setPrimaryItemId(getDisplayPrimaryItemId(tx));
@@ -4016,8 +4037,10 @@ function TransactionsView({
     setBulkEditBaseline(null);
     setIsBulkEditConfirmOpen(false);
     setDialogMode("create");
-    setDate(getDateKey(tx.transaction_date));
-    setTime(formatTime(tx.transaction_date));
+    const wall = splitWallClock(tx.transaction_date);
+    setDate(wall.dateKey);
+    setTime(wall.time === "00:00" ? "" : wall.time);
+    setTxTimezone(tx.timezone || DEFAULT_TIMEZONE);
     setDirection(tx.direction);
     setFormTransactionType("ACTUAL");
     setPrimaryItemId(getDisplayPrimaryItemId(tx));
@@ -4212,11 +4235,13 @@ function TransactionsView({
       return "Выберите транзакции для редактирования.";
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayDateKey();
 
     for (const tx of targets) {
       const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
-      const nextDate = changes.hasDateChanged ? date : getDateKey(tx.transaction_date);
+      const nextDate = changes.hasDateChanged
+        ? date
+        : splitWallClock(tx.transaction_date).dateKey;
       const basePrimaryItemId = getDisplayPrimaryItemId(tx);
       const baseCounterpartyItemId = getDisplayCounterpartyItemId(tx);
       const nextPrimaryItemId = changes.hasPrimaryItemChanged
@@ -4344,8 +4369,11 @@ function TransactionsView({
       const results = await Promise.allSettled(
         targets.map((tx) => {
           const nextDirection = changes.hasDirectionChanged ? direction : tx.direction;
-          const baseDate = changes.hasDateChanged ? date : getDateKey(tx.transaction_date);
-          const nextDate = buildTransactionDate(baseDate, changes.hasDateChanged ? time : formatTime(tx.transaction_date));
+          const wall = splitWallClock(tx.transaction_date);
+          const baseDate = changes.hasDateChanged ? date : wall.dateKey;
+          const baseTime = changes.hasDateChanged ? time : wall.time === "00:00" ? "" : wall.time;
+          const nextDate = buildTransactionDate(baseDate, baseTime);
+          const nextTimezone = changes.hasDateChanged ? txTimezone : tx.timezone || DEFAULT_TIMEZONE;
           const basePrimaryItemId = getDisplayPrimaryItemId(tx);
           const baseCounterpartyItemId = getDisplayCounterpartyItemId(tx);
           const nextPrimaryItemId = changes.hasPrimaryItemChanged
@@ -4424,6 +4452,7 @@ function TransactionsView({
 
           const payload: TransactionCreate = {
             transaction_date: nextDate,
+            timezone: nextTimezone,
             primary_item_id: resolvedPrimaryItemId ?? basePrimaryItemId,
             counterparty_item_id: nextCounterpartyItemId,
             counterparty_id: nextCounterpartyId ?? null,
@@ -4909,7 +4938,7 @@ function TransactionsView({
   useEffect(() => {
     const dates = new Set<string>();
     txs.forEach((tx) => {
-      const dateKey = getDateKey(tx.transaction_date);
+      const dateKey = getDateKey(tx.transaction_date, tx.timezone);
       if (dateKey) dates.add(dateKey);
     });
     if (isDialogOpen && date) {
@@ -4963,14 +4992,14 @@ function TransactionsView({
 
   const filteredTxs = useMemo(() => {
     const enriched = txs.map((tx) => ({ ...tx, isDeleted: Boolean(tx.deleted_at) }));
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayKey = todayDateKey(displayTimezone);
 
     if (isTodayPlannedPreset) {
       return enriched.filter((tx) => {
         if (tx.isDeleted || tx.is_split_parent) return false;
         if (tx.transaction_type !== "PLANNED") return false;
         if (tx.status === "REALIZED") return false;
-        return getDateKey(tx.transaction_date) === todayKey;
+        return getDateKey(tx.transaction_date, tx.timezone) === todayKey;
       });
     }
 
@@ -5015,7 +5044,7 @@ function TransactionsView({
 
         // overdue/upcoming: нереализованные
         if (tx.status === "REALIZED") return false;
-        const dateKey = getDateKey(tx.transaction_date);
+        const dateKey = getDateKey(tx.transaction_date, tx.timezone);
         if (!dateKey) return false;
         if (mode === "overdue") return dateKey < todayKey;
         if (mode === "upcoming") return dateKey >= todayKey;
@@ -5034,6 +5063,7 @@ function TransactionsView({
     cashflowUncategorized,
     cashflowCategoryL1Param,
     categoryLookup.idToPath,
+    displayTimezone,
   ]);
 
   const sortedTxs = useMemo(() => {
@@ -5051,8 +5081,8 @@ function TransactionsView({
       return tx.transaction_date ?? "";
     };
     list.sort((a, b) => {
-      const dateA = getDateKey(a.transaction_date);
-      const dateB = getDateKey(b.transaction_date);
+      const dateA = getDateKey(a.transaction_date, a.timezone);
+      const dateB = getDateKey(b.transaction_date, b.timezone);
       if (dateB !== dateA) return dateB.localeCompare(dateA);
       const familyDateA = getFamilyDate(a);
       const familyDateB = getFamilyDate(b);
@@ -5069,7 +5099,7 @@ function TransactionsView({
       return a.id - b.id;
     });
     return list;
-  }, [filteredTxs]);
+  }, [filteredTxs, displayTimezone]);
   const childrenSumByParentId = useMemo(() => {
     const map = new Map<number, number>();
     for (const tx of sortedTxs) {
@@ -5092,7 +5122,7 @@ function TransactionsView({
   const checkpointsInWindow = useMemo(() => {
     if (dateFrom || dateTo) return checkpoints;
     const txDates = sortedTxs
-      .map((tx) => getDateKey(tx.transaction_date))
+      .map((tx) => getDateKey(tx.transaction_date, tx.timezone))
       .filter((d): d is string => !!d);
     const cpDates = checkpoints
       .map((cp) => cp.checkpoint_at.slice(0, 10))
@@ -5116,7 +5146,7 @@ function TransactionsView({
   const mergedRows = useMemo((): MergedRow[] => {
     const dateKeys = new Set<string>();
     sortedTxs.forEach((tx) => {
-      const d = getDateKey(tx.transaction_date);
+      const d = getDateKey(tx.transaction_date, tx.timezone);
       if (d) dateKeys.add(d);
     });
     checkpointsInWindow.forEach((cp) => {
@@ -5171,7 +5201,7 @@ function TransactionsView({
         });
       }
 
-      const txsOnDate = sortedTxs.filter((tx) => getDateKey(tx.transaction_date) === dateKey);
+      const txsOnDate = sortedTxs.filter((tx) => getDateKey(tx.transaction_date, tx.timezone) === dateKey);
       const skipTxIds = new Set<number>();
       for (const tx of txsOnDate) {
         if (skipTxIds.has(tx.id)) continue;
@@ -6311,6 +6341,7 @@ function TransactionsView({
                         const transactionDate = buildTransactionDate(date, time);
                         const basePayload = {
                           transaction_date: transactionDate,
+              timezone: txTimezone,
                           primary_item_id: primaryItemId,
                           counterparty_id: counterpartyId ?? null,
                           transaction_type: formTransactionType,
@@ -6389,6 +6420,7 @@ function TransactionsView({
                           where_paid_counterparty_id: wherePaidCounterpartyId,
                           amount: theyPaidCents,
                           transaction_date: transactionDate,
+              timezone: txTimezone,
                           category_id: theyPaidCategoryId,
                           comment: comment || null,
                         };
@@ -6503,6 +6535,7 @@ function TransactionsView({
                             transaction_counterparty_id: counterpartyId,
                             primary_item_id: primaryItemId,
                             transaction_date: transactionDate,
+              timezone: txTimezone,
                             amount: splitCents,
                             transaction_type: formTransactionType,
                             comment: comment || null,
@@ -6622,6 +6655,7 @@ function TransactionsView({
                           counterparty_id: counterpartyId,
                           primary_item_id: primaryItemId,
                           transaction_date: transactionDate,
+              timezone: txTimezone,
                           amount: debtCents,
                           transaction_type: formTransactionType,
                           comment: comment || null,
@@ -6783,6 +6817,7 @@ function TransactionsView({
                         }
                         const payload = {
                           transaction_date: transactionDate,
+              timezone: txTimezone,
                           primary_item_id: primaryItemId,
                           counterparty_item_id: isTransfer
                             ? counterpartyItemId
@@ -7064,30 +7099,25 @@ function TransactionsView({
                       inlineLabel={!isDesktop}
                       icon={!isDesktop ? <Calendar className="h-5 w-5" /> : undefined}
                     >
-                      <div className="relative flex items-center gap-2 flex-wrap [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px]">
-                        <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
-                          <AuthInput
-                            type="date"
-                            value={date}
-                            onChange={(e) => setDate(e.target.value)}
-                            className="w-full"
-                            placeholder={!isDesktop ? "Дата и время" : undefined}
-                          />
+                      <div className={`relative flex items-center gap-2 [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] ${isDesktop ? "flex-nowrap" : "flex-wrap"}`}>
+                        <div className="relative flex items-center min-h-[40px] shrink-0">
+                          <DateInput value={date} onChange={setDate} />
                         </div>
-                        <div className="relative flex items-center min-h-[40px] shrink-0 min-w-[5.5rem] w-[6rem]">
-                          <AuthInput
-                            type="text"
-                            inputMode="numeric"
-                            value={time}
-                            onChange={(e) => setTime(formatTimeInput(e.target.value))}
-                            placeholder={!isDesktop ? "Время" : "00:00"}
-                            maxLength={5}
-                            autoComplete="off"
-                            className="w-full"
-                          />
+                        <div className="relative flex items-center min-h-[40px] shrink-0">
+                          <TimeInput value={time} onChange={setTime} />
                         </div>
+                        {isDesktop && (
+                          <div className="relative min-h-[40px] min-w-0 flex-1">
+                            <TimezoneSelector value={txTimezone} onChange={setTxTimezone} />
+                          </div>
+                        )}
                       </div>
                     </FormField>
+                    {!isDesktop && (
+                      <FormField label="Часовой пояс">
+                        <TimezoneSelector value={txTimezone} onChange={setTxTimezone} />
+                      </FormField>
+                    )}
 
                     {(direction === "TRANSFER" || (isDebts && debtDirection === "DEBT_OFFSET")) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -7972,29 +8002,25 @@ function TransactionsView({
                   />
                 </FormField>
                 <FormField label="Дата и время" required>
-                  <div className="relative flex items-center gap-2 flex-wrap [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px]">
-                    <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
-                      <AuthInput
-                        type="date"
-                        value={date}
-                        onChange={(e) => setDate(e.target.value)}
-                        className="w-full"
-                      />
+                  <div className={`relative flex items-center gap-2 [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px] ${isDesktop ? "flex-nowrap" : "flex-wrap"}`}>
+                    <div className="relative flex items-center min-h-[40px] shrink-0">
+                      <DateInput value={date} onChange={setDate} />
                     </div>
-                    <div className="relative flex items-center min-h-[40px] shrink-0 min-w-[5.5rem] w-[6rem]">
-                      <AuthInput
-                        type="text"
-                        inputMode="numeric"
-                        value={time}
-                        onChange={(e) => setTime(formatTimeInput(e.target.value))}
-                        placeholder="00:00"
-                        maxLength={5}
-                        autoComplete="off"
-                        className="w-full"
-                      />
+                    <div className="relative flex items-center min-h-[40px] shrink-0">
+                      <TimeInput value={time} onChange={setTime} />
                     </div>
+                    {isDesktop && (
+                      <div className="relative min-h-[40px] min-w-0 flex-1">
+                        <TimezoneSelector value={txTimezone} onChange={setTxTimezone} />
+                      </div>
+                    )}
                   </div>
                 </FormField>
+                {!isDesktop && (
+                  <FormField label="Часовой пояс">
+                    <TimezoneSelector value={txTimezone} onChange={setTxTimezone} />
+                  </FormField>
+                )}
                 <FormField label="Актив, с которого производится погашение">
                   <ItemSelector
                     items={assetItems}

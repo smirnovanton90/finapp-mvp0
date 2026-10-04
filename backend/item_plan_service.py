@@ -14,6 +14,7 @@ from market import fetch_bond_coupons_list, fetch_dividends_list
 from models import Category, Item, ItemPlanSettings, Transaction, TransactionChain, User
 from russian_workdays import get_next_workday
 from schemas import ItemPlanSettingsBase
+from timezones import effective_timezone
 from transaction_chains import build_schedule_dates
 
 INTEREST_ITEM_TYPES = {"deposit", "savings_account"}
@@ -1254,12 +1255,15 @@ def _create_chain_with_transactions(
     db.flush()
 
     txs = []
+    tz_name = effective_timezone(user)
     for tx_date, amount in zip(schedule_dates, amounts):
         txs.append(
             Transaction(
                 user_id=user.id,
                 chain_id=chain.id,
                 transaction_date=datetime.combine(tx_date, datetime.min.time()),
+                timezone=tz_name,
+                balance_applied=False,
                 primary_item_id=primary_item.id,
                 primary_card_item_id=primary_card_item.id if primary_card_item else None,
                 counterparty_item_id=counterparty_item.id if counterparty_item else None,

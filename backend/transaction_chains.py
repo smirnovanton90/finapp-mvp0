@@ -10,6 +10,7 @@ from category_service import resolve_category_or_none
 from db import get_db
 from models import Item, Transaction, TransactionChain, User, Counterparty
 from schemas import TransactionChainCreate, TransactionChainOut
+from timezones import effective_timezone
 from transactions import _load_item as load_item_for_related
 
 router = APIRouter(prefix="/transaction-chains", tags=["transaction-chains"])
@@ -298,12 +299,15 @@ def create_transaction_chain(
     db.flush()
 
     txs = []
+    tz_name = effective_timezone(user)
     for tx_date in schedule_dates:
         txs.append(
             Transaction(
                 user_id=user.id,
                 chain_id=chain.id,
                 transaction_date=datetime.combine(tx_date, datetime.min.time()),
+                timezone=tz_name,
+                balance_applied=False,
                 primary_item_id=primary.id,
                 primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
                 counterparty_item_id=counter.id if data.direction == "TRANSFER" else None,

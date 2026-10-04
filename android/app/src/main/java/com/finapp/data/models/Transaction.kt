@@ -35,6 +35,7 @@ enum class TransactionStatus {
 data class Transaction(
     val id: Int,
     @SerializedName("transaction_date") val transactionDate: String,
+    val timezone: String? = null,
     @SerializedName("primary_item_id") val primaryItemId: Int,
     @SerializedName("counterparty_item_id") val counterpartyItemId: Int?,
     @SerializedName("counterparty_id") val counterpartyId: Int?,
@@ -60,6 +61,7 @@ data class Transaction(
 
 data class TransactionCreate(
     @SerializedName("transaction_date") val transactionDate: String,
+    val timezone: String? = null,
     @SerializedName("primary_item_id") val primaryItemId: Int,
     @SerializedName("counterparty_item_id") val counterpartyItemId: Int? = null,
     @SerializedName("counterparty_id") val counterpartyId: Int? = null,

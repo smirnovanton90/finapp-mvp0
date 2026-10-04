@@ -1,5 +1,7 @@
 "use client";
 
+import { transactionDateKey } from "@/lib/timezone";
+
 import React, { useState } from "react";
 import { MoreVertical, Pencil, Trash2, MessageSquare, ChevronDown, ChevronUp } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
@@ -166,8 +168,8 @@ function isRealizedTransaction(tx: TransactionOut) {
   return tx.transaction_type === "ACTUAL" || tx.status === "REALIZED";
 }
 
-function toTxDateKey(value: string) {
-  return value ? value.slice(0, 10) : "";
+function toTxDateKey(value: string, txTimezone?: string | null) {
+  return transactionDateKey(value, txTimezone);
 }
 
 function amountInRange(
@@ -182,7 +184,7 @@ function amountInRange(
     if (tx.direction !== direction) continue;
     if (!isRealizedTransaction(tx)) continue;
     if (!tx.category_id || !categoryIds.has(tx.category_id)) continue;
-    const dateKey = toTxDateKey(tx.transaction_date);
+    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
     if (!dateKey || dateKey < startKey || dateKey > endKey) continue;
     sum += tx.amount;
   }

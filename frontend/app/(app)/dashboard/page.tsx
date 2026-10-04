@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
+import { dateKeyInTimezone, hasTransactionOccurred, todayDateKey, transactionDateKey } from "@/lib/timezone";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -256,8 +257,8 @@ function toDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function toTxDateKey(value: string) {
-  return value ? value.slice(0, 10) : "";
+function toTxDateKey(value: string, txTimezone?: string | null) {
+  return transactionDateKey(value, txTimezone);
 }
 
 function parseDateKey(dateKey: string) {
@@ -659,7 +660,7 @@ function buildCategoryBreakdown(
   txs.forEach((tx) => {
     if (tx.is_split_parent) return;
     if (tx.direction !== direction) return;
-    const dateKey = toTxDateKey(tx.transaction_date);
+    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
     if (!isDashboardTxIncluded(tx, includePlan)) return;
@@ -707,7 +708,7 @@ function buildCategoryTotalsByLabel(
   txs.forEach((tx) => {
     if (tx.is_split_parent) return;
     if (tx.direction !== direction) return;
-    const dateKey = toTxDateKey(tx.transaction_date);
+    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
     if (!isDashboardTxIncluded(tx, includePlan)) return;
@@ -731,7 +732,7 @@ function buildCategoryMonthlyTotals(
   txs.forEach((tx) => {
     if (tx.is_split_parent) return;
     if (tx.direction !== direction) return;
-    const dateKey = toTxDateKey(tx.transaction_date);
+    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
     if (!isDashboardTxIncluded(tx, includePlan)) return;
@@ -820,7 +821,7 @@ function getItemStartKey(item: ItemOut, accountingStartDate?: string | null) {
   if (item.open_date && item.open_date > minDate) {
     minDate = item.open_date;
   }
-  return minDate ? toTxDateKey(minDate) : toDateKey(new Date(item.created_at));
+  return minDate ? minDate.slice(0, 10) : dateKeyInTimezone(new Date(item.created_at));
 }
 
 function getRateForDate(
@@ -1067,7 +1068,7 @@ export default function DashboardPage() {
           if (tx.direction !== direction) return;
           if (!isRealizedTransaction(tx)) return;
           if (!tx.category_id || !categoryIds.has(tx.category_id)) return;
-          const dateKey = toTxDateKey(tx.transaction_date);
+          const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
           if (!dateKey) return;
           if (dateKey < range.startKey || dateKey > range.endKey) return;
           amount += tx.amount;

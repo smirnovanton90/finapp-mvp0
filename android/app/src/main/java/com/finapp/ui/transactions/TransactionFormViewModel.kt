@@ -6,8 +6,14 @@ import com.finapp.data.models.Item
 import com.finapp.data.models.TransactionCreate
 import com.finapp.data.models.TransactionDirection
 import com.finapp.data.models.TransactionType
+import com.finapp.data.models.UserProfileUpdate
 import com.finapp.data.repository.ItemsRepository
 import com.finapp.data.repository.TransactionsRepository
+import com.finapp.data.repository.UsersRepository
+import com.finapp.utils.DEFAULT_TIMEZONE
+import com.finapp.utils.DisplayTimezone
+import com.finapp.utils.deviceTimezone
+import com.finapp.utils.effectiveTimezone
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +28,7 @@ data class TransactionFormUiState(
     val selectedTransactionType: TransactionType = TransactionType.ACTUAL,
     val selectedPrimaryItemId: Int? = null,
     val description: String = "",
+    val timezone: String = DEFAULT_TIMEZONE,
     val items: List<Item> = emptyList(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null
@@ -29,13 +36,34 @@ data class TransactionFormUiState(
 
 class TransactionFormViewModel(
     private val transactionsRepository: TransactionsRepository,
-    private val itemsRepository: ItemsRepository
+    private val itemsRepository: ItemsRepository,
+    private val usersRepository: UsersRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TransactionFormUiState())
     val uiState: StateFlow<TransactionFormUiState> = _uiState.asStateFlow()
     
     init {
         loadItems()
+        loadTimezone()
+    }
+
+    private fun loadTimezone() {
+        viewModelScope.launch {
+            usersRepository.getMe().onSuccess { user ->
+                val zone = effectiveTimezone(user)
+                DisplayTimezone.apply(user)
+                _uiState.value = _uiState.value.copy(timezone = zone)
+                if (user.timezoneAuto && user.timezoneDetected != deviceTimezone()) {
+                    usersRepository.updateProfile(
+                        UserProfileUpdate(timezoneDetected = deviceTimezone())
+                    )
+                }
+            }
+        }
+    }
+
+    fun updateTimezone(timezone: String) {
+        _uiState.value = _uiState.value.copy(timezone = timezone)
     }
     
     private fun loadItems() {
@@ -92,10 +120,12 @@ class TransactionFormViewModel(
             _uiState.value = state.copy(isLoading = true, errorMessage = null)
             
             val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            dateFormat.timeZone = java.util.TimeZone.getTimeZone(state.timezone)
             val transactionDateString = dateFormat.format(Date(state.transactionDate))
             
             val transactionCreate = TransactionCreate(
                 transactionDate = transactionDateString,
+                timezone = state.timezone,
                 primaryItemId = primaryItemId,
                 direction = state.selectedDirection,
                 transactionType = state.selectedTransactionType,

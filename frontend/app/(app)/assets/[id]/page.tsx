@@ -83,7 +83,6 @@ import {
   getTodayDateKey,
 } from "@/lib/asset-item-form-constants";
 import { ACCENT, ACCENT2, ACTIVE_TEXT_DARK, GREEN, RED, PLACEHOLDER_COLOR_DARK, BACKGROUND_DT, MODAL_BG, GREEN_FILL, RED_FILL } from "@/lib/colors";
-import { formatTimeInput } from "@/lib/format-time";
 import { PINK_GRADIENT, ASSET_DETAIL_HEADER_GRADIENT_MOBILE } from "@/lib/gradients";
 import { TYPE_ICON_BY_CODE } from "@/lib/asset-icons";
 import { assetIconPath } from "@/lib/image-paths";
@@ -91,6 +90,7 @@ import { CurrencyChip, getCurrencyChartColor } from "@/components/currency-chip"
 import { LinkedBrokerageAccountsMeta } from "@/components/linked-brokerage-accounts-meta";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { buildCategoryLookup, type CategoryNode } from "@/lib/categories";
+import { formatTransactionDateLabel, todayDateKey } from "@/lib/timezone";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { EditMarketValueModal } from "@/components/edit-market-value-modal";
@@ -106,6 +106,8 @@ import {
 import { FormModal } from "@/components/form-modal";
 import { Label } from "@/components/ui/label";
 import { AuthInput } from "@/components/ui/auth-input";
+import { TimeInput } from "@/components/ui/time-input";
+import { DateInput } from "@/components/ui/date-input";
 import { FormField, TextField, DateField } from "@/components/ui/form-field";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
 import { CardIcon } from "@/components/card-icon";
@@ -628,7 +630,7 @@ export default function AssetDetailPage() {
     }
     let cancelled = false;
     setLoadingDynamics(true);
-    const dateEnd = new Date().toISOString().slice(0, 10);
+    const dateEnd = todayDateKey();
     const dateStart = item.open_date ?? dateEnd;
     Promise.all([fetchTransactions(), fetchCategories(), fetchItems(), fetchCounterparties()])
       .then(([txs, cats, itemsRes, cpRes]) => {
@@ -639,7 +641,7 @@ export default function AssetDetailPage() {
         setCounterparties(cpRes ?? []);
         const dateSet = new Set<string>([dateStart, dateEnd]);
         txs.forEach((tx) => {
-          const d = toTxDateKey(tx.transaction_date);
+          const d = toTxDateKey(tx.transaction_date, tx.timezone);
           if (d && d > dateStart && d <= dateEnd) dateSet.add(d);
         });
         const dates = Array.from(dateSet).sort();
@@ -745,7 +747,7 @@ export default function AssetDetailPage() {
   /** Транзакции для блока «Стоимость вложенных средств»: все «Приобретение актива» + «Вложение в актив» (для нового актива; для исторического — та же логика). */
   const investedTxsForAsset = useMemo(() => {
     const merged = [...purchaseTxsForAsset, ...investmentTxsForAsset];
-    return merged.sort((a, b) => (toTxDateKey(b.transaction_date)).localeCompare(toTxDateKey(a.transaction_date)));
+    return merged.sort((a, b) => (toTxDateKey(b.transaction_date, b.timezone)).localeCompare(toTxDateKey(a.transaction_date, a.timezone)));
   }, [purchaseTxsForAsset, investmentTxsForAsset]);
 
   /** Дата транзакции; время (HH:mm или HH:mm:ss) — только если есть в строке и не 00:00:00. */
@@ -829,7 +831,7 @@ export default function AssetDetailPage() {
           }
           return { tx, deltaCents: 0, inCurrency: false };
         })
-        .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)));
+        .sort((a, b) => toTxDateKey(a.tx.transaction_date, a.tx.timezone).localeCompare(toTxDateKey(b.tx.transaction_date, b.tx.timezone)));
     })();
 
     let totalIncomeRub = 0;
@@ -842,7 +844,7 @@ export default function AssetDetailPage() {
     let totalSaleCur = 0;
     const isCrypto = isCryptoItem(it);
     txsInRange.forEach(({ tx, deltaCents, inCurrency }) => {
-      const d = toTxDateKey(tx.transaction_date);
+      const d = toTxDateKey(tx.transaction_date, tx.timezone);
       const rate = currencyCode !== "RUB" ? getRate(d) : null;
       let curUnits: number | null = null;
       let rubCents: number;
@@ -4064,7 +4066,7 @@ export default function AssetDetailPage() {
                               <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                                 <tbody>
                                   {txs.map((tx) => {
-                                    const d = toTxDateKey(tx.transaction_date);
+                                    const d = toTxDateKey(tx.transaction_date, tx.timezone);
                                     const primaryItem = itemsById.get(tx.primary_item_id) ?? null;
                                     const txCurrency = (primaryItem?.currency_code ?? "RUB").toUpperCase();
                                     const rateTxCur =
@@ -4088,7 +4090,7 @@ export default function AssetDetailPage() {
                                     const categoryLabel = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]! : "–";
                                     return (
                                       <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                                        <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
+                                        <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date, tx.timezone)}</td>
                                         <td className="py-1.5 pr-4 align-middle">
                                           {tx.category_id != null ? (
                                             <div className="flex items-center gap-2">
@@ -4269,25 +4271,11 @@ export default function AssetDetailPage() {
             <div className="grid gap-4 py-4">
               <FormField label="Дата и время" required>
                 <div className="relative flex items-center gap-2 flex-wrap [&_input]:text-sm [&_input]:font-normal [&_div.relative.flex.items-center]:h-10 [&_div.relative.flex.items-center]:min-h-[40px]">
-                  <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
-                    <AuthInput
-                      type="date"
-                      value={checkpointDateStr}
-                      onChange={(e) => setCheckpointDateStr(e.target.value)}
-                      className="w-full"
-                    />
+                  <div className="relative flex items-center min-h-[40px] shrink-0">
+                    <DateInput value={checkpointDateStr} onChange={setCheckpointDateStr} />
                   </div>
-                  <div className="relative flex items-center min-h-[40px] shrink-0 min-w-[5.5rem] w-[6rem]">
-                    <AuthInput
-                      type="text"
-                      inputMode="numeric"
-                      value={checkpointTimeStr}
-                      onChange={(e) => setCheckpointTimeStr(formatTimeInput(e.target.value))}
-                      placeholder="00:00"
-                      maxLength={5}
-                      autoComplete="off"
-                      className="w-full"
-                    />
+                  <div className="relative flex items-center min-h-[40px] shrink-0">
+                    <TimeInput value={checkpointTimeStr} onChange={setCheckpointTimeStr} />
                   </div>
                 </div>
               </FormField>

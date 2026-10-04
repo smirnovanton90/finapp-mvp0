@@ -16,9 +16,9 @@ import com.finapp.ui.theme.Blue
 import com.finapp.ui.theme.Green
 import com.finapp.ui.theme.Red
 import com.finapp.ui.utils.CategoryIconMapper
+import com.finapp.utils.DisplayTimezone
 import com.finapp.utils.formatRubles
-import com.finapp.utils.toDate
-import com.finapp.utils.formatDateTime
+import com.finapp.utils.formatTransactionInZone
 
 @Composable
 fun TransactionRow(
@@ -89,7 +89,11 @@ fun TransactionRow(
                     }
                     
                     Text(
-                        text = transaction.transactionDate.toDate()?.formatDateTime() ?: transaction.transactionDate,
+                        text = formatTransactionInZone(
+                            transaction.transactionDate,
+                            transaction.timezone,
+                            DisplayTimezone.zoneId,
+                        ),
                         style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp)
                     )

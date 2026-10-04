@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { transactionDateKey } from "@/lib/timezone";
+import { transactionDateKey } from "@/lib/timezone";
 import { useSession } from "next-auth/react";
 import {
   fetchCounterparties,
@@ -30,8 +32,8 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-function toDateKey(value: string) {
-  return value ? value.slice(0, 10) : "";
+function toDateKey(value: string, txTimezone?: string | null) {
+  return transactionDateKey(value, txTimezone);
 }
 
 function formatDateLabel(dateKey: string) {
@@ -260,7 +262,7 @@ function buildReportData(
   };
 
   const beforeStart = relevantTxs.filter((tx) => {
-    const key = toDateKey(tx.transaction_date);
+    const key = toDateKey(tx.transaction_date, tx.timezone);
     return key && key < rangeStartKey;
   });
   const openingByItemId = new Map<number, number>();
@@ -283,10 +285,12 @@ function buildReportData(
 
   const periodTxs = relevantTxs
     .filter((tx) => {
-      const key = toDateKey(tx.transaction_date);
+      const key = toDateKey(tx.transaction_date, tx.timezone);
       return key && key >= rangeStartKey && key <= rangeEndKey;
     })
-    .sort((a, b) => toDateKey(a.transaction_date).localeCompare(toDateKey(b.transaction_date)));
+    .sort((a, b) =>
+      toDateKey(a.transaction_date, a.timezone).localeCompare(toDateKey(b.transaction_date, b.timezone))
+    );
 
   const periodNetByItemId = new Map<number, number>();
   let periodNet = 0;
@@ -324,7 +328,7 @@ function buildReportData(
     const item = itemId != null ? itemsById.get(itemId) : undefined;
     return {
       type: "transaction",
-      dateKey: toDateKey(tx.transaction_date),
+      dateKey: toDateKey(tx.transaction_date, tx.timezone),
       comment: tx.comment?.trim() ?? "",
       amountCents: delta,
       sourceType,

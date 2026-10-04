@@ -14,7 +14,11 @@ import { Switch } from "@/components/ui/switch";
 import { ItemSelector } from "@/components/item-selector";
 import { TbankProfileInfoBadges } from "@/components/tbank-profile-info-badges";
 import { FormField } from "@/components/ui/form-field";
+import { TimezoneSelector } from "@/components/timezone-selector";
+import { useDisplayTimezone } from "@/components/timezone-context";
 import { AuthInput } from "@/components/ui/auth-input";
+import { TimeInput } from "@/components/ui/time-input";
+import { DateInput } from "@/components/ui/date-input";
 import { TextField } from "@/components/ui/form-field";
 import {
   ACTIVE_TEXT_DARK,
@@ -77,7 +81,6 @@ import {
   type TbankAccountOut,
 } from "@/lib/api";
 import { parseRubToCents, formatRubInput, normalizeRubOnBlur, formatCentsForInput } from "@/lib/format-rub";
-import { formatTimeInput } from "@/lib/format-time";
 import { validateStep2, getAccountValidationError, getAccountValidationWarning } from "@/lib/import-step2-validation";
 import { validateStep3 } from "@/lib/import-step3-validation";
 import { validateStep4 } from "@/lib/import-step4-validation";
@@ -225,6 +228,11 @@ export function ImportAccountsOperationsModal({
   tbankIntegrationId = null,
 }: ImportAccountsOperationsModalProps) {
   const { accountingStartDate } = useAccountingStart();
+  const { timezone: displayTimezone } = useDisplayTimezone();
+  const [importTimezone, setImportTimezone] = React.useState(displayTimezone);
+  React.useEffect(() => {
+    setImportTimezone(displayTimezone);
+  }, [displayTimezone]);
   const [step, setStep] = React.useState<ImportStep>(1);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [isDragOver, setIsDragOver] = React.useState(false);
@@ -1320,6 +1328,7 @@ export function ImportAccountsOperationsModal({
           categoryCardStates,
           counterpartyCardStates,
           categoryNodes: categories,
+          timezone: importTimezone,
         });
         if (result.success && isBankImport) {
           const buildCheckpointAtIso = (dateStr: string, timeStr: string) => {
@@ -2523,11 +2532,9 @@ export function ImportAccountsOperationsModal({
                           </div>
                           <div className="flex items-end gap-2 shrink-0">
                             <FormField label="Дата" required>
-                              <AuthInput
-                                type="date"
+                              <DateInput
                                 value={block.dateKey}
-                                onChange={(e) => {
-                                  const v = e.target.value;
+                                onChange={(v) => {
                                   setCheckpointStepState((prev) => {
                                     const next = new Map(prev);
                                     const cur = next.get(accountKey) ?? block;
@@ -2535,16 +2542,12 @@ export function ImportAccountsOperationsModal({
                                     return next;
                                   });
                                 }}
-                                className="w-[140px]"
                               />
                             </FormField>
                             <FormField label="Время" required>
-                              <AuthInput
-                                type="text"
-                                inputMode="numeric"
+                              <TimeInput
                                 value={block.timeStr}
-                                onChange={(e) => {
-                                  const v = formatTimeInput(e.target.value);
+                                onChange={(v) => {
                                   setCheckpointStepState((prev) => {
                                     const next = new Map(prev);
                                     const cur = next.get(accountKey) ?? block;
@@ -2552,9 +2555,6 @@ export function ImportAccountsOperationsModal({
                                     return next;
                                   });
                                 }}
-                                placeholder="00:00"
-                                maxLength={5}
-                                className="w-[5.5rem]"
                               />
                             </FormField>
                           </div>
@@ -2699,6 +2699,9 @@ export function ImportAccountsOperationsModal({
             )}
             {step === stepConfirm && !isTbankInvestIntegration && (
               <div className="flex flex-col gap-6">
+                <FormField label="В каком поясе время в файле?">
+                  <TimezoneSelector value={importTimezone} onChange={setImportTimezone} />
+                </FormField>
                 {step5Error && (
                   <p
                     className="text-base shrink-0"

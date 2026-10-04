@@ -1,5 +1,7 @@
 "use client";
 
+import { dateKeyInTimezone, todayDateKey, transactionDateKey } from "@/lib/timezone";
+
 import {
   Briefcase,
   Building2,
@@ -202,8 +204,8 @@ function formatDate(value: string) {
   });
 }
 
-function getDateKey(value: string) {
-  return value ? value.slice(0, 10) : "";
+function getDateKey(value: string, txTimezone?: string | null) {
+  return transactionDateKey(value, txTimezone);
 }
 
 function parseRubToCents(input: string): number {
@@ -273,7 +275,7 @@ function formatCategoryPath(l1: string, l2: string, l3: string) {
 }
 
 function getTodayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return todayDateKey();
 }
 
 export default function FinancialPlanningPage() {
@@ -647,7 +649,7 @@ export default function FinancialPlanningPage() {
     const endDateValue = (() => {
       const date = new Date();
       date.setDate(date.getDate() + 180);
-      return date.toISOString().slice(0, 10);
+      return dateKeyInTimezone(date);
     })();
 
     setChainName("Зарплата");
@@ -898,7 +900,7 @@ export default function FinancialPlanningPage() {
         add(tx.chain_id, "realized");
         return;
       }
-      const dateKey = getDateKey(tx.transaction_date);
+      const dateKey = getDateKey(tx.transaction_date, tx.timezone);
       if (dateKey && dateKey < todayKey) {
         add(tx.chain_id, "overdue");
       } else {

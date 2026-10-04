@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Camera, Upload, CheckCircle2, CircleCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TextField, DateField } from "@/components/ui/form-field";
+import { TimezoneSelector } from "@/components/timezone-selector";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -38,6 +39,8 @@ import {
   TBANK,
 } from "@/lib/colors";
 import { cn } from "@/lib/utils";
+import { DEFAULT_TIMEZONE, detectDeviceTimezone } from "@/lib/timezone";
+import { useDisplayTimezone } from "@/components/timezone-context";
 
 const CABINET_AUTH_PRIMARY_STYLE = {
   "--auth-primary-bg":
@@ -94,6 +97,10 @@ export default function CabinetPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [birthDate, setBirthDate] = useState("");
+  const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
+  const [timezoneAuto, setTimezoneAuto] = useState(true);
+  const deviceTimezone = useMemo(() => detectDeviceTimezone(), []);
+  const { refresh: refreshTimezone } = useDisplayTimezone();
 
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -252,6 +259,8 @@ export default function CabinetPage() {
       setFirstName(me.first_name || "");
       setLastName(me.last_name || "");
       setBirthDate(me.birth_date || "");
+      setTimezone(me.timezone || DEFAULT_TIMEZONE);
+      setTimezoneAuto(Boolean(me.timezone_auto));
       if (!photoPreview?.startsWith("blob:")) {
         if (me.photo_url && me.photo_url.startsWith("http") && !me.photo_url.includes("googleusercontent.com")) {
           const blobUrl = await fetchUserPhotoAsBlob();
@@ -357,7 +366,14 @@ export default function CabinetPage() {
     const fn = firstName.trim() || null;
     const ln = lastName.trim() || null;
     const bd = birthDate || null;
-    if (fn === (profile.first_name ?? null) && ln === (profile.last_name ?? null) && bd === (profile.birth_date ?? null)) {
+    const tz = timezoneAuto ? profile.timezone ?? DEFAULT_TIMEZONE : timezone;
+    if (
+      fn === (profile.first_name ?? null) &&
+      ln === (profile.last_name ?? null) &&
+      bd === (profile.birth_date ?? null) &&
+      timezoneAuto === Boolean(profile.timezone_auto) &&
+      tz === (profile.timezone ?? DEFAULT_TIMEZONE)
+    ) {
       return;
     }
     if (!firstName.trim()) return;
@@ -372,13 +388,18 @@ export default function CabinetPage() {
         first_name: fn || null,
         last_name: ln || null,
         birth_date: bd || null,
+        timezone: tz,
+        timezone_auto: timezoneAuto,
       };
       updateUserProfile(payload)
-        .then((updated) => {
+        .then(async (updated) => {
           setProfile(updated);
           setFirstName(updated.first_name ?? "");
           setLastName(updated.last_name ?? "");
           setBirthDate(updated.birth_date ?? "");
+          setTimezone(updated.timezone || DEFAULT_TIMEZONE);
+          setTimezoneAuto(Boolean(updated.timezone_auto));
+          await refreshTimezone();
           setSuccess("Профиль сохранён.");
           setTimeout(() => setSuccess(null), 3000);
         })
@@ -394,7 +415,7 @@ export default function CabinetPage() {
         saveProfileRef.current = null;
       }
     };
-  }, [firstName, lastName, birthDate, profile]);
+  }, [firstName, lastName, birthDate, timezone, timezoneAuto, profile, refreshTimezone]);
 
   const photoUrl = photoPreview;
 
@@ -525,8 +546,24 @@ export default function CabinetPage() {
                 />
                 <TextField
                   label="Фамилия"
+                  name="profile-family-name"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-1p-ignore="true"
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  readOnly
+                  onPointerDown={(event) => {
+                    event.currentTarget.readOnly = false;
+                  }}
+                  onFocus={(event) => {
+                    event.currentTarget.readOnly = false;
+                  }}
                 />
               </div>
               <DateField
@@ -536,6 +573,28 @@ export default function CabinetPage() {
                 max={new Date().toISOString().split("T")[0]}
               />
             </div>
+          </div>
+        </CabinetCard>
+
+        <CabinetCard>
+          <div className="space-y-4">
+            <h3
+              className="text-2xl font-medium"
+              style={{ color: ACTIVE_TEXT_DARK }}
+            >
+              Часовой пояс
+            </h3>
+            <div className="flex items-center justify-between gap-4">
+              <label className="text-base" style={{ color: ACTIVE_TEXT_DARK }}>
+                Определять автоматически
+              </label>
+              <Switch checked={timezoneAuto} onCheckedChange={setTimezoneAuto} />
+            </div>
+            <TimezoneSelector
+              value={timezoneAuto ? deviceTimezone : timezone}
+              onChange={setTimezone}
+              disabled={timezoneAuto}
+            />
           </div>
         </CabinetCard>
 

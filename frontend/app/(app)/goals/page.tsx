@@ -1,5 +1,7 @@
 "use client";
 
+import { todayDateKey, transactionDateKey } from "@/lib/timezone";
+
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
@@ -81,11 +83,11 @@ function toDateKey(date: Date) {
 }
 
 function getTodayKey() {
-  return toDateKey(new Date());
+  return todayDateKey();
 }
 
-function toTxDateKey(value: string) {
-  return value ? value.slice(0, 10) : "";
+function toTxDateKey(value: string, txTimezone?: string | null) {
+  return transactionDateKey(value, txTimezone);
 }
 
 function normalizeCategory(value: string) {
@@ -299,7 +301,7 @@ export default function GoalsPage() {
           if (tx.direction !== direction) return;
           if (!isRealizedTransaction(tx)) return;
           if (!tx.category_id || !categoryIds.has(tx.category_id)) return;
-          const dateKey = toTxDateKey(tx.transaction_date);
+          const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
           if (!dateKey) return;
           if (dateKey < range.startKey || dateKey > range.endKey) return;
           amount += tx.amount;

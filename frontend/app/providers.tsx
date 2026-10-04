@@ -2,6 +2,7 @@
 
 import { SessionProvider } from "next-auth/react";
 import { AccountingStartProvider } from "@/components/accounting-start-context";
+import { TimezoneProvider } from "@/components/timezone-context";
 import { OnboardingProvider } from "@/components/onboarding-context";
 import { SidebarProvider } from "@/components/ui/sidebar-context";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -12,7 +13,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <ThemeProvider>
         <SidebarProvider>
           <AccountingStartProvider>
-            <OnboardingProvider>{children}</OnboardingProvider>
+            <TimezoneProvider>
+              <OnboardingProvider>{children}</OnboardingProvider>
+            </TimezoneProvider>
           </AccountingStartProvider>
         </SidebarProvider>
       </ThemeProvider>

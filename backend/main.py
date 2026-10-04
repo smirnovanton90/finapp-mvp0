@@ -79,6 +79,7 @@ from transactions import (
     router as transactions_router,
     purge_card_transactions as purge_card_transactions_fn,
     transfer_delta,
+    apply_due_transaction_balances,
 )
 from transaction_chains import router as transaction_chains_router
 from categories import router as categories_router, invalidate_category_cache
@@ -100,6 +101,7 @@ from item_plan_service import (
     rebuild_item_chains,
     upsert_plan_settings,
 )
+from timezones import validate_timezone
 from item_opening_service import (
     create_commission_transaction,
     create_opening_transactions,
@@ -1091,6 +1093,18 @@ def update_user_profile(
                 detail="Дата рождения не может быть в будущем.",
             )
         user.birth_date = payload.birth_date
+    if payload.timezone is not None:
+        try:
+            user.timezone = validate_timezone(payload.timezone)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if payload.timezone_auto is not None:
+        user.timezone_auto = payload.timezone_auto
+    if payload.timezone_detected is not None:
+        try:
+            user.timezone_detected = validate_timezone(payload.timezone_detected)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Проверка обязательности first_name (если не из Google или если из Google, но first_name пустое)
     if not user.first_name:
@@ -1242,6 +1256,7 @@ def list_items(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    apply_due_transaction_balances(db, user)
     stmt = select(Item).where(Item.user_id == user.id).options(
         selectinload(Item.plan_settings)
     )
@@ -1371,6 +1386,7 @@ def get_item(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    apply_due_transaction_balances(db, user)
     stmt = (
         select(Item)
         .where(Item.id == item_id, Item.user_id == user.id)

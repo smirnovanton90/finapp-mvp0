@@ -1,8 +1,9 @@
+import { transactionDateKey } from "@/lib/timezone";
 import type { ItemOut, TransactionOut } from "@/lib/api";
 import type { FxRateOut } from "@/lib/api";
 
-export function toTxDateKey(value: string): string {
-  return value ? value.slice(0, 10) : "";
+export function toTxDateKey(value: string, txTimezone?: string | null): string {
+  return transactionDateKey(value, txTimezone);
 }
 
 function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number) {

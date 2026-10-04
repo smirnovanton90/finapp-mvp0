@@ -1,5 +1,7 @@
 "use client";
 
+import { formatTransactionTimeLabel, transactionDateKey } from "@/lib/timezone";
+
 import React, {
   Fragment,
   useCallback,
@@ -79,18 +81,11 @@ function formatDateLabel(dateKey: string) {
 }
 
 /** Форматирует дату транзакции: дата; время HH:mm — только если оно есть в transaction_date и не 00:00. */
-function formatTxDateCell(transactionDate: string) {
-  const dateKey = toTxDateKey(transactionDate);
+function formatTxDateCell(transactionDate: string, txTimezone?: string | null) {
+  const dateKey = toTxDateKey(transactionDate, txTimezone);
   const dateLabel = formatDateLabel(dateKey);
-  const tIdx = transactionDate.indexOf("T");
-  if (tIdx === -1) return dateLabel;
-  const timePart = transactionDate.slice(tIdx + 1);
-  const match = /^(\d{1,2}):(\d{2})/.exec(timePart);
-  if (!match) return dateLabel;
-  const hours = parseInt(match[1], 10);
-  const minutes = parseInt(match[2], 10);
-  if (hours === 0 && minutes === 0) return dateLabel;
-  const timeLabel = `${match[1].padStart(2, "0")}:${match[2]}`;
+  const timeLabel = formatTransactionTimeLabel(transactionDate, txTimezone);
+  if (!timeLabel) return dateLabel;
   return (
     <>
       {dateLabel}
@@ -120,8 +115,8 @@ function toMonthKey(dateKey: string) {
   return dateKey.slice(0, 7);
 }
 
-function toTxDateKey(value: string) {
-  return value ? value.slice(0, 10) : "";
+function toTxDateKey(value: string, txTimezone?: string | null) {
+  return transactionDateKey(value, txTimezone);
 }
 
 function formatMonthLabel(monthKey: string) {
@@ -194,7 +189,7 @@ function buildCategoryBreakdownByPeriod(
   filteredTxs.forEach((tx) => {
     const categoryId = tx.category_id;
     if (!categoryId || !tx.transaction_date) return;
-    const periodKey = getPeriodKey(toTxDateKey(tx.transaction_date), granularity);
+    const periodKey = getPeriodKey(toTxDateKey(tx.transaction_date, tx.timezone), granularity);
     if (!periodKeys.includes(periodKey)) return;
     const trail = resolveTrail(categoryId);
     if (trail.length === 0) return;
@@ -430,7 +425,7 @@ function getRubEquivalentCents(
   ratesByDate: Record<string, FxRateOut[]>
 ) {
   if (!currencyCode || currencyCode === "RUB") return tx.amount;
-  const dateKey = toTxDateKey(tx.transaction_date);
+  const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
   if (!dateKey) return null;
   const rates = ratesByDate[dateKey];
   if (!rates) return null;
@@ -468,7 +463,7 @@ function buildCategoryMatrix(
     const [l1, l2, l3] = trail;
     if (!l1 || !tx.transaction_date) return;
 
-    const dateKey = toTxDateKey(tx.transaction_date);
+    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
     if (!dateKey) return;
     const monthKey = toMonthKey(dateKey);
     monthSet.add(monthKey);
@@ -870,7 +865,7 @@ function CategoryBreakdownTable({
   }
   const sumTxToRubCents = useCallback(
     (tx: TransactionOut) => {
-      const dateKey = toTxDateKey(tx.transaction_date);
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (!dateKey) return 0;
       const code = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
       let rubCents = tx.amount;
@@ -967,11 +962,15 @@ function CategoryBreakdownSection({
           if (tx.direction !== direction) return false;
           const catId = tx.category_id;
           if (!catId || !ids.has(catId)) return false;
-          const periodKey = getPeriodKey(toTxDateKey(tx.transaction_date), granularity);
+          const periodKey = getPeriodKey(toTxDateKey(tx.transaction_date, tx.timezone), granularity);
           return periodSet.has(periodKey);
         })
         .map((tx) => ({ tx, rubCents: sumTxToRubCents(tx) * (direction === "EXPENSE" ? -1 : 1) }))
-        .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)));
+        .sort((a, b) =>
+          toTxDateKey(a.tx.transaction_date, a.tx.timezone).localeCompare(
+            toTxDateKey(b.tx.transaction_date, b.tx.timezone)
+          )
+        );
     },
     [chartTxList, clickedPeriodKeys, direction, granularity, categoryDescendantsMap, sumTxToRubCents]
   );
@@ -1058,7 +1057,7 @@ function CategoryBreakdownSection({
                                 const isLastTx = txIdx === txsForCategory.length - 1;
                                 return (
                                   <tr key={tx.id} style={isLastTx ? undefined : { borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                                    <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
+                                    <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date, tx.timezone)}</td>
                                     <td className="py-1.5 pr-4 align-middle">
                                       {item ? (
                                         <div className="flex items-center gap-2">
@@ -1570,7 +1569,7 @@ export default function IncomeExpenseDynamicsPage() {
             if (mode === "realized") return tx.status === "REALIZED";
             if (mode === "total") return true;
             if (tx.status === "REALIZED") return false;
-            const dateKey = toTxDateKey(tx.transaction_date);
+            const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
             if (!dateKey) return false;
             if (mode === "overdue") return dateKey < todayKey;
             if (mode === "upcoming") return dateKey >= todayKey;
@@ -1604,7 +1603,7 @@ export default function IncomeExpenseDynamicsPage() {
     chartTxList.forEach((tx) => {
       const code = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
       if (code === "RUB") return;
-      const dateKey = toTxDateKey(tx.transaction_date);
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (dateKey && !chartRatesByDate[dateKey]) missingDates.add(dateKey);
     });
     if (missingDates.size === 0) return;
@@ -1645,7 +1644,7 @@ export default function IncomeExpenseDynamicsPage() {
 
   const sumTxToRubCents = useCallback(
     (tx: TransactionOut) => {
-      const dateKey = toTxDateKey(tx.transaction_date);
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (!dateKey) return 0;
       const code = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
       let rubCents = tx.amount;
@@ -1667,7 +1666,7 @@ export default function IncomeExpenseDynamicsPage() {
       if (tx.is_split_parent) return;
       if (tx.direction !== "INCOME") return;
       if (showForecast && tx.transaction_type !== "ACTUAL") return;
-      const dateKey = toTxDateKey(tx.transaction_date);
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (!dateKey) return;
       const periodKey = getPeriodKey(dateKey, granularity);
       if (!map.has(periodKey)) return;
@@ -1684,7 +1683,7 @@ export default function IncomeExpenseDynamicsPage() {
       if (tx.is_split_parent) return;
       if (tx.direction !== "EXPENSE") return;
       if (showForecast && tx.transaction_type !== "ACTUAL") return;
-      const dateKey = toTxDateKey(tx.transaction_date);
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (!dateKey) return;
       const periodKey = getPeriodKey(dateKey, granularity);
       if (!map.has(periodKey)) return;
@@ -1701,7 +1700,7 @@ export default function IncomeExpenseDynamicsPage() {
     chartTxList.forEach((tx) => {
       if (tx.is_split_parent) return;
       if (tx.direction !== "INCOME") return;
-      const dateKey = toTxDateKey(tx.transaction_date);
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (!dateKey) return;
       const periodKey = getPeriodKey(dateKey, granularity);
       if (!map.has(periodKey)) return;
@@ -1718,7 +1717,7 @@ export default function IncomeExpenseDynamicsPage() {
     chartTxList.forEach((tx) => {
       if (tx.is_split_parent) return;
       if (tx.direction !== "EXPENSE") return;
-      const dateKey = toTxDateKey(tx.transaction_date);
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (!dateKey) return;
       const periodKey = getPeriodKey(dateKey, granularity);
       if (!map.has(periodKey)) return;

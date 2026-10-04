@@ -1,12 +1,14 @@
 """Service for building planned transaction notifications."""
 
-from datetime import date, datetime, time
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_
 from sqlalchemy.orm import Session, selectinload
+from zoneinfo import ZoneInfo
 
 from models import Transaction, User
+from timezones import effective_timezone, transaction_instant
 
 
 def get_planned_transactions_for_notification(
@@ -25,16 +27,9 @@ def get_planned_transactions_for_notification(
         Transaction.status != "REALIZED",
     )
 
-    today_start = datetime.combine(target_date, time.min)
-    today_end = datetime.combine(target_date, time.max)
-
-    today_txs = (
+    txs = (
         db.query(Transaction)
-        .filter(
-            base_filter,
-            Transaction.transaction_date >= today_start,
-            Transaction.transaction_date <= today_end,
-        )
+        .filter(base_filter)
         .options(
             selectinload(Transaction.chain),
             selectinload(Transaction.primary_item),
@@ -45,21 +40,15 @@ def get_planned_transactions_for_notification(
         .all()
     )
 
-    overdue_txs = (
-        db.query(Transaction)
-        .filter(
-            base_filter,
-            Transaction.transaction_date < today_start,
-        )
-        .options(
-            selectinload(Transaction.chain),
-            selectinload(Transaction.primary_item),
-            selectinload(Transaction.counterparty_item),
-            selectinload(Transaction.category),
-        )
-        .order_by(Transaction.transaction_date)
-        .all()
-    )
+    zone = ZoneInfo(effective_timezone(user))
+    today_txs: list[Transaction] = []
+    overdue_txs: list[Transaction] = []
+    for tx in txs:
+        local_day = transaction_instant(tx.transaction_date, tx.timezone).astimezone(zone).date()
+        if local_day == target_date:
+            today_txs.append(tx)
+        elif local_day < target_date:
+            overdue_txs.append(tx)
 
     return today_txs, overdue_txs
 

@@ -1,5 +1,14 @@
 "use client";
 
+import {
+  dateKeyInTimezone,
+  formatTransactionDateLabel,
+  formatTransactionTimeLabel,
+  hasTransactionOccurred,
+  todayDateKey,
+  transactionDateKey,
+} from "@/lib/timezone";
+
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
@@ -85,8 +94,8 @@ function toDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function toTxDateKey(value: string) {
-  return value ? value.slice(0, 10) : "";
+function toTxDateKey(value: string, txTimezone?: string | null) {
+  return transactionDateKey(value, txTimezone);
 }
 
 function parseDateKey(dateKey: string) {
@@ -287,7 +296,7 @@ function getItemStartKey(item: ItemOut, accountingStartDate?: string | null) {
   if (item.open_date && item.open_date > minDate) {
     minDate = item.open_date;
   }
-  return minDate ? toTxDateKey(minDate) : toDateKey(new Date(item.created_at));
+  return minDate ? minDate.slice(0, 10) : dateKeyInTimezone(new Date(item.created_at));
 }
 
 function transferDelta(kind: ItemOut["kind"], isPrimary: boolean, amount: number) {
@@ -867,7 +876,7 @@ export default function AssetsDynamicsPage() {
     singleCurrencyCode && singleCurrencyCode !== "RUB"
   );
 
-  const todayKey = toDateKey(new Date());
+  const todayKey = todayDateKey();
   const defaultStartKey = getRelativeDateKey(-7);
   const defaultEndKey = getRelativeDateKey(7);
   const startKeys = useMemo(
@@ -2798,7 +2807,11 @@ export default function AssetsDynamicsPage() {
                                             }
                                             return { tx, deltaCents: 0, inCurrency: false };
                                           })
-                                          .sort((a, b) => toTxDateKey(a.tx.transaction_date).localeCompare(toTxDateKey(b.tx.transaction_date)));
+                                          .sort((a, b) =>
+                                            toTxDateKey(a.tx.transaction_date, a.tx.timezone).localeCompare(
+                                              toTxDateKey(b.tx.transaction_date, b.tx.timezone)
+                                            )
+                                          );
                                       })()
                                     : [];
                                 return (
@@ -2948,7 +2961,7 @@ export default function AssetsDynamicsPage() {
                                         <table className="w-full text-left border-collapse text-sm" style={{ color: ACTIVE_TEXT_DARK }}>
                                           <tbody>
                                             {txsInRange.map(({ tx, deltaCents, inCurrency }) => {
-                                              const d = toTxDateKey(tx.transaction_date);
+                                              const d = toTxDateKey(tx.transaction_date, tx.timezone);
                                               const rate = currencyCode !== "RUB" ? getRateForDate(fxRatesByDate, d, currencyCode, latestRatesByCurrency, todayKey, sortedFxRateDateKeys) : null;
                                               // Для валютных счетов: если deltaCents в валюте счёта (inCurrency=true), считаем рубли через курс;
                                               // если deltaCents уже в рублях (inCurrency=false), сначала берём рубли, а валюту счёта — через деление на курс.
@@ -2978,7 +2991,7 @@ export default function AssetsDynamicsPage() {
                                               const amountColor = tx.direction === "EXPENSE" ? RED : tx.direction === "INCOME" ? GREEN : ACCENT;
                                               return (
                                                 <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                                                  <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date)}</td>
+                                                  <td className="py-1.5 pr-4 align-middle" style={{ color: ACTIVE_TEXT_DARK }}>{formatTxDateCell(tx.transaction_date, tx.timezone)}</td>
                                                   <td className="py-1.5 pr-4 align-middle">
                                                     {isTransfer && otherItem ? (
                                                       <div className="flex flex-col gap-0.5">
@@ -3073,7 +3086,7 @@ export default function AssetsDynamicsPage() {
                                           let totalSaleRub = 0;
                                           let totalSaleCur = 0;
                                           txsInRange.forEach(({ tx, deltaCents, inCurrency }) => {
-                                            const d = toTxDateKey(tx.transaction_date);
+                                            const d = toTxDateKey(tx.transaction_date, tx.timezone);
                                             const rate = getRate(d);
                                             let curUnits: number | null = null;
                                             let rubCents: number;

@@ -12,6 +12,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.finapp.data.models.TransactionDirection
 import com.finapp.data.models.TransactionType
 import com.finapp.ui.components.LoadingIndicator
+import com.finapp.utils.DEFAULT_TIMEZONE
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -69,6 +70,42 @@ fun TransactionFormScreen(
                     modifier = Modifier.fillMaxWidth(),
                     readOnly = true
                 )
+
+                val timezoneChoices = listOf(
+                    uiState.timezone,
+                    DEFAULT_TIMEZONE,
+                    "Asia/Bangkok",
+                    "Asia/Dubai",
+                    "Europe/London",
+                    "America/New_York",
+                ).distinct()
+                var timezoneMenu by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = timezoneMenu,
+                    onExpandedChange = { timezoneMenu = it },
+                ) {
+                    OutlinedTextField(
+                        value = uiState.timezone,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Часовой пояс") },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = timezoneMenu,
+                        onDismissRequest = { timezoneMenu = false },
+                    ) {
+                        timezoneChoices.forEach { zone ->
+                            DropdownMenuItem(
+                                text = { Text(zone) },
+                                onClick = {
+                                    viewModel.updateTimezone(zone)
+                                    timezoneMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
                 
                 OutlinedTextField(
                     value = uiState.amountRub.toString(),

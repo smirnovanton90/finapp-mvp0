@@ -10,6 +10,11 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { FormField, TextField, DateField, SelectField } from "@/components/ui/form-field";
 import { AuthInput } from "@/components/ui/auth-input";
+import { TimeInput } from "@/components/ui/time-input";
+import { DateInput } from "@/components/ui/date-input";
+import { TimezoneSelector } from "@/components/timezone-selector";
+import { useDisplayTimezone } from "@/components/timezone-context";
+import { nowInTimezone } from "@/lib/timezone";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { CurrencyChip } from "@/components/currency-chip";
 import { MobileSearchSelectOverlay } from "@/components/mobile-search-select-overlay";
@@ -30,7 +35,6 @@ import { getItemTypeLabel } from "@/lib/item-types";
 import { getEffectiveItemKind, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { buildOrderedItemsLikeAssetsPage } from "@/lib/order-items-like-assets";
 import { formatCentsForInput, formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
-import { formatTimeInput } from "@/lib/format-time";
 import { formatAmount } from "@/lib/item-utils";
 import {
   createTransaction,
@@ -109,13 +113,12 @@ export function MobileAddTransactionWizard({
   const [formErrorStep, setFormErrorStep] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const { timezone: displayTimezone } = useDisplayTimezone();
   const [amountStr, setAmountStr] = useState("");
   const [amountCounterpartyStr, setAmountCounterpartyStr] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [time, setTime] = useState(() => {
-    const n = new Date();
-    return `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`;
-  });
+  const [date, setDate] = useState(() => nowInTimezone().dateKey);
+  const [time, setTime] = useState(() => nowInTimezone().time);
+  const [txTimezone, setTxTimezone] = useState(displayTimezone);
   const [direction, setDirection] = useState<"INCOME" | "EXPENSE" | "TRANSFER">("EXPENSE");
   const [formTransactionType, setFormTransactionType] = useState<TransactionOut["transaction_type"]>("ACTUAL");
   const [primaryItemId, setPrimaryItemId] = useState<number | null>(null);
@@ -144,11 +147,10 @@ export function MobileAddTransactionWizard({
       setFormErrorStep(null);
       setAmountStr("");
       setAmountCounterpartyStr("");
-      const now = new Date();
-      setDate(now.toISOString().slice(0, 10));
-      setTime(
-        `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
-      );
+      const now = nowInTimezone(displayTimezone);
+      setDate(now.dateKey);
+      setTime(now.time);
+      setTxTimezone(displayTimezone);
       setDirection("EXPENSE");
       setFormTransactionType("ACTUAL");
       setPrimaryItemId(null);
@@ -166,7 +168,7 @@ export function MobileAddTransactionWizard({
       setCounterpartyQuantityUnitsStr("");
     }
     prevOpenRef.current = open;
-  }, [open]);
+  }, [open, displayTimezone]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const categoryLookup = useMemo(() => buildCategoryLookup(categoryNodes), [categoryNodes]);
@@ -504,6 +506,7 @@ export function MobileAddTransactionWizard({
       transaction_type: formTransactionType,
       category_id: resolvedCategoryId,
       comment: comment || null,
+      timezone: txTimezone,
       related_item_id: isTransfer ? null : (relatedItemId ?? null),
       asset_link_type: isTransfer ? null : (relatedItemId != null ? effectiveAssetLinkType : null),
     };
@@ -557,6 +560,7 @@ export function MobileAddTransactionWizard({
     amountCounterpartyStr,
     date,
     time,
+    txTimezone,
     primaryItemId,
     counterpartyItemId,
     counterpartyId,
@@ -898,34 +902,28 @@ export function MobileAddTransactionWizard({
             <FormField label="" inlineLabel>
               <MobileTapScale className="block w-full">
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="relative flex items-center min-h-[40px] flex-1 min-w-0">
-                  <AuthInput
-                    type="date"
+                <div className="relative flex items-center min-h-[40px] shrink-0">
+                  <DateInput
                     value={date}
-                    onChange={(e) => {
-                      setDate(e.target.value);
+                    onChange={(next) => {
+                      setDate(next);
                       if (step === 3) tryAutoAdvanceRef.current();
                     }}
                     onBlur={() => { if (step === 3) tryAutoAdvanceRef.current(); }}
-                    className="w-full"
-                    placeholder="Дата"
                   />
                 </div>
-                <div className="relative flex items-center min-h-[40px] shrink-0 w-[6rem]">
-                  <AuthInput
-                    type="text"
-                    inputMode="numeric"
+                <div className="relative flex items-center min-h-[40px] shrink-0">
+                  <TimeInput
                     value={time}
-                    onChange={(e) => setTime(formatTimeInput(e.target.value))}
+                    onChange={setTime}
                     onBlur={() => { if (step === 3) tryAutoAdvanceRef.current(); }}
-                    placeholder="00:00"
-                    maxLength={5}
-                    autoComplete="off"
-                    className="w-full"
                   />
                 </div>
               </div>
               </MobileTapScale>
+            </FormField>
+            <FormField label="Часовой пояс">
+              <TimezoneSelector value={txTimezone} onChange={setTxTimezone} />
             </FormField>
             {step === 3 && (
               <div className="flex justify-center pt-6 pb-2">

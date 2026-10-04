@@ -17,6 +17,7 @@ import {
   Users,
   User,
   Filter,
+  Clock,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
@@ -26,6 +27,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useSidebar } from "./sidebar-context";
 import { fetchUserMe, fetchUserPhotoAsBlob } from "@/lib/api";
 import { ACTIVE_TEXT_DARK, MODAL_BG, SIDEBAR_BG, SIDEBAR_TEXT_ACTIVE, SIDEBAR_TEXT_INACTIVE } from "@/lib/colors";
+import { useDisplayTimezone } from "@/components/timezone-context";
+import { timeInTimezone, timezoneCityName, timezoneUtcOffset } from "@/lib/timezone";
 import { SIDEBAR_FILTERS_SLOT_ID } from "@/lib/sidebar-filters-slot";
 
 const SIDEBAR_BASE_WIDTH = 300;
@@ -81,6 +84,87 @@ const nav = [
     ],
   },
 ];
+
+function useMinuteNow() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    let interval = 0;
+    const timeout = window.setTimeout(() => {
+      setNow(new Date());
+      interval = window.setInterval(() => setNow(new Date()), 60_000);
+    }, 60_000 - (Date.now() % 60_000));
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, []);
+  return now;
+}
+
+function TimezoneStatusButton({
+  collapsed = false,
+  onOpen,
+}: {
+  collapsed?: boolean;
+  onOpen: () => void;
+}) {
+  const { timezone } = useDisplayTimezone();
+  const now = useMinuteNow();
+  const time = timeInTimezone(now, timezone);
+  const offset = timezoneUtcOffset(timezone) || "UTC";
+  const city = timezoneCityName(timezone);
+  const fullLabel = `${time}, ${city}, ${offset}`;
+  const style = {
+    "--glass-bg": "rgba(108, 93, 215, 0.22)",
+    "--glass-bg-hover": "rgba(108, 93, 215, 0.32)",
+  } as CSSProperties;
+
+  const button = (
+    <Button
+      variant="glass"
+      className={
+        collapsed
+          ? "mx-auto h-[50px] w-[60px] rounded-[9px] p-0"
+          : "mx-[10px] h-[50px] w-[calc(100%-20px)] justify-start rounded-[9px] pl-[15px] pr-[15px]"
+      }
+      style={style}
+      aria-label={`${fullLabel}. Открыть личный кабинет`}
+      onClick={onOpen}
+    >
+      {collapsed ? (
+        <span className="flex flex-col items-center leading-none">
+          <span className="text-[13px] font-medium tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
+            {time}
+          </span>
+          <span className="mt-1 text-[10px] tracking-tight" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+            {offset}
+          </span>
+        </span>
+      ) : (
+        <span className="flex w-full items-center gap-[10px] min-w-0">
+          <IconFrame>
+            <Clock className="size-[30px]" strokeWidth={1.5} style={{ color: ACTIVE_TEXT_DARK }} />
+          </IconFrame>
+          <span className="flex min-w-0 flex-col items-start leading-tight">
+            <span className="text-base font-normal tabular-nums" style={{ color: ACTIVE_TEXT_DARK }}>
+              {time}
+            </span>
+            <span className="max-w-full truncate text-xs" style={{ color: SIDEBAR_TEXT_INACTIVE }}>
+              {city}, {offset}
+            </span>
+          </span>
+        </span>
+      )}
+    </Button>
+  );
+
+  if (!collapsed) return button;
+  return (
+    <Tooltip content={fullLabel} side="right" className="flex w-full">
+      {button}
+    </Tooltip>
+  );
+}
 
 function IconFrame({ children }: { children: React.ReactNode }) {
   return (
@@ -249,6 +333,12 @@ export function Sidebar() {
             })}
           </nav>
           <div className="pb-[10px] flex flex-col gap-[10px]">
+            <TimezoneStatusButton
+              onOpen={() => {
+                setMobileOpen(false);
+                router.push("/cabinet");
+              }}
+            />
             <Button
               variant={isCabinetActive ? "authPrimary" : "glass"}
               className="mx-[10px] h-[50px] w-[calc(100%-20px)] justify-start rounded-[9px] pl-[15px] pr-[15px]"
@@ -447,6 +537,10 @@ export function Sidebar() {
         {/* Footer (profile + logout) */}
         <div className="pb-[10px]">
           <div className="flex flex-col gap-[10px]">
+            <TimezoneStatusButton
+              collapsed={isCollapsed}
+              onOpen={() => router.push("/cabinet")}
+            />
             {/* Личный кабинет */}
             {isCollapsed ? (
               <Tooltip content="Личный кабинет" side="right" className="flex w-full">

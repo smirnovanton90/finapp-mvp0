@@ -5,6 +5,7 @@
  */
 
 import { parseRubToCents } from "@/lib/format-rub";
+import { todayDateKey } from "@/lib/timezone";
 import { buildCategoryLookup, makeCategoryPathKey } from "@/lib/categories";
 import { getTypeOptionsForKind, normalizeDisplayTypeCode } from "@/lib/item-type-options";
 import {
@@ -46,7 +47,7 @@ function calcInitialFromTransactions(
 ): { initialCents: number; earliestDate: string } {
   let incomeSum = 0;
   let outcomeSum = 0;
-  let earliestDate = minDate ?? new Date().toISOString().slice(0, 10);
+  let earliestDate = minDate ?? todayDateKey();
 
   for (const tx of transactions) {
     if (minDate && tx.date && tx.date < minDate) continue;
@@ -133,6 +134,7 @@ export type ImportDzenParams = {
   categoryCardStates: Map<string, ImportCategoryCardState>;
   counterpartyCardStates: Map<string, ImportCounterpartyCardState>;
   categoryNodes: CategoryNode[];
+  timezone?: string | null;
 };
 
 export type ImportDzenResult =
@@ -429,7 +431,8 @@ export async function executeImportDzen(
               ? (counterpartyNameToId.get(tx.counterparty) ?? null)
               : null;
             await createTransaction({
-              transaction_date: getTransactionDateTimeSortKey(tx),
+            transaction_date: getTransactionDateTimeSortKey(tx),
+            timezone: params.timezone,
               primary_item_id: incomeItemId,
               counterparty_id: counterpartyId,
               amount: tx.income,
@@ -448,7 +451,8 @@ export async function executeImportDzen(
               ? (counterpartyNameToId.get(tx.counterparty) ?? null)
               : null;
             await createTransaction({
-              transaction_date: getTransactionDateTimeSortKey(tx),
+            transaction_date: getTransactionDateTimeSortKey(tx),
+            timezone: params.timezone,
               primary_item_id: outcomeItemId,
               counterparty_id: counterpartyId,
               amount: tx.outcome,
@@ -608,8 +612,9 @@ export async function executeImportDzen(
             tx.outcomeCurrency !== tx.incomeCurrency && tx.income != null
               ? tx.income
               : undefined;
-          await createTransaction({
+            await createTransaction({
             transaction_date: getTransactionDateTimeSortKey(tx),
+            timezone: params.timezone,
             primary_item_id: primaryItemId,
             counterparty_item_id: counterpartyItemId,
             amount: amountCents,
@@ -624,8 +629,9 @@ export async function executeImportDzen(
         continue;
       }
 
-      await createTransaction({
-        transaction_date: getTransactionDateTimeSortKey(tx),
+            await createTransaction({
+            transaction_date: getTransactionDateTimeSortKey(tx),
+            timezone: params.timezone,
         primary_item_id: primaryItemId,
         counterparty_id: counterpartyId,
         amount: amountCents,

@@ -24,6 +24,14 @@ from schemas import (
 from sqlalchemy import select, and_, or_, func
 from datetime import date, datetime, time, timezone
 
+from timezones import (
+    as_wall_clock,
+    effective_timezone,
+    is_occurred,
+    resolve_timezone_name,
+    today_in_timezone,
+)
+
 from counterparty_settlements import (
     ensure_counterparty_settlements_item,
     create_counterparty_settlements_item,
@@ -168,6 +176,132 @@ def get_min_balance(item: Item) -> int:
     if item.kind == "ASSET":
         return -(2**62)
     return 0
+
+
+def _lock_user_item(db: Session, user: User, item_id: int | None) -> Item | None:
+    if item_id is None:
+        return None
+    return (
+        db.query(Item)
+        .filter(Item.id == item_id, Item.user_id == user.id)
+        .with_for_update()
+        .first()
+    )
+
+
+def _apply_stored_actual_balance(db: Session, user: User, tx: Transaction) -> None:
+    """Учесть уже сохранённую фактическую транзакцию в остатках."""
+    primary = _lock_user_item(db, user, tx.primary_item_id)
+    if not primary:
+        raise HTTPException(status_code=400, detail="Primary item not found")
+    counter = None
+    if tx.direction == "TRANSFER":
+        counter = _lock_user_item(db, user, tx.counterparty_item_id)
+        if not counter:
+            raise HTTPException(status_code=400, detail="Counterparty item not found")
+    related = _lock_user_item(db, user, tx.related_item_id)
+
+    primary_is_moex = is_moex_item(primary)
+    primary_is_crypto = is_crypto_item(primary)
+    counter_is_moex = is_moex_item(counter) if counter else False
+    related_is_moex = is_moex_item(related) if related else False
+    related_is_crypto = is_crypto_item(related) if related else False
+    amt = tx.amount_rub
+    amt_counterparty = tx.amount_counterparty if tx.amount_counterparty is not None else amt
+    tx_date = tx.transaction_date
+
+    if tx.direction == "INCOME":
+        if primary_is_moex:
+            _apply_position_delta(primary, tx.primary_quantity_lots or 0, tx_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, float(tx.primary_quantity_units or 0), tx_date)
+        else:
+            primary.current_value_rub += amt
+    elif tx.direction == "EXPENSE":
+        if primary_is_moex:
+            _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, -float(tx.primary_quantity_units or 0), tx_date)
+        else:
+            next_balance = primary.current_value_rub - amt
+            if next_balance < get_min_balance(primary):
+                raise HTTPException(
+                    status_code=400,
+                    detail=balance_violation_detail(primary, amt, tx_date),
+                )
+            primary.current_value_rub = next_balance
+    elif tx.direction == "TRANSFER":
+        if primary_is_moex:
+            _apply_position_delta(primary, -(tx.primary_quantity_lots or 0), tx_date)
+        elif primary_is_crypto and tx.primary_quantity_units is not None:
+            _apply_quantity_units_delta(primary, -float(tx.primary_quantity_units or 0), tx_date)
+        primary_delta = transfer_delta(primary.kind, True, amt)
+        primary_next = primary.current_value_rub + primary_delta
+        if primary_next < get_min_balance(primary):
+            raise HTTPException(
+                status_code=400,
+                detail=balance_violation_detail(primary, -primary_delta, tx_date),
+            )
+        primary.current_value_rub = primary_next
+        if counter_is_moex and counter is not None:
+            _apply_position_delta(counter, tx.counterparty_quantity_lots or 0, tx_date)
+        if counter is not None:
+            counter_delta = transfer_delta(counter.kind, False, amt_counterparty)
+            counter_next = counter.current_value_rub + counter_delta
+            if counter_next < get_min_balance(counter):
+                raise HTTPException(
+                    status_code=400,
+                    detail=balance_violation_detail(counter, -counter_delta, tx_date),
+                )
+            counter.current_value_rub = counter_next
+
+    if related and related_is_moex and tx.primary_quantity_lots is not None:
+        if tx.direction == "EXPENSE":
+            _apply_position_delta(related, tx.primary_quantity_lots or 0, tx_date)
+        elif tx.direction == "INCOME":
+            _apply_position_delta(related, -(tx.primary_quantity_lots or 0), tx_date)
+    if related and related_is_crypto and tx.primary_quantity_units is not None:
+        if tx.direction == "EXPENSE":
+            _apply_quantity_units_delta(related, float(tx.primary_quantity_units or 0), tx_date)
+        elif tx.direction == "INCOME":
+            _apply_quantity_units_delta(related, -float(tx.primary_quantity_units or 0), tx_date)
+
+    if tx.direction == "TRANSFER" and counter is not None:
+        update_settlements_item_closed_status(db, primary)
+        update_settlements_item_closed_status(db, counter)
+
+
+def apply_due_transaction_balances(db: Session, user: User) -> None:
+    """Доначислить фактические транзакции, чей момент уже наступил."""
+    now = datetime.now(timezone.utc)
+    pending = (
+        db.query(Transaction)
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.deleted_at.is_(None),
+            Transaction.transaction_type == "ACTUAL",
+            Transaction.balance_applied.is_(False),
+        )
+        .order_by(Transaction.transaction_date.asc(), Transaction.id.asc())
+        .with_for_update()
+        .all()
+    )
+    changed = False
+    for tx in pending:
+        if getattr(tx, "is_split_parent", False):
+            continue
+        if not is_occurred(tx.transaction_date, tx.timezone, now):
+            continue
+        nested = db.begin_nested()
+        try:
+            _apply_transaction_balance(db, user, tx)
+            tx.balance_applied = True
+            nested.commit()
+            changed = True
+        except HTTPException:
+            nested.rollback()
+    if changed:
+        db.commit()
 
 
 def format_amount_value(value: int) -> str:
@@ -652,6 +786,7 @@ def create_debts_transaction(
     # TRANSFER does not allow counterparty_id in TransactionCreate; it is only resolved for validation
     payload = TransactionCreate(
         transaction_date=data.transaction_date,
+        timezone=data.timezone,
         primary_item_id=primary_item_id,
         counterparty_item_id=counterparty_item_id,
         counterparty_id=None,
@@ -703,7 +838,14 @@ def create_they_paid_for_me_transaction(
         )
 
     accounting_start = user.accounting_start_date
-    tx_date = data.transaction_date.date() if data.transaction_date else date.today()
+    try:
+        tz_name = resolve_timezone_name(data.timezone, user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if data.transaction_date:
+        tx_date = as_wall_clock(data.transaction_date).date()
+    else:
+        tx_date = today_in_timezone(tz_name).date()
     open_date = max(accounting_start, tx_date)
 
     if has_item_id:
@@ -749,10 +891,11 @@ def create_they_paid_for_me_transaction(
     if not category:
         raise HTTPException(status_code=400, detail="Invalid category_id")
 
-    transaction_date = datetime.combine(tx_date, time(0, 0, 0), tzinfo=timezone.utc)
+    transaction_date = datetime.combine(tx_date, time(0, 0, 0))
 
     payload = TransactionCreate(
         transaction_date=transaction_date,
+        timezone=tz_name,
         primary_item_id=settlements_item.id,
         counterparty_item_id=None,
         counterparty_id=data.where_paid_counterparty_id,
@@ -948,9 +1091,18 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
                 detail="Нет доступной категории. Создайте категорию или укажите category_id.",
             )
 
+    wall = as_wall_clock(data.transaction_date)
+    try:
+        tx_timezone = resolve_timezone_name(data.timezone, user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    due = data.transaction_type == "ACTUAL" and is_occurred(wall, tx_timezone)
+
     tx = Transaction(
         user_id=user.id,
-        transaction_date=data.transaction_date,
+        transaction_date=wall,
+        timezone=tx_timezone,
+        balance_applied=due,
         primary_item_id=primary.id,
         primary_card_item_id=primary_side.card_item.id if primary_side.card_item else None,
         counterparty_item_id=counter.id if counter_side else None,
@@ -977,7 +1129,7 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
         is_split_parent=data.is_split_parent,
     )
 
-    if data.transaction_type == "ACTUAL" and not data.is_split_parent:
+    if due and not data.is_split_parent:
         amt = data.amount_primary_minor
 
         if data.direction == "INCOME":
@@ -1266,6 +1418,13 @@ def update_transaction(
                 detail="counterparty_quantity_lots is only allowed for TRANSFER",
             )
 
+    wall = as_wall_clock(data.transaction_date)
+    try:
+        tx_timezone = resolve_timezone_name(data.timezone, user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    new_due = data.transaction_type == "ACTUAL" and is_occurred(wall, tx_timezone)
+
     old_primary_is_crypto = is_crypto_item(old_primary)
     old_counter_is_crypto = is_crypto_item(old_counter) if old_counter else False
 
@@ -1288,7 +1447,7 @@ def update_transaction(
             return
         units_deltas[item_id] = units_deltas.get(item_id, 0.0) + delta
 
-    if tx.transaction_type == "ACTUAL":
+    if tx.transaction_type == "ACTUAL" and tx.balance_applied:
         old_amt = tx.amount_primary_minor
         old_counter_amt = (
             tx.amount_counterparty if tx.amount_counterparty is not None else old_amt
@@ -1334,7 +1493,7 @@ def update_transaction(
             old_counter_delta = transfer_delta(old_counter.kind, False, old_amt_counter)
             add_delta(old_counter.id, -old_counter_delta)
 
-    if data.transaction_type == "ACTUAL":
+    if new_due:
         new_amt = data.amount_primary_minor
         new_counter_amt = (
             amount_counterparty if amount_counterparty is not None else new_amt
@@ -1438,7 +1597,9 @@ def update_transaction(
 
     category = resolve_category_or_400(db, user, data.category_id)
 
-    tx.transaction_date = data.transaction_date
+    tx.transaction_date = wall
+    tx.timezone = tx_timezone
+    tx.balance_applied = new_due
     tx.primary_item_id = new_primary.id
     tx.primary_card_item_id = (
         new_primary_side.card_item.id if new_primary_side.card_item else None
@@ -1486,7 +1647,7 @@ def update_transaction(
 
 def _rollback_transaction_balance(db: Session, user: User, tx: Transaction) -> None:
     """Reverse the balance impact of an ACTUAL transaction (without setting deleted_at)."""
-    if tx.transaction_type != "ACTUAL":
+    if tx.transaction_type != "ACTUAL" or not tx.balance_applied:
         return
     primary = (
         db.query(Item)
@@ -1684,6 +1845,7 @@ def _apply_transaction_soft_delete(db: Session, user: User, tx: Transaction) -> 
     if tx.deleted_at is not None:
         return
     _rollback_transaction_balance(db, user, tx)
+    tx.balance_applied = False
     tx.deleted_at = datetime.now(timezone.utc)
 
 

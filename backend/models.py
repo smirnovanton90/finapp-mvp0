@@ -47,6 +47,14 @@ class User(Base):
     telegram_notify_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
     telegram_notify_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default="Europe/Moscow", default="Europe/Moscow"
+    )
+    timezone_auto: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true", default=True
+    )
+    timezone_detected: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -771,6 +779,12 @@ class Transaction(Base):
     chain: Mapped[Optional["TransactionChain"]] = relationship(back_populates="transactions")
 
     transaction_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default="Europe/Moscow", default="Europe/Moscow"
+    )
+    balance_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true", default=True
+    )
     source: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     primary_item_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("items.id"), nullable=False)

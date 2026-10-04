@@ -420,6 +420,7 @@ export type TransactionOut = {
   id: number;
 
   transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
+  timezone?: string | null;
   primary_item_id: number;
   primary_card_item_id: number | null;
   counterparty_item_id: number | null;
@@ -463,12 +464,18 @@ export type UserMeOut = {
   photo_url: string | null;
   accounting_start_date: string | null;
   google_sub: string | null;
+  timezone?: string;
+  timezone_auto?: boolean;
+  timezone_detected?: string | null;
 };
 
 export type UserProfileUpdate = {
   first_name?: string | null;
   last_name?: string | null;
   birth_date?: string | null;
+  timezone?: string | null;
+  timezone_auto?: boolean | null;
+  timezone_detected?: string | null;
 };
 
 export type AccountingStartDateUpdate = {
@@ -593,6 +600,7 @@ export type GoalCreate = {
 
 export type TransactionCreate = {
   transaction_date: string; // YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
+  timezone?: string | null;
   primary_item_id: number;
   counterparty_item_id?: number | null;
   counterparty_id?: number | null;
@@ -665,6 +673,7 @@ export type TransactionTheyPaidForMeCreate = {
   /** Сумма в копейках/центах в валюте. */
   amount: number;
   transaction_date?: string | null;
+  timezone?: string | null;
   category_id?: number | null;
   comment?: string | null;
   /** Существующий элемент взаиморасчётов по контрагенту «Кто платит». Указать либо его, либо new_settlement_name. */

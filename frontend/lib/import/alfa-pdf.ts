@@ -3,6 +3,7 @@ import "@/lib/import/pdfjs-polyfill";
 /**
  * Парсер выписки Альфа-Банк (PDF).
  * Счёт — из поля «Описание» операций («Операция по карте: 555947++++++5809»); если не указан — из шапки выписки.
+ * Дата транзакции — «дата совершения операции» из описания; если её нет — «Дата проводки».
  * Категория — из «Описание» после «MCC», контрагент — между «место совершения операции: » и «MCC».
  */
 
@@ -69,6 +70,53 @@ function parseDateFromPdf(dateStr: string): { dateKey: string; time: string } {
   return { dateKey, time: "00:00:00" };
 }
 
+/**
+ * В карточке Альфа-Банка «Дата проводки» — день, когда банк провёл операцию.
+ * Дата покупки лежит в описании: «дата совершения операции: 13.08.26».
+ * Порядок всегда день.месяц.год: «13.08.26» → 13.08.2026, а не 26.08.2026.
+ */
+const OPERATION_DATE_REGEX =
+  /дата\s+совершения\s+операции\s*:?\s*(\d{2})\.(\d{2})\.(\d{2}|\d{4})\b/i;
+
+function expandTwoDigitYear(yy: number, referenceYear: number): number {
+  const century = Math.floor(referenceYear / 100) * 100;
+  const candidates = [century - 100 + yy, century + yy, century + 100 + yy];
+  return candidates.reduce((best, year) =>
+    Math.abs(year - referenceYear) < Math.abs(best - referenceYear) ? year : best
+  );
+}
+
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > 2100) return false;
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function resolveAlfaTransactionDate(
+  postingDate: string,
+  descriptionText: string
+): { dateKey: string; time: string } {
+  const posting = parseDateFromPdf(postingDate);
+  const operation = normalizePdfText(descriptionText).match(OPERATION_DATE_REGEX);
+  if (!operation) return posting;
+
+  const day = Number(operation[1]);
+  const month = Number(operation[2]);
+  const yearRaw = operation[3];
+  const referenceYear = Number(posting.dateKey.slice(0, 4));
+  const year =
+    yearRaw.length === 4
+      ? Number(yearRaw)
+      : expandTwoDigitYear(
+          Number(yearRaw),
+          Number.isFinite(referenceYear) && referenceYear > 0 ? referenceYear : 2000 + Number(yearRaw)
+        );
+
+  if (!isRealCalendarDate(year, month, day)) return posting;
+  const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return { dateKey, time: "00:00:00" };
+}
+
 const ACCOUNT_NUMBER_REGEX = /(?:операции\s+по\s+счету|номер\s+счета|счет[а]?)\s*[:\s]*(\d{10,20})/i;
 
 /** «Операция по карте: 555947++++++5809» — извлекаем номер карты из поля «Описание». */
@@ -116,6 +164,43 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
 
   let alfaOutgoingBalanceCents: number | null = null;
   let alfaPeriodEndDateKey = "";
+
+  const commitRow = (row: {
+    dateTime: string;
+    descriptionText: string;
+    amountText: string;
+  } | null) => {
+    if (!row) return;
+    const amountMeta = parsePdfAmount(row.amountText);
+    if (!amountMeta) return;
+    const { counterparty, category } = parseDescriptionAlfa(row.descriptionText);
+    const accountName =
+      extractAccountFromDescriptionAlfa(row.descriptionText) ||
+      headerAccountNumber ||
+      "Счёт";
+    const effectiveCategory = category
+      ? formatMccCategoryForImport(category)
+      : (amountMeta.isIncome ? IMPORT_DEFAULT_CATEGORY_INCOME : IMPORT_DEFAULT_CATEGORY_EXPENSE);
+
+    const key = `${accountName}|${defaultCurrency}`;
+    if (!accountsMap.has(key)) {
+      accountsMap.set(key, { name: accountName, currency: defaultCurrency });
+    }
+    categoriesSet.add(effectiveCategory);
+    if (counterparty) counterpartiesSet.add(counterparty);
+
+    const { dateKey, time } = resolveAlfaTransactionDate(row.dateTime, row.descriptionText);
+    rows.push({
+      dateKey,
+      time,
+      accountName,
+      currency: defaultCurrency,
+      category: effectiveCategory,
+      counterparty,
+      amountCents: amountMeta.amountCents,
+      isIncome: amountMeta.isIncome,
+    });
+  };
 
   for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
     const page = await pdf.getPage(pageIndex);
@@ -193,17 +278,6 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
       }
 
       if (lineTextLower.startsWith("страница")) continue;
-      if (lineTextLower.startsWith("hold")) {
-        currentRow = null;
-        inOperations = false;
-        continue;
-      }
-
-      if (stopPhrases.some((phrase) => lineTextLower.includes(phrase))) {
-        currentRow = null;
-        inOperations = false;
-        continue;
-      }
 
       const dateText = normalizePdfText(
         line.items
@@ -215,39 +289,24 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
         dateText.match(PDF_DATE_REGEX) ||
         lineText.match(/^(\d{2}\.\d{2}\.\d{4})\b/);
 
+      if (lineTextLower.startsWith("hold")) {
+        commitRow(currentRow);
+        currentRow = null;
+        inOperations = false;
+        continue;
+      }
+
+      // Подпись внизу страницы. Строку с датой проводки не обрываем:
+      // в переводе СБП есть «по номеру телефона», и это сама операция.
+      if (!dateMatch && stopPhrases.some((phrase) => lineTextLower.includes(phrase))) {
+        commitRow(currentRow);
+        currentRow = null;
+        inOperations = false;
+        continue;
+      }
+
       if (dateMatch) {
-        if (currentRow) {
-          const amountMeta = parsePdfAmount(currentRow.amountText);
-          if (amountMeta) {
-            const { counterparty, category } = parseDescriptionAlfa(currentRow.descriptionText);
-            const accountName =
-              extractAccountFromDescriptionAlfa(currentRow.descriptionText) ||
-              headerAccountNumber ||
-              "Счёт";
-            const effectiveCategory = category
-              ? formatMccCategoryForImport(category)
-              : (amountMeta.isIncome ? IMPORT_DEFAULT_CATEGORY_INCOME : IMPORT_DEFAULT_CATEGORY_EXPENSE);
-
-            const key = `${accountName}|${defaultCurrency}`;
-            if (!accountsMap.has(key)) {
-              accountsMap.set(key, { name: accountName, currency: defaultCurrency });
-            }
-            categoriesSet.add(effectiveCategory);
-            if (counterparty) counterpartiesSet.add(counterparty);
-
-            const { dateKey, time } = parseDateFromPdf(currentRow.dateTime);
-            rows.push({
-              dateKey,
-              time,
-              accountName,
-              currency: defaultCurrency,
-              category: effectiveCategory,
-              counterparty,
-              amountCents: amountMeta.amountCents,
-              isIncome: amountMeta.isIncome,
-            });
-          }
-        }
+        commitRow(currentRow);
 
         let codeText = normalizePdfText(
           line.items
@@ -323,9 +382,11 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
       }
 
       if (!currentRow) continue;
+      // Подпись («А.А. Панченко») стоит правее колонки описания.
+      const descriptionMaxX = Math.min(amountMinX, viewport.width * 0.56);
       const descriptionText = normalizePdfText(
         line.items
-          .filter((item) => item.x > dateMaxX && item.x < amountMinX)
+          .filter((item) => item.x > dateMaxX && item.x < descriptionMaxX)
           .map((item) => item.text)
           .join(" ")
       );
@@ -334,38 +395,7 @@ export async function parseAlfaPdfFile(file: File): Promise<DzenParsedData> {
       }
     }
 
-    if (currentRow) {
-      const amountMeta = parsePdfAmount(currentRow.amountText);
-      if (amountMeta) {
-        const { counterparty, category } = parseDescriptionAlfa(currentRow.descriptionText);
-        const accountName =
-          extractAccountFromDescriptionAlfa(currentRow.descriptionText) ||
-          headerAccountNumber ||
-          "Счёт";
-        const effectiveCategory = category
-          ? formatMccCategoryForImport(category)
-          : (amountMeta.isIncome ? IMPORT_DEFAULT_CATEGORY_INCOME : IMPORT_DEFAULT_CATEGORY_EXPENSE);
-
-        const key = `${accountName}|${defaultCurrency}`;
-        if (!accountsMap.has(key)) {
-          accountsMap.set(key, { name: accountName, currency: defaultCurrency });
-        }
-        categoriesSet.add(effectiveCategory);
-        if (counterparty) counterpartiesSet.add(counterparty);
-
-        const { dateKey, time } = parseDateFromPdf(currentRow.dateTime);
-        rows.push({
-          dateKey,
-          time,
-          accountName,
-          currency: defaultCurrency,
-          category: effectiveCategory,
-          counterparty,
-          amountCents: amountMeta.amountCents,
-          isIncome: amountMeta.isIncome,
-        });
-      }
-    }
+    commitRow(currentRow);
   }
 
   if (accountsMap.size === 0 && headerAccountNumber) {

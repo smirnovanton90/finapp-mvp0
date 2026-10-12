@@ -14,7 +14,23 @@ import type { ImportCategoryCardState } from "@/components/import-category-card"
 import { isTransferCategoryName } from "@/lib/import-match-helpers";
 import { isLikelyInboundTransferMisclassifiedAsExpense } from "@/lib/import-transfer-category";
 
-/** Как в executor после шага счетов: только привязанные к существующему активу счета. */
+/**
+ * Счёт попадёт в импорт: уже связан с активом или будет создан.
+ * Как в executor: новый счёт создаётся до транзакций и тоже получает контрагентов.
+ */
+function accountWillBeImported(
+  accountName: string,
+  currency: string,
+  accountKeyToItemId: Map<string, number>,
+  accountCardStates: Map<string, ImportAccountCardState>
+): boolean {
+  if (!accountName || isDzenDebtsAccount({ name: accountName })) return false;
+  const key = `${accountName}|${currency}`;
+  if (accountKeyToItemId.has(key)) return true;
+  return accountCardStates.has(key);
+}
+
+/** Уже связанные счета — для проверки, что перевод между счетами настроен целиком. */
 function buildAccountKeyToItemIdPreview(
   accountCardStates: Map<string, ImportAccountCardState>,
   accounts: DzenParsedData["accounts"]
@@ -37,7 +53,8 @@ function buildAccountKeyToItemIdPreview(
 export function transactionUsesCounterpartyMapping(
   tx: DzenParsedTransaction,
   categoryCardStates: Map<string, ImportCategoryCardState>,
-  accountKeyToItemId: Map<string, number>
+  accountKeyToItemId: Map<string, number>,
+  accountCardStates: Map<string, ImportAccountCardState>
 ): boolean {
   if (!(tx.counterparty ?? "").trim()) return false;
 
@@ -110,26 +127,37 @@ export function transactionUsesCounterpartyMapping(
     }
   }
 
-  let primaryItemId: number | null = null;
+  let accountName = "";
+  let accountCurrency = "";
   let amountCents = 0;
 
   if (tx.type === "expense" && tx.outcome != null && tx.outcome > 0) {
-    const key = `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
-    primaryItemId = accountKeyToItemId.get(key) ?? null;
+    accountName = tx.outcomeAccountName;
+    accountCurrency = tx.outcomeCurrency;
     amountCents = tx.outcome;
   } else if (tx.type === "income" && tx.income != null && tx.income > 0) {
-    const key = `${tx.incomeAccountName}|${tx.incomeCurrency}`;
-    primaryItemId = accountKeyToItemId.get(key) ?? null;
+    accountName = tx.incomeAccountName;
+    accountCurrency = tx.incomeCurrency;
     amountCents = tx.income;
   } else if (tx.type === "transfer") {
     if (tx.outcome != null && tx.outcome > 0) {
-      const key = `${tx.outcomeAccountName}|${tx.outcomeCurrency}`;
-      primaryItemId = accountKeyToItemId.get(key) ?? null;
+      accountName = tx.outcomeAccountName;
+      accountCurrency = tx.outcomeCurrency;
       amountCents = tx.outcome;
     }
   }
 
-  if (primaryItemId == null || amountCents <= 0) return false;
+  if (
+    amountCents <= 0 ||
+    !accountWillBeImported(
+      accountName,
+      accountCurrency,
+      accountKeyToItemId,
+      accountCardStates
+    )
+  ) {
+    return false;
+  }
 
   if (tx.type === "transfer") {
     const incomeKey = `${tx.incomeAccountName}|${tx.incomeCurrency}`;
@@ -165,7 +193,8 @@ export function filterCounterpartiesForMappingStep(
       transactionUsesCounterpartyMapping(
         tx,
         categoryCardStates,
-        accountKeyToItemId
+        accountKeyToItemId,
+        accountCardStates
       )
     );
   });

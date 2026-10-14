@@ -1,6 +1,9 @@
 /**
  * Парсер выписки Т-Банка (xlsx).
- * Счета — из столбца «Номер карты», категории — «Категория», контрагенты — «Описание».
+ * Поддерживается старый формат (счёт — «Номер карты», сумма — «Сумма платежа»)
+ * и новый (счёт — «Имя счёта», сумма — «Сумма в валюте счёта», статус «Ок»).
+ * Категория: «Ваша категория», иначе «Категория по-умолчанию» / «Категория».
+ * Контрагенты — «Описание».
  * Пары «Переводы» с одинаковой суммой по модулю в один день и подряд объединяются в одну транзакцию TRANSFER.
  */
 
@@ -18,26 +21,75 @@ import {
   IMPORT_DEFAULT_CATEGORY_INCOME,
 } from "@/lib/dzen-csv-parser";
 
-const IMPORT_HEADERS = [
-  "Дата операции",
-  "Дата платежа",
-  "Номер карты",
-  "Статус",
-  "Сумма операции",
-  "Валюта операции",
-  "Сумма платежа",
-  "Валюта платежа",
-  "Кэшбэк",
-  "Категория",
-  "MCC",
-  "Описание",
-  "Бонусы (включая кэшбэк)",
-  "Округление на инвесткопилку",
-  "Сумма операции с округлением",
-];
+type ColumnKey =
+  | "operationDate"
+  | "status"
+  | "accountName"
+  | "card"
+  | "paymentAmount"
+  | "paymentCurrency"
+  | "operationAmount"
+  | "operationCurrency"
+  | "category"
+  | "defaultCategory"
+  | "userCategory"
+  | "description"
+  | "message";
+
+/** Синонимы столбцов старой и новой выписки. «ё» заранее приводится к «е». */
+const COLUMN_ALIASES: Record<ColumnKey, string[]> = {
+  operationDate: ["дата операции"],
+  status: ["статус"],
+  accountName: ["имя счета"],
+  card: ["номер карты"],
+  paymentAmount: ["сумма в валюте счета", "сумма платежа"],
+  paymentCurrency: ["валюта счета", "валюта платежа"],
+  operationAmount: ["сумма операции"],
+  operationCurrency: ["валюта операции"],
+  category: ["категория"],
+  defaultCategory: ["категория по-умолчанию", "категория по умолчанию"],
+  userCategory: ["ваша категория"],
+  description: ["описание"],
+  message: ["сообщение"],
+};
+
+const FORMAT_HINT =
+  "Нужны столбцы: Дата операции, Статус, Сумма в валюте счёта (или Сумма платежа / Сумма операции), Имя счёта или Номер карты, Категория, Описание.";
 
 function normalizeHeader(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/ё/g, "е")
+    .toLocaleLowerCase("ru");
+}
+
+function mapColumns(header: unknown[]): Map<ColumnKey, number> | null {
+  const normalized = header.map((cell) => normalizeHeader(String(cell ?? "")));
+  const map = new Map<ColumnKey, number>();
+  for (const key of Object.keys(COLUMN_ALIASES) as ColumnKey[]) {
+    const idx = normalized.findIndex((cell) => COLUMN_ALIASES[key].includes(cell));
+    if (idx >= 0) map.set(key, idx);
+  }
+  const recognized =
+    map.has("operationDate") &&
+    map.has("status") &&
+    (map.has("paymentAmount") || map.has("operationAmount")) &&
+    (map.has("accountName") || map.has("card")) &&
+    (map.has("category") || map.has("defaultCategory") || map.has("userCategory")) &&
+    map.has("description");
+  return recognized ? map : null;
+}
+
+function cellAt(row: unknown[], columns: Map<ColumnKey, number>, key: ColumnKey): unknown {
+  const index = columns.get(key);
+  if (index == null) return "";
+  return row[index] ?? "";
+}
+
+function isPostedStatus(value: string): boolean {
+  const status = value.trim().toLocaleLowerCase("ru");
+  return status === "ok" || status === "ок";
 }
 
 function parseDateFromString(value: string): Date | null {
@@ -99,11 +151,12 @@ function formatTimeHHmmss(date: Date): string {
 type RawTBankRow = {
   dateKey: string;
   date: Date;
-  cardNumber: string;
+  accountName: string;
   currency: string;
   amount: number;
   category: string;
   description: string;
+  message: string;
   rowIndex: number;
 };
 
@@ -115,7 +168,7 @@ function isTransferPair(a: RawTBankRow, b: RawTBankRow): boolean {
   if ((b.category || "").trim() !== CATEGORY_TRANSFERS) return false;
   if (a.dateKey !== b.dateKey) return false;
   if (Math.abs(Math.abs(a.amount) - Math.abs(b.amount)) > 0.01) return false;
-  return (a.cardNumber || "").trim() !== (b.cardNumber || "").trim();
+  return (a.accountName || "").trim() !== (b.accountName || "").trim();
 }
 
 export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
@@ -136,23 +189,18 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
     throw new Error("Файл не содержит данных для импорта.");
   }
 
-  const expectedHeader = IMPORT_HEADERS.map(normalizeHeader);
   let headerRowIndex = -1;
-  for (let r = 0; r < Math.min(rows.length, 5); r++) {
-    const row = rows[r] ?? [];
-    const normalized = row.map((cell) => normalizeHeader(String(cell ?? "")));
-    const valid =
-      normalized.length >= expectedHeader.length &&
-      expectedHeader.every((value, index) => value === normalized[index]);
-    if (valid) {
+  let columns: Map<ColumnKey, number> | null = null;
+  for (let r = 0; r < Math.min(rows.length, 20); r++) {
+    const mapped = mapColumns(rows[r] ?? []);
+    if (mapped) {
       headerRowIndex = r;
+      columns = mapped;
       break;
     }
   }
-  if (headerRowIndex < 0) {
-    throw new Error(
-      `Файл не соответствует формату. Ожидаемые столбцы: ${IMPORT_HEADERS.join(", ")}.`
-    );
+  if (headerRowIndex < 0 || !columns) {
+    throw new Error(`Файл не соответствует формату выписки Т-Банка. ${FORMAT_HINT}`);
   }
 
   const dataStartIndex = headerRowIndex + 1;
@@ -171,31 +219,40 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
     const hasValues = row.some((cell) => String(cell ?? "").trim() !== "");
     if (!hasValues) continue;
 
-    const rawStatus = row[3];
-    const statusValue = String(rawStatus ?? "").trim().toUpperCase();
-    if (statusValue !== "OK") continue;
+    const statusValue = String(cellAt(row, columns, "status") ?? "");
+    if (!isPostedStatus(statusValue)) continue;
 
-    const rawOperationDate = row[0];
-    const parsedDate = parseExcelDate(rawOperationDate);
+    const parsedDate = parseExcelDate(cellAt(row, columns, "operationDate"));
     if (!parsedDate) {
       throw new Error(`Строка ${rowNumber}: не удалось распознать дату операции.`);
     }
     const dateKey = formatDateKey(parsedDate);
 
-    const rawPaymentAmount = row[6];
-    const amountValue = parseAmountCell(rawPaymentAmount);
+    const rawPaymentAmount = cellAt(row, columns, "paymentAmount");
+    const rawOperationAmount = cellAt(row, columns, "operationAmount");
+    const amountValue = parseAmountCell(
+      String(rawPaymentAmount ?? "").trim() !== "" ? rawPaymentAmount : rawOperationAmount
+    );
     if (amountValue == null || !Number.isFinite(amountValue)) {
       throw new Error(`Строка ${rowNumber}: не удалось распознать сумму операции.`);
     }
 
-    const cardNumber = String(row[2] ?? "").trim();
-    const currency = String(row[7] ?? row[5] ?? "RUB").trim() || "RUB";
-    const category = String(row[9] ?? "").trim();
-    const description = String(row[11] ?? "").trim();
+    const namedAccount = String(cellAt(row, columns, "accountName") ?? "").trim();
+    const cardNumber = String(cellAt(row, columns, "card") ?? "").trim();
+    const accountName = namedAccount || cardNumber || "Счёт";
+    const paymentCurrency = String(cellAt(row, columns, "paymentCurrency") ?? "").trim();
+    const operationCurrency = String(cellAt(row, columns, "operationCurrency") ?? "").trim();
+    const currency = paymentCurrency || operationCurrency || "RUB";
+    const userCategory = String(cellAt(row, columns, "userCategory") ?? "").trim();
+    const defaultCategory = String(cellAt(row, columns, "defaultCategory") ?? "").trim();
+    const legacyCategory = String(cellAt(row, columns, "category") ?? "").trim();
+    const category = userCategory || defaultCategory || legacyCategory;
+    const description = String(cellAt(row, columns, "description") ?? "").trim();
+    const message = String(cellAt(row, columns, "message") ?? "").trim();
 
-    const key = `${cardNumber}|${currency}`;
+    const key = `${accountName}|${currency}`;
     if (!accountsMap.has(key)) {
-      accountsMap.set(key, { name: cardNumber || "Счёт", currency });
+      accountsMap.set(key, { name: accountName, currency });
     }
     if (category) categoriesSet.add(category);
     if (description) counterpartiesSet.add(description);
@@ -203,11 +260,12 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
     rawRows.push({
       dateKey,
       date: parsedDate,
-      cardNumber,
+      accountName,
       currency,
       amount: amountValue,
       category,
       description,
+      message,
       rowIndex: i,
     });
   }
@@ -229,8 +287,8 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
       used.add(i + 1);
       const outcomeRow = a.amount < 0 ? a : b;
       const incomeRow = a.amount < 0 ? b : a;
-      const outcomeAcc = accountsMap.get(`${outcomeRow.cardNumber}|${outcomeRow.currency}`);
-      const incomeAcc = accountsMap.get(`${incomeRow.cardNumber}|${incomeRow.currency}`);
+      const outcomeAcc = accountsMap.get(`${outcomeRow.accountName}|${outcomeRow.currency}`);
+      const incomeAcc = accountsMap.get(`${incomeRow.accountName}|${incomeRow.currency}`);
       if (outcomeAcc && incomeAcc) {
         const amountCents = Math.round(Math.abs(a.amount) * 100);
         transactions.push({
@@ -238,7 +296,7 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
           time: formatTimeHHmmss(a.date),
           categoryName: CATEGORY_TRANSFERS,
           counterparty: "",
-          comment: a.description || b.description || "",
+          comment: a.message || b.message || a.description || b.description || "",
           outcomeAccountName: outcomeAcc.name,
           outcome: amountCents,
           outcomeCurrency: outcomeAcc.currency,
@@ -252,7 +310,7 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
       continue;
     }
 
-    const accKey = `${a.cardNumber}|${a.currency}`;
+    const accKey = `${a.accountName}|${a.currency}`;
     const acc = accountsMap.get(accKey);
     if (!acc) continue;
 
@@ -268,7 +326,7 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
         time: formatTimeHHmmss(a.date),
         categoryName: effectiveCategory,
         counterparty: a.description,
-        comment: "",
+        comment: a.message,
         outcomeAccountName: acc.name,
         outcome: amountCents,
         outcomeCurrency: acc.currency,
@@ -284,7 +342,7 @@ export async function parseTBankXlsxFile(file: File): Promise<DzenParsedData> {
         time: formatTimeHHmmss(a.date),
         categoryName: effectiveCategory,
         counterparty: a.description,
-        comment: "",
+        comment: a.message,
         outcomeAccountName: "",
         outcome: null,
         outcomeCurrency: "",

@@ -20,6 +20,7 @@ export const SPECIAL_STEP_TITLES: Record<string, string> = {
   loanInterest: "Проценты",
   category: "Категория",
   comment: "Комментарий",
+  extras: "Дополнительно",
   counterparty: "Контрагент",
   wherePay: "Где платите",
   payFor: "За кого",
@@ -81,12 +82,14 @@ export type SpecialWizardInput = {
   counterpartySkipsMinDate: boolean;
 };
 
-export function specialWizardSteps(input: Pick<SpecialWizardInput, "flow" | "debtDirection" | "debtCross" | "offsetCross">): string[] {
+export function specialWizardSteps(
+  input: Pick<SpecialWizardInput, "flow" | "debtDirection" | "debtCross" | "offsetCross">,
+): string[] {
+  const tail = ["extras", "preview"];
   if (input.flow === "LOAN_REPAYMENT") {
-    return ["type", "date", "payFrom", "liability", "loanTotal", "loanInterest", "category", "comment", "preview"];
+    return ["type", "date", "payFrom", "liability", "loanTotal", "loanInterest", "category", ...tail];
   }
   const head = ["type", "debtDirection", "date"];
-  const tail = ["comment", "preview"];
   switch (input.debtDirection) {
     case "I_PAID":
       return [...head, "payFrom", "counterparty", "debtMode", "debtPick", "amount", ...(input.debtCross ? ["debtAmount"] : []), ...tail];
@@ -211,7 +214,7 @@ function txDate(date: string, time: string): string {
 export async function submitSpecialWizard(input: SpecialWizardInput): Promise<void> {
   const steps = specialWizardSteps(input);
   for (const stepId of steps) {
-    if (stepId === "preview" || stepId === "comment" || stepId === "type" || stepId === "debtMode") continue;
+    if (stepId === "preview" || stepId === "comment" || stepId === "extras" || stepId === "type" || stepId === "debtMode") continue;
     const error = specialStepError(stepId, input);
     if (error) throw new Error(error);
   }

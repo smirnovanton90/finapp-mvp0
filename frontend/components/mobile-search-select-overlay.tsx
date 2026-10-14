@@ -51,6 +51,10 @@ export interface MobileSearchSelectOverlayProps<T> {
   renderTriggerContent?: (option: T) => React.ReactNode;
   /** Кастомное отображение пустого триггера. */
   renderEmptyTriggerContent?: () => React.ReactNode;
+  /** Открыть поиск сразу, если значение ещё не выбрано. */
+  autoOpen?: boolean;
+  /** Сбросить выбранное значение. После очистки поиск открывается снова. */
+  onClear?: () => void;
 }
 
 /**
@@ -77,8 +81,10 @@ export function MobileSearchSelectOverlay<T>({
   ariaLabel,
   renderTriggerContent,
   renderEmptyTriggerContent,
+  autoOpen = false,
+  onClear,
 }: MobileSearchSelectOverlayProps<T>) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => autoOpen && value == null && !disabled);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -122,6 +128,17 @@ export function MobileSearchSelectOverlay<T>({
   const handleClose = useCallback(() => {
     setOpen(false);
   }, []);
+
+  const handleClear = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClear?.();
+      setQuery("");
+      setOpen(true);
+    },
+    [onClear],
+  );
 
   /** Стиль триггера в пустом состоянии — как у поля поиска с вкладки «Активы». */
   const [triggerFocused, setTriggerFocused] = useState(false);
@@ -168,7 +185,7 @@ export function MobileSearchSelectOverlay<T>({
       ) : (
         <span className="flex-1 font-normal break-words">{displayLabel}</span>
       )}
-      {value != null && (
+      {value != null && !onClear && (
         <Pencil className="size-4 shrink-0 opacity-70" aria-hidden />
       )}
     </button>
@@ -276,8 +293,19 @@ export function MobileSearchSelectOverlay<T>({
     );
 
   return (
-    <div className={cn("min-w-0", className)}>
-      {trigger}
+    <div className={cn("flex min-w-0 items-center gap-2", className)}>
+      <div className="min-w-0 flex-1">{trigger}</div>
+      {value != null && onClear ? (
+        <button
+          type="button"
+          aria-label="Очистить"
+          onClick={handleClear}
+          className="flex size-11 shrink-0 items-center justify-center rounded-lg active:opacity-70"
+          style={{ color: PLACEHOLDER_COLOR_DARK, backgroundColor: "rgba(255,255,255,0.06)" }}
+        >
+          <X className="size-4" strokeWidth={1.5} />
+        </button>
+      ) : null}
       {overlay}
     </div>
   );

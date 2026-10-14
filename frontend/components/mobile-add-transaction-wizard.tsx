@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Building2, Coins, HandCoins, Receipt, QrCode, Banknote, Calendar, Wallet, Tag, User, MessageSquare, Link2, X, Plus, Trash2, SplitSquareVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -63,14 +63,95 @@ import {
 const STEP_PREVIEW = 11;
 /** Для перевода: куда зачислить. Идёт сразу после шага «откуда». */
 const STEP_ASSET_TO = 12;
+/** Необязательные поля: кнопки, которые добавляют отдельные этапы. */
+const STEP_EXTRAS = 13;
+
+type SimpleExtra = "counterparty" | "comment" | "related" | "split";
+
+const EXTRA_STEP: Record<SimpleExtra, number> = {
+  counterparty: 7,
+  comment: 8,
+  related: 9,
+  split: 10,
+};
+
+const OPTIONAL_SIMPLE_STEPS = new Set<number>([7, 8, 9, 10]);
 
 /**
  * Экраны простой транзакции.
- * Перевод пропускает категорию, контрагента, связанный актив и разделение.
+ * Необязательные поля открываются с экрана «Дополнительно» и возвращают туда же.
+ * Перевод не предлагает контрагента, связанный актив и разделение.
  */
 function visibleWizardSteps(isTransfer: boolean): number[] {
-  if (isTransfer) return [1, 2, 3, 4, STEP_ASSET_TO, 5, 8, STEP_PREVIEW];
-  return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, STEP_PREVIEW];
+  if (isTransfer) return [1, 2, 3, 4, STEP_ASSET_TO, 5, STEP_EXTRAS, STEP_PREVIEW];
+  return [1, 2, 3, 4, 5, 6, STEP_EXTRAS, STEP_PREVIEW];
+}
+
+function WizardAutoFocus({ children, active = true }: { children: React.ReactNode; active?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setTimeout(() => {
+      const el = ref.current?.querySelector("input, textarea");
+      if (el instanceof HTMLElement) {
+        el.focus();
+        el.scrollIntoView({ block: "center" });
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [active]);
+  return <div ref={ref}>{children}</div>;
+}
+
+function ExtraAction({
+  icon,
+  addLabel,
+  title,
+  valueText,
+  included,
+  onOpen,
+  onClear,
+}: {
+  icon: React.ReactNode;
+  addLabel: string;
+  title: string;
+  valueText?: string | null;
+  included: boolean;
+  onOpen: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex w-full items-stretch overflow-hidden rounded-lg" style={{ backgroundColor: MODAL_BG }}>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-h-14 flex-1 items-center gap-3 px-4 py-3 text-left active:opacity-80"
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center">{icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-base" style={{ color: ACTIVE_TEXT_DARK }}>
+            {included ? title : addLabel}
+          </span>
+          {included ? (
+            <span className="mt-0.5 block truncate text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+              {valueText || "Не заполнено"}
+            </span>
+          ) : null}
+        </span>
+      </button>
+      {included ? (
+        <button
+          type="button"
+          aria-label={`Очистить: ${title}`}
+          onClick={onClear}
+          className="flex w-12 shrink-0 items-center justify-center active:opacity-70"
+          style={{ color: PLACEHOLDER_COLOR_DARK }}
+        >
+          <X className="size-4" strokeWidth={1.5} />
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function buildTransactionDate(dateKey: string, timeHHmm: string): string {
@@ -176,6 +257,7 @@ export function MobileAddTransactionWizard({
   const effectiveAssetLinkType = assetLinkType ?? defaultAssetLinkType;
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitParts, setSplitParts] = useState<{ amountStr: string; categoryId: number | null }[]>([]);
+  const [includedExtras, setIncludedExtras] = useState<Set<SimpleExtra>>(() => new Set());
   const [primaryQuantityLots, setPrimaryQuantityLots] = useState("");
   const [counterpartyQuantityLots, setCounterpartyQuantityLots] = useState("");
   const [primaryQuantityUnitsStr, setPrimaryQuantityUnitsStr] = useState("");
@@ -219,6 +301,7 @@ export function MobileAddTransactionWizard({
       setAssetLinkType(null);
       setSplitEnabled(false);
       setSplitParts([]);
+      setIncludedExtras(new Set());
       setPrimaryQuantityLots("");
       setCounterpartyQuantityLots("");
       setPrimaryQuantityUnitsStr("");
@@ -516,6 +599,7 @@ export function MobileAddTransactionWizard({
     setFlowType(null);
     setStep(0);
     setFormError(null);
+    setIncludedExtras(new Set());
   }, []);
 
   const handleClose = useCallback(() => {
@@ -527,6 +611,7 @@ export function MobileAddTransactionWizard({
   }, [onClose]);
 
   const handleSelectSimple = useCallback(() => {
+    setIncludedExtras(new Set());
     setFlowType("SIMPLE");
     setStepMotion("forward");
     setStep(1);
@@ -534,6 +619,7 @@ export function MobileAddTransactionWizard({
   }, []);
 
   const handleSelectLoanRepayment = useCallback(() => {
+    setIncludedExtras(new Set());
     setFlowType("LOAN_REPAYMENT");
     setDirection("EXPENSE");
     setFlowStepId("type");
@@ -544,6 +630,7 @@ export function MobileAddTransactionWizard({
   }, []);
 
   const handleSelectDebt = useCallback(() => {
+    setIncludedExtras(new Set());
     setFlowType("DEBTS");
     setDebtDirection("I_PAID");
     setDirection("EXPENSE");
@@ -558,13 +645,106 @@ export function MobileAddTransactionWizard({
     onSelectReceipt();
   }, [onSelectReceipt]);
 
+  const includeComment = includedExtras.has("comment");
+
+  const specialStepsFor = useCallback(
+    (special: SpecialWizardInput, debtDirectionOverride?: DebtDirection) =>
+      specialWizardSteps(
+        debtDirectionOverride ? { ...special, debtDirection: debtDirectionOverride } : special,
+      ),
+    [],
+  );
+
+  const returnToExtras = useCallback(() => {
+    setFormError(null);
+    setFormErrorStep(null);
+    setStepMotion("back");
+    if (flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") {
+      setFlowStepId("extras");
+      return;
+    }
+    setStep(STEP_EXTRAS);
+  }, [flowType]);
+
+  const advanceFromStep = useCallback((fromStep: number) => {
+    setFormError(null);
+    setFormErrorStep(null);
+    if (OPTIONAL_SIMPLE_STEPS.has(fromStep)) {
+      setStepMotion("back");
+      setStep(STEP_EXTRAS);
+      return;
+    }
+    const steps = visibleWizardSteps(isTransfer);
+    const idx = steps.indexOf(fromStep);
+    if (idx >= 0 && idx < steps.length - 1) {
+      setStepMotion("forward");
+      setStep(steps[idx + 1]);
+    }
+  }, [isTransfer]);
+
+  const advanceSpecial = useCallback((fromStep: string, debtDirectionOverride?: DebtDirection) => {
+    const special = buildSpecialInput();
+    if (!special) return;
+    const steps = specialStepsFor(special, debtDirectionOverride);
+    const idx = steps.indexOf(fromStep);
+    if (idx >= 0 && idx < steps.length - 1) {
+      setFormError(null);
+      setFormErrorStep(null);
+      setStepMotion("forward");
+      setFlowStepId(steps[idx + 1]);
+    }
+  }, [buildSpecialInput, specialStepsFor]);
+
+  const openExtra = useCallback((extra: SimpleExtra) => {
+    setIncludedExtras((prev) => {
+      const next = new Set(prev);
+      next.add(extra);
+      return next;
+    });
+    if (extra === "split") {
+      setSplitEnabled(true);
+      setSplitParts((prev) => {
+        if (prev.length > 0) return prev;
+        const totalCents = parseRubToCents(normalizeRubOnBlur(amountStr)) ?? 0;
+        const parentCat = resolveCategoryId(cat1, cat2, cat3);
+        return [{ amountStr: formatCentsForInput(totalCents), categoryId: parentCat ?? null }];
+      });
+    }
+    setFormError(null);
+    setFormErrorStep(null);
+    setStepMotion("forward");
+    setStep(EXTRA_STEP[extra]);
+  }, [amountStr, cat1, cat2, cat3, resolveCategoryId]);
+
+  const clearExtra = useCallback((extra: SimpleExtra) => {
+    setIncludedExtras((prev) => {
+      const next = new Set(prev);
+      next.delete(extra);
+      return next;
+    });
+    if (extra === "counterparty") setCounterpartyId(null);
+    if (extra === "comment") setComment("");
+    if (extra === "related") {
+      setRelatedItemId(null);
+      setAssetLinkType(null);
+    }
+    if (extra === "split") {
+      setSplitEnabled(false);
+      setSplitParts([]);
+    }
+  }, []);
+
   const goNext = useCallback(() => {
     setFormError(null);
     setFormErrorStep(null);
     if (flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") {
+      if (flowStepId === "comment") {
+        returnToExtras();
+        return;
+      }
       const special = buildSpecialInput();
       if (!special) return;
-      const steps = specialWizardSteps(special);
+      const steps = specialStepsFor(special);
       const idx = steps.indexOf(flowStepId);
       if (idx >= 0 && idx < steps.length - 1) {
         setStepMotion("forward");
@@ -573,21 +753,24 @@ export function MobileAddTransactionWizard({
       return;
     }
     if (flowType !== "SIMPLE") return;
-    const steps = visibleWizardSteps(isTransfer);
-    const idx = steps.indexOf(step);
-    if (idx >= 0 && idx < steps.length - 1) {
-      setStepMotion("forward");
-      setStep(steps[idx + 1]);
+    if (OPTIONAL_SIMPLE_STEPS.has(step)) {
+      returnToExtras();
+      return;
     }
-  }, [flowType, step, isTransfer, buildSpecialInput, flowStepId]);
+    advanceFromStep(step);
+  }, [flowType, step, buildSpecialInput, flowStepId, specialStepsFor, advanceFromStep, returnToExtras]);
 
   const goBack = useCallback(() => {
     setFormError(null);
     setFormErrorStep(null);
     if (flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") {
+      if (flowStepId === "comment") {
+        returnToExtras();
+        return;
+      }
       const special = buildSpecialInput();
       if (!special) return;
-      const steps = specialWizardSteps(special);
+      const steps = specialStepsFor(special);
       const idx = steps.indexOf(flowStepId);
       if (idx > 0) {
         setStepMotion("back");
@@ -596,10 +779,15 @@ export function MobileAddTransactionWizard({
         setStepMotion("forward");
         setFlowType(null);
         setFlowStepId("type");
+        setIncludedExtras(new Set());
       }
       return;
     }
     if (flowType !== "SIMPLE") return;
+    if (OPTIONAL_SIMPLE_STEPS.has(step)) {
+      returnToExtras();
+      return;
+    }
     const steps = visibleWizardSteps(isTransfer);
     const idx = steps.indexOf(step);
     if (idx > 0) {
@@ -609,8 +797,9 @@ export function MobileAddTransactionWizard({
       setStepMotion("forward");
       setFlowType(null);
       setStep(0);
+      setIncludedExtras(new Set());
     }
-  }, [flowType, step, isTransfer, buildSpecialInput, flowStepId]);
+  }, [flowType, step, isTransfer, buildSpecialInput, flowStepId, specialStepsFor, returnToExtras]);
 
   const canGoNext = useCallback(() => {
     if (flowType !== "SIMPLE") return true;
@@ -686,6 +875,7 @@ export function MobileAddTransactionWizard({
     10: "Разделение",
     [STEP_PREVIEW]: "Проверка",
     [STEP_ASSET_TO]: "Куда",
+    [STEP_EXTRAS]: "Дополнительно",
   };
 
   const handleSubmit = useCallback(async () => {
@@ -717,10 +907,15 @@ export function MobileAddTransactionWizard({
       return;
     }
     const transactionDate = buildTransactionDate(date, time);
-    let payloadAmount = cents;
-    let payloadAmountCounterparty: number | null = isTransfer ? (parseRubToCents(normalizeRubOnBlur(amountCounterpartyStr)) ?? null) : null;
-    if (isCrossCurrencyTransfer && payloadAmountCounterparty != null) {
-      payloadAmount = cents;
+    const payloadAmount = cents;
+    let payloadAmountCounterparty: number | null = null;
+    if (isCrossCurrencyTransfer) {
+      const counterCents = parseRubToCents(normalizeRubOnBlur(amountCounterpartyStr));
+      if (!Number.isFinite(counterCents) || counterCents <= 0) {
+        fail("Введите сумму поступления.", 5);
+        return;
+      }
+      payloadAmountCounterparty = counterCents;
     }
     const primaryLotsValue = primaryIsMoex ? (parseInt(primaryQuantityLots, 10) || 0) : null;
     const counterpartyLotsValue = counterpartyIsMoex ? (parseInt(counterpartyQuantityLots, 10) || 0) : null;
@@ -845,7 +1040,7 @@ export function MobileAddTransactionWizard({
     if (flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") {
       const special = buildSpecialInput();
       if (!special) return;
-      const steps = specialWizardSteps(special);
+      const steps = specialStepsFor(special);
       const idx = steps.indexOf(flowStepId);
       const last = idx >= 0 && idx === steps.length - 1;
       if (!last) {
@@ -892,7 +1087,7 @@ export function MobileAddTransactionWizard({
     } else {
       handleSubmit();
     }
-  }, [flowType, step, canGoNext, goNext, handleSubmit, isTransfer, counterpartyItemId, primaryItemId, buildSpecialInput, flowStepId, submitSpecial]);
+  }, [flowType, step, canGoNext, goNext, handleSubmit, isTransfer, counterpartyItemId, primaryItemId, buildSpecialInput, flowStepId, submitSpecial, specialStepsFor]);
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -934,24 +1129,18 @@ export function MobileAddTransactionWizard({
   const progressIds = flowType === "SIMPLE"
     ? visibleWizardSteps(isTransfer).map(String)
     : specialNow
-      ? specialWizardSteps(specialNow)
+      ? specialStepsFor(specialNow)
       : [];
-  const activeStepKey = flowType === "SIMPLE" ? String(step) : flowStepId;
-  const stepIndex = Math.max(0, progressIds.indexOf(activeStepKey));
-  const isLastStep = progressIds.length > 0 && activeStepKey === progressIds[progressIds.length - 1];
+  const progressStepKey = flowType === "SIMPLE"
+    ? String(OPTIONAL_SIMPLE_STEPS.has(step) ? STEP_EXTRAS : step)
+    : (flowStepId === "comment" ? "extras" : flowStepId);
+  const stepIndex = Math.max(0, progressIds.indexOf(progressStepKey));
+  const isLastStep = progressIds.length > 0 && progressStepKey === progressIds[progressIds.length - 1];
   const stepAnimClass = stepMotion === "back" ? "wizard-step-back" : "wizard-step-enter";
   const progressTitle = flowType === "SIMPLE"
     ? (step === 4 && isTransfer ? "Откуда" : (stepTitles[step] ?? ""))
     : (SPECIAL_STEP_TITLES[flowStepId] ?? "");
-  const optionalEmpty =
-    (flowType === "SIMPLE" && (
-      (step === 7 && counterpartyId == null) ||
-      (step === 8 && !comment.trim()) ||
-      (step === 9 && relatedItemId == null) ||
-      (step === 10 && !splitEnabled)
-    )) ||
-    (isSpecialFlow && flowStepId === "comment" && !comment.trim());
-  const nextLabel = isLastStep ? (submitting ? "Создание…" : "Добавить") : optionalEmpty ? "Пропустить" : "Далее";
+  const nextLabel = isLastStep ? (submitting ? "Создание…" : "Добавить") : "Далее";
 
   const wizardContent = (
     <div
@@ -1116,6 +1305,7 @@ export function MobileAddTransactionWizard({
 
         {(flowType === "LOAN_REPAYMENT" || flowType === "DEBTS") && (
           <MobileSpecialTransactionStep
+            key={flowStepId}
             stepId={flowStepId}
             animClass={stepAnimClass}
             error={formError}
@@ -1132,6 +1322,31 @@ export function MobileAddTransactionWizard({
               setDebtSettlementItemId(null);
               setDebtSettlementNewName("");
               setDebtSettlementMode("existing");
+              advanceSpecial("debtDirection", value);
+            }}
+            onAdvance={advanceSpecial}
+            commentIncluded={includeComment}
+            onIncludeComment={() => {
+              setIncludedExtras((prev) => {
+                const next = new Set(prev);
+                next.add("comment");
+                return next;
+              });
+              setFormError(null);
+              setStepMotion("forward");
+              setFlowStepId("comment");
+            }}
+            onClearComment={() => {
+              setIncludedExtras((prev) => {
+                const next = new Set(prev);
+                next.delete("comment");
+                return next;
+              });
+              setComment("");
+              if (flowStepId === "comment") {
+                setStepMotion("back");
+                setFlowStepId("extras");
+              }
             }}
             transactionType={formTransactionType}
             onTransactionType={setFormTransactionType}
@@ -1211,7 +1426,7 @@ export function MobileAddTransactionWizard({
                 value={formTransactionType}
                 onChange={(v) => {
                   setFormTransactionType(v as TransactionOut["transaction_type"]);
-
+                  advanceFromStep(1);
                 }}
               />
               </MobileTapScale>
@@ -1235,7 +1450,7 @@ export function MobileAddTransactionWizard({
                   setDirection(v as "INCOME" | "EXPENSE" | "TRANSFER");
                   setCounterpartyItemId(null);
                   applyCategorySelection("", "", "");
-
+                  advanceFromStep(2);
                 }}
               />
               </MobileTapScale>
@@ -1251,18 +1466,19 @@ export function MobileAddTransactionWizard({
             </p>
             <FormField label="" inlineLabel>
               <MobileTapScale className="block w-full">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="relative flex items-center min-h-[40px] shrink-0">
+              <div className="flex w-full items-stretch gap-2">
+                <div className="min-w-0" style={{ flex: "1.45 1 0%" }}>
                   <DateInput
+                    className="w-full"
                     value={date}
                     onChange={(next) => {
                       setDate(next);
-
                     }}
                   />
                 </div>
-                <div className="relative flex items-center min-h-[40px] shrink-0">
+                <div className="min-w-0" style={{ flex: "1 1 0%" }}>
                   <TimeInput
+                    className="w-full"
                     value={time}
                     onChange={setTime}
                   />
@@ -1288,16 +1504,22 @@ export function MobileAddTransactionWizard({
                 <FormField label="Откуда" inlineLabel>
                   <MobileTapScale className="block w-full">
                   <MobileSearchSelectOverlay
+                    autoOpen
                     value={primaryItemId != null ? itemsById.get(primaryItemId) ?? null : null}
                     options={primarySelectItems}
                     getOptionLabel={(item) => item.name}
                     getOptionKey={(item) => item.id}
                     onSelect={(item) => {
                       setPrimaryItemId(item.id);
-
+                      if (!isMoexItem(item) && !isCryptoItem(item)) advanceFromStep(4);
                     }}
-                    placeholder="Откуда"
-                    searchPlaceholder="Поиск актива"
+                    onClear={() => {
+                      setPrimaryItemId(null);
+                      setPrimaryQuantityLots("");
+                      setPrimaryQuantityUnitsStr("");
+                    }}
+                    placeholder="Откуда списать"
+                    searchPlaceholder="Откуда списать"
                     renderTriggerContent={(item) => (
                       <>
                         <AssetItemIcon item={item} counterparty={getItemCounterparty(item.id)} apiBase={API_BASE} size={20} />
@@ -1333,16 +1555,22 @@ export function MobileAddTransactionWizard({
               <FormField label="" inlineLabel>
                 <MobileTapScale className="block w-full">
                 <MobileSearchSelectOverlay
+                  autoOpen
                   value={primaryItemId != null ? itemsById.get(primaryItemId) ?? null : null}
                   options={primarySelectItems}
                   getOptionLabel={(item) => item.name}
                   getOptionKey={(item) => item.id}
                   onSelect={(item) => {
                     setPrimaryItemId(item.id);
-
+                    if (!isMoexItem(item) && !isCryptoItem(item)) advanceFromStep(4);
                   }}
-                  placeholder="Выберите"
-                  searchPlaceholder="Поиск актива"
+                  onClear={() => {
+                    setPrimaryItemId(null);
+                    setPrimaryQuantityLots("");
+                    setPrimaryQuantityUnitsStr("");
+                  }}
+                  placeholder="Актив"
+                  searchPlaceholder="Актив"
                   renderTriggerContent={(item) => (
                     <>
                       <AssetItemIcon item={item} counterparty={getItemCounterparty(item.id)} apiBase={API_BASE} size={20} />
@@ -1375,26 +1603,58 @@ export function MobileAddTransactionWizard({
               </FormField>
             )}
             {primaryIsMoex && (
-              <MobileTapScale className="block w-full">
-                <TextField
-                  label="Количество лотов"
-                  value={primaryQuantityLots}
-                  onChange={(e) => setPrimaryQuantityLots(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="Например: 10"
-                />
-              </MobileTapScale>
+              <WizardAutoFocus>
+                <MobileTapScale className="block w-full">
+                  <div className="relative">
+                    <TextField
+                      label="Количество лотов"
+                      value={primaryQuantityLots}
+                      onChange={(e) => setPrimaryQuantityLots(e.target.value)}
+                      inputMode="numeric"
+                      placeholder="Например: 10"
+                      className={primaryQuantityLots ? "pr-14" : undefined}
+                    />
+                    {primaryQuantityLots ? (
+                      <button
+                        type="button"
+                        aria-label="Очистить поле"
+                        onClick={() => setPrimaryQuantityLots("")}
+                        className="absolute bottom-0 right-2 z-10 flex h-10 w-11 items-center justify-center"
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                      >
+                        <X className="size-4" strokeWidth={1.5} />
+                      </button>
+                    ) : null}
+                  </div>
+                </MobileTapScale>
+              </WizardAutoFocus>
             )}
             {primaryIsCrypto && (
-              <MobileTapScale className="block w-full">
-                <TextField
-                  label="Количество (единиц)"
-                  value={primaryQuantityUnitsStr}
-                  onChange={(e) => setPrimaryQuantityUnitsStr(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="Например: 0.5"
-                />
-              </MobileTapScale>
+              <WizardAutoFocus>
+                <MobileTapScale className="block w-full">
+                  <div className="relative">
+                    <TextField
+                      label="Количество (единиц)"
+                      value={primaryQuantityUnitsStr}
+                      onChange={(e) => setPrimaryQuantityUnitsStr(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="Например: 0.5"
+                      className={primaryQuantityUnitsStr ? "pr-14" : undefined}
+                    />
+                    {primaryQuantityUnitsStr ? (
+                      <button
+                        type="button"
+                        aria-label="Очистить поле"
+                        onClick={() => setPrimaryQuantityUnitsStr("")}
+                        className="absolute bottom-0 right-2 z-10 flex h-10 w-11 items-center justify-center"
+                        style={{ color: PLACEHOLDER_COLOR_DARK }}
+                      >
+                        <X className="size-4" strokeWidth={1.5} />
+                      </button>
+                    ) : null}
+                  </div>
+                </MobileTapScale>
+              </WizardAutoFocus>
             )}
           </div>
             {formError && formErrorStep === 4 && (
@@ -1422,13 +1682,22 @@ export function MobileAddTransactionWizard({
               <FormField label="" inlineLabel>
                 <MobileTapScale className="block w-full">
                   <MobileSearchSelectOverlay
+                    autoOpen
                     value={counterpartyItemId != null ? itemsById.get(counterpartyItemId) ?? null : null}
                     options={counterpartySelectItems.filter((it) => it.id !== primaryItemId)}
                     getOptionLabel={(item) => item.name}
                     getOptionKey={(item) => item.id}
-                    onSelect={(item) => setCounterpartyItemId(item.id)}
-                    placeholder="Куда"
-                    searchPlaceholder="Поиск актива"
+                    onSelect={(item) => {
+                      setCounterpartyItemId(item.id);
+                      if (!isMoexItem(item) && !isCryptoItem(item)) advanceFromStep(STEP_ASSET_TO);
+                    }}
+                    onClear={() => {
+                      setCounterpartyItemId(null);
+                      setCounterpartyQuantityLots("");
+                      setCounterpartyQuantityUnitsStr("");
+                    }}
+                    placeholder="Куда зачислить"
+                    searchPlaceholder="Куда зачислить"
                     renderTriggerContent={(item) => (
                       <>
                         <AssetItemIcon item={item} counterparty={getItemCounterparty(item.id)} apiBase={API_BASE} size={20} />
@@ -1471,26 +1740,58 @@ export function MobileAddTransactionWizard({
                 Поменять местами
               </button>
               {counterpartyIsMoex && (
-                <MobileTapScale className="block w-full">
-                  <TextField
-                    label="Количество лотов"
-                    value={counterpartyQuantityLots}
-                    onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
-                    inputMode="numeric"
-                    placeholder="Например: 10"
-                  />
-                </MobileTapScale>
+                <WizardAutoFocus>
+                  <MobileTapScale className="block w-full">
+                    <div className="relative">
+                      <TextField
+                        label="Количество лотов"
+                        value={counterpartyQuantityLots}
+                        onChange={(e) => setCounterpartyQuantityLots(e.target.value)}
+                        inputMode="numeric"
+                        placeholder="Например: 10"
+                        className={counterpartyQuantityLots ? "pr-14" : undefined}
+                      />
+                      {counterpartyQuantityLots ? (
+                        <button
+                          type="button"
+                          aria-label="Очистить поле"
+                          onClick={() => setCounterpartyQuantityLots("")}
+                          className="absolute bottom-0 right-2 z-10 flex h-10 w-11 items-center justify-center"
+                          style={{ color: PLACEHOLDER_COLOR_DARK }}
+                        >
+                          <X className="size-4" strokeWidth={1.5} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </MobileTapScale>
+                </WizardAutoFocus>
               )}
               {counterpartyIsCrypto && (
-                <MobileTapScale className="block w-full">
-                  <TextField
-                    label="Количество (единиц)"
-                    value={counterpartyQuantityUnitsStr}
-                    onChange={(e) => setCounterpartyQuantityUnitsStr(e.target.value)}
-                    inputMode="decimal"
-                    placeholder="Например: 0.5"
-                  />
-                </MobileTapScale>
+                <WizardAutoFocus>
+                  <MobileTapScale className="block w-full">
+                    <div className="relative">
+                      <TextField
+                        label="Количество (единиц)"
+                        value={counterpartyQuantityUnitsStr}
+                        onChange={(e) => setCounterpartyQuantityUnitsStr(e.target.value)}
+                        inputMode="decimal"
+                        placeholder="Например: 0.5"
+                        className={counterpartyQuantityUnitsStr ? "pr-14" : undefined}
+                      />
+                      {counterpartyQuantityUnitsStr ? (
+                        <button
+                          type="button"
+                          aria-label="Очистить поле"
+                          onClick={() => setCounterpartyQuantityUnitsStr("")}
+                          className="absolute bottom-0 right-2 z-10 flex h-10 w-11 items-center justify-center"
+                          style={{ color: PLACEHOLDER_COLOR_DARK }}
+                        >
+                          <X className="size-4" strokeWidth={1.5} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </MobileTapScale>
+                </WizardAutoFocus>
               )}
             </div>
             {formError && formErrorStep === STEP_ASSET_TO && (
@@ -1513,6 +1814,7 @@ export function MobileAddTransactionWizard({
             <div className="grid gap-4">
               <FormField label="" inlineLabel>
                 <MobileTapScale className="block w-full">
+                <WizardAutoFocus>
                 <div className="relative [&_input]:!text-base">
                   <TextField
                     label=""
@@ -1543,6 +1845,7 @@ export function MobileAddTransactionWizard({
                     </button>
                   )}
                 </div>
+                </WizardAutoFocus>
                 </MobileTapScale>
               </FormField>
               {isCrossCurrencyTransfer && (
@@ -1606,19 +1909,21 @@ export function MobileAddTransactionWizard({
           <FormField label="" inlineLabel>
             <MobileTapScale className="block w-full">
             <MobileSearchSelectOverlay
+              autoOpen
               value={selectedCategoryOption}
               options={categoryOptionsForOverlay}
               getOptionLabel={(opt) => opt.label}
               getOptionKey={(opt) => opt.id}
               onSelect={(opt) => {
                 applyCategorySelection(opt.path[0], opt.path[1], opt.path[2]);
-
+                advanceFromStep(6);
               }}
+              onClear={() => applyCategorySelection("", "", "")}
               placeholder="Категория"
-              searchPlaceholder="Поиск категории"
+              searchPlaceholder="Категория"
               emptyMessage="Нет категорий"
               noResultsMessage="Ничего не найдено"
-                  renderTriggerContent={(opt) => (
+              renderTriggerContent={(opt) => (
                 <>
                   <CategoryIconImage
                     categoryId={opt.id}
@@ -1629,6 +1934,18 @@ export function MobileAddTransactionWizard({
                   />
                   <span className="break-words">{opt.path[2] || opt.path[1] || opt.path[0] || "—"}</span>
                 </>
+              )}
+              renderOption={(opt) => (
+                <span className="flex min-h-12 w-full items-center gap-3 px-3 py-3">
+                  <CategoryIconImage
+                    categoryId={opt.id}
+                    categoryLookup={categoryLookup}
+                    apiBase={API_BASE}
+                    size={32}
+                    fallbackIconColor={ACTIVE_TEXT_DARK}
+                  />
+                  <span className="min-w-0 flex-1 break-words text-base" style={{ color: ACTIVE_TEXT_DARK }}>{opt.label}</span>
+                </span>
               )}
             />
             </MobileTapScale>
@@ -1650,31 +1967,38 @@ export function MobileAddTransactionWizard({
 
         {flowType === "SIMPLE" && step === 7 && !isTransfer && (
           <div className={stepAnimClass}>
-            <p className="text-[22px] font-medium leading-snug mb-2 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
               <User className="h-5 w-5 shrink-0" strokeWidth={1.5} />
               Контрагент
             </p>
-            <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно пропустить</p>
           <FormField label="" inlineLabel>
             <MobileTapScale className="block w-full">
             <MobileSearchSelectOverlay
+              autoOpen
               value={counterpartyId != null ? counterpartiesById.get(counterpartyId) ?? null : null}
               options={selectableCounterparties}
               getOptionLabel={buildCounterpartyName}
               getOptionKey={(c) => c.id}
               onSelect={(c) => {
                 setCounterpartyId(c.id);
-
+                advanceFromStep(7);
               }}
+              onClear={() => setCounterpartyId(null)}
               placeholder="Контрагент"
-              searchPlaceholder="Поиск контрагента"
+              searchPlaceholder="Контрагент"
               emptyMessage="Нет контрагентов"
               noResultsMessage="Ничего не найдено"
               renderTriggerContent={(c) => (
                 <>
-                  <CounterpartyIconImage counterparty={c} apiBase={API_BASE} size={20} />
+                  <CounterpartyIconImage counterparty={c} apiBase={API_BASE} size={20} fallbackIconColor={ACTIVE_TEXT_DARK} />
                   <span className="truncate">{buildCounterpartyName(c)}</span>
                 </>
+              )}
+              renderOption={(c) => (
+                <span className="flex min-h-12 w-full items-center gap-3 px-3 py-3">
+                  <CounterpartyIconImage counterparty={c} apiBase={API_BASE} size={32} fallbackIconColor={ACTIVE_TEXT_DARK} />
+                  <span className="min-w-0 flex-1 truncate text-base" style={{ color: ACTIVE_TEXT_DARK }}>{buildCounterpartyName(c)}</span>
+                </span>
               )}
             />
             </MobileTapScale>
@@ -1684,13 +2008,13 @@ export function MobileAddTransactionWizard({
 
         {flowType === "SIMPLE" && step === 8 && (
           <div className={stepAnimClass}>
-            <p className="text-[22px] font-medium leading-snug mb-2 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
               <MessageSquare className="h-5 w-5 shrink-0" strokeWidth={1.5} />
               Комментарий
             </p>
-            <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно пропустить</p>
           <FormField label="" inlineLabel>
             <MobileTapScale className="block w-full">
+            <WizardAutoFocus>
             <div className="relative [&_div.relative.flex.items-center]:h-10 [&_input]:!text-base">
               <AuthInput
                 value={comment}
@@ -1714,6 +2038,7 @@ export function MobileAddTransactionWizard({
                 </button>
               )}
             </div>
+            </WizardAutoFocus>
             </MobileTapScale>
           </FormField>
           </div>
@@ -1721,25 +2046,28 @@ export function MobileAddTransactionWizard({
 
         {flowType === "SIMPLE" && step === 9 && !isTransfer && (
           <div className={stepAnimClass}>
-            <p className="text-[22px] font-medium leading-snug mb-2 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+            <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
               <Link2 className="h-5 w-5 shrink-0" strokeWidth={1.5} />
               Связанный актив
             </p>
-            <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно пропустить</p>
           <div className="grid gap-4">
             <FormField label="" inlineLabel>
               <MobileTapScale className="block w-full">
               <MobileSearchSelectOverlay
+                autoOpen
                 value={relatedItemId != null ? itemsById.get(relatedItemId) ?? null : null}
                 options={itemsForRelatedSelector}
                 getOptionLabel={(item) => item.name}
                 getOptionKey={(item) => item.id}
                 onSelect={(item) => {
                   setRelatedItemId(item.id);
-
                 }}
-                placeholder="Выберите"
-                searchPlaceholder="Поиск актива"
+                onClear={() => {
+                  setRelatedItemId(null);
+                  setAssetLinkType(null);
+                }}
+                placeholder="Связанный актив"
+                searchPlaceholder="Связанный актив"
                 renderTriggerContent={(item) => (
                   <>
                     <AssetItemIcon item={item} counterparty={getItemCounterparty(item.id)} apiBase={API_BASE} size={20} />
@@ -1790,7 +2118,7 @@ export function MobileAddTransactionWizard({
                     onChange={(v) => {
                       const next = (typeof v === "string" ? v : effectiveAssetLinkType) as AssetLinkType;
                       setAssetLinkType(next);
-
+                      advanceFromStep(9);
                     }}
                     colorScheme="purple"
                   />
@@ -1815,11 +2143,10 @@ export function MobileAddTransactionWizard({
               {formError}
             </div>
           )}
-          <p className="text-[22px] font-medium leading-snug mb-2 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
+          <p className="text-[22px] font-medium leading-snug mb-6 flex items-center gap-2" style={{ color: ACTIVE_TEXT_DARK }}>
             <SplitSquareVertical className="h-5 w-5 shrink-0" strokeWidth={1.5} />
-            Разделить транзакцию?
+            Как разделить?
           </p>
-          <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно оставить одной суммой</p>
           <div className="grid gap-4">
             <div className="flex w-full items-center justify-between gap-3 min-h-11">
               <span className="text-base" style={{ color: ACTIVE_TEXT_DARK }}>Разделить на несколько</span>
@@ -1947,10 +2274,27 @@ export function MobileAddTransactionWizard({
                                 next[idx] = { ...next[idx], categoryId: opt.id };
                                 setSplitParts(next);
                               }}
-                              placeholder="Категория"
-                              searchPlaceholder="Поиск категории"
+                              onClear={() => {
+                                const next = [...splitParts];
+                                next[idx] = { ...next[idx], categoryId: null };
+                                setSplitParts(next);
+                              }}
+                              placeholder="Категория части"
+                              searchPlaceholder="Категория части"
                               emptyMessage="Нет категорий"
                               noResultsMessage="Ничего не найдено"
+                              renderOption={(opt) => (
+                                <span className="flex min-h-12 w-full items-center gap-3 px-3 py-3">
+                                  <CategoryIconImage
+                                    categoryId={opt.id}
+                                    categoryLookup={categoryLookup}
+                                    apiBase={API_BASE}
+                                    size={32}
+                                    fallbackIconColor={ACTIVE_TEXT_DARK}
+                                  />
+                                  <span className="min-w-0 flex-1 break-words text-base" style={{ color: ACTIVE_TEXT_DARK }}>{opt.label}</span>
+                                </span>
+                              )}
                               renderTriggerContent={(opt) => (
                                 <>
                                   <CategoryIconImage
@@ -1988,6 +2332,68 @@ export function MobileAddTransactionWizard({
               );
             })()}
           </div>
+          </div>
+        )}
+
+        {flowType === "SIMPLE" && step === STEP_EXTRAS && (
+          <div className={stepAnimClass}>
+            <p className="text-[22px] font-medium leading-snug mb-2" style={{ color: ACTIVE_TEXT_DARK }}>
+              Что ещё добавить?
+            </p>
+            <p className="text-sm mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+              Необязательно — можно перейти дальше
+            </p>
+            <div className="grid gap-2">
+              {!isTransfer && (
+                <ExtraAction
+                  icon={<User className="size-5" strokeWidth={1.5} style={{ color: ACTIVE_TEXT_DARK }} />}
+                  addLabel="Добавить контрагента"
+                  title="Контрагент"
+                  included={includedExtras.has("counterparty")}
+                  valueText={(() => {
+                    const picked = counterpartyId != null ? counterpartiesById.get(counterpartyId) : undefined;
+                    return picked ? buildCounterpartyName(picked) : null;
+                  })()}
+                  onOpen={() => openExtra("counterparty")}
+                  onClear={() => clearExtra("counterparty")}
+                />
+              )}
+              <ExtraAction
+                icon={<MessageSquare className="size-5" strokeWidth={1.5} style={{ color: ACTIVE_TEXT_DARK }} />}
+                addLabel="Добавить комментарий"
+                title="Комментарий"
+                included={includedExtras.has("comment")}
+                valueText={comment.trim() || null}
+                onOpen={() => openExtra("comment")}
+                onClear={() => clearExtra("comment")}
+              />
+              {!isTransfer && (
+                <ExtraAction
+                  icon={<Link2 className="size-5" strokeWidth={1.5} style={{ color: ACTIVE_TEXT_DARK }} />}
+                  addLabel="Связать с активом"
+                  title="Связанный актив"
+                  included={includedExtras.has("related")}
+                  valueText={relatedItemId != null ? itemsById.get(relatedItemId)?.name ?? null : null}
+                  onOpen={() => openExtra("related")}
+                  onClear={() => clearExtra("related")}
+                />
+              )}
+              {!isTransfer && (
+                <ExtraAction
+                  icon={<SplitSquareVertical className="size-5" strokeWidth={1.5} style={{ color: ACTIVE_TEXT_DARK }} />}
+                  addLabel="Разделить транзакцию"
+                  title="Разделение"
+                  included={includedExtras.has("split")}
+                  valueText={
+                    splitEnabled
+                      ? `${splitParts.length} ${splitParts.length === 1 ? "часть" : splitParts.length >= 2 && splitParts.length <= 4 ? "части" : "частей"}`
+                      : null
+                  }
+                  onOpen={() => openExtra("split")}
+                  onClear={() => clearExtra("split")}
+                />
+              )}
+            </div>
           </div>
         )}
 

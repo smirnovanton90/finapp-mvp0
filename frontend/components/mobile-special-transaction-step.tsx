@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { Banknote, Calendar, Coins, Tag, User, Wallet } from "lucide-react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { Banknote, Calendar, Coins, MessageSquare, Tag, User, Wallet, X } from "lucide-react";
 import { AssetCard } from "@/components/asset-card";
 import { AssetItemIcon } from "@/components/asset-item-icon";
 import { CategoryIconImage } from "@/components/category-icon-image";
@@ -25,6 +25,22 @@ import type { CategoryLookup } from "@/lib/categories";
 import { cn } from "@/lib/utils";
 
 const QUESTION = "text-[22px] font-medium leading-snug mb-6 flex items-center gap-2";
+
+function WizardAutoFocus({ children, active = true }: { children: ReactNode; active?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setTimeout(() => {
+      const el = ref.current?.querySelector("input, textarea");
+      if (el instanceof HTMLElement) {
+        el.focus();
+        el.scrollIntoView({ block: "center" });
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [active]);
+  return <div ref={ref}>{children}</div>;
+}
 
 type CategoryOption = { id: number; path: [string, string, string]; label: string };
 
@@ -52,20 +68,24 @@ export type SpecialStepProps = {
   settlementItems: ItemOut[];
   primaryItemId: number | null;
   counterpartyItemId: number | null;
-  onPrimaryItem: (id: number) => void;
-  onCounterpartyItem: (id: number) => void;
+  onPrimaryItem: (id: number | null) => void;
+  onCounterpartyItem: (id: number | null) => void;
   counterparties: CounterpartyOut[];
   counterpartyId: number | null;
   debtPayForCounterpartyId: number | null;
   wherePaidCounterpartyId: number | null;
-  onCounterparty: (id: number) => void;
-  onPayFor: (id: number) => void;
-  onWherePaid: (id: number) => void;
+  onCounterparty: (id: number | null) => void;
+  onPayFor: (id: number | null) => void;
+  onWherePaid: (id: number | null) => void;
   counterpartyName: (cp: CounterpartyOut) => string;
   debtSettlementMode: "existing" | "new";
   onDebtSettlementMode: (value: "existing" | "new") => void;
   debtSettlementItemId: number | null;
-  onDebtSettlementItem: (id: number) => void;
+  onDebtSettlementItem: (id: number | null) => void;
+  onAdvance: (stepId: string) => void;
+  commentIncluded: boolean;
+  onIncludeComment: () => void;
+  onClearComment: () => void;
   debtSettlementNewName: string;
   onDebtSettlementNewName: (value: string) => void;
   loanTotalStr: string;
@@ -138,20 +158,33 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
     </div>
   );
 
-  const itemPicker = (valueId: number | null, options: ItemOut[], onSelect: (id: number) => void, placeholder: string, emptyMessage: string) => (
+  const itemPicker = (
+    valueId: number | null,
+    options: ItemOut[],
+    onSelect: (id: number | null) => void,
+    placeholder: string,
+    emptyMessage: string,
+    stepId: string,
+    searchPlaceholder: string,
+  ) => (
     <MobileTapScale className="block w-full">
       <MobileSearchSelectOverlay
+        autoOpen
         value={valueId != null ? props.itemsById.get(valueId) ?? null : null}
         options={options}
         getOptionLabel={(item) => item.name}
         getOptionKey={(item) => item.id}
-        onSelect={(item) => onSelect(item.id)}
+        onSelect={(item) => {
+          onSelect(item.id);
+          props.onAdvance(stepId);
+        }}
+        onClear={() => onSelect(null)}
         placeholder={placeholder}
-        searchPlaceholder="Поиск"
+        searchPlaceholder={searchPlaceholder}
         emptyMessage={emptyMessage}
         renderTriggerContent={(item) => (
           <>
-            <AssetItemIcon item={item} counterparty={props.getItemCounterparty(item.id)} apiBase={API_BASE} size={20} />
+            <AssetItemIcon item={item} counterparty={props.getItemCounterparty(item.id)} apiBase={API_BASE} size={20} fallbackIconColor={ACTIVE_TEXT_DARK} />
             <span className="truncate">{item.name}</span>
           </>
         )}
@@ -162,40 +195,73 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
 
   const personPicker = (
     valueId: number | null,
-    onSelect: (id: number) => void,
+    onSelect: (id: number | null) => void,
     placeholder: string,
+    stepId: string,
+    searchPlaceholder: string,
   ) => (
     <MobileTapScale className="block w-full">
       <MobileSearchSelectOverlay
+        autoOpen
         value={valueId != null ? props.counterparties.find((c) => c.id === valueId) ?? null : null}
         options={props.counterparties}
         getOptionLabel={props.counterpartyName}
         getOptionKey={(c) => c.id}
-        onSelect={(c) => onSelect(c.id)}
+        onSelect={(c) => {
+          onSelect(c.id);
+          props.onAdvance(stepId);
+        }}
+        onClear={() => onSelect(null)}
         placeholder={placeholder}
-        searchPlaceholder="Поиск контрагента"
+        searchPlaceholder={searchPlaceholder}
         emptyMessage="Нет контрагентов"
         noResultsMessage="Ничего не найдено"
         renderTriggerContent={(c) => (
           <>
-            <CounterpartyIconImage counterparty={c} apiBase={API_BASE} size={20} />
+            <CounterpartyIconImage counterparty={c} apiBase={API_BASE} size={20} fallbackIconColor={ACTIVE_TEXT_DARK} />
             <span className="truncate">{props.counterpartyName(c)}</span>
           </>
+        )}
+        renderOption={(c) => (
+          <span className="flex min-h-12 w-full items-center gap-3 px-3 py-3">
+            <CounterpartyIconImage counterparty={c} apiBase={API_BASE} size={32} fallbackIconColor={ACTIVE_TEXT_DARK} />
+            <span className="min-w-0 flex-1 truncate text-base" style={{ color: ACTIVE_TEXT_DARK }}>{props.counterpartyName(c)}</span>
+          </span>
         )}
       />
     </MobileTapScale>
   );
 
   const amountField = (value: string, onChange: (value: string) => void, currency: string | null, placeholder: string) => (
-    <TextField
-      label=""
-      currencyCode={currency ?? undefined}
-      value={value}
-      onChange={(e) => onChange(formatRubInput(e.target.value))}
-      onBlur={() => onChange(normalizeRubOnBlur(value))}
-      inputMode="decimal"
-      placeholder={placeholder}
-    />
+    <WizardAutoFocus>
+      <div className="relative [&_input]:!text-base">
+        <TextField
+          label=""
+          currencyCode={currency ?? undefined}
+          value={value}
+          onChange={(e) => onChange(formatRubInput(e.target.value))}
+          onBlur={() => onChange(normalizeRubOnBlur(value))}
+          inputMode="decimal"
+          placeholder={placeholder}
+          className={value ? "pr-14" : undefined}
+        />
+        {value ? (
+          <button
+            type="button"
+            aria-label="Очистить поле"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onChange("");
+            }}
+            className="absolute right-2 top-1/2 z-10 flex size-11 -translate-y-1/2 items-center justify-center rounded-md"
+            style={{ color: PLACEHOLDER_COLOR_DARK }}
+          >
+            <X className="size-4" strokeWidth={1.5} />
+          </button>
+        ) : null}
+      </div>
+    </WizardAutoFocus>
   );
 
   let body: ReactNode = null;
@@ -210,7 +276,10 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
             { value: "PLANNED", label: "Плановая", colorScheme: "orange" },
           ]}
           value={props.transactionType}
-          onChange={(v) => props.onTransactionType(v as TransactionOut["transaction_type"])}
+          onChange={(v) => {
+            props.onTransactionType(v as TransactionOut["transaction_type"]);
+            props.onAdvance("type");
+          }}
         />
       </>
     );
@@ -243,9 +312,13 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
     body = (
       <>
         <Question icon={<Calendar className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>Выберите дату и время</Question>
-        <div className="flex items-center gap-2 flex-wrap">
-          <DateInput value={props.date} onChange={props.onDate} />
-          <TimeInput value={props.time} onChange={props.onTime} />
+        <div className="flex w-full items-stretch gap-2">
+          <div className="min-w-0" style={{ flex: "1.45 1 0%" }}>
+            <DateInput className="w-full" value={props.date} onChange={props.onDate} />
+          </div>
+          <div className="min-w-0" style={{ flex: "1 1 0%" }}>
+            <TimeInput className="w-full" value={props.time} onChange={props.onTime} />
+          </div>
         </div>
         <div className="mt-4">
           <FormField label="Часовой пояс">
@@ -260,14 +333,22 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
         <Question icon={<Wallet className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>
           {props.flow === "LOAN_REPAYMENT" ? "С какого актива платите?" : "Откуда заплатили?"}
         </Question>
-        {itemPicker(props.primaryItemId, props.flow === "LOAN_REPAYMENT" ? props.assetItems : props.items, props.onPrimaryItem, "Выберите", "Нет активов")}
+        {itemPicker(
+          props.primaryItemId,
+          props.flow === "LOAN_REPAYMENT" ? props.assetItems : props.items,
+          props.onPrimaryItem,
+          props.flow === "LOAN_REPAYMENT" ? "Откуда платите" : "Откуда заплатили",
+          "Нет активов",
+          "payFrom",
+          props.flow === "LOAN_REPAYMENT" ? "Откуда платите" : "Откуда заплатили",
+        )}
       </>
     );
   } else if (stepId === "payTo") {
     body = (
       <>
         <Question icon={<Wallet className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>Куда заплатили?</Question>
-        {itemPicker(props.primaryItemId, props.items, props.onPrimaryItem, "Выберите", "Нет активов")}
+        {itemPicker(props.primaryItemId, props.items, props.onPrimaryItem, "Куда заплатили", "Нет активов", "payTo", "Куда заплатили")}
       </>
     );
   } else if (stepId === "liability") {
@@ -280,6 +361,8 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
           props.onCounterpartyItem,
           "Обязательство",
           "Нет обязательств",
+          "liability",
+          "Обязательство",
         )}
       </>
     );
@@ -310,13 +393,18 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
         <Question icon={<Tag className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>Какая категория?</Question>
         <MobileTapScale className="block w-full">
           <MobileSearchSelectOverlay
+            autoOpen
             value={props.selectedCategory}
             options={props.categoryOptions}
             getOptionLabel={(opt) => opt.label}
             getOptionKey={(opt) => opt.id}
-            onSelect={(opt) => props.onCategory(opt.path)}
+            onSelect={(opt) => {
+              props.onCategory(opt.path);
+              props.onAdvance("category");
+            }}
+            onClear={() => props.onCategory(["", "", ""])}
             placeholder="Категория"
-            searchPlaceholder="Поиск категории"
+            searchPlaceholder="Категория"
             emptyMessage="Нет категорий"
             noResultsMessage="Ничего не найдено"
             renderTriggerContent={(opt) => (
@@ -325,30 +413,37 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
                 <span className="break-words">{opt.path[2] || opt.path[1] || opt.path[0] || "—"}</span>
               </>
             )}
+            renderOption={(opt) => (
+              <span className="flex min-h-12 w-full items-center gap-3 px-3 py-3">
+                <CategoryIconImage categoryId={opt.id} categoryLookup={props.categoryLookup} apiBase={API_BASE} size={32} fallbackIconColor={ACTIVE_TEXT_DARK} />
+                <span className="min-w-0 flex-1 break-words text-base" style={{ color: ACTIVE_TEXT_DARK }}>{opt.label}</span>
+              </span>
+            )}
           />
         </MobileTapScale>
       </>
     );
   } else if (stepId === "counterparty" || stepId === "wherePay" || stepId === "whoPaid") {
     const title = stepId === "wherePay" ? "Где платите?" : stepId === "whoPaid" || props.debtDirection === "THEY_PAID" ? "Кто платит?" : "Кому платите?";
+    const fieldLabel = stepId === "wherePay" ? "Где платите" : stepId === "whoPaid" || props.debtDirection === "THEY_PAID" ? "Кто платит" : "Кому платите";
     body = (
       <>
         <Question icon={<User className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>{title}</Question>
-        {personPicker(props.counterpartyId, props.onCounterparty, "Контрагент")}
+        {personPicker(props.counterpartyId, props.onCounterparty, fieldLabel, stepId, fieldLabel)}
       </>
     );
   } else if (stepId === "payFor") {
     body = (
       <>
         <Question icon={<User className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>За кого платите?</Question>
-        {personPicker(props.debtPayForCounterpartyId, props.onPayFor, "Контрагент")}
+        {personPicker(props.debtPayForCounterpartyId, props.onPayFor, "За кого платите", "payFor", "За кого платите")}
       </>
     );
   } else if (stepId === "wherePaid") {
     body = (
       <>
         <Question icon={<User className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>Где платит?</Question>
-        {personPicker(props.wherePaidCounterpartyId, props.onWherePaid, "Контрагент")}
+        {personPicker(props.wherePaidCounterpartyId, props.onWherePaid, "Где платит", "wherePaid", "Где платит")}
       </>
     );
   } else if (stepId === "debtMode") {
@@ -361,7 +456,10 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
             { value: "new", label: "Новый", colorScheme: "green" },
           ]}
           value={props.debtSettlementMode}
-          onChange={(v) => props.onDebtSettlementMode(v as "existing" | "new")}
+          onChange={(v) => {
+            props.onDebtSettlementMode(v as "existing" | "new");
+            props.onAdvance("debtMode");
+          }}
         />
       </>
     );
@@ -369,12 +467,33 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
     body = props.debtSettlementMode === "new" ? (
       <>
         <Question>Как назвать долг?</Question>
-        <TextField label="" value={props.debtSettlementNewName} onChange={(e) => props.onDebtSettlementNewName(e.target.value)} placeholder="Например: Займ на ремонт" />
+        <WizardAutoFocus>
+          <div className="relative">
+            <TextField
+              label=""
+              value={props.debtSettlementNewName}
+              onChange={(e) => props.onDebtSettlementNewName(e.target.value)}
+              placeholder="Например: Займ на ремонт"
+              className={props.debtSettlementNewName ? "pr-14" : undefined}
+            />
+            {props.debtSettlementNewName ? (
+              <button
+                type="button"
+                aria-label="Очистить поле"
+                onClick={() => props.onDebtSettlementNewName("")}
+                className="absolute right-2 top-1/2 z-10 flex size-11 -translate-y-1/2 items-center justify-center"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+              >
+                <X className="size-4" strokeWidth={1.5} />
+              </button>
+            ) : null}
+          </div>
+        </WizardAutoFocus>
       </>
     ) : (
       <>
         <Question icon={<Coins className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>Какой долг?</Question>
-        {itemPicker(props.debtSettlementItemId, props.settlementItems, props.onDebtSettlementItem, "Выберите долг", "Нет долгов с этим контрагентом")}
+        {itemPicker(props.debtSettlementItemId, props.settlementItems, props.onDebtSettlementItem, "Долг", "Нет долгов с этим контрагентом", "debtPick", "Долг")}
       </>
     );
   } else if (stepId === "amount" || stepId === "fullAmount") {
@@ -404,7 +523,7 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
     body = (
       <>
         <Question icon={<Wallet className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>С какого долга зачитываете?</Question>
-        {itemPicker(props.primaryItemId, props.settlementAssetItems, props.onPrimaryItem, "Откуда", "Нет долгов, где вам должны")}
+        {itemPicker(props.primaryItemId, props.settlementAssetItems, props.onPrimaryItem, "Откуда зачитываете", "Нет долгов, где вам должны", "offsetFrom", "Откуда зачитываете")}
       </>
     );
   } else if (stepId === "offsetTo") {
@@ -415,8 +534,10 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
           props.counterpartyItemId,
           props.settlementLiabilityItems.filter((it) => it.id !== props.primaryItemId),
           props.onCounterpartyItem,
-          "Куда",
+          "Куда зачитываете",
           "Нет долгов, где должны вы",
+          "offsetTo",
+          "Куда зачитываете",
         )}
       </>
     );
@@ -427,12 +548,68 @@ export function MobileSpecialTransactionStep(props: SpecialStepProps) {
         {amountField(props.amountCounterpartyStr, props.onAmountCounterparty, props.counterpartyCurrency, "Сумма")}
       </>
     );
+  } else if (stepId === "extras") {
+    body = (
+      <>
+        <Question>Что ещё добавить?</Question>
+        <p className="text-sm -mt-4 mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Необязательно — можно перейти дальше</p>
+        <div className="flex w-full items-stretch overflow-hidden rounded-lg" style={{ backgroundColor: MODAL_BG }}>
+          <button
+            type="button"
+            onClick={props.onIncludeComment}
+            className="flex min-h-14 flex-1 items-center gap-3 px-4 py-3 text-left active:opacity-80"
+          >
+            <MessageSquare className="size-5 shrink-0" strokeWidth={1.5} style={{ color: ACTIVE_TEXT_DARK }} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-base" style={{ color: ACTIVE_TEXT_DARK }}>
+                {props.commentIncluded ? "Комментарий" : "Добавить комментарий"}
+              </span>
+              {props.commentIncluded ? (
+                <span className="mt-0.5 block truncate text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
+                  {props.comment.trim() || "Не заполнено"}
+                </span>
+              ) : null}
+            </span>
+          </button>
+          {props.commentIncluded ? (
+            <button
+              type="button"
+              aria-label="Очистить комментарий"
+              onClick={props.onClearComment}
+              className="flex w-12 shrink-0 items-center justify-center active:opacity-70"
+              style={{ color: PLACEHOLDER_COLOR_DARK }}
+            >
+              <X className="size-4" strokeWidth={1.5} />
+            </button>
+          ) : null}
+        </div>
+      </>
+    );
   } else if (stepId === "comment") {
     body = (
       <>
-        <Question>Комментарий</Question>
-        <p className="text-sm -mt-4 mb-6" style={{ color: PLACEHOLDER_COLOR_DARK }}>Можно пропустить</p>
-        <AuthInput value={props.comment} onChange={(e) => props.onComment(e.target.value)} placeholder="Комментарий" className="w-full text-base" />
+        <Question icon={<MessageSquare className="h-5 w-5 shrink-0" strokeWidth={1.5} />}>Комментарий</Question>
+        <WizardAutoFocus>
+          <div className="relative">
+            <AuthInput
+              value={props.comment}
+              onChange={(e) => props.onComment(e.target.value)}
+              placeholder="Комментарий"
+              className={cn("w-full text-base", props.comment ? "pr-14" : undefined)}
+            />
+            {props.comment ? (
+              <button
+                type="button"
+                aria-label="Очистить поле"
+                onClick={() => props.onComment("")}
+                className="absolute right-2 top-1/2 z-10 flex size-11 -translate-y-1/2 items-center justify-center"
+                style={{ color: PLACEHOLDER_COLOR_DARK }}
+              >
+                <X className="size-4" strokeWidth={1.5} />
+              </button>
+            ) : null}
+          </div>
+        </WizardAutoFocus>
       </>
     );
   } else if (stepId === "preview") {

@@ -168,6 +168,8 @@ function DateInput({ value, onChange, onBlur, disabled, className }: DateInputPr
     event.currentTarget.select();
   };
 
+  const fill = className?.includes("w-full") ?? false;
+
   return (
     <div
       ref={shellRef}
@@ -177,11 +179,11 @@ function DateInput({ value, onChange, onBlur, disabled, className }: DateInputPr
       onBlur={handleShellBlur}
     >
       <div
-        className="relative rounded-lg transition-all duration-200 box-border"
+        className={cn("relative rounded-lg transition-all duration-200 box-border", fill && "w-full")}
         style={{ backgroundColor, borderRadius: "8px", boxShadow }}
       >
         <div
-          className="relative flex h-10 min-h-[40px] items-center gap-0 rounded-lg px-2"
+          className={cn("relative flex h-10 min-h-[40px] items-center gap-0 rounded-lg px-2", fill && "w-full")}
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget) return;
             event.preventDefault();
@@ -280,7 +282,7 @@ function DateInput({ value, onChange, onBlur, disabled, className }: DateInputPr
             type="button"
             aria-label="Открыть календарь"
             disabled={disabled}
-            className="ml-1.5 flex size-5 shrink-0 items-center justify-center"
+            className={cn("flex size-5 shrink-0 items-center justify-center", fill ? "ml-auto" : "ml-1.5")}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               const picker = pickerRef.current;

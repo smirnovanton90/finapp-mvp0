@@ -110,6 +110,8 @@ function TimeInput({ value, onChange, onBlur, disabled, className }: TimeInputPr
     ["--auth-placeholder-color" as string]: placeholder,
   });
 
+  const fill = className?.includes("w-full") ?? false;
+
   return (
     <div
       ref={shellRef}
@@ -119,11 +121,14 @@ function TimeInput({ value, onChange, onBlur, disabled, className }: TimeInputPr
       onBlur={handleShellBlur}
     >
       <div
-        className="relative rounded-lg transition-all duration-200 box-border"
+        className={cn("relative rounded-lg transition-all duration-200 box-border", fill && "w-full")}
         style={{ backgroundColor, borderRadius: "8px", boxShadow }}
       >
         <div
-          className="relative flex h-10 min-h-[40px] items-center gap-0 rounded-lg px-2"
+          className={cn(
+            "relative flex h-10 min-h-[40px] items-center gap-0 rounded-lg px-2",
+            fill && "w-full justify-center",
+          )}
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget) return;
             event.preventDefault();

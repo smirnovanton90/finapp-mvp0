@@ -29,6 +29,7 @@ import {
   todayDateKey,
   transactionDateKey,
   timezoneOptions,
+  zonedWallTimeToUtc,
 } from "@/lib/timezone";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar-context";
@@ -397,19 +398,17 @@ function buildTransactionDate(dateKey: string, timeHHmm: string): string {
   return `${dateKey}T${t}:00`;
 }
 
-/** Локальная метка времени для сортировки КТ и транзакций внутри дня (новее — выше). */
-function toSortableLocalDateTime(value: string | null | undefined): string {
+/**
+ * Ключ сортировки по абсолютному моменту. Новее — больше, чтобы localeCompare по убыванию
+ * ставил их выше. Цифры транзакции читаются в её поясе, а не как местные часы браузера.
+ */
+function absoluteSortKey(value: string | null | undefined, txTimezone?: string | null): string {
   if (!value) return "";
   const raw = value.trim();
-  const d =
-    raw.length <= 10
-      ? new Date(`${raw.slice(0, 10)}T00:00:00`)
-      : new Date(raw);
-  if (Number.isNaN(d.getTime())) {
-    return `${raw.slice(0, 10)}T00:00:00`;
-  }
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const instant = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw)
+    ? new Date(raw)
+    : zonedWallTimeToUtc(raw, txTimezone);
+  return Number.isNaN(instant.getTime()) ? "" : instant.toISOString();
 }
 
 /** Для разделителей между днями: текущий год — "8 марта", иначе "10 октября 2027". */
@@ -5073,25 +5072,25 @@ function TransactionsView({
 
   const sortedTxs = useMemo(() => {
     const list = [...filteredTxs];
-    const familyDateByParentId = new Map<number, string>();
+    const familyInstantByParentId = new Map<number, string>();
     for (const t of list) {
       if (t.is_split_parent) {
-        familyDateByParentId.set(t.id, t.transaction_date ?? "");
+        familyInstantByParentId.set(t.id, absoluteSortKey(t.transaction_date, t.timezone));
       }
     }
-    const getFamilyDate = (tx: TransactionCard) => {
+    const getFamilyInstant = (tx: TransactionCard) => {
       if (tx.parent_transaction_id != null) {
-        return familyDateByParentId.get(tx.parent_transaction_id) ?? tx.transaction_date ?? "";
+        return familyInstantByParentId.get(tx.parent_transaction_id) ?? absoluteSortKey(tx.transaction_date, tx.timezone);
       }
-      return tx.transaction_date ?? "";
+      return absoluteSortKey(tx.transaction_date, tx.timezone);
     };
     list.sort((a, b) => {
       const dateA = getDateKey(a.transaction_date, a.timezone);
       const dateB = getDateKey(b.transaction_date, b.timezone);
       if (dateB !== dateA) return dateB.localeCompare(dateA);
-      const familyDateA = getFamilyDate(a);
-      const familyDateB = getFamilyDate(b);
-      if (familyDateB !== familyDateA) return familyDateB.localeCompare(familyDateA);
+      const familyInstantA = getFamilyInstant(a);
+      const familyInstantB = getFamilyInstant(b);
+      if (familyInstantB !== familyInstantA) return familyInstantB.localeCompare(familyInstantA);
       const groupA = a.parent_transaction_id ?? a.id;
       const groupB = b.parent_transaction_id ?? b.id;
       if (groupA !== groupB) return groupA - groupB;
@@ -5196,7 +5195,7 @@ function TransactionsView({
       }
       for (const [, cps] of byTime) {
         const first = cps[0]!;
-        const sortKey = toSortableLocalDateTime(first.checkpoint_at);
+        const sortKey = absoluteSortKey(first.checkpoint_at);
         pending.push({
           kind: "checkpoint_line",
           sortKey,
@@ -5213,7 +5212,7 @@ function TransactionsView({
         if (tx.is_split_parent) {
           const splitChildren = txsOnDate.filter((t) => t.parent_transaction_id === tx.id);
           splitChildren.forEach((c) => skipTxIds.add(c.id));
-          const sortKey = toSortableLocalDateTime(tx.transaction_date ?? "");
+          const sortKey = absoluteSortKey(tx.transaction_date, tx.timezone);
           const tie = `sg:${tx.id}`;
           if (splitChildren.length > 0) {
             pending.push({
@@ -5234,7 +5233,7 @@ function TransactionsView({
         } else {
           pending.push({
             kind: "transaction",
-            sortKey: toSortableLocalDateTime(tx.transaction_date ?? ""),
+            sortKey: absoluteSortKey(tx.transaction_date, tx.timezone),
             tie: `tx:${tx.id}`,
             tx,
           });

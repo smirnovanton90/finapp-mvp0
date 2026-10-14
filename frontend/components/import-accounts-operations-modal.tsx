@@ -41,9 +41,13 @@ import { parseCoinKeeperCSVFile } from "@/lib/coinkeeper-csv-parser";
 import {
   parseTBankXlsxFile,
   parseSberPdfFile,
-  parseAlfaPdfFile,
+  parseAlfaXlsxFile,
   parseOzonPdfFile,
 } from "@/lib/import";
+import {
+  hasStatementTransferCandidates,
+  resolveStatementTransfers,
+} from "@/lib/import/statement-transfers";
 import { formatImportFileParseError } from "@/lib/import/import-parse-error-message";
 import { parseExportCsv } from "@/lib/data-export-import";
 import { parsedExportToDzenParsedData } from "@/lib/prostofin-to-dzen";
@@ -128,7 +132,13 @@ type ServiceImportSourceKey =
 /** Контент шага 1 по источнику импорта */
 const STEP1_CONTENT: Record<
   ServiceImportSourceKey,
-  { title: string; description: string; instructionLabel: string }
+  {
+    title: string;
+    description: string;
+    instructionLabel: string;
+    /** Шаги выгрузки выписки, показываются над полем выбора файла */
+    downloadSteps?: string[];
+  }
 > = {
   dzen: {
     title: "Дзен-мани",
@@ -160,8 +170,14 @@ const STEP1_CONTENT: Record<
   },
   alfa: {
     title: "Альфа-Банк",
-    description: "Загрузите выписку по счёту или карте в формате .pdf",
+    description: "Загрузите выписку по счёту в формате .xlsx",
     instructionLabel: "",
+    downloadSteps: [
+      "Откройте мобильное приложение Альфа-Банка или его веб-версию.",
+      "Перейдите в раздел «История».",
+      "Нажмите кнопку «Скачать» в правом верхнем углу экрана.",
+      "Выберите формат XLSX и сохраните файл.",
+    ],
   },
   ozon: {
     title: "Озон Банк",
@@ -344,9 +360,9 @@ export function ImportAccountsOperationsModal({
   const acceptedTypes =
     importSource === "own"
       ? ".csv,.xlsx,.xls"
-      : importSource === "tbank"
+      : importSource === "tbank" || importSource === "alfa"
         ? ".xlsx"
-        : importSource === "sber" || importSource === "alfa" || importSource === "ozon"
+        : importSource === "sber" || importSource === "ozon"
           ? ".pdf"
           : importSource === "file"
             ? ".csv"
@@ -422,11 +438,19 @@ export function ImportAccountsOperationsModal({
           : importSource === "sber"
             ? parseSberPdfFile
             : importSource === "alfa"
-              ? parseAlfaPdfFile
+              ? parseAlfaXlsxFile
               : importSource === "ozon"
                 ? parseOzonPdfFile
                 : parseDzenCSVFile;
     parseFile(selectedFile)
+      .then(async (data) => {
+        if (!hasStatementTransferCandidates(data)) return data;
+        try {
+          return resolveStatementTransfers(data, await fetchItems());
+        } catch {
+          return data;
+        }
+      })
       .then((data) => {
         if (!cancelled) setParsedData(normalizeParsedDataUndefinedCategory(data));
       })
@@ -1648,16 +1672,42 @@ export function ImportAccountsOperationsModal({
                       )
                     : step1Content.description}
                 </p>
-                <button
-                  type="button"
-                  className="text-left font-normal underline hover:no-underline focus:outline-none focus:underline w-fit"
-                  style={{ color: ACCENT }}
-                  onClick={() => {
-                    // Заглушка: инструкции пока не открываются
-                  }}
-                >
-                  {step1Content.instructionLabel}
-                </button>
+                {step1Content.downloadSteps && (
+                  <div
+                    className="p-4"
+                    style={{
+                      backgroundColor: BACKGROUND_DT,
+                      borderRadius: 9,
+                    }}
+                  >
+                    <p
+                      className="text-base mb-2 font-medium"
+                      style={{ color: ACTIVE_TEXT_DARK }}
+                    >
+                      Как скачать выписку
+                    </p>
+                    <ol
+                      className="list-decimal pl-5 flex flex-col gap-1 text-base"
+                      style={{ color: ACTIVE_TEXT_DARK, lineHeight: 1.4 }}
+                    >
+                      {step1Content.downloadSteps.map((stepText) => (
+                        <li key={stepText}>{stepText}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                {step1Content.instructionLabel && (
+                  <button
+                    type="button"
+                    className="text-left font-normal underline hover:no-underline focus:outline-none focus:underline w-fit"
+                    style={{ color: ACCENT }}
+                    onClick={() => {
+                      // Заглушка: инструкции пока не открываются
+                    }}
+                  >
+                    {step1Content.instructionLabel}
+                  </button>
+                )}
                 <div className="flex flex-col gap-2">
                   <div
                     role="button"

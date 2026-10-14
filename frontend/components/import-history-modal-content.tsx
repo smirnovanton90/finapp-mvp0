@@ -152,7 +152,7 @@ type SourceCard = {
 const BANKS: SourceCard[] = [
   { key: "tbank", title: "Т-Банк", description: "Выписка в формате .xlsx" },
   { key: "sber", title: "Сбер", description: "Выписка в формате .pdf" },
-  { key: "alfa", title: "Альфа-Банк", description: "Выписка в формате .pdf" },
+  { key: "alfa", title: "Альфа-Банк", description: "Выписка в формате .xlsx" },
   { key: "ozon", title: "Озон Банк", description: "Выписка в формате .pdf" },
 ];
 

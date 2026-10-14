@@ -23,9 +23,10 @@ function norm(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase();
 }
 
-/** Категория выписки считается «переводной» по подстроке «перевод» (без учёта регистра). */
+/** Категория выписки считается «переводной» по подстроке «перевод» или «между своими счетами» (без учёта регистра). */
 export function isTransferCategoryName(name: string | null | undefined): boolean {
-  return norm(name).includes("перевод");
+  const n = norm(name).replace(/ё/g, "е");
+  return n.includes("перевод") || n.includes("между своими счетами");
 }
 
 /** Полное или частичное совпадение: равны или одна строка содержит другую. */

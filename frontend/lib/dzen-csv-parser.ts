@@ -39,6 +39,11 @@ export type DzenParsedTransaction = {
   type: DzenTransactionType;
   /** Сумма операции в копейках (целое число) */
   amount: number;
+  /**
+   * Номер второго счёта перевода из описания банковской выписки («Со счёта … на счёт …»).
+   * Доход/расход становится переводом, только если у пользователя есть такой актив (см. resolveStatementTransfers).
+   */
+  counterAccountName?: string;
 };
 
 /** Нормализует время до HH:mm:ss для сортировки и API */

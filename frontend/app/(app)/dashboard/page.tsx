@@ -54,6 +54,8 @@ import {
   fetchFxRatesBatch,
   fetchItems,
   fetchDashboardTransactions,
+  fetchDashboardCashflow,
+  type DashboardCashflowOut,
   fetchUserMe,
   fetchUserPhotoAsBlob,
   FxRateOut,
@@ -69,7 +71,7 @@ import { ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { minorToRubCents } from "@/lib/amount-rub";
 import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { getGoalProgressColor } from "@/lib/goal-progress-color";
-import { ACCENT, ACCENT_FILL_LIGHT, GREEN, GREEN_FILL, MODAL_BG, ORANGE, RED } from "@/lib/colors";
+import { ACCENT, ACCENT_FILL_LIGHT, GREEN, GREEN_FILL, MODAL_BG, ORANGE, ORANGE_FILL, RED, RED_FILL } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 import {
   CASHFLOW_BUCKET_ORDER,
@@ -164,23 +166,10 @@ function MobileCardPress({
   );
 }
 
-function MobileSolidTag({
-  children,
-  color,
-  height = 24,
-}: {
-  children: React.ReactNode;
-  color: string;
-  height?: number;
-}) {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center rounded-[4px] px-2 text-[11px] font-medium leading-none text-[#191732]"
-      style={{ backgroundColor: color, height }}
-    >
-      {children}
-    </span>
-  );
+function goalTrackColor(color: string) {
+  if (color === RED) return RED_FILL;
+  if (color === ORANGE) return ORANGE_FILL;
+  return GREEN_FILL;
 }
 
 function MobileNumberSkeleton({ className }: { className?: string }) {
@@ -753,6 +742,73 @@ type CategoryBreakdown = {
   rows: CategoryBreakdownRow[];
 };
 
+function collapseCategoryRows(
+  rows: CategoryBreakdownRow[],
+  limit: number
+): CategoryBreakdown {
+  const sorted = rows
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const total = sorted.reduce((sum, row) => sum + row.value, 0);
+  if (total <= 0) return { total: 0, rows: [] };
+  const baseCount = Math.min(limit, sorted.length);
+  let visibleCount = baseCount;
+  let visibleSum = sorted.slice(0, visibleCount).reduce((sum, row) => sum + row.value, 0);
+  let otherValue = Math.max(total - visibleSum, 0);
+  const maxOtherValue = total * OTHER_SHARE_MAX;
+  while (visibleCount < sorted.length && otherValue > maxOtherValue) {
+    visibleSum += sorted[visibleCount].value;
+    visibleCount += 1;
+    otherValue = Math.max(total - visibleSum, 0);
+  }
+  const head = sorted.slice(0, visibleCount);
+  if (otherValue > 0) head.push({ label: OTHER_LABEL, value: otherValue });
+  return { total, rows: head };
+}
+
+function categoryRows(
+  direction: DashboardCashflowOut["income"] | null | undefined
+): CategoryBreakdownRow[] {
+  return (direction?.categories ?? []).map((category) => ({
+    label: category.name,
+    value: category.rub_cents,
+  }));
+}
+
+function categoryTotalMap(
+  direction: DashboardCashflowOut["income"] | null | undefined
+) {
+  const map = new Map<string, number>();
+  direction?.categories.forEach((category) => {
+    map.set(category.name, category.rub_cents);
+  });
+  return map;
+}
+
+function categoryMonthMap(
+  direction: DashboardCashflowOut["income"] | null | undefined,
+  monthKey: string
+) {
+  const map = new Map<string, number>();
+  direction?.categories.forEach((category) => {
+    const month = category.months.find((row) => row.month === monthKey);
+    if (month) map.set(category.name, month.rub_cents);
+  });
+  return map;
+}
+
+function categoryMonthlyMap(
+  direction: DashboardCashflowOut["income"] | null | undefined
+) {
+  const map = new Map<string, Map<string, number>>();
+  direction?.categories.forEach((category) => {
+    const months = new Map<string, number>();
+    category.months.forEach((row) => months.set(row.month, row.rub_cents));
+    map.set(category.name, months);
+  });
+  return map;
+}
+
 type CategorySegment = CategoryBreakdownRow & {
   percent: number;
   color: string;
@@ -1097,6 +1153,10 @@ export default function DashboardPage() {
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [txsLoaded, setTxsLoaded] = useState(false);
   const [txWindowStartKey, setTxWindowStartKey] = useState<string | null>(null);
+  const [periodCashflow, setPeriodCashflow] = useState<DashboardCashflowOut | null>(null);
+  const [comparisonCashflow, setComparisonCashflow] = useState<DashboardCashflowOut | null>(null);
+  const [cashflowLoading, setCashflowLoading] = useState(true);
+  const [comparisonReady, setComparisonReady] = useState(false);
   const [goals, setGoals] = useState<GoalOut[]>([]);
   const [userProfile, setUserProfile] = useState<UserMeOut | null>(null);
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
@@ -1211,6 +1271,46 @@ export default function DashboardPage() {
       active = false;
     };
   }, [session, feedStartKey, txWindowStartKey, loading]);
+
+  useEffect(() => {
+    if (!session || !periodStartKey || !periodEndKey) return;
+    let active = true;
+    setCashflowLoading(true);
+    fetchDashboardCashflow(periodStartKey, periodEndKey, false)
+      .then((data) => {
+        if (active) setPeriodCashflow(data);
+      })
+      .catch((e: any) => {
+        if (!active) return;
+        setPeriodCashflow(null);
+        setError((prev) => prev ?? (e?.message ?? "Не удалось загрузить доходы и расходы"));
+      })
+      .finally(() => {
+        if (active) setCashflowLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session, periodStartKey, periodEndKey]);
+
+  useEffect(() => {
+    if (!session || !twelveMonthStartKey || !twelveMonthEndKey) return;
+    let active = true;
+    setComparisonReady(false);
+    fetchDashboardCashflow(twelveMonthStartKey, twelveMonthEndKey, true)
+      .then((data) => {
+        if (active) setComparisonCashflow(data);
+      })
+      .catch(() => {
+        if (active) setComparisonCashflow(null);
+      })
+      .finally(() => {
+        if (active) setComparisonReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session, twelveMonthStartKey, twelveMonthEndKey]);
 
   useEffect(() => {
     if (!session) return;
@@ -1443,103 +1543,94 @@ export default function DashboardPage() {
 
   const incomeBreakdown = useMemo(
     () =>
-      buildCategoryBreakdown(
-        txs,
-        "INCOME",
-        periodStartKey,
-        periodEndKey,
-        categoryLookup,
-        CATEGORY_BREAKDOWN_LIMIT,
-        showPlan,
-        txToRubCents
+      collapseCategoryRows(
+        categoryRows(periodCashflow?.income),
+        CATEGORY_BREAKDOWN_LIMIT
       ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs, txToRubCents]
+    [periodCashflow]
   );
 
   const expenseBreakdown = useMemo(
     () =>
-      buildCategoryBreakdown(
-        txs,
-        "EXPENSE",
-        periodStartKey,
-        periodEndKey,
-        categoryLookup,
-        CATEGORY_BREAKDOWN_LIMIT,
-        showPlan,
-        txToRubCents
+      collapseCategoryRows(
+        categoryRows(periodCashflow?.expense),
+        CATEGORY_BREAKDOWN_LIMIT
       ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs, txToRubCents]
+    [periodCashflow]
   );
 
-  const incomeCashflow = useMemo(
-    () =>
-      buildCashflowBreakdown(
-        txs,
-        "INCOME",
-      periodStartKey,
-      periodEndKey,
-        todayKey,
-        INCOME_SEGMENT_COLORS,
-        txToRubCents
-      ),
-    [periodEndKey, periodStartKey, todayKey, txs, txToRubCents]
-  );
+  const incomeCashflow = useMemo(() => {
+    const total = periodCashflow?.income.total_rub_cents ?? 0;
+    return {
+      actual: total,
+      planned: 0,
+      overdueMonth: 0,
+      overduePrev: 0,
+      total,
+      segments:
+        total > 0
+          ? [
+              {
+                key: "actual" as const,
+                label: CASHFLOW_LABELS.actual,
+                value: total,
+                color: INCOME_SEGMENT_COLORS.actual,
+              },
+            ]
+          : [],
+    };
+  }, [periodCashflow]);
 
-  const expenseCashflow = useMemo(
-    () =>
-      buildCashflowBreakdown(
-        txs,
-        "EXPENSE",
-      periodStartKey,
-      periodEndKey,
-        todayKey,
-        EXPENSE_SEGMENT_COLORS,
-        txToRubCents
-      ),
-    [periodEndKey, periodStartKey, todayKey, txs, txToRubCents]
-  );
+  const expenseCashflow = useMemo(() => {
+    const total = periodCashflow?.expense.total_rub_cents ?? 0;
+    return {
+      actual: total,
+      planned: 0,
+      overdueMonth: 0,
+      overduePrev: 0,
+      total,
+      segments:
+        total > 0
+          ? [
+              {
+                key: "actual" as const,
+                label: CASHFLOW_LABELS.actual,
+                value: total,
+                color: EXPENSE_SEGMENT_COLORS.actual,
+              },
+            ]
+          : [],
+    };
+  }, [periodCashflow]);
 
-  const displayIncomeCashflow = useMemo(
-    () => withCashflowPlanFilter(incomeCashflow, showPlan, INCOME_SEGMENT_COLORS),
-    [incomeCashflow, showPlan]
-  );
+  const displayIncomeCashflow = incomeCashflow;
+  const displayExpenseCashflow = expenseCashflow;
 
-  const displayExpenseCashflow = useMemo(
-    () => withCashflowPlanFilter(expenseCashflow, showPlan, EXPENSE_SEGMENT_COLORS),
-    [expenseCashflow, showPlan]
-  );
+  const incomeBucketGroups = useMemo<CashflowBucketGroup[]>(() => {
+    const categories = categoryRows(periodCashflow?.income);
+    return [
+      {
+        key: "actual",
+        label: CASHFLOW_LABELS.actual,
+        color: INCOME_SEGMENT_COLORS.actual,
+        total: periodCashflow?.income.total_rub_cents ?? 0,
+        categories,
+      },
+    ];
+  }, [periodCashflow]);
 
-  const incomeBucketGroups = useMemo(
-    () =>
-      buildCashflowBucketGroups(
-        txs,
-        "INCOME",
-      periodStartKey,
-      periodEndKey,
-        todayKey,
-        categoryLookup,
-        showPlan,
-        INCOME_SEGMENT_COLORS,
-        txToRubCents
-      ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, todayKey, txs, txToRubCents]
-  );
-
-  const expenseBucketGroups = useMemo(
-    () =>
-      buildCashflowBucketGroups(
-        txs,
-        "EXPENSE",
-      periodStartKey,
-      periodEndKey,
-        todayKey,
-        categoryLookup,
-        showPlan,
-        EXPENSE_SEGMENT_COLORS,
-        txToRubCents
-      ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, todayKey, txs, txToRubCents]
-  );
+  const expenseBucketGroups = useMemo<CashflowBucketGroup[]>(() => {
+    const categories = categoryRows(periodCashflow?.expense);
+    return [
+      {
+        key: "actual",
+        label: CASHFLOW_LABELS.actual,
+        color: EXPENSE_SEGMENT_COLORS.actual,
+        total: periodCashflow?.expense.total_rub_cents ?? 0,
+        categories,
+      },
+    ];
+  }, [periodCashflow]);
 
   const toggleCashflowExpand = useCallback((direction: "income" | "expense") => {
     setCashflowExpanded((prev) => ({ ...prev, [direction]: !prev[direction] }));
@@ -1555,88 +1646,36 @@ export default function DashboardPage() {
     [expenseBreakdown]
   );
 
+  const priorMonthKey = priorMonthStartKey.slice(0, 7);
+
   const incomeTotalsCurrent = useMemo(
-    () =>
-      buildCategoryTotalsByLabel(
-        txs,
-        "INCOME",
-        periodStartKey,
-        periodEndKey,
-        categoryLookup,
-        showPlan,
-        txToRubCents
-      ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs, txToRubCents]
+    () => categoryTotalMap(periodCashflow?.income),
+    [periodCashflow]
   );
 
   const expenseTotalsCurrent = useMemo(
-    () =>
-      buildCategoryTotalsByLabel(
-        txs,
-        "EXPENSE",
-        periodStartKey,
-        periodEndKey,
-        categoryLookup,
-        showPlan,
-        txToRubCents
-      ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs, txToRubCents]
+    () => categoryTotalMap(periodCashflow?.expense),
+    [periodCashflow]
   );
 
   const incomeTotalsPrevMonth = useMemo(
-    () =>
-      buildCategoryTotalsByLabel(
-        txs,
-        "INCOME",
-        priorMonthStartKey,
-        priorMonthEndKey,
-        categoryLookup,
-        showPlan,
-        txToRubCents
-      ),
-    [categoryLookup, priorMonthEndKey, priorMonthStartKey, showPlan, txs, txToRubCents]
+    () => categoryMonthMap(comparisonCashflow?.income, priorMonthKey),
+    [comparisonCashflow, priorMonthKey]
   );
 
   const expenseTotalsPrevMonth = useMemo(
-    () =>
-      buildCategoryTotalsByLabel(
-        txs,
-        "EXPENSE",
-        priorMonthStartKey,
-        priorMonthEndKey,
-        categoryLookup,
-        showPlan,
-        txToRubCents
-      ),
-    [categoryLookup, priorMonthEndKey, priorMonthStartKey, showPlan, txs, txToRubCents]
+    () => categoryMonthMap(comparisonCashflow?.expense, priorMonthKey),
+    [comparisonCashflow, priorMonthKey]
   );
 
   const incomeMonthlyTotals = useMemo(
-    () =>
-      buildCategoryMonthlyTotals(
-        txs,
-        "INCOME",
-        twelveMonthStartKey,
-        twelveMonthEndKey,
-        categoryLookup,
-        showPlan,
-        txToRubCents
-      ),
-    [categoryLookup, showPlan, twelveMonthEndKey, twelveMonthStartKey, txs, txToRubCents]
+    () => categoryMonthlyMap(comparisonCashflow?.income),
+    [comparisonCashflow]
   );
 
   const expenseMonthlyTotals = useMemo(
-    () =>
-      buildCategoryMonthlyTotals(
-        txs,
-        "EXPENSE",
-        twelveMonthStartKey,
-        twelveMonthEndKey,
-        categoryLookup,
-        showPlan,
-        txToRubCents
-      ),
-    [categoryLookup, showPlan, twelveMonthEndKey, twelveMonthStartKey, txs, txToRubCents]
+    () => categoryMonthlyMap(comparisonCashflow?.expense),
+    [comparisonCashflow]
   );
 
   const incomePrevMonthTotal = useMemo(
@@ -1671,12 +1710,16 @@ export default function DashboardPage() {
 
     return incomeSegments.map((segment) => {
       const isOther = segment.label === OTHER_LABEL;
-      const prevValue = isOther
-        ? otherPrevValue
-        : incomeTotalsPrevMonth.get(segment.label) ?? 0;
-      const avgValue = isOther
-        ? otherAvgValue
-        : averageMonthlyTotal(incomeMonthlyTotals.get(segment.label) ?? emptyMonthly);
+      const prevValue = !comparisonReady
+        ? null
+        : isOther
+          ? otherPrevValue
+          : incomeTotalsPrevMonth.get(segment.label) ?? 0;
+      const avgValue = !comparisonReady
+        ? null
+        : isOther
+          ? otherAvgValue
+          : averageMonthlyTotal(incomeMonthlyTotals.get(segment.label) ?? emptyMonthly);
       return {
         ...segment,
         prevDelta: calcPercentChange(segment.value, prevValue),
@@ -1689,6 +1732,7 @@ export default function DashboardPage() {
     incomeMonthlyTotals,
     incomeTotalsPrevMonth,
     incomePrevMonthTotal,
+    comparisonReady,
   ]);
 
   const expenseLegendRows = useMemo<LegendRow[]>(() => {
@@ -1713,12 +1757,16 @@ export default function DashboardPage() {
 
     return expenseSegments.map((segment) => {
       const isOther = segment.label === OTHER_LABEL;
-      const prevValue = isOther
-        ? otherPrevValue
-        : expenseTotalsPrevMonth.get(segment.label) ?? 0;
-      const avgValue = isOther
-        ? otherAvgValue
-        : averageMonthlyTotal(expenseMonthlyTotals.get(segment.label) ?? emptyMonthly);
+      const prevValue = !comparisonReady
+        ? null
+        : isOther
+          ? otherPrevValue
+          : expenseTotalsPrevMonth.get(segment.label) ?? 0;
+      const avgValue = !comparisonReady
+        ? null
+        : isOther
+          ? otherAvgValue
+          : averageMonthlyTotal(expenseMonthlyTotals.get(segment.label) ?? emptyMonthly);
       return {
         ...segment,
         prevDelta: calcPercentChange(segment.value, prevValue),
@@ -1731,6 +1779,7 @@ export default function DashboardPage() {
     expenseMonthlyTotals,
     expenseTotalsPrevMonth,
     expensePrevMonthTotal,
+    comparisonReady,
   ]);
 
   const resolveCategoryIcon = useCallback(
@@ -1765,30 +1814,16 @@ export default function DashboardPage() {
   );
 
   const needsRates = useMemo(
-    () =>
-      chartItems.some((item) => (item.currency_code || "RUB").toUpperCase() !== "RUB") ||
-      txs.some((tx) => {
-        const code = itemsById.get(tx.primary_item_id)?.currency_code || "RUB";
-        return code.toUpperCase() !== "RUB";
-      }),
-    [chartItems, itemsById, txs]
+    () => chartItems.some((item) => (item.currency_code || "RUB").toUpperCase() !== "RUB"),
+    [chartItems]
   );
 
   const rateFetchKeys = useMemo(() => {
-    const keys = new Set<string>();
-    dateKeys.forEach((dateKey) => {
-      if (dateKey <= todayKey) keys.add(dateKey);
-    });
-    txs.forEach((tx) => {
-      const code = itemsById.get(tx.primary_item_id)?.currency_code || "RUB";
-      if (code.toUpperCase() === "RUB") return;
-      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
-      if (!dateKey) return;
-      keys.add(dateKey > todayKey ? todayKey : dateKey);
-    });
-    if (keys.size === 0 && needsRates) keys.add(todayKey);
-    return Array.from(keys);
-  }, [dateKeys, itemsById, needsRates, todayKey, txs]);
+    if (!needsRates) return [];
+    const pastKeys = dateKeys.filter((dateKey) => dateKey <= todayKey);
+    if (pastKeys.length === 0) return [todayKey];
+    return Array.from(new Set(pastKeys));
+  }, [dateKeys, needsRates, todayKey]);
 
   const latestRatesByCurrency = useMemo(() => {
     const latest = new Map<string, { dateKey: string; rate: number }>();
@@ -2156,7 +2191,7 @@ export default function DashboardPage() {
           ...row,
           bucket: "actual" as const,
         }));
-    if (activityLoading) {
+    if (cashflowLoading) {
       return (
         <div className="flex flex-col gap-3">
           {[0, 1].map((row) => (
@@ -2232,7 +2267,7 @@ export default function DashboardPage() {
             <span className="text-[28px] font-semibold leading-7" style={{ color: signColor }}>
               {sign}
             </span>
-            {activityLoading ? (
+            {cashflowLoading ? (
               <MobileNumberSkeleton className="h-7 w-28" />
             ) : (
               <span className="min-w-0 truncate text-[28px] font-semibold leading-7 tabular-nums text-white/85">
@@ -2416,10 +2451,9 @@ export default function DashboardPage() {
               >
                 <span className="flex items-center gap-3">
                   <MobileNumberSkeleton className="h-[18px] w-32" />
-                  <MobileNumberSkeleton className="ml-auto h-[21px] w-10" />
+                  <MobileNumberSkeleton className="ml-auto h-[18px] w-28" />
                 </span>
                 <MobileNumberSkeleton className="h-6 w-full" />
-                <MobileNumberSkeleton className="h-[18px] w-40" />
               </div>
             ) : activeGoals.length === 0 ? (
               <p className="text-sm leading-4 text-white/55">Целей пока нет</p>
@@ -2442,42 +2476,37 @@ export default function DashboardPage() {
                     style={{ backgroundColor: MODAL_BG }}
                   >
                     <span className="flex items-center gap-3">
-                      <span className="min-w-0 flex-1 truncate text-sm leading-[18px] text-white/85">
+                      <span className="min-w-0 flex-1 truncate text-sm leading-4 text-white/85">
                         {goal.name}
                       </span>
                       {activityLoading ? (
-                        <MobileNumberSkeleton className="h-[21px] w-10" />
+                        <MobileNumberSkeleton className="h-[18px] w-28" />
                       ) : (
-                        <MobileSolidTag color={progressColor} height={21}>
-                          {Math.round(ratio * 100)}%
-                        </MobileSolidTag>
-                      )}
-                    </span>
-                    <span className="flex flex-col gap-3">
-                      {activityLoading ? (
-                        <MobileNumberSkeleton className="h-6 w-full" />
-                      ) : (
-                        <span
-                          className="flex h-6 overflow-hidden rounded-[4px]"
-                          style={{ backgroundColor: GREEN_FILL }}
-                        >
-                          <span
-                            className="block h-full"
-                            style={{
-                              width: `${Math.min(ratio, 1) * 100}%`,
-                              backgroundColor: progressColor,
-                            }}
-                          />
-                        </span>
-                      )}
-                      {activityLoading ? (
-                        <MobileNumberSkeleton className="h-[18px] w-40" />
-                      ) : (
-                        <span className="text-base font-medium leading-[18px] tabular-nums text-white/90">
+                        <span className="shrink-0 text-base font-medium leading-[18px] tabular-nums text-white/90">
                           {formatRub(summary.amount)} / {formatRub(goal.amount)}
                         </span>
                       )}
                     </span>
+                    {activityLoading ? (
+                      <MobileNumberSkeleton className="h-6 w-full" />
+                    ) : (
+                      <span
+                        className="flex h-6 overflow-hidden rounded-[4px]"
+                        style={{ backgroundColor: goalTrackColor(progressColor) }}
+                      >
+                        <span
+                          className="flex h-full items-center overflow-hidden px-3"
+                          style={{
+                            width: `${Math.min(ratio, 1) * 100}%`,
+                            backgroundColor: progressColor,
+                          }}
+                        >
+                          <span className="whitespace-nowrap text-[11px] font-medium leading-none text-[#191732]">
+                            {Math.round(ratio * 100)}%
+                          </span>
+                        </span>
+                      </span>
+                    )}
                   </Link>
                   </MobileCardPress>
                 );
@@ -2611,10 +2640,10 @@ export default function DashboardPage() {
                 className="text-lg font-semibold whitespace-nowrap"
                 style={{ color: GREEN }}
               >
-                {activityLoading ? "..." : formatRub(incomeBreakdown.total)}
+                {cashflowLoading ? "..." : formatRub(incomeBreakdown.total)}
               </div>
             </div>
-            {activityLoading ? (
+            {cashflowLoading ? (
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : incomeSegments.length === 0 ? (
               <div className="text-sm text-muted-foreground">
@@ -2704,10 +2733,10 @@ export default function DashboardPage() {
                 className="text-lg font-semibold whitespace-nowrap"
                 style={{ color: RED }}
               >
-                {activityLoading ? "..." : formatRub(expenseBreakdown.total)}
+                {cashflowLoading ? "..." : formatRub(expenseBreakdown.total)}
               </div>
             </div>
-            {activityLoading ? (
+            {cashflowLoading ? (
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : expenseSegments.length === 0 ? (
               <div className="text-sm text-muted-foreground">

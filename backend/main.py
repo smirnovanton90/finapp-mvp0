@@ -72,6 +72,10 @@ from schemas import (
     BalanceCheckpointOut,
     BalanceAtOut,
     BalanceCheckpointWithItemOut,
+    DashboardCashflowOut,
+    DashboardCashflowDirectionOut,
+    DashboardCashflowCategoryOut,
+    DashboardCashflowMonthOut,
 )
 from auth import get_current_user, create_access_token, hash_password, verify_password
 
@@ -1550,6 +1554,173 @@ def list_fx_rates_batch(
         except requests.RequestException:
             continue
     return results
+
+
+def _category_roots(db: Session) -> dict[int, tuple[int, str]]:
+    """id категории → (id верхнего уровня, его название)."""
+    rows = db.query(Category.id, Category.parent_id, Category.name).all()
+    parents = {row.id: row.parent_id for row in rows}
+    names = {row.id: row.name for row in rows}
+    roots: dict[int, tuple[int, str]] = {}
+
+    def resolve(category_id: int) -> tuple[int, str]:
+        cached = roots.get(category_id)
+        if cached:
+            return cached
+        seen: set[int] = set()
+        current = category_id
+        while parents.get(current) and current not in seen:
+            seen.add(current)
+            parent = parents.get(current)
+            if parent is None:
+                break
+            current = parent
+        resolved = (current, names.get(current) or "Без категории")
+        for seen_id in seen | {category_id, current}:
+            roots[seen_id] = resolved
+        return resolved
+
+    for category_id in parents:
+        resolve(category_id)
+    return roots
+
+
+def _fx_rate_on_or_before(
+    series: list[tuple[date_type, float]],
+    day: date_type,
+) -> float | None:
+    best: float | None = None
+    for rate_date, rate in series:
+        if rate_date <= day:
+            best = rate
+        else:
+            break
+    return best
+
+
+@app.get("/dashboard/cashflow", response_model=DashboardCashflowOut)
+def dashboard_cashflow(
+    date_from: date_type,
+    date_to: date_type,
+    include_months: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Фактические доходы и расходы за период, уже переведённые в рубли.
+
+    Переводы, нереализованные планы и родительские сплиты не входят.
+    Курс — последний сохранённый на дату операции или раньше.
+    """
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+    zone = ZoneInfo(effective_timezone(user))
+    start = datetime.combine(date_from, time.min) - timedelta(days=1)
+    end = datetime.combine(date_to, time.max) + timedelta(days=1)
+    tx_rows = (
+        db.query(
+            Transaction.direction,
+            Transaction.category_id,
+            Transaction.amount_primary_minor,
+            Transaction.transaction_date,
+            Transaction.timezone,
+            Item.currency_code,
+        )
+        .join(Item, Item.id == Transaction.primary_item_id)
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.deleted_at.is_(None),
+            Transaction.is_split_parent.is_(False),
+            Transaction.direction.in_(("INCOME", "EXPENSE")),
+            or_(
+                Transaction.transaction_type == "ACTUAL",
+                Transaction.status == "REALIZED",
+            ),
+            Transaction.transaction_date >= start,
+            Transaction.transaction_date <= end,
+        )
+        .all()
+    )
+    currencies = {
+        (row.currency_code or "RUB").upper()
+        for row in tx_rows
+        if (row.currency_code or "RUB").upper() != "RUB"
+    }
+    rate_series: dict[str, list[tuple[date_type, float]]] = {}
+    if currencies:
+        rate_rows = (
+            db.query(FxRate.rate_date, FxRate.char_code, FxRate.rate)
+            .filter(
+                FxRate.char_code.in_(currencies),
+                FxRate.rate_date <= date_to,
+                FxRate.rate_date >= date_from - timedelta(days=60),
+                FxRate.rate > 0,
+            )
+            .order_by(FxRate.rate_date.asc())
+            .all()
+        )
+        for rate_date, code, rate in rate_rows:
+            rate_series.setdefault(code, []).append((rate_date, float(rate)))
+    roots = _category_roots(db)
+    totals: dict[tuple[str, int | None], dict] = {}
+    for row in tx_rows:
+        instant = transaction_instant(row.transaction_date, row.timezone)
+        local_day = instant.astimezone(zone).date()
+        if local_day < date_from or local_day > date_to:
+            continue
+        code = (row.currency_code or "RUB").upper()
+        amount = row.amount_primary_minor or 0
+        if code == "RUB":
+            rub = amount
+        else:
+            rate = _fx_rate_on_or_before(rate_series.get(code, []), local_day)
+            if rate is None:
+                continue
+            rub = int(round((amount / 100) * rate * 100))
+        if rub == 0:
+            continue
+        if row.category_id and row.category_id in roots:
+            top_id, top_name = roots[row.category_id]
+        else:
+            top_id, top_name = None, "Без категории"
+        key = (row.direction, top_id)
+        bucket = totals.get(key)
+        if bucket is None:
+            bucket = {"name": top_name, "total": 0, "months": {}}
+            totals[key] = bucket
+        bucket["total"] += rub
+        if include_months:
+            month_key = local_day.strftime("%Y-%m")
+            bucket["months"][month_key] = bucket["months"].get(month_key, 0) + rub
+
+    def direction_out(direction: str) -> DashboardCashflowDirectionOut:
+        categories = []
+        total_rub = 0
+        for (row_direction, category_id), bucket in totals.items():
+            if row_direction != direction:
+                continue
+            total_rub += bucket["total"]
+            months = [
+                DashboardCashflowMonthOut(month=month, rub_cents=value)
+                for month, value in sorted(bucket["months"].items())
+            ]
+            categories.append(
+                DashboardCashflowCategoryOut(
+                    category_id=category_id,
+                    name=bucket["name"],
+                    rub_cents=bucket["total"],
+                    months=months,
+                )
+            )
+        categories.sort(key=lambda item: item.rub_cents, reverse=True)
+        return DashboardCashflowDirectionOut(
+            total_rub_cents=total_rub,
+            categories=categories,
+        )
+
+    return DashboardCashflowOut(
+        income=direction_out("INCOME"),
+        expense=direction_out("EXPENSE"),
+    )
 
 
 COUNTERPARTY_SETTLEMENTS_TYPE = "counterparty_settlements"

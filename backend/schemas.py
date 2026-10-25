@@ -1397,6 +1397,30 @@ class CounterpartyOut(CounterpartyBase):
         from_attributes = True
 
 
+class DashboardCashflowMonthOut(BaseModel):
+    month: str
+    rub_cents: int
+
+
+class DashboardCashflowCategoryOut(BaseModel):
+    category_id: int | None = None
+    name: str
+    rub_cents: int
+    months: list[DashboardCashflowMonthOut] = []
+
+
+class DashboardCashflowDirectionOut(BaseModel):
+    total_rub_cents: int
+    categories: list[DashboardCashflowCategoryOut]
+
+
+class DashboardCashflowOut(BaseModel):
+    """Доходы и расходы за период уже в рублях, по верхним категориям."""
+
+    income: DashboardCashflowDirectionOut
+    expense: DashboardCashflowDirectionOut
+
+
 class CounterpartyPageOut(BaseModel):
     items: list[CounterpartyOut]
     next_cursor: str | None = None

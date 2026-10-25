@@ -1267,13 +1267,7 @@ def list_dashboard_transactions(
         .where(
             Transaction.user_id == user.id,
             Transaction.deleted_at.is_(None),
-            or_(
-                Transaction.transaction_date >= start,
-                and_(
-                    Transaction.transaction_type == "PLANNED",
-                    Transaction.status != "REALIZED",
-                ),
-            ),
+            Transaction.transaction_date >= start,
         )
         .options(selectinload(Transaction.chain))
         .order_by(Transaction.transaction_date.asc(), Transaction.id.asc())

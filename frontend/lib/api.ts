@@ -1813,6 +1813,43 @@ export async function fetchTransactions(): Promise<TransactionOut[]> {
   return raw.map(mapTransactionFromApi);
 }
 
+export type DashboardCashflowMonth = {
+  month: string;
+  rub_cents: number;
+};
+
+export type DashboardCashflowCategory = {
+  category_id: number | null;
+  name: string;
+  rub_cents: number;
+  months: DashboardCashflowMonth[];
+};
+
+export type DashboardCashflowDirection = {
+  total_rub_cents: number;
+  categories: DashboardCashflowCategory[];
+};
+
+export type DashboardCashflowOut = {
+  income: DashboardCashflowDirection;
+  expense: DashboardCashflowDirection;
+};
+
+export async function fetchDashboardCashflow(
+  dateFrom: string,
+  dateTo: string,
+  includeMonths = false
+): Promise<DashboardCashflowOut> {
+  const params = new URLSearchParams({
+    date_from: dateFrom,
+    date_to: dateTo,
+  });
+  if (includeMonths) params.set("include_months", "true");
+  const res = await authFetch(`${API_BASE}/dashboard/cashflow?${params.toString()}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function fetchDashboardTransactions(dateFrom: string): Promise<TransactionOut[]> {
   const params = new URLSearchParams({ date_from: dateFrom });
   const res = await authFetch(`${API_BASE}/transactions/dashboard-feed?${params.toString()}`);

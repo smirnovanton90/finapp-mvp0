@@ -1,6 +1,6 @@
 "use client";
 
-import { todayDateKey, transactionDateKey } from "@/lib/timezone";
+import { todayDateKey } from "@/lib/timezone";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
@@ -33,15 +33,13 @@ import {
   deleteGoal,
   fetchCategories,
   fetchGoals,
-  fetchItems,
+  fetchGoalProgress,
   fetchTransactions,
-  fetchFxRatesBatch,
   fetchCounterparties,
-  FxRateOut,
   GoalCreate,
   GoalOut,
   GoalPeriod,
-  ItemOut,
+  GoalProgress,
   TransactionOut,
   updateGoal,
 } from "@/lib/api";
@@ -51,7 +49,6 @@ import { GoalCard } from "@/components/goal-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
-import { minorToRubCents } from "@/lib/amount-rub";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, ACCENT } from "@/lib/colors";
@@ -89,10 +86,6 @@ function toDateKey(date: Date) {
 
 function getTodayKey() {
   return todayDateKey();
-}
-
-function toTxDateKey(value: string, txTimezone?: string | null) {
-  return transactionDateKey(value, txTimezone);
 }
 
 function normalizeCategory(value: string) {
@@ -168,8 +161,7 @@ export default function GoalsPage() {
 
   const [goals, setGoals] = useState<GoalOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
-  const [items, setItems] = useState<ItemOut[]>([]);
-  const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
+  const [goalProgress, setGoalProgress] = useState<GoalProgress[]>([]);
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -288,77 +280,45 @@ export default function GoalsPage() {
     txs,
   ]);
 
-  const itemsById = useMemo(
-    () => new Map(items.map((item) => [item.id, item])),
-    [items]
-  );
-
-  const txToRubCents = useCallback((tx: TransactionOut) => {
-    const code = (itemsById.get(tx.primary_item_id)?.currency_code || "RUB").toUpperCase();
-    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
-    const todayKey = todayDateKey();
-    const rateKey = dateKey && dateKey > todayKey ? todayKey : dateKey;
-    const dayRates = rateKey ? fxRatesByDate[rateKey] : undefined;
-    const rate = code === "RUB" ? 1 : dayRates?.find((row) => row.char_code === code)?.rate ?? null;
-    return minorToRubCents(tx.amount, code, rate);
-  }, [fxRatesByDate, itemsById]);
-
   const goalSummaryById = useMemo(() => {
+    const progressById = new Map(goalProgress.map((row) => [row.goal_id, row]));
     const now = new Date();
     const map = new Map<
       number,
-      { amount: number; progress: number; rangeLabel: string | null; isIncome: boolean }
+      { amount: number; progress: number; rangeLabel: string | null; isIncome: boolean; history: GoalProgress["history"] }
     >();
 
     goals.forEach((goal) => {
       const range = getGoalRange(goal, now);
-      const categoryIds =
-        categoryDescendants.get(goal.category_id) ?? new Set([goal.category_id]);
       const scope: CategoryScope | undefined = categoryLookup.idToScope?.get(goal.category_id);
       const isIncome = scope === "INCOME";
-      const direction = isIncome ? "INCOME" : "EXPENSE";
-      let amount = 0;
-      if (range) {
-        txs.forEach((tx) => {
-          if (tx.direction !== direction) return;
-          if (!isRealizedTransaction(tx)) return;
-          if (!tx.category_id || !categoryIds.has(tx.category_id)) return;
-          const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
-          if (!dateKey) return;
-          if (dateKey < range.startKey || dateKey > range.endKey) return;
-          const rub = txToRubCents(tx);
-          if (rub == null) return;
-          amount += rub;
-        });
-      }
-      const progress =
-        goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;
+      const amount = progressById.get(goal.id)?.rub_cents ?? 0;
+      const progress = goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;
       map.set(goal.id, {
         amount,
         progress,
         rangeLabel: range?.rangeLabel ?? null,
         isIncome,
+        history: progressById.get(goal.id)?.history ?? [],
       });
     });
     return map;
-  }, [categoryDescendants, categoryLookup.idToScope, goals, txs, txToRubCents]);
+  }, [categoryLookup.idToScope, goalProgress, goals]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [goalsData, txData, categoriesData, counterpartiesData, itemsData] = await Promise.all([
+      const [goalsData, categoriesData, counterpartiesData, progressData] = await Promise.all([
         fetchGoals({ include_deleted: true }),
-        fetchTransactions(),
         fetchCategories(),
         fetchCounterparties(),
-        fetchItems({ includeArchived: true, includeClosed: true }),
+        fetchGoalProgress({ include_deleted: true, include_history: true }),
       ]);
       setGoals(goalsData);
-      setTxs(txData);
       setCategoryNodes(categoriesData);
       setCounterparties(counterpartiesData);
-      setItems(itemsData);
+      setGoalProgress(progressData);
     } catch (e: unknown) {
       const err = e as { message?: string };
       setError(
@@ -376,28 +336,19 @@ export default function GoalsPage() {
   }, [session, loadAll]);
 
   useEffect(() => {
-    const dates = new Set<string>();
-    const todayKey = todayDateKey();
-    txs.forEach((tx) => {
-      const code = itemsById.get(tx.primary_item_id)?.currency_code || "RUB";
-      if (code.toUpperCase() === "RUB") return;
-      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
-      if (!dateKey) return;
-      dates.add(dateKey > todayKey ? todayKey : dateKey);
-    });
-    const missing = Array.from(dates).filter((dateKey) => !fxRatesByDate[dateKey]);
-    if (missing.length === 0) return;
+    if (!session || filterCounterpartyIds.length === 0 || txs.length > 0) return;
     let cancelled = false;
-    fetchFxRatesBatch(missing)
-      .then((next) => {
-        if (cancelled || Object.keys(next).length === 0) return;
-        setFxRatesByDate((prev) => ({ ...prev, ...next }));
+    fetchTransactions()
+      .then((data) => {
+        if (!cancelled) setTxs(data);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setTxs([]);
+      });
     return () => {
       cancelled = true;
     };
-  }, [fxRatesByDate, itemsById, txs]);
+  }, [session, filterCounterpartyIds.length, txs.length]);
 
   useEffect(() => {
     if (period !== "CUSTOM") return;
@@ -935,6 +886,7 @@ export default function GoalsPage() {
                     progress: 0,
                     rangeLabel: null,
                     isIncome: false,
+                    history: [],
                   };
                   return (
                     <div
@@ -949,7 +901,7 @@ export default function GoalsPage() {
                         categoryPathLabel={formatCategoryLabel(goal.category_id)}
                         categoryDescendants={categoryDescendants}
                         txs={txs}
-                        toRubCents={txToRubCents}
+                        history={summary.history}
                         currentAmount={summary.amount}
                         currentProgress={summary.progress}
                         onEdit={goal.deleted_at ? undefined : openEditDialog}

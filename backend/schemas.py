@@ -1421,6 +1421,18 @@ class DashboardCashflowOut(BaseModel):
     expense: DashboardCashflowDirectionOut
 
 
+class GoalProgressPeriodOut(BaseModel):
+    start_date: date
+    end_date: date
+    rub_cents: int
+
+
+class GoalProgressOut(BaseModel):
+    goal_id: int
+    rub_cents: int
+    history: list[GoalProgressPeriodOut] = []
+
+
 class CounterpartyPageOut(BaseModel):
     items: list[CounterpartyOut]
     next_cursor: str | None = None

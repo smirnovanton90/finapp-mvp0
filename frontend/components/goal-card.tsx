@@ -203,6 +203,7 @@ export interface GoalCardProps {
   categoryDescendants: Map<number, Set<number>>;
   txs: TransactionOut[];
   toRubCents?: (tx: TransactionOut) => number | null;
+  history?: { start_date: string; end_date: string; rub_cents: number }[];
   currentAmount: number;
   currentProgress: number;
   onEdit?: (goal: GoalOut) => void;
@@ -219,6 +220,7 @@ export function GoalCard({
   categoryDescendants,
   txs,
   toRubCents,
+  history,
   currentAmount,
   currentProgress,
   onEdit,
@@ -380,14 +382,21 @@ export function GoalCard({
             {expanded && (
               <div className="space-y-3 mt-3">
                 {previousRanges.map((range) => {
-                  const amount = amountInRange(
-                    txs,
-                    categoryIds,
-                    range.startKey,
-                    range.endKey,
-                    direction,
-                    toRubCents
+                  const fromHistory = history?.find(
+                    (period) =>
+                      period.start_date === range.startKey &&
+                      period.end_date === range.endKey
                   );
+                  const amount = fromHistory
+                    ? fromHistory.rub_cents
+                    : amountInRange(
+                        txs,
+                        categoryIds,
+                        range.startKey,
+                        range.endKey,
+                        direction,
+                        toRubCents
+                      );
                   const progress =
                     goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;
                   const barColor = getGoalProgressColor(progress, isIncomeGoal);

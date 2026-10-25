@@ -2126,6 +2126,31 @@ export async function fetchGoals(options?: {
   return raw.map(mapGoalFromApi);
 }
 
+export type GoalProgressPeriod = {
+  start_date: string;
+  end_date: string;
+  rub_cents: number;
+};
+
+export type GoalProgress = {
+  goal_id: number;
+  rub_cents: number;
+  history: GoalProgressPeriod[];
+};
+
+export async function fetchGoalProgress(options?: {
+  include_deleted?: boolean;
+  include_history?: boolean;
+}): Promise<GoalProgress[]> {
+  const params = new URLSearchParams();
+  if (options?.include_deleted) params.set("include_deleted", "true");
+  if (options?.include_history) params.set("include_history", "true");
+  const qs = params.toString();
+  const res = await authFetch(`${API_BASE}/goals/progress${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function createGoal(payload: GoalCreate): Promise<GoalOut> {
   const { amount, ...rest } = payload;
   const body = { ...rest, amount_rub: amount };

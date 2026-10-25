@@ -36,7 +36,6 @@ import {
 } from "@/components/ui/dialog";
 import { PeriodRangeCalendar } from "@/components/period-range-calendar";
 import {
-  buildCategoryDescendants,
   buildCategoryLookup,
   makeCategoryPathKey,
   type CategoryNode,
@@ -50,6 +49,8 @@ import {
   API_BASE,
   fetchCategories,
   fetchGoals,
+  fetchGoalProgress,
+  type GoalProgress,
   fetchFxRates,
   fetchFxRatesBatch,
   fetchItems,
@@ -68,7 +69,6 @@ import {
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { MobileWidgetStack, WidgetDragHandle } from "@/components/mobile-widget-stack";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
-import { minorToRubCents } from "@/lib/amount-rub";
 import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { getGoalProgressColor } from "@/lib/goal-progress-color";
 import { ACCENT, ACCENT_FILL_LIGHT, GREEN, GREEN_FILL, MODAL_BG, ORANGE, ORANGE_FILL, RED, RED_FILL } from "@/lib/colors";
@@ -1158,6 +1158,8 @@ export default function DashboardPage() {
   const [cashflowLoading, setCashflowLoading] = useState(true);
   const [comparisonReady, setComparisonReady] = useState(false);
   const [goals, setGoals] = useState<GoalOut[]>([]);
+  const [goalProgress, setGoalProgress] = useState<GoalProgress[]>([]);
+  const [goalsProgressLoading, setGoalsProgressLoading] = useState(true);
   const [userProfile, setUserProfile] = useState<UserMeOut | null>(null);
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
@@ -1315,6 +1317,25 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!session) return;
     let active = true;
+    setGoalsProgressLoading(true);
+    fetchGoalProgress()
+      .then((data) => {
+        if (active) setGoalProgress(data);
+      })
+      .catch(() => {
+        if (active) setGoalProgress([]);
+      })
+      .finally(() => {
+        if (active) setGoalsProgressLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
     let blobUrl: string | null = null;
 
     const loadProfile = async () => {
@@ -1354,29 +1375,8 @@ export default function DashboardPage() {
     return map;
   }, [fxRates]);
 
-  const itemsById = useMemo(
-    () => new Map(items.map((item) => [item.id, item])),
-    [items]
-  );
-
-  const txToRubCents = useCallback((tx: TransactionOut) => {
-    const code = (itemsById.get(tx.primary_item_id)?.currency_code || "RUB").toUpperCase();
-    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
-    const rateKey = dateKey && dateKey > todayKey ? todayKey : dateKey;
-    const dayRates =
-      (rateKey ? fxRatesByDate[rateKey] : undefined) ??
-      (rateKey === todayKey ? fxRates : undefined);
-    const rate =
-      code === "RUB" ? 1 : dayRates?.find((row) => row.char_code === code)?.rate ?? null;
-    return minorToRubCents(tx.amount, code, rate);
-  }, [fxRates, fxRatesByDate, itemsById, todayKey]);
-
   const categoryLookup = useMemo(
     () => buildCategoryLookup(categoryNodes),
-    [categoryNodes]
-  );
-  const categoryDescendants = useMemo(
-    () => buildCategoryDescendants(categoryNodes),
     [categoryNodes]
   );
   const topLevelIconByLabel = useMemo(() => {
@@ -1399,31 +1399,13 @@ export default function DashboardPage() {
   );
 
   const goalSummaryById = useMemo(() => {
+    const progressById = new Map(goalProgress.map((row) => [row.goal_id, row.rub_cents]));
     const now = new Date();
     const map = new Map<number, { amount: number; progress: number; rangeLabel: string }>();
     activeGoals.forEach((goal) => {
       const range = getGoalRange(goal, now);
-      const categoryIds =
-        categoryDescendants.get(goal.category_id) ?? new Set([goal.category_id]);
-      const scope = categoryLookup.idToScope?.get(goal.category_id);
-      const direction = scope === "INCOME" ? "INCOME" : "EXPENSE";
-      let amount = 0;
-      if (range) {
-        txs.forEach((tx) => {
-          if (tx.is_split_parent) return;
-          if (tx.direction !== direction) return;
-          if (!isRealizedTransaction(tx)) return;
-          if (!tx.category_id || !categoryIds.has(tx.category_id)) return;
-          const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
-          if (!dateKey) return;
-          if (dateKey < range.startKey || dateKey > range.endKey) return;
-          const rub = txToRubCents(tx);
-          if (rub == null) return;
-          amount += rub;
-        });
-      }
-      const progress =
-        goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;
+      const amount = progressById.get(goal.id) ?? 0;
+      const progress = goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;
       map.set(goal.id, {
         amount,
         progress,
@@ -1431,7 +1413,7 @@ export default function DashboardPage() {
       });
     });
     return map;
-  }, [activeGoals, categoryDescendants, categoryLookup.idToScope, txs, txToRubCents]);
+  }, [activeGoals, goalProgress]);
 
   const formatGoalCategoryLabel = (categoryId: number | null) => {
     if (!categoryId) return "-";
@@ -2479,7 +2461,7 @@ export default function DashboardPage() {
                       <span className="min-w-0 flex-1 truncate text-sm leading-4 text-white/85">
                         {goal.name}
                       </span>
-                      {activityLoading ? (
+                      {goalsProgressLoading ? (
                         <MobileNumberSkeleton className="h-[18px] w-28" />
                       ) : (
                         <span className="shrink-0 text-base font-medium leading-[18px] tabular-nums text-white/90">
@@ -2487,7 +2469,7 @@ export default function DashboardPage() {
                         </span>
                       )}
                     </span>
-                    {activityLoading ? (
+                    {goalsProgressLoading ? (
                       <MobileNumberSkeleton className="h-6 w-full" />
                     ) : (
                       <span
@@ -2827,7 +2809,7 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {activityLoading ? (
+            {goalsProgressLoading ? (
               <div className="text-sm text-white/80">Загрузка целей...</div>
             ) : activeGoals.length === 0 ? (
               <div className="rounded-lg border border-dashed border-white/40 bg-white/10 p-4 text-center text-sm text-white/80">

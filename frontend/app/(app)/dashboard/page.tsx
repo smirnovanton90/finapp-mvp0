@@ -3,32 +3,31 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ComponentType,
 } from "react";
-import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import { dateKeyInTimezone, hasTransactionOccurred, todayDateKey, transactionDateKey } from "@/lib/timezone";
 import Link from "next/link";
 import {
-  AlertTriangle,
-  ArrowDownRight,
+  ArrowDown,
   ArrowRight,
-  ArrowUpRight,
+  ArrowUp,
+  Bell,
   Calendar,
   ChevronDown,
-  ChevronRight,
   PieChart,
+  Plus,
+  Settings,
   Target,
   User,
   Wallet,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { IconButton } from "@/components/ui/icon-button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tag } from "@/components/ui/tag";
 import {
   Dialog,
@@ -36,7 +35,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PeriodRangeCalendar } from "@/components/period-range-calendar";
-import { useSidebar } from "@/components/ui/sidebar-context";
 import {
   buildCategoryDescendants,
   buildCategoryLookup,
@@ -46,6 +44,7 @@ import {
 import {
   CATEGORY_ICON_BY_NAME,
   CATEGORY_ICON_FALLBACK,
+  CATEGORY_ICON_NAME_BY_L1,
 } from "@/lib/category-icons";
 import {
   API_BASE,
@@ -65,17 +64,12 @@ import {
   UserMeOut,
 } from "@/lib/api";
 import { CategoryIconImage } from "@/components/category-icon-image";
+import { MobileWidgetStack, WidgetDragHandle } from "@/components/mobile-widget-stack";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { minorToRubCents } from "@/lib/amount-rub";
 import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
-import {
-  ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
-  OVERDUE_TRANSACTIONS_GRADIENT,
-  NO_OVERDUE_TRANSACTIONS_GRADIENT,
-} from "@/lib/gradients";
 import { getGoalProgressColor } from "@/lib/goal-progress-color";
-import { ACCENT, GREEN, MODAL_BG, ORANGE, RED } from "@/lib/colors";
-import { CurrencyChip } from "@/components/currency-chip";
+import { ACCENT, ACCENT_FILL_LIGHT, GREEN, GREEN_FILL, MODAL_BG, ORANGE, RED } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 import {
   CASHFLOW_BUCKET_ORDER,
@@ -88,6 +82,49 @@ import {
 /** Подложка в стиле карточки актива: MODAL_BG, rounded-lg, без бордера. */
 const assetCardSurfaceClass =
   "relative rounded-lg overflow-hidden border-0 outline-none";
+
+/** Верхняя плашка метрики на мобильном дашборде — color/app-bg-end. */
+const MOBILE_METRIC_HEADER_BG = "#4B4197";
+
+/** Короткое уменьшение блока при нажатии, как у MobileTapScale. */
+const mobileBlockPressClass =
+  "origin-center touch-manipulation transition-transform duration-75 ease-out active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100";
+
+function MobileSolidTag({
+  children,
+  color,
+  height = 24,
+}: {
+  children: React.ReactNode;
+  color: string;
+  height?: number;
+}) {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center rounded-[4px] px-2 text-[11px] font-medium leading-none text-[#191732]"
+      style={{ backgroundColor: color, height }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function MobileNumberSkeleton({ className }: { className?: string }) {
+  return <Skeleton aria-hidden className={cn("rounded-[4px]", className)} />;
+}
+
+function MobilePlusLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      className="grid size-9 shrink-0 place-items-center rounded-[4px] text-white/85 transition-transform active:scale-90"
+      style={{ backgroundColor: ACCENT }}
+    >
+      <Plus className="size-5" strokeWidth={2.25} />
+    </Link>
+  );
+}
 
 type CashflowSegment = {
   key: CashflowBucket;
@@ -337,6 +374,11 @@ function formatRub(valueInCents: number) {
   return formatAmount(valueInCents);
 }
 
+function formatLiabilityRub(valueInCents: number) {
+  if (valueInCents === 0) return formatRub(0);
+  return `−${formatRub(valueInCents)}`;
+}
+
 function formatPercent(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 1,
@@ -467,6 +509,13 @@ function formatDashboardPeriodLabel(startKey: string, endKey: string) {
     return label.charAt(0).toUpperCase() + label.slice(1);
   }
   return formatRangeLabel(startKey, endKey);
+}
+
+function formatMobileCashflowPeriod(startKey: string, endKey: string) {
+  if (isFullCalendarMonthRange(startKey, endKey)) {
+    return `За ${formatMonthLabel(parseDateKey(startKey))}`;
+  }
+  return formatDashboardPeriodLabel(startKey, endKey);
 }
 
 function getPreviousMonthRange(date: Date) {
@@ -970,7 +1019,6 @@ function sumDeltaRange(
 export default function DashboardPage() {
   const { data: session } = useSession();
   const { accountingStartDate } = useAccountingStart();
-  const { isDesktop } = useSidebar();
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
   const [txsLoaded, setTxsLoaded] = useState(false);
@@ -989,10 +1037,11 @@ export default function DashboardPage() {
   const [expenseHover, setExpenseHover] = useState<CategorySegment | null>(null);
   const [mobileDetail, setMobileDetail] = useState<"structure" | null>(null);
   const [mobileDetailExpanded, setMobileDetailExpanded] = useState(false);
-  const [showPlan, setShowPlan] = useState(true);
-  const [expandedCashflow, setExpandedCashflow] = useState<
-    "income" | "expense" | null
-  >(null);
+  const showPlan = false;
+  const [cashflowExpanded, setCashflowExpanded] = useState({
+    income: false,
+    expense: false,
+  });
   const [periodStartKey, setPeriodStartKey] = useState(
     () => getCurrentMonthRangeKeys().startKey
   );
@@ -1003,10 +1052,6 @@ export default function DashboardPage() {
   const [periodCalendarKey, setPeriodCalendarKey] = useState(0);
   const [draftPeriodStartKey, setDraftPeriodStartKey] = useState(periodStartKey);
   const [draftPeriodEndKey, setDraftPeriodEndKey] = useState(periodEndKey);
-  const [mobileStickyHeaderVisible, setMobileStickyHeaderVisible] = useState(false);
-  const mobileStickyHeaderVisibleRef = useRef(false);
-  const mobileHeroDissolveRef = useRef<HTMLDivElement | null>(null);
-  const mobileHeroGradientRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const [chartSize, setChartSize] = useState({ width: 240, height: 128 });
   const now = new Date();
@@ -1423,7 +1468,7 @@ export default function DashboardPage() {
   );
 
   const toggleCashflowExpand = useCallback((direction: "income" | "expense") => {
-    setExpandedCashflow((prev) => (prev === direction ? null : direction));
+    setCashflowExpanded((prev) => ({ ...prev, [direction]: !prev[direction] }));
   }, []);
 
   const incomeSegments = useMemo(
@@ -1614,37 +1659,6 @@ export default function DashboardPage() {
     expensePrevMonthTotal,
   ]);
 
-  const { overduePlannedCount, overduePlannedSum, todayPlannedCount, todayPlannedSum } =
-    useMemo(() => {
-      let overdueCount = 0;
-      let overdueSum = 0;
-      let todayCount = 0;
-      let todaySum = 0;
-      txs.forEach((tx) => {
-        if (tx.is_split_parent) return;
-        if (tx.transaction_type !== "PLANNED") return;
-        if (tx.status === "REALIZED") return;
-        const dateKey = toTxDateKey(tx.transaction_date);
-        if (!dateKey) return;
-        if (dateKey < todayKey) {
-          overdueCount += 1;
-          const rub = txToRubCents(tx);
-          if (rub != null) overdueSum += rub;
-        } else if (dateKey === todayKey) {
-          todayCount += 1;
-          const rub = txToRubCents(tx);
-          if (rub != null) todaySum += rub;
-        }
-      });
-      return {
-        overduePlannedCount: overdueCount,
-        overduePlannedSum: overdueSum,
-        todayPlannedCount: todayCount,
-        todayPlannedSum: todaySum,
-      };
-    }, [todayKey, txs, txToRubCents]);
-  const hasOverduePlanned = showPlan && overduePlannedCount > 0;
-
   const resolveCategoryIcon = useCallback(
     (categoryId: number | null): CategoryIcon => {
       if (!categoryId) return CATEGORY_ICON_FALLBACK;
@@ -1739,7 +1753,7 @@ export default function DashboardPage() {
     };
   }, [fxRatesByDate, needsRates, rateFetchKeys]);
 
-  const { dailyRows, endBalancesByItemId } = useMemo(() => {
+  const { dailyRows } = useMemo(() => {
     const emptyBalances = new Map<number, number>();
     if (!txsLoaded || !chartItems.length || !rangeStartKey || !rangeEndKey) {
       return { dailyRows: [] as DailyRow[], endBalancesByItemId: emptyBalances };
@@ -1849,64 +1863,19 @@ export default function DashboardPage() {
 
   const itemRubCentsById = useMemo(() => {
     const map = new Map<number, number>();
-    const selectedIds = new Set(activeItems.map((item) => item.id));
-    const itemKindById = new Map(activeItems.map((item) => [item.id, item.kind]));
-    const itemTypeById = new Map(items.map((item) => [item.id, item.type_code]));
-    const plannedByDate =
-      showPlan && txsLoaded
-        ? buildDeltasByDate(txs, selectedIds, itemKindById, true, "planned", itemTypeById)
-        : null;
-
     activeItems.forEach((item) => {
-      const base = getPrimaryValueRubCents(item);
-      if (base == null) return;
-      if (!plannedByDate) {
-        map.set(item.id, base);
-        return;
-      }
-      const currency = item.currency_code ?? "RUB";
-      let plannedRub = 0;
-      plannedByDate.forEach((bucket, dateKey) => {
-        if (dateKey > rangeEndKey) return;
-        const delta = bucket.get(item.id) ?? 0;
-        if (!delta) return;
-        const rateDate = dateKey > todayKey ? todayKey : dateKey;
-        const dayRates = fxRatesByDate[rateDate] ?? (rateDate === todayKey ? fxRates : undefined);
-        const rate =
-          currency.toUpperCase() === "RUB"
-            ? 1
-            : dayRates?.find((row) => row.char_code === currency.toUpperCase())?.rate ?? null;
-        const rub = minorToRubCents(delta, currency, rate);
-        if (rub != null) plannedRub += rub;
-      });
-      map.set(item.id, Math.abs(base + plannedRub));
+      const value = getPrimaryValueRubCents(item);
+      if (value != null) map.set(item.id, value);
     });
     return map;
-  }, [
-    activeItems,
-    fxRates,
-    fxRatesByDate,
-    items,
-    rangeEndKey,
-    rateByCode,
-    showPlan,
-    todayKey,
-    txs,
-    txsLoaded,
-  ]);
+  }, [activeItems, rateByCode]);
 
   const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
     let assets = 0;
     let liabilities = 0;
     activeItems.forEach((item) => {
       const value = itemRubCentsById.get(item.id) ?? 0;
-      const balanceHint =
-        showPlan && txsLoaded
-          ? (endBalancesByItemId.get(item.id) ??
-            item.balance_currency_cents ??
-            item.initial_balance_minor)
-          : item.balance_currency_cents ?? undefined;
-      const kind = resolveItemEffectiveKind(item, balanceHint);
+      const kind = resolveItemEffectiveKind(item, item.balance_currency_cents ?? undefined);
       if (kind === "ASSET") assets += value;
       else liabilities += value;
     });
@@ -1917,23 +1886,14 @@ export default function DashboardPage() {
     };
   }, [
     activeItems,
-    endBalancesByItemId,
     itemRubCentsById,
     resolveItemEffectiveKind,
-    showPlan,
-    txsLoaded,
   ]);
 
   const assetSegments = useMemo((): AssetStructureSegment[] => {
     const byType = new Map<string, number>();
     activeItems.forEach((item) => {
-      const balanceHint =
-        showPlan && txsLoaded
-          ? (endBalancesByItemId.get(item.id) ??
-            item.balance_currency_cents ??
-            item.initial_balance_minor)
-          : item.balance_currency_cents ?? undefined;
-      if (resolveItemEffectiveKind(item, balanceHint) !== "ASSET") return;
+      if (resolveItemEffectiveKind(item, item.balance_currency_cents ?? undefined) !== "ASSET") return;
       const value = itemRubCentsById.get(item.id) ?? 0;
       if (value <= 0) return;
       byType.set(item.type_code, (byType.get(item.type_code) ?? 0) + value);
@@ -1954,23 +1914,14 @@ export default function DashboardPage() {
     }));
   }, [
     activeItems,
-    endBalancesByItemId,
     itemRubCentsById,
     resolveItemEffectiveKind,
-    showPlan,
-    txsLoaded,
   ]);
 
   const liabilitySegments = useMemo((): AssetStructureSegment[] => {
     const byType = new Map<string, number>();
     activeItems.forEach((item) => {
-      const balanceHint =
-        showPlan && txsLoaded
-          ? (endBalancesByItemId.get(item.id) ??
-            item.balance_currency_cents ??
-            item.initial_balance_minor)
-          : item.balance_currency_cents ?? undefined;
-      if (resolveItemEffectiveKind(item, balanceHint) !== "LIABILITY") return;
+      if (resolveItemEffectiveKind(item, item.balance_currency_cents ?? undefined) !== "LIABILITY") return;
       const value = itemRubCentsById.get(item.id) ?? 0;
       if (value <= 0) return;
       byType.set(item.type_code, (byType.get(item.type_code) ?? 0) + value);
@@ -1993,11 +1944,8 @@ export default function DashboardPage() {
     }));
   }, [
     activeItems,
-    endBalancesByItemId,
     itemRubCentsById,
     resolveItemEffectiveKind,
-    showPlan,
-    txsLoaded,
   ]);
 
   const periodStartNetTotal = useMemo(() => {
@@ -2119,615 +2067,366 @@ export default function DashboardPage() {
     return () => observer.disconnect();
   }, []);
 
-  // Герой: при скролле уменьшается и растворяется; затем появляется компактная шапка с чипами.
-  useLayoutEffect(() => {
-    if (isDesktop) {
-      mobileStickyHeaderVisibleRef.current = false;
-      setMobileStickyHeaderVisible(false);
-      return;
-    }
-    const root = document.querySelector("[data-app-scroll-container]");
-    if (!(root instanceof HTMLElement)) return;
-
-    const COLLAPSE_RANGE_PX = 160;
-    let raf = 0;
-    const update = () => {
-      raf = 0;
-      const y = root.scrollTop;
-      const p = Math.min(1, Math.max(0, y / COLLAPSE_RANGE_PX));
-      const dissolveEl = mobileHeroDissolveRef.current;
-      if (dissolveEl) {
-        dissolveEl.style.opacity = String(Math.max(0, 1 - p));
-        dissolveEl.style.transform = `translate3d(0, ${y}px, 0) scale(${1 - p * 0.42})`;
-        dissolveEl.style.pointerEvents = p > 0.85 ? "none" : "auto";
-      }
-      const gradientEl = mobileHeroGradientRef.current;
-      if (gradientEl) {
-        gradientEl.style.opacity = String(Math.max(0, 1 - p * 1.15));
-        gradientEl.style.transform = `translate3d(0, ${y}px, 0)`;
-      }
-      const showSticky = p >= 0.55;
-      if (showSticky !== mobileStickyHeaderVisibleRef.current) {
-        mobileStickyHeaderVisibleRef.current = showSticky;
-        setMobileStickyHeaderVisible(showSticky);
-      }
-    };
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(update);
-    };
-    update();
-    root.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      root.removeEventListener("scroll", onScroll);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [isDesktop, loading]);
-
-  const renderSettingsChips = (opts?: { compact?: boolean }) => (
-    <div className={cn("flex flex-wrap items-center gap-2", opts?.compact && "min-w-0 flex-1")}>
-      <button
-        type="button"
-        onClick={openPeriodDialog}
-        className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-sm text-white/90 transition-opacity active:opacity-80"
-        aria-label="Выбрать отчётный период"
-      >
-        <Calendar className="h-4 w-4 shrink-0 text-white/70" strokeWidth={1.5} />
-        <span className="truncate font-medium">{periodLabel}</span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-white/60" strokeWidth={1.5} />
-      </button>
-      <button
-        type="button"
-        onClick={() => setShowPlan((value) => !value)}
-        aria-pressed={showPlan}
-        aria-label={showPlan ? "План включён" : "План выключен"}
-        className={cn(
-          "inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-all active:scale-[0.98]",
-          showPlan
-            ? "border-transparent text-white shadow-[0_0_18px_-4px_rgba(127,92,255,0.85)]"
-            : "border-white/15 bg-white/10 text-white/45"
-        )}
-        style={showPlan ? { backgroundColor: ACCENT } : undefined}
-      >
-        План
-      </button>
-    </div>
+  const mobileCashflowPeriodLabel = formatMobileCashflowPeriod(
+    periodStartKey,
+    periodEndKey
   );
+
+  const renderMobileCategoryRows = (direction: "INCOME" | "EXPENSE") => {
+    const groups = direction === "INCOME" ? incomeBucketGroups : expenseBucketGroups;
+    const rows = showPlan
+      ? groups.flatMap((group) =>
+          group.categories.map((row) => ({ ...row, bucket: group.key }))
+        )
+      : (groups[0]?.categories ?? []).map((row) => ({
+          ...row,
+          bucket: "actual" as const,
+        }));
+    if (activityLoading) {
+      return (
+        <div className="flex flex-col gap-2">
+          {[0, 1].map((row) => (
+            <div key={row} className="flex items-center gap-2">
+              <MobileNumberSkeleton className="size-4 shrink-0" />
+              <MobileNumberSkeleton className="h-4 w-28" />
+              <MobileNumberSkeleton className="ml-auto h-[18px] w-16" />
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (rows.length === 0) {
+      return <p className="text-sm leading-4 text-white/55">Нет операций</p>;
+    }
+    return (
+      <div className="flex flex-col gap-2">
+        {rows.map((row) => {
+          const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+          const configuredIconName = CATEGORY_ICON_NAME_BY_L1[row.label];
+          const CategoryIcon =
+            (configuredIconName ? CATEGORY_ICON_BY_NAME[configuredIconName] : undefined) ??
+            topLevelIconByLabel.get(row.label) ??
+            CATEGORY_ICON_FALLBACK;
+          return (
+            <div key={`${row.bucket}-${row.label}`} className="flex items-center gap-2">
+              <span className="shrink-0" style={{ color: ACCENT }}>
+                <CategoryIcon className="size-4" strokeWidth={1.75} />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm leading-4 text-white/55">
+                {row.label}
+              </span>
+              <Link
+                href={buildCashflowTransactionsHref({
+                  direction,
+                  bucket: row.bucket,
+                  periodStartKey,
+                  periodEndKey,
+                  categoryL1: isUncategorized ? null : row.label,
+                  uncategorized: isUncategorized,
+                })}
+                className="shrink-0 text-base font-medium leading-[18px] tabular-nums text-white/90"
+              >
+                {formatRub(row.value)}
+              </Link>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderMobileCashflowCard = (direction: "income" | "expense") => {
+    const expanded = cashflowExpanded[direction];
+    const total =
+      direction === "income" ? displayIncomeCashflow.total : displayExpenseCashflow.total;
+    const sign = direction === "income" ? "+" : "−";
+    const signColor = direction === "income" ? GREEN : RED;
+    const apiDirection = direction === "income" ? "INCOME" : "EXPENSE";
+    const headerBg = direction === "income" ? MOBILE_METRIC_HEADER_BG : MODAL_BG;
+    return (
+      <div className={cn("overflow-hidden rounded-[10px]", mobileBlockPressClass)}>
+        <div
+          className="flex items-center gap-3 px-6 py-[18px]"
+          style={{ backgroundColor: headerBg }}
+        >
+          <button
+            type="button"
+            onClick={() => toggleCashflowExpand(direction)}
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            aria-expanded={expanded}
+          >
+            <span className="text-[28px] font-semibold leading-7" style={{ color: signColor }}>
+              {sign}
+            </span>
+            {activityLoading ? (
+              <MobileNumberSkeleton className="h-7 w-28" />
+            ) : (
+              <span className="min-w-0 truncate text-[28px] font-semibold leading-7 tabular-nums text-white/85">
+                {formatRub(total)}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleCashflowExpand(direction)}
+            aria-label={expanded ? "Свернуть категории" : "Показать категории"}
+            className="grid size-9 shrink-0 place-items-center text-white/85"
+          >
+            {expanded ? (
+              <ArrowUp className="size-5" strokeWidth={2} />
+            ) : (
+              <ArrowDown className="size-5" strokeWidth={2} />
+            )}
+          </button>
+        </div>
+        {expanded ? (
+          <div className="px-6 py-[18px]" style={{ backgroundColor: ACCENT_FILL_LIGHT }}>
+            {renderMobileCategoryRows(apiDirection)}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <>
-      <main className="min-h-0 pb-2 text-slate-50 md:hidden">
-        <style
-          dangerouslySetInnerHTML={{
-            __html: `
-              @keyframes dashboard-header-gradient-shift {
-                0%, 100% { background-position: 0% 0%; }
-                50% { background-position: 25% 15%; }
-              }
-            `,
-          }}
-        />
-        {/* Шапка с анимированным градиентом от верха экрана (включая safe-area), как на странице актива */}
-        <div
-          className="relative mb-6 flex w-screen max-w-none flex-col gap-4 ml-[calc(-50vw+50%)] px-4 pb-2"
-          style={{
-            paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
-            opacity: loading ? 0 : 1,
-            transition: "opacity 0.3s ease-in-out",
-          }}
+      <main className="min-h-0 text-white/85 md:hidden">
+        <header
+          className="flex items-center gap-3 pb-2"
+          style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)" }}
         >
-          <div
-            ref={mobileHeroGradientRef}
-            className="pointer-events-none absolute inset-0 z-0 overflow-hidden will-change-transform"
-            style={{
-              background: ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
-              backgroundSize: "200% 200%",
-              backgroundPosition: "0% 0%",
-              animation: "dashboard-header-gradient-shift 18s ease-in-out infinite",
-              WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 45%, transparent 100%)",
-              maskImage: "linear-gradient(to bottom, black 0%, black 45%, transparent 100%)",
-            }}
-          />
-          <div
-            ref={mobileHeroDissolveRef}
-            className="relative z-0 flex flex-col will-change-transform"
-            style={{ transformOrigin: "center top" }}
+          <Link
+            href="/cabinet"
+            aria-label="Открыть личный кабинет"
+            className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-full bg-[rgba(93,95,215,0.22)] text-base font-semibold text-white"
           >
-            <header className="relative z-10 flex items-center justify-between px-1">
-              <div>
-                <p className="text-sm text-white/65">
-                  {new Intl.DateTimeFormat("ru-RU", {
-                    weekday: "long",
-                    day: "numeric",
-                    month: "long",
-                  }).format(now)}
-                </p>
-                <h1 className="mt-1 text-[22px] font-semibold leading-tight tracking-tight text-white">
-                  {greetingName ? `Привет, ${greetingName}` : "Добрый день"}
-                </h1>
-              </div>
-              <Link
-                href="/cabinet"
-                aria-label="Открыть личный кабинет"
-                className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full border border-white/10 bg-[rgba(93,95,215,0.22)] text-base font-semibold text-violet-200 shadow-[0_10px_22px_-16px_rgba(127,92,255,0.6)] transition-transform active:scale-90"
-              >
-                {userPhotoUrl ? (
-                  <img src={userPhotoUrl} alt="Фото профиля" className="h-full w-full object-cover" />
-                ) : avatarLetter ? (
-                  avatarLetter
-                ) : (
-                  <User className="h-5 w-5" />
-                )}
-              </Link>
-            </header>
-          </div>
-          <div
-            className={cn(
-              "relative z-10 transition-opacity duration-200",
-              mobileStickyHeaderVisible && "opacity-0 pointer-events-none"
+            {userPhotoUrl ? (
+              <img src={userPhotoUrl} alt="" className="h-full w-full object-cover" />
+            ) : avatarLetter ? (
+              avatarLetter
+            ) : (
+              <User className="size-5" />
             )}
+          </Link>
+          <p className="min-w-0 flex-1 truncate text-[22px] font-semibold leading-[26px] tracking-[-0.4px] text-white">
+            {greetingName || "Добрый день"}
+          </p>
+          <button
+            type="button"
+            aria-label="Уведомления"
+            className="inline-flex h-9 shrink-0 items-center justify-center rounded-[4px] px-3 text-white/85 transition-transform active:scale-90"
+            style={{ backgroundColor: ACCENT_FILL_LIGHT }}
           >
-            {renderSettingsChips()}
-          </div>
-        </div>
+            <Bell className="size-4" strokeWidth={1.75} />
+          </button>
+          <Link
+            href="/cabinet"
+            aria-label="Настройки"
+            className="inline-flex h-9 shrink-0 items-center justify-center rounded-[4px] px-3 text-white/85 transition-transform active:scale-90"
+            style={{ backgroundColor: ACCENT_FILL_LIGHT }}
+          >
+            <Settings className="size-4" strokeWidth={1.75} />
+          </Link>
+        </header>
 
-        <div
-          className="relative z-10 flex w-full flex-col gap-8"
-          style={{ opacity: loading ? 0 : 1, transition: "opacity 0.3s ease-in-out" }}
-        >
-          {/* Чистые активы — главный акцент */}
-          <section className="space-y-3">
-            <h2 className="px-1 text-xl font-semibold tracking-tight text-white/95">
-              Чистые активы
-            </h2>
+        <div className="flex flex-col gap-8 pt-6">
+          <MobileWidgetStack
+            storageKey="finapp.dashboard.mobileWidgets"
+            items={{
+              assets: (
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <WidgetDragHandle id="assets">
+                  <h2 className="text-[22px] font-semibold leading-[23px] tracking-[-0.3px] text-white/95">
+                    Чистые активы
+                  </h2>
+                </WidgetDragHandle>
+                <p className="mt-1 text-sm leading-4 text-white/55">на текущий момент</p>
+              </div>
+              <MobilePlusLink href="/assets?openCreate=1" label="Добавить актив" />
+            </div>
             <button
               type="button"
               onClick={() => {
                 setMobileDetailExpanded(false);
                 setMobileDetail("structure");
               }}
-              className={`${assetCardSurfaceClass} w-full p-6 text-left text-white transition-transform active:scale-[0.98]`}
-              style={{ backgroundColor: MODAL_BG }}
+              className={cn(
+                "w-full overflow-hidden rounded-[10px] text-left",
+                mobileBlockPressClass
+              )}
               aria-label="Открыть структуру активов и обязательств"
             >
-              <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full border-[20px] border-[rgba(93,95,215,0.18)]" />
-              <div className="relative flex flex-wrap items-center gap-2.5">
-                <CurrencyChip code="RUB" />
-                <span className="text-[32px] font-semibold leading-none tracking-tight tabular-nums text-white">
-                  {loading
-                    ? "..."
-                    : netTotal < 0
+              <div
+                className="px-6 py-[18px]"
+                style={{ backgroundColor: MOBILE_METRIC_HEADER_BG }}
+              >
+                {loading ? (
+                  <MobileNumberSkeleton className="h-8 w-44" />
+                ) : (
+                  <span className="block truncate text-[28px] font-semibold leading-8 tracking-[-0.6px] tabular-nums text-white/85">
+                    {netTotal < 0
                       ? `−${formatRub(Math.abs(netTotal))}`
                       : formatRub(netTotal)}
-                </span>
-              </div>
-              <div className="relative mt-4 inline-flex items-center gap-1.5 rounded-full bg-[rgba(93,95,215,0.22)] px-3 py-1.5 text-sm text-white/90">
-                <ArrowUpRight className="h-4 w-4 shrink-0" strokeWidth={1.5} />
-                <span>
-                  {netTotalChangeLabel}{" "}
-                  {activityLoading ? "..." : formatChangePercent(netTotalChangePercent)}
-                </span>
-              </div>
-              <div className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
-                <div>
-                  <span className="block text-sm text-white/55">Активы</span>
-                  <span className="mt-1 block text-base font-medium tabular-nums text-white/90">
-                    {loading ? "..." : formatRub(totalAssets)}
                   </span>
+                )}
+              </div>
+              <div
+                className="flex gap-4 px-6 py-[18px]"
+                style={{ backgroundColor: ACCENT_FILL_LIGHT }}
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="block text-sm leading-4 text-white/55">Активы</span>
+                  {loading ? (
+                    <MobileNumberSkeleton className="mt-1 h-[18px] w-24" />
+                  ) : (
+                    <span className="mt-1 block text-base font-medium leading-[18px] tabular-nums text-white/90">
+                      {formatRub(totalAssets)}
+                    </span>
+                  )}
                 </div>
-                <div>
-                  <span className="block text-sm text-white/55">Обязательства</span>
-                  <span className="mt-1 block text-base font-medium tabular-nums text-white/90">
-                    {loading ? "..." : `−${formatRub(totalLiabilities)}`}
-                  </span>
+                <div className="min-w-0 flex-1">
+                  <span className="block text-sm leading-4 text-white/55">Обязательства</span>
+                  {loading ? (
+                    <MobileNumberSkeleton className="mt-1 h-[18px] w-20" />
+                  ) : (
+                    <span className="mt-1 block text-base font-medium leading-[18px] tabular-nums text-white/90">
+                      {formatLiabilityRub(totalLiabilities)}
+                    </span>
+                  )}
                 </div>
               </div>
             </button>
           </section>
 
-          {/* Доходы и расходы — две крупные суммы */}
-          <section className="space-y-3">
-            <h2 className="px-1 text-xl font-semibold tracking-tight text-white/95">
-              Доходы и расходы
-            </h2>
-            <div className="grid gap-3">
-              <div
-                className={`${assetCardSurfaceClass} p-5`}
-                style={{ backgroundColor: MODAL_BG }}
-              >
+              ),
+              cashflow: (
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <WidgetDragHandle id="cashflow">
+                  <h2 className="text-[22px] font-semibold leading-[23px] tracking-[-0.3px] text-white/95">
+                    Доходы и расходы
+                  </h2>
+                </WidgetDragHandle>
                 <button
                   type="button"
-                  onClick={() => toggleCashflowExpand("income")}
-                  className="flex w-full flex-col gap-3 text-left transition-opacity active:opacity-80"
-                  aria-expanded={expandedCashflow === "income"}
+                  onClick={openPeriodDialog}
+                  className="mt-1 block text-left text-sm leading-4 text-white/55"
+                  aria-label="Выбрать отчётный период"
                 >
-                  <span className="flex items-center gap-2 text-base text-white/60">
-                    <ArrowUpRight className="h-5 w-5 text-emerald-400" strokeWidth={1.5} />
-                    Доходы
-                    <ChevronDown
-                      className={cn(
-                        "ml-auto h-4 w-4 text-white/40 transition-transform",
-                        expandedCashflow === "income" && "rotate-180"
-                      )}
-                      strokeWidth={1.5}
-                    />
-                  </span>
-                  <span className="inline-flex flex-wrap items-center gap-2.5">
-                    <CurrencyChip code="RUB" />
-                    <span
-                      className="text-[28px] font-semibold leading-none tracking-tight tabular-nums"
-                      style={{ color: GREEN }}
-                    >
-                      {activityLoading ? "..." : formatRub(displayIncomeCashflow.total)}
-                    </span>
-                  </span>
+                  {mobileCashflowPeriodLabel}
                 </button>
-
-                {expandedCashflow === "income" && (
-                  <div className="mt-5 space-y-3 border-t border-white/10 pt-4">
-                    {incomeBucketGroups.length === 0 ? (
-                      <p className="text-sm text-slate-400">Нет операций</p>
-                    ) : showPlan ? (
-                      incomeBucketGroups.map((group) => (
-                        <div key={group.key} className="space-y-2.5">
-                          <div className="flex items-center gap-2.5">
-                            <span
-                              className="h-2.5 w-2.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: group.color }}
-                            />
-                            <span className="min-w-0 flex-1 truncate text-base font-medium text-slate-200">
-                              {group.label}
-                            </span>
-                            <Link
-                              href={buildCashflowTransactionsHref({
-                                direction: "INCOME",
-                                bucket: group.key,
-                                periodStartKey,
-                                periodEndKey,
-                              })}
-                              className="inline-flex items-center gap-1.5 transition-opacity active:opacity-70"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <CurrencyChip code="RUB" />
-                              <span
-                                className="text-base font-semibold tabular-nums underline-offset-2 hover:underline"
-                                style={{ color: GREEN }}
-                              >
-                                {formatRub(group.total)}
-                              </span>
-                            </Link>
-                          </div>
-                          {group.categories.map((row) => {
-                            const CategoryIcon =
-                              topLevelIconByLabel.get(row.label) ??
-                              CATEGORY_ICON_FALLBACK;
-                            const isUncategorized = row.label === UNCATEGORIZED_LABEL;
-                            return (
-                              <div
-                                key={`${group.key}-${row.label}`}
-                                className="flex items-center gap-2.5 pl-5 text-sm"
-                              >
-                                <span style={{ color: ACCENT }}>
-                                  <CategoryIcon className="h-4 w-4" />
-                                </span>
-                                <span className="min-w-0 flex-1 truncate text-slate-400">
-                                  {row.label}
-                                </span>
-                                <Link
-                                  href={buildCashflowTransactionsHref({
-                                    direction: "INCOME",
-                                    bucket: group.key,
-                                    periodStartKey,
-                                    periodEndKey,
-                                    categoryL1: isUncategorized ? null : row.label,
-                                    uncategorized: isUncategorized,
-                                  })}
-                                  className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  {formatRub(row.value)}
-                                </Link>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ))
-                    ) : (
-                      (incomeBucketGroups[0]?.categories ?? []).map((row) => {
-                        const CategoryIcon =
-                          topLevelIconByLabel.get(row.label) ??
-                          CATEGORY_ICON_FALLBACK;
-                        const isUncategorized = row.label === UNCATEGORIZED_LABEL;
-                        return (
-                          <div
-                            key={row.label}
-                            className="flex items-center gap-2.5 text-sm"
-                          >
-                            <span style={{ color: ACCENT }}>
-                              <CategoryIcon className="h-4 w-4" />
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-slate-400">
-                              {row.label}
-                            </span>
-                            <Link
-                              href={buildCashflowTransactionsHref({
-                                direction: "INCOME",
-                                bucket: "actual",
-                                periodStartKey,
-                                periodEndKey,
-                                categoryL1: isUncategorized ? null : row.label,
-                                uncategorized: isUncategorized,
-                              })}
-                              className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {formatRub(row.value)}
-                            </Link>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
               </div>
-
-              <div
-                className={`${assetCardSurfaceClass} p-5`}
-                style={{ backgroundColor: MODAL_BG }}
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleCashflowExpand("expense")}
-                  className="flex w-full flex-col gap-3 text-left transition-opacity active:opacity-80"
-                  aria-expanded={expandedCashflow === "expense"}
-                >
-                  <span className="flex items-center gap-2 text-base text-white/60">
-                    <ArrowDownRight className="h-5 w-5 text-rose-400" strokeWidth={1.5} />
-                    Расходы
-                    <ChevronDown
-                      className={cn(
-                        "ml-auto h-4 w-4 text-white/40 transition-transform",
-                        expandedCashflow === "expense" && "rotate-180"
-                      )}
-                      strokeWidth={1.5}
-                    />
-                  </span>
-                  <span className="inline-flex flex-wrap items-center gap-2.5">
-                    <CurrencyChip code="RUB" />
-                    <span
-                      className="text-[28px] font-semibold leading-none tracking-tight tabular-nums"
-                      style={{ color: RED }}
-                    >
-                      {activityLoading ? "..." : formatRub(displayExpenseCashflow.total)}
-                    </span>
-                  </span>
-                </button>
-
-                {expandedCashflow === "expense" && (
-                  <div className="mt-5 space-y-3 border-t border-white/10 pt-4">
-                    {expenseBucketGroups.length === 0 ? (
-                      <p className="text-sm text-slate-400">Нет операций</p>
-                    ) : showPlan ? (
-                      expenseBucketGroups.map((group) => (
-                        <div key={group.key} className="space-y-2.5">
-                          <div className="flex items-center gap-2.5">
-                            <span
-                              className="h-2.5 w-2.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: group.color }}
-                            />
-                            <span className="min-w-0 flex-1 truncate text-base font-medium text-slate-200">
-                              {group.label}
-                            </span>
-                            <Link
-                              href={buildCashflowTransactionsHref({
-                                direction: "EXPENSE",
-                                bucket: group.key,
-                                periodStartKey,
-                                periodEndKey,
-                              })}
-                              className="inline-flex items-center gap-1.5 transition-opacity active:opacity-70"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <CurrencyChip code="RUB" />
-                              <span
-                                className="text-base font-semibold tabular-nums underline-offset-2 hover:underline"
-                                style={{ color: RED }}
-                              >
-                                {formatRub(group.total)}
-                              </span>
-                            </Link>
-                          </div>
-                          {group.categories.map((row) => {
-                            const CategoryIcon =
-                              topLevelIconByLabel.get(row.label) ??
-                              CATEGORY_ICON_FALLBACK;
-                            const isUncategorized = row.label === UNCATEGORIZED_LABEL;
-                            return (
-                              <div
-                                key={`${group.key}-${row.label}`}
-                                className="flex items-center gap-2.5 pl-5 text-sm"
-                              >
-                                <span style={{ color: ACCENT }}>
-                                  <CategoryIcon className="h-4 w-4" />
-                                </span>
-                                <span className="min-w-0 flex-1 truncate text-slate-400">
-                                  {row.label}
-                                </span>
-                                <Link
-                                  href={buildCashflowTransactionsHref({
-                                    direction: "EXPENSE",
-                                    bucket: group.key,
-                                    periodStartKey,
-                                    periodEndKey,
-                                    categoryL1: isUncategorized ? null : row.label,
-                                    uncategorized: isUncategorized,
-                                  })}
-                                  className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  {formatRub(row.value)}
-                                </Link>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ))
-                    ) : (
-                      (expenseBucketGroups[0]?.categories ?? []).map((row) => {
-                        const CategoryIcon =
-                          topLevelIconByLabel.get(row.label) ??
-                          CATEGORY_ICON_FALLBACK;
-                        const isUncategorized = row.label === UNCATEGORIZED_LABEL;
-                        return (
-                          <div
-                            key={row.label}
-                            className="flex items-center gap-2.5 text-sm"
-                          >
-                            <span style={{ color: ACCENT }}>
-                              <CategoryIcon className="h-4 w-4" />
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-slate-400">
-                              {row.label}
-                            </span>
-                            <Link
-                              href={buildCashflowTransactionsHref({
-                                direction: "EXPENSE",
-                                bucket: "actual",
-                                periodStartKey,
-                                periodEndKey,
-                                categoryL1: isUncategorized ? null : row.label,
-                                uncategorized: isUncategorized,
-                              })}
-                              className="tabular-nums text-slate-300 underline-offset-2 transition-opacity hover:underline active:opacity-70"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {formatRub(row.value)}
-                            </Link>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
+              <MobilePlusLink href="/transactions?openCreate=1" label="Добавить транзакцию" />
             </div>
+            {renderMobileCashflowCard("income")}
+            {renderMobileCashflowCard("expense")}
           </section>
 
-          {/* Компактные сигналы плана — ниже главных цифр */}
-          {showPlan && (todayPlannedCount > 0 || overduePlannedCount > 0) && (
-            <section className="space-y-2">
-              {overduePlannedCount > 0 && (
-                <Link
-                  href="/transactions?preset=overdue-planned"
-                  className={`${assetCardSurfaceClass} flex items-center gap-3 px-4 py-3.5 transition-transform active:scale-[0.98]`}
-                  style={{ backgroundColor: "rgba(255, 141, 40, 0.22)" }}
-                >
-                  <AlertTriangle className="h-5 w-5 shrink-0 text-amber-300" strokeWidth={1.5} />
-                  <span className="min-w-0 flex-1 text-base text-amber-100">
-                    Просрочено:{" "}
-                    <span className="font-semibold tabular-nums">
-                      {activityLoading ? "..." : overduePlannedCount}
-                    </span>
-                  </span>
-                  <span className="inline-flex shrink-0 items-center gap-1.5 text-base font-semibold text-amber-100">
-                    <CurrencyChip code="RUB" />
-                    <span className="tabular-nums">
-                      {activityLoading ? "..." : formatRub(overduePlannedSum)}
-                    </span>
-                  </span>
-                </Link>
-              )}
-              {todayPlannedCount > 0 && (
-                <Link
-                  href="/transactions?preset=today-planned"
-                  className={`${assetCardSurfaceClass} flex items-center gap-3 px-4 py-3.5 transition-transform active:scale-[0.98]`}
-                  style={{ backgroundColor: MODAL_BG }}
-                >
-                  <Calendar className="h-5 w-5 shrink-0 text-violet-300" strokeWidth={1.5} />
-                  <span className="min-w-0 flex-1 text-base text-white/80">
-                    На сегодня:{" "}
-                    <span className="font-semibold tabular-nums text-white">
-                      {activityLoading ? "..." : todayPlannedCount}
-                    </span>
-                  </span>
-                  <span className="inline-flex shrink-0 items-center gap-1.5 text-base font-semibold text-white">
-                    <CurrencyChip code="RUB" />
-                    <span className="tabular-nums">
-                      {activityLoading ? "..." : formatRub(todayPlannedSum)}
-                    </span>
-                  </span>
-                </Link>
-              )}
-            </section>
-          )}
-
-          {/* Цели — вторичный блок */}
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between px-1">
-              <h2 className="text-xl font-semibold tracking-tight text-white/95">Цели</h2>
-              <Link href="/goals" className="text-base font-medium text-violet-400">
-                Все
-              </Link>
+              ),
+              goals: (
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <WidgetDragHandle id="goals" className="flex-1">
+                <h2 className="text-[22px] font-semibold leading-[23px] tracking-[-0.3px] text-white/95">
+                  Цели
+                </h2>
+              </WidgetDragHandle>
+              <MobilePlusLink href="/goals" label="Добавить цель" />
             </div>
-            {activityLoading ? (
-              <div className="text-base text-slate-400">Загрузка целей...</div>
-            ) : activeGoals.length === 0 ? (
-              <Link
-                href="/goals"
-                className="block overflow-hidden rounded-lg border border-dashed border-white/10 p-5 text-base text-slate-400"
+            {loading ? (
+              <div
+                className="flex flex-col gap-3 rounded-[10px] px-6 py-[18px]"
                 style={{ backgroundColor: MODAL_BG }}
               >
-                Добавить первую цель →
-              </Link>
+                <span className="flex items-center gap-3">
+                  <MobileNumberSkeleton className="h-[18px] w-32" />
+                  <MobileNumberSkeleton className="ml-auto h-[21px] w-10" />
+                </span>
+                <MobileNumberSkeleton className="h-6 w-full" />
+                <MobileNumberSkeleton className="h-[18px] w-40" />
+              </div>
+            ) : activeGoals.length === 0 ? (
+              <p className="text-sm leading-4 text-white/55">Целей пока нет</p>
             ) : (
-              <div className="space-y-3">
-                {activeGoals.slice(0, 1).map((goal) => {
-                  const summary = goalSummaryById.get(goal.id) ?? {
-                    amount: 0,
-                    progress: 0,
-                    progressLabel: "",
-                  };
-                  const progressColor = getGoalProgressColor(
-                    summary.progress,
-                    categoryLookup.idToScope?.get(goal.category_id) === "INCOME"
-                  );
-                  return (
-                    <Link
-                      href="/goals"
-                      key={goal.id}
-                      className={`flex items-center gap-3 ${assetCardSurfaceClass} p-4`}
-                      style={{ backgroundColor: MODAL_BG }}
-                    >
-                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[rgba(93,95,215,0.22)] text-violet-300">
-                        <Target className="h-5 w-5" strokeWidth={1.5} />
+              activeGoals.map((goal) => {
+                const summary = goalSummaryById.get(goal.id) ?? {
+                  amount: 0,
+                  progress: 0,
+                  rangeLabel: "",
+                };
+                const ratio = goal.amount > 0 ? summary.amount / goal.amount : 0;
+                const isIncomeGoal =
+                  categoryLookup.idToScope?.get(goal.category_id) === "INCOME";
+                const progressColor = getGoalProgressColor(ratio, isIncomeGoal);
+                return (
+                  <Link
+                    key={goal.id}
+                    href="/goals"
+                    className={cn(
+                      "flex flex-col gap-3 rounded-[10px] px-6 py-[18px]",
+                      mobileBlockPressClass
+                    )}
+                    style={{ backgroundColor: MODAL_BG }}
+                  >
+                    <span className="flex items-center gap-3">
+                      <span className="min-w-0 flex-1 truncate text-sm leading-[18px] text-white/85">
+                        {goal.name}
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-base font-medium text-white">
-                          {goal.name}
-                        </span>
-                        <span className="mt-1 block truncate text-sm text-slate-400">
-                          {formatRub(summary.amount)} из {formatRub(goal.amount)}
-                        </span>
-                        <span className="mt-2.5 block h-1.5 overflow-hidden rounded-full bg-slate-800">
+                      {activityLoading ? (
+                        <MobileNumberSkeleton className="h-[21px] w-10" />
+                      ) : (
+                        <MobileSolidTag color={progressColor} height={21}>
+                          {Math.round(ratio * 100)}%
+                        </MobileSolidTag>
+                      )}
+                    </span>
+                    <span className="flex flex-col gap-3">
+                      {activityLoading ? (
+                        <MobileNumberSkeleton className="h-6 w-full" />
+                      ) : (
+                        <span
+                          className="flex h-6 overflow-hidden rounded-[4px]"
+                          style={{ backgroundColor: GREEN_FILL }}
+                        >
                           <span
-                            className="block h-full rounded-full"
+                            className="block h-full"
                             style={{
-                              width: `${summary.progress * 100}%`,
+                              width: `${Math.min(ratio, 1) * 100}%`,
                               backgroundColor: progressColor,
                             }}
                           />
                         </span>
-                      </span>
-                      <ChevronRight
-                        className="h-5 w-5 shrink-0 text-slate-500"
-                        strokeWidth={1.5}
-                      />
-                    </Link>
-                  );
-                })}
-              </div>
+                      )}
+                      {activityLoading ? (
+                        <MobileNumberSkeleton className="h-[18px] w-40" />
+                      ) : (
+                        <span className="text-base font-medium leading-[18px] tabular-nums text-white/90">
+                          {formatRub(summary.amount)} / {formatRub(goal.amount)}
+                        </span>
+                      )}
+                    </span>
+                  </Link>
+                );
+              })
             )}
           </section>
+              ),
+            }}
+          />
+
+          <button
+            type="button"
+            className={cn(
+              "flex h-12 w-full items-center justify-center rounded-[4px] text-[18px] font-medium leading-7 text-white/85",
+              mobileBlockPressClass
+            )}
+            style={{ backgroundColor: ACCENT_FILL_LIGHT }}
+          >
+            Добавить виджет
+          </button>
         </div>
       </main>
 
@@ -2751,26 +2450,9 @@ export default function DashboardPage() {
             <span className="truncate font-medium text-white">{periodLabel}</span>
             <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" strokeWidth={1.5} />
           </button>
-          <button
-            type="button"
-            onClick={() => setShowPlan((value) => !value)}
-            aria-pressed={showPlan}
-            aria-label={showPlan ? "План включён" : "План выключен"}
-            className={cn(
-              "inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-all hover:opacity-90",
-              showPlan
-                ? "border-transparent text-white shadow-[0_0_18px_-4px_rgba(127,92,255,0.85)]"
-                : "border-white/15 text-white/45"
-            )}
-            style={{
-              backgroundColor: showPlan ? ACCENT : MODAL_BG,
-            }}
-          >
-            План
-          </button>
         </div>
 
-        <div className="grid gap-4 items-stretch md:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,0.5fr)]">
+        <div className="grid gap-4">
           <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500 text-white shadow-[0_20px_50px_-28px_rgba(76,29,149,0.8)]">
             <div className="pointer-events-none absolute right-4 top-3 h-32 w-60 opacity-90">
               <div ref={chartRef} className="h-full w-full">
@@ -2843,64 +2525,11 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <span>Обязательства</span>
                   <span className="whitespace-nowrap text-white/90">
-                    {loading ? "..." : `-${formatRub(totalLiabilities)}`}
+                    {loading ? "..." : formatLiabilityRub(totalLiabilities)}
                   </span>
                 </div>
               </div>
             </CardContent>
-          </Card>
-
-          <Card
-            className={`h-full ${
-              hasOverduePlanned
-                ? "relative overflow-hidden border-0 text-white shadow-[0_20px_50px_-28px_rgba(136,19,55,0.85)]"
-                : "relative overflow-hidden border-0 text-white shadow-[0_20px_50px_-28px_rgba(16,121,74,0.75)]"
-            }`}
-            style={{
-              background: hasOverduePlanned
-                ? OVERDUE_TRANSACTIONS_GRADIENT
-                : NO_OVERDUE_TRANSACTIONS_GRADIENT,
-            }}
-          >
-            <div className="flex h-full flex-col">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between gap-3">
-                  <CardTitle className="flex items-center gap-2 text-2xl font-normal leading-tight text-white/85">
-                    {hasOverduePlanned && (
-                      <AlertTriangle className="h-5 w-5 shrink-0 text-white/85" />
-                    )}
-                    <span className="whitespace-normal break-words">
-                      {hasOverduePlanned
-                        ? "Просрочено"
-                        : "Нет просроченных транзакций"}
-                    </span>
-                  </CardTitle>
-                  {hasOverduePlanned && (
-                    <IconButton
-                      asChild
-                      aria-label="Открыть просроченные транзакции"
-                      className="self-start"
-                    >
-                      <Link href="/transactions?preset=overdue-planned">
-                        <ArrowRight />
-                      </Link>
-                    </IconButton>
-                  )}
-                </div>
-              </CardHeader>
-              <div className="flex flex-1 items-end px-6 -mt-6 pb-0">
-                <div
-                  className="pointer-events-none select-none w-full text-right text-[180px] font-semibold leading-none"
-                  style={{
-                    color: hasOverduePlanned
-                      ? "rgba(174, 43, 91, 0.75)"
-                      : "rgba(255, 255, 255, 0.15)",
-                  }}
-                >
-                  {activityLoading ? "..." : overduePlannedCount}
-                </div>
-              </div>
-            </div>
           </Card>
         </div>
 
@@ -3338,40 +2967,6 @@ export default function DashboardPage() {
       </div>
     </main>
 
-    {typeof document !== "undefined" &&
-      !isDesktop &&
-      createPortal(
-        <>
-          <div
-            className={cn(
-              "pointer-events-none fixed inset-x-0 top-0 z-40 transition-opacity duration-200 ease-out",
-              mobileStickyHeaderVisible ? "opacity-100" : "opacity-0"
-            )}
-            style={{
-              height: "calc(5.75rem + env(safe-area-inset-top, 0px))",
-              background:
-                "linear-gradient(to bottom, rgba(25, 23, 50, 0.45) 0%, rgba(25, 23, 50, 0.18) 40%, transparent 100%)",
-            }}
-            aria-hidden
-          />
-          <div
-            className={cn(
-              "fixed z-40 flex min-h-12 items-center gap-2 px-3 py-2 transition-all duration-200 ease-out",
-              "left-[calc(0.75rem+env(safe-area-inset-left))] right-[calc(0.75rem+env(safe-area-inset-right))]",
-              "top-[calc(0.75rem+env(safe-area-inset-top))]",
-              "rounded-2xl border border-sidebar-border/70 bg-sidebar/70 shadow-[0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/55",
-              mobileStickyHeaderVisible
-                ? "opacity-100 translate-y-0 pointer-events-auto"
-                : "opacity-0 -translate-y-2 pointer-events-none"
-            )}
-            aria-hidden={!mobileStickyHeaderVisible}
-          >
-            {renderSettingsChips({ compact: true })}
-          </div>
-        </>,
-        document.body
-      )}
-
     <Dialog open={mobileDetail !== null} onOpenChange={(open) => !open && setMobileDetail(null)}>
       <DialogContent
         title="Детализация"
@@ -3389,7 +2984,7 @@ export default function DashboardPage() {
             <div className="space-y-3">{assetSegments.length === 0 ? <p className="text-sm text-slate-400">Активов пока нет</p> : assetSegments.slice(0, mobileDetailExpanded ? assetSegments.length : 4).map((segment) => <div key={segment.label} className="flex items-center gap-2 text-sm"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} /><span className="flex-1 truncate">{segment.label}</span><span className="font-medium">{formatRub(segment.value)}</span><span className="w-10 text-right text-xs text-slate-400">{formatPercent(segment.percent * 100)}%</span></div>)}</div>
           </div>
           <div className={`${assetCardSurfaceClass} p-3`} style={{ backgroundColor: MODAL_BG }}>
-            <div className="mb-3 flex items-center justify-between"><span className="font-medium">Обязательства</span><span className="font-semibold text-rose-400">−{formatRub(totalLiabilities)}</span></div>
+            <div className="mb-3 flex items-center justify-between"><span className="font-medium">Обязательства</span><span className="font-semibold text-rose-400">{formatLiabilityRub(totalLiabilities)}</span></div>
             <div className="space-y-3">{liabilitySegments.length === 0 ? <p className="text-sm text-slate-400">Обязательств нет</p> : liabilitySegments.slice(0, mobileDetailExpanded ? liabilitySegments.length : 4).map((segment) => <div key={segment.label} className="flex items-center gap-2 text-sm"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} /><span className="flex-1 truncate">{segment.label}</span><span className="font-medium">{formatRub(segment.value)}</span><span className="w-10 text-right text-xs text-slate-400">{formatPercent(segment.percent * 100)}%</span></div>)}</div>
           </div>
           {(assetSegments.length > 4 || liabilitySegments.length > 4) && <button type="button" onClick={() => setMobileDetailExpanded((value) => !value)} className="w-full rounded-xl bg-[rgba(93,95,215,0.22)] py-3 text-sm font-medium text-violet-200">{mobileDetailExpanded ? "Свернуть список" : "Показать все категории"}</button>}

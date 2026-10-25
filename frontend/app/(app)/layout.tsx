@@ -10,7 +10,7 @@ import { signOut, useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, type CSSProperties } from "react";
 import { useTheme } from "@/components/theme-provider";
-import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
+import { APP_BG_GRADIENT, APP_BG_START, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { MobileFloatingBar } from "@/components/mobile-floating-bar";
 import { MobileWizardOpenProvider, useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
@@ -119,6 +119,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     return null;
   }
 
+  const mobilePageBg = isDashboardPage ? APP_BG_START : SIDEBAR_BG;
+
   const loadingContent = (
     <div className="relative min-h-screen overflow-hidden flex items-center justify-center">
       <div
@@ -152,13 +154,13 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         style={
           !isDesktop
             ? ({
-                "--app-bg": SIDEBAR_BG,
-                // На странице актива и дашборде safe-area рисует сама страница (градиент шапки).
-                // Иначе padding + сплошной SIDEBAR_BG дают тёмную полосу над градиентом.
+                "--app-bg": mobilePageBg,
+                // На странице актива и дашборде safe-area рисует сама страница.
+                // Иначе padding + сплошной фон дают тёмную полосу над шапкой.
                 paddingTop: isAssetDetailPage || isDashboardPage ? 0 : "env(safe-area-inset-top, 0px)",
                 paddingLeft: "env(safe-area-inset-left, 0px)",
                 paddingRight: "env(safe-area-inset-right, 0px)",
-                backgroundColor: SIDEBAR_BG,
+                backgroundColor: mobilePageBg,
               } as CSSProperties & Record<"--app-bg", string>)
             : undefined
         }
@@ -168,14 +170,14 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
-            background: !isDesktop ? SIDEBAR_BG : APP_BG_GRADIENT,
+            background: !isDesktop ? mobilePageBg : APP_BG_GRADIENT,
             opacity: isDark ? 1 : 0,
           }}
         />
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
-            background: !isDesktop ? SIDEBAR_BG : AUTH_BG_GRADIENT_LIGHT,
+            background: !isDesktop ? mobilePageBg : AUTH_BG_GRADIENT_LIGHT,
             opacity: isDark ? 0 : 1,
           }}
         />

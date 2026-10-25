@@ -18,8 +18,11 @@ export const AUTH_BG_GRADIENT_LIGHT =
   "radial-gradient(1600px 1200px at 100% 100%, rgba(179, 63, 119, 0.18) 0%, rgba(179, 63, 119, 0) 82%)," +
   "linear-gradient(135deg, #FFFFFF 0%, #F3F0FF 45%, #EEE9FF 100%)";
 
+/** Начало градиента приложения и фон мобильного дашборда (color/app-bg-start). */
+export const APP_BG_START = "#040308";
+
 // Dark theme gradient for основное приложение (кабинет, дашборд и т.п.)
-export const APP_BG_GRADIENT = "linear-gradient(135deg, #040308 0%, #4B4197 100%)";
+export const APP_BG_GRADIENT = `linear-gradient(135deg, ${APP_BG_START} 0%, #4B4197 100%)`;
 
 // Градиент выбранного элемента в сайдбаре (и селекторе)
 export const SIDEBAR_SELECTED_GRADIENT =

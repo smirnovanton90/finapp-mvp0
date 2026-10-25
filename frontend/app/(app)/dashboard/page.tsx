@@ -52,8 +52,9 @@ import {
   fetchCategories,
   fetchGoals,
   fetchFxRates,
+  fetchFxRatesBatch,
   fetchItems,
-  fetchTransactions,
+  fetchDashboardTransactions,
   fetchUserMe,
   fetchUserPhotoAsBlob,
   FxRateOut,
@@ -802,18 +803,30 @@ function buildDateRange(startKey: string, endKey: string) {
   return dates;
 }
 
-function toCbrDate(value: string) {
-  const parts = value.split("-");
-  if (parts.length === 3) {
-    const [year, month, day] = parts;
-    if (year && month && day) return `${day}/${month}/${year}`;
-  }
-  return value;
-}
-
 function transferDelta(kind: ItemKind, isPrimary: boolean, amount: number) {
   if (kind === "LIABILITY") return isPrimary ? amount : -amount;
   return isPrimary ? -amount : amount;
+}
+
+function transferAmounts(
+  tx: TransactionOut,
+  itemTypeById?: Map<number, string>
+) {
+  const primaryAmount = tx.amount;
+  const counterAmount = tx.amount_counterparty ?? tx.amount;
+  const primaryType = itemTypeById?.get(tx.primary_item_id);
+  const counterType = tx.counterparty_item_id
+    ? itemTypeById?.get(tx.counterparty_item_id)
+    : undefined;
+  const primarySettlement = primaryType === "counterparty_settlements";
+  const counterSettlement = counterType === "counterparty_settlements";
+  if (primarySettlement && !counterSettlement) {
+    return { primary: counterAmount, counter: primaryAmount };
+  }
+  if (counterSettlement && !primarySettlement) {
+    return { primary: primaryAmount, counter: counterAmount };
+  }
+  return { primary: primaryAmount, counter: counterAmount };
 }
 
 function getItemStartKey(item: ItemOut, accountingStartDate?: string | null) {
@@ -845,7 +858,9 @@ function buildDeltasByDate(
   txs: TransactionOut[],
   selectedIds: Set<number>,
   itemKindById: Map<number, ItemKind>,
-  includePlan: boolean
+  includePlan: boolean,
+  kind: "both" | "actual" | "planned" = "both",
+  itemTypeById?: Map<number, string>
 ) {
   const map = new Map<string, Map<number, number>>();
   const addDelta = (dateKey: string, itemId: number, delta: number) => {
@@ -862,7 +877,11 @@ function buildDeltasByDate(
     if (tx.source === "AUTO_ITEM_OPENING" || tx.source === "AUTO_ITEM_CLOSING") {
       return;
     }
-    if (!isDashboardTxIncluded(tx, includePlan)) return;
+    const actual = isRealizedTransaction(tx);
+    const planned = isOpenPlannedTransaction(tx);
+    if (kind === "actual" && !actual) return;
+    if (kind === "planned" && !planned) return;
+    if (kind === "both" && !isDashboardTxIncluded(tx, includePlan)) return;
 
     const primarySelected = selectedIds.has(tx.primary_item_id);
     const counterSelected = tx.counterparty_item_id
@@ -875,21 +894,61 @@ function buildDeltasByDate(
       if (tx.direction === "INCOME") delta = tx.amount;
       if (tx.direction === "EXPENSE") delta = -tx.amount;
       if (tx.direction === "TRANSFER") {
-        const kind = itemKindById.get(tx.primary_item_id) ?? "ASSET";
-        delta = transferDelta(kind, true, tx.amount);
+        const itemKind = itemKindById.get(tx.primary_item_id) ?? "ASSET";
+        const { primary } = transferAmounts(tx, itemTypeById);
+        delta = transferDelta(itemKind, true, primary);
       }
       addDelta(dateKey, tx.primary_item_id, delta);
     }
 
     if (counterSelected && tx.direction === "TRANSFER" && tx.counterparty_item_id) {
-      const kind = itemKindById.get(tx.counterparty_item_id) ?? "ASSET";
-      const counterAmount = tx.amount_counterparty ?? tx.amount;
-      const delta = transferDelta(kind, false, counterAmount);
+      const itemKind = itemKindById.get(tx.counterparty_item_id) ?? "ASSET";
+      const { counter } = transferAmounts(tx, itemTypeById);
+      const delta = transferDelta(itemKind, false, counter);
       addDelta(dateKey, tx.counterparty_item_id, delta);
     }
   });
 
   return map;
+}
+
+function upperBoundDate(dates: string[], key: string) {
+  let lo = 0;
+  let hi = dates.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (dates[mid] <= key) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function buildDeltaPrefix(deltas: Map<string, Map<number, number>>, itemIds: number[]) {
+  const dates = Array.from(deltas.keys()).sort();
+  const prefix = new Map<number, number[]>();
+  itemIds.forEach((itemId) => {
+    const sums = new Array<number>(dates.length + 1);
+    sums[0] = 0;
+    for (let i = 0; i < dates.length; i += 1) {
+      sums[i + 1] = sums[i] + (deltas.get(dates[i])?.get(itemId) ?? 0);
+    }
+    prefix.set(itemId, sums);
+  });
+  return { dates, prefix };
+}
+
+function sumDeltaRange(
+  built: { dates: string[]; prefix: Map<number, number[]> },
+  itemId: number,
+  afterKey: string,
+  throughKey: string
+) {
+  if (afterKey >= throughKey) return 0;
+  const sums = built.prefix.get(itemId);
+  if (!sums) return 0;
+  const hi = upperBoundDate(built.dates, throughKey);
+  const lo = upperBoundDate(built.dates, afterKey);
+  return sums[hi] - sums[lo];
 }
 
 export default function DashboardPage() {
@@ -898,6 +957,8 @@ export default function DashboardPage() {
   const { isDesktop } = useSidebar();
   const [items, setItems] = useState<ItemOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
+  const [txsLoaded, setTxsLoaded] = useState(false);
+  const [txWindowStartKey, setTxWindowStartKey] = useState<string | null>(null);
   const [goals, setGoals] = useState<GoalOut[]>([]);
   const [userProfile, setUserProfile] = useState<UserMeOut | null>(null);
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
@@ -948,24 +1009,34 @@ export default function DashboardPage() {
   const priorMonthEndKey = toDateKey(priorMonthRange.end);
   const twelveMonthStartKey = toDateKey(addMonths(previousMonthRange.start, -11));
   const twelveMonthEndKey = previousMonthEndKey;
+  const feedStartKey = useMemo(() => {
+    const keys = [periodStartKey, twelveMonthStartKey, priorMonthStartKey];
+    goals.forEach((goal) => {
+      if (goal.deleted_at) return;
+      const range = getGoalRange(goal, new Date());
+      if (range?.startKey) keys.push(range.startKey);
+    });
+    return keys.filter(Boolean).sort()[0] ?? periodStartKey;
+  }, [goals, periodStartKey, priorMonthStartKey, twelveMonthStartKey]);
 
   useEffect(() => {
     if (!session) return;
     let active = true;
     setLoading(true);
     setError(null);
+    setTxs([]);
+    setTxsLoaded(false);
+    setTxWindowStartKey(null);
 
     Promise.all([
       fetchItems({ includeArchived: true }),
-      fetchTransactions(),
       fetchFxRates().catch(() => [] as FxRateOut[]),
       fetchCategories({ includeArchived: false }),
       fetchGoals(),
     ])
-      .then(([itemsData, txData, fxRatesData, categoriesData, goalsData]) => {
+      .then(([itemsData, fxRatesData, categoriesData, goalsData]) => {
         if (!active) return;
         setItems(itemsData);
-        setTxs(txData);
         setFxRates(fxRatesData);
         setCategoryNodes(categoriesData);
         setGoals(goalsData);
@@ -982,6 +1053,29 @@ export default function DashboardPage() {
       active = false;
     };
   }, [session]);
+
+  useEffect(() => {
+    if (!session || loading || !feedStartKey) return;
+    if (txWindowStartKey && feedStartKey >= txWindowStartKey) return;
+    let active = true;
+    setTxsLoaded(false);
+    fetchDashboardTransactions(feedStartKey)
+      .then((txData) => {
+        if (!active) return;
+        setTxs(txData);
+        setTxWindowStartKey(feedStartKey);
+      })
+      .catch((e: any) => {
+        if (!active) return;
+        setError((prev) => prev ?? (e?.message ?? "Не удалось загрузить операции"));
+      })
+      .finally(() => {
+        if (active) setTxsLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [session, feedStartKey, txWindowStartKey, loading]);
 
   useEffect(() => {
     if (!session) return;
@@ -1568,26 +1662,14 @@ export default function DashboardPage() {
     if (missingDates.length === 0) return;
 
     let cancelled = false;
-    const loadRates = async () => {
-      const next: Record<string, FxRateOut[]> = {};
-
-      for (const dateKey of missingDates) {
-        try {
-          const rates = await fetchFxRates(toCbrDate(dateKey));
-          if (cancelled) return;
-          next[dateKey] = rates;
-        } catch (e) {
-          if (cancelled) return;
-          next[dateKey] = [];
-        }
-      }
-
-      if (!cancelled && Object.keys(next).length > 0) {
+    fetchFxRatesBatch(missingDates)
+      .then((next) => {
+        if (cancelled || Object.keys(next).length === 0) return;
         setFxRatesByDate((prev) => ({ ...prev, ...next }));
-      }
-    };
-
-    loadRates();
+      })
+      .catch(() => {
+        if (cancelled) return;
+      });
 
     return () => {
       cancelled = true;
@@ -1596,36 +1678,27 @@ export default function DashboardPage() {
 
   const { dailyRows, endBalancesByItemId } = useMemo(() => {
     const emptyBalances = new Map<number, number>();
-    if (!chartItems.length || !rangeStartKey || !rangeEndKey) {
+    if (!txsLoaded || !chartItems.length || !rangeStartKey || !rangeEndKey) {
       return { dailyRows: [] as DailyRow[], endBalancesByItemId: emptyBalances };
     }
 
     const selectedIds = new Set(chartItems.map((item) => item.id));
+    const itemIds = chartItems.map((item) => item.id);
     const itemKindById = new Map(chartItems.map((item) => [item.id, item.kind]));
+    const itemTypeById = new Map(items.map((item) => [item.id, item.type_code]));
     const itemStartKeyById = new Map(
       chartItems.map((item) => [item.id, getItemStartKey(item, accountingStartDate)])
     );
-    const itemsByStartDate = new Map<string, ItemOut[]>();
-    chartItems.forEach((item) => {
-      const startKey = itemStartKeyById.get(item.id);
-      if (!startKey) return;
-      if (!itemsByStartDate.has(startKey)) itemsByStartDate.set(startKey, []);
-      itemsByStartDate.get(startKey)?.push(item);
-    });
-
-    const deltasByDate = buildDeltasByDate(
-      txs,
-      selectedIds,
-      itemKindById,
-      showPlan
+    const actualDeltas = buildDeltaPrefix(
+      buildDeltasByDate(txs, selectedIds, itemKindById, false, "actual", itemTypeById),
+      itemIds
     );
-    const startKeys = chartItems.map((item) => getItemStartKey(item, accountingStartDate)).sort();
-    const earliestStartKey = startKeys[0] ?? "";
-    const startKey =
-      earliestStartKey && earliestStartKey < rangeStartKey
-        ? earliestStartKey
-        : rangeStartKey;
-    let startDate = parseDateKey(startKey);
+    const plannedDeltas = buildDeltaPrefix(
+      buildDeltasByDate(txs, selectedIds, itemKindById, true, "planned", itemTypeById),
+      itemIds
+    );
+
+    let startDate = parseDateKey(rangeStartKey);
     const endDate = parseDateKey(rangeEndKey);
     if (startDate > endDate) startDate = endDate;
 
@@ -1638,21 +1711,6 @@ export default function DashboardPage() {
       current = addDays(current, 1)
     ) {
       const dateKey = toDateKey(current);
-      const newItems = itemsByStartDate.get(dateKey) ?? [];
-      newItems.forEach((item) => {
-        balances.set(item.id, item.initial_balance_minor);
-      });
-
-      const dayDeltas = deltasByDate.get(dateKey);
-      if (dayDeltas) {
-        dayDeltas.forEach((delta, itemId) => {
-          const currentBalance = balances.get(itemId) ?? 0;
-          balances.set(itemId, currentBalance + delta);
-        });
-      }
-
-      if (dateKey < rangeStartKey) continue;
-
       const rateCache = new Map<string, number | null>();
       const getRate = (currency: string) => {
         if (!rateCache.has(currency)) {
@@ -1678,15 +1736,23 @@ export default function DashboardPage() {
         if (startKeyForItem && dateKey < startKeyForItem) {
           return;
         }
-        const valueCents = balances.get(item.id) ?? item.initial_balance_minor;
+        const actualNow = item.balance_currency_cents ?? item.initial_balance_minor;
+        const valueCents =
+          dateKey <= todayKey
+            ? actualNow - sumDeltaRange(actualDeltas, item.id, dateKey, todayKey)
+            : actualNow + sumDeltaRange(actualDeltas, item.id, todayKey, dateKey);
+        const withPlan = showPlan
+          ? valueCents + sumDeltaRange(plannedDeltas, item.id, "", dateKey)
+          : valueCents;
+        balances.set(item.id, withPlan);
         const currency = (item.currency_code ?? "RUB").toUpperCase();
-        // Для валютных элементов баланс в API в рублях (current_value_rub), в рублёвый итог не умножаем на курс
         const rate = getRate(item.currency_code);
         if (rate === null) {
           if (currency !== "RUB") missingRate = true;
         } else {
-          const rubValueCents = currency !== "RUB" ? valueCents : Math.round((valueCents / 100) * rate * 100);
-          const effectiveKind = resolveItemEffectiveKind(item, valueCents);
+          const rubValueCents =
+            currency !== "RUB" ? withPlan : Math.round((withPlan / 100) * rate * 100);
+          const effectiveKind = resolveItemEffectiveKind(item, withPlan);
           const signedRub = effectiveKind === "LIABILITY" ? -rubValueCents : rubValueCents;
           if (totalRubCents !== null) totalRubCents += signedRub;
         }
@@ -1708,6 +1774,7 @@ export default function DashboardPage() {
     accountingStartDate,
     chartItems,
     fxRatesByDate,
+    items,
     latestRatesByCurrency,
     rangeEndKey,
     rangeStartKey,
@@ -1715,11 +1782,12 @@ export default function DashboardPage() {
     showPlan,
     todayKey,
     txs,
+    txsLoaded,
   ]);
 
   const itemRubCentsById = useMemo(() => {
     const map = new Map<number, number>();
-    if (!showPlan) {
+    if (!showPlan || !txsLoaded) {
       activeItems.forEach((item) => {
         const value = getPrimaryValueRubCents(item);
         if (value != null) map.set(item.id, value);
@@ -1760,6 +1828,7 @@ export default function DashboardPage() {
     rateByCode,
     showPlan,
     todayKey,
+    txsLoaded,
   ]);
 
   const { totalAssets, totalLiabilities, netTotal } = useMemo(() => {
@@ -1767,9 +1836,12 @@ export default function DashboardPage() {
     let liabilities = 0;
     activeItems.forEach((item) => {
       const value = itemRubCentsById.get(item.id) ?? 0;
-      const balanceHint = showPlan
-        ? (endBalancesByItemId.get(item.id) ?? item.initial_balance_minor)
-        : undefined;
+      const balanceHint =
+        showPlan && txsLoaded
+          ? (endBalancesByItemId.get(item.id) ??
+            item.balance_currency_cents ??
+            item.initial_balance_minor)
+          : item.balance_currency_cents ?? undefined;
       const kind = resolveItemEffectiveKind(item, balanceHint);
       if (kind === "ASSET") assets += value;
       else liabilities += value;
@@ -1785,14 +1857,18 @@ export default function DashboardPage() {
     itemRubCentsById,
     resolveItemEffectiveKind,
     showPlan,
+    txsLoaded,
   ]);
 
   const assetSegments = useMemo((): AssetStructureSegment[] => {
     const byType = new Map<string, number>();
     activeItems.forEach((item) => {
-      const balanceHint = showPlan
-        ? (endBalancesByItemId.get(item.id) ?? item.initial_balance_minor)
-        : undefined;
+      const balanceHint =
+        showPlan && txsLoaded
+          ? (endBalancesByItemId.get(item.id) ??
+            item.balance_currency_cents ??
+            item.initial_balance_minor)
+          : item.balance_currency_cents ?? undefined;
       if (resolveItemEffectiveKind(item, balanceHint) !== "ASSET") return;
       const value = itemRubCentsById.get(item.id) ?? 0;
       if (value <= 0) return;
@@ -1818,14 +1894,18 @@ export default function DashboardPage() {
     itemRubCentsById,
     resolveItemEffectiveKind,
     showPlan,
+    txsLoaded,
   ]);
 
   const liabilitySegments = useMemo((): AssetStructureSegment[] => {
     const byType = new Map<string, number>();
     activeItems.forEach((item) => {
-      const balanceHint = showPlan
-        ? (endBalancesByItemId.get(item.id) ?? item.initial_balance_minor)
-        : undefined;
+      const balanceHint =
+        showPlan && txsLoaded
+          ? (endBalancesByItemId.get(item.id) ??
+            item.balance_currency_cents ??
+            item.initial_balance_minor)
+          : item.balance_currency_cents ?? undefined;
       if (resolveItemEffectiveKind(item, balanceHint) !== "LIABILITY") return;
       const value = itemRubCentsById.get(item.id) ?? 0;
       if (value <= 0) return;
@@ -1853,6 +1933,7 @@ export default function DashboardPage() {
     itemRubCentsById,
     resolveItemEffectiveKind,
     showPlan,
+    txsLoaded,
   ]);
 
   const periodStartNetTotal = useMemo(() => {
@@ -1881,6 +1962,7 @@ export default function DashboardPage() {
   const netTotalChangeLabel = isCurrentMonthPeriod
     ? "С 1 числа месяца"
     : "За период";
+  const activityLoading = loading || !txsLoaded;
 
   const openPeriodDialog = useCallback(() => {
     setDraftPeriodStartKey(periodStartKey);
@@ -2159,7 +2241,7 @@ export default function DashboardPage() {
                 <ArrowUpRight className="h-4 w-4 shrink-0" strokeWidth={1.5} />
                 <span>
                   {netTotalChangeLabel}{" "}
-                  {loading ? "..." : formatChangePercent(netTotalChangePercent)}
+                  {activityLoading ? "..." : formatChangePercent(netTotalChangePercent)}
                 </span>
               </div>
               <div className="relative mt-6 grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
@@ -2212,7 +2294,7 @@ export default function DashboardPage() {
                       className="text-[28px] font-semibold leading-none tracking-tight tabular-nums"
                       style={{ color: GREEN }}
                     >
-                      {loading ? "..." : formatRub(displayIncomeCashflow.total)}
+                      {activityLoading ? "..." : formatRub(displayIncomeCashflow.total)}
                     </span>
                   </span>
                 </button>
@@ -2352,7 +2434,7 @@ export default function DashboardPage() {
                       className="text-[28px] font-semibold leading-none tracking-tight tabular-nums"
                       style={{ color: RED }}
                     >
-                      {loading ? "..." : formatRub(displayExpenseCashflow.total)}
+                      {activityLoading ? "..." : formatRub(displayExpenseCashflow.total)}
                     </span>
                   </span>
                 </button>
@@ -2480,13 +2562,13 @@ export default function DashboardPage() {
                   <span className="min-w-0 flex-1 text-base text-amber-100">
                     Просрочено:{" "}
                     <span className="font-semibold tabular-nums">
-                      {loading ? "..." : overduePlannedCount}
+                      {activityLoading ? "..." : overduePlannedCount}
                     </span>
                   </span>
                   <span className="inline-flex shrink-0 items-center gap-1.5 text-base font-semibold text-amber-100">
                     <CurrencyChip code="RUB" />
                     <span className="tabular-nums">
-                      {loading ? "..." : formatRub(overduePlannedSum)}
+                      {activityLoading ? "..." : formatRub(overduePlannedSum)}
                     </span>
                   </span>
                 </Link>
@@ -2501,13 +2583,13 @@ export default function DashboardPage() {
                   <span className="min-w-0 flex-1 text-base text-white/80">
                     На сегодня:{" "}
                     <span className="font-semibold tabular-nums text-white">
-                      {loading ? "..." : todayPlannedCount}
+                      {activityLoading ? "..." : todayPlannedCount}
                     </span>
                   </span>
                   <span className="inline-flex shrink-0 items-center gap-1.5 text-base font-semibold text-white">
                     <CurrencyChip code="RUB" />
                     <span className="tabular-nums">
-                      {loading ? "..." : formatRub(todayPlannedSum)}
+                      {activityLoading ? "..." : formatRub(todayPlannedSum)}
                     </span>
                   </span>
                 </Link>
@@ -2523,7 +2605,7 @@ export default function DashboardPage() {
                 Все
               </Link>
             </div>
-            {loading ? (
+            {activityLoading ? (
               <div className="text-base text-slate-400">Загрузка целей...</div>
             ) : activeGoals.length === 0 ? (
               <Link
@@ -2628,7 +2710,7 @@ export default function DashboardPage() {
           <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-violet-600 via-violet-500 to-fuchsia-500 text-white shadow-[0_20px_50px_-28px_rgba(76,29,149,0.8)]">
             <div className="pointer-events-none absolute right-4 top-3 h-32 w-60 opacity-90">
               <div ref={chartRef} className="h-full w-full">
-                {!loading && !error && chartData.length > 1 && (
+                {!activityLoading && !error && chartData.length > 1 && (
                   <svg
                     viewBox={`0 0 ${width} ${height}`}
                     className="h-full w-full"
@@ -2684,7 +2766,7 @@ export default function DashboardPage() {
               <div className="flex items-center gap-2 text-xs text-white/80">
                 <span>{netTotalChangeLabel}</span>
                 <Tag variant={getChangeVariant(netTotalChangePercent, "income")}>
-                  {loading ? "..." : formatChangePercent(netTotalChangePercent)}
+                  {activityLoading ? "..." : formatChangePercent(netTotalChangePercent)}
                 </Tag>
               </div>
               <div className="space-y-1 text-xs text-white/80">
@@ -2751,7 +2833,7 @@ export default function DashboardPage() {
                       : "rgba(255, 255, 255, 0.15)",
                   }}
                 >
-                  {loading ? "..." : overduePlannedCount}
+                  {activityLoading ? "..." : overduePlannedCount}
                 </div>
               </div>
             </div>
@@ -2766,10 +2848,10 @@ export default function DashboardPage() {
                 className="text-lg font-semibold whitespace-nowrap"
                 style={{ color: GREEN }}
               >
-                {loading ? "..." : formatRub(incomeBreakdown.total)}
+                {activityLoading ? "..." : formatRub(incomeBreakdown.total)}
               </div>
             </div>
-            {loading ? (
+            {activityLoading ? (
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : incomeSegments.length === 0 ? (
               <div className="text-sm text-muted-foreground">
@@ -2859,10 +2941,10 @@ export default function DashboardPage() {
                 className="text-lg font-semibold whitespace-nowrap"
                 style={{ color: RED }}
               >
-                {loading ? "..." : formatRub(expenseBreakdown.total)}
+                {activityLoading ? "..." : formatRub(expenseBreakdown.total)}
               </div>
             </div>
-            {loading ? (
+            {activityLoading ? (
               <div className="text-sm text-muted-foreground">Загрузка...</div>
             ) : expenseSegments.length === 0 ? (
               <div className="text-sm text-muted-foreground">
@@ -2953,7 +3035,7 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {loading ? (
+            {activityLoading ? (
               <div className="text-sm text-white/80">Загрузка целей...</div>
             ) : activeGoals.length === 0 ? (
               <div className="rounded-lg border border-dashed border-white/40 bg-white/10 p-4 text-center text-sm text-white/80">

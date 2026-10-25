@@ -16,7 +16,7 @@ from pathlib import Path
 from io import BytesIO
 from PIL import Image
 from sqlalchemy.orm import Session, selectinload, aliased
-from sqlalchemy import select, delete, func, or_, and_, text
+from sqlalchemy import select, delete, func, or_, and_, text, union_all
 from sqlalchemy.exc import SQLAlchemyError, ProgrammingError
 
 from db import get_db
@@ -75,10 +75,10 @@ from schemas import (
 )
 from auth import get_current_user, create_access_token, hash_password, verify_password
 
+from item_balance_cache import ensure_user_balances_reconciled, signed_item_delta
 from transactions import (
     router as transactions_router,
     purge_card_transactions as purge_card_transactions_fn,
-    transfer_delta,
     apply_due_transaction_balances,
 )
 from transaction_chains import router as transaction_chains_router
@@ -1257,6 +1257,7 @@ def list_items(
     user: User = Depends(get_current_user),
 ):
     apply_due_transaction_balances(db, user)
+    ensure_user_balances_reconciled(db, user.id)
     stmt = select(Item).where(Item.user_id == user.id).options(
         selectinload(Item.plan_settings)
     )
@@ -1274,15 +1275,6 @@ def list_items(
         try:
             price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
             value = _compute_market_value_rub(item, price, db)
-            if value is None and is_crypto_item(item) and item.instrument_id:
-                try:
-                    prices = get_simple_price([item.instrument_id], vs_currencies="usd")
-                    data = prices.get(item.instrument_id) if isinstance(prices.get(item.instrument_id), dict) else None
-                    usd_val = data.get("usd") if data else None
-                    if usd_val is not None and isinstance(usd_val, (int, float)):
-                        value = int(round(float(item.quantity_units or 0) * float(usd_val) * 100))
-                except Exception:
-                    pass
             if value is not None:
                 if is_crypto_item(item) and (item.currency_code or "RUB").upper() != "RUB":
                     usd_cents = _get_market_price_usd_cents(db, price) if price else None
@@ -1380,6 +1372,32 @@ def list_items(
     return items
 
 
+@app.get("/items/transaction-counts")
+def item_transaction_counts(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[int, int]:
+    """Сколько операций приходится на каждый актив, без выгрузки самих транзакций."""
+    base = (
+        Transaction.user_id == user.id,
+        Transaction.deleted_at.is_(None),
+    )
+    parts = [
+        select(column.label("item_id")).where(*base, column.isnot(None))
+        for column in (
+            Transaction.primary_item_id,
+            Transaction.counterparty_item_id,
+            Transaction.primary_card_item_id,
+            Transaction.counterparty_card_item_id,
+        )
+    ]
+    combined = union_all(*parts).subquery()
+    rows = db.execute(
+        select(combined.c.item_id, func.count()).group_by(combined.c.item_id)
+    ).all()
+    return {int(item_id): int(count) for item_id, count in rows}
+
+
 @app.get("/items/{item_id}", response_model=ItemOut)
 def get_item(
     item_id: int,
@@ -1387,6 +1405,7 @@ def get_item(
     user: User = Depends(get_current_user),
 ):
     apply_due_transaction_balances(db, user)
+    ensure_user_balances_reconciled(db, user.id)
     stmt = (
         select(Item)
         .where(Item.id == item_id, Item.user_id == user.id)
@@ -1399,15 +1418,6 @@ def get_item(
         try:
             price = _get_latest_market_price(db, item.instrument_id, item.instrument_board_id)
             value = _compute_market_value_rub(item, price, db)
-            if value is None and is_crypto_item(item) and item.instrument_id:
-                try:
-                    prices = get_simple_price([item.instrument_id], vs_currencies="usd")
-                    data = prices.get(item.instrument_id) if isinstance(prices.get(item.instrument_id), dict) else None
-                    usd_val = data.get("usd") if data else None
-                    if usd_val is not None and isinstance(usd_val, (int, float)):
-                        value = int(round(float(item.quantity_units or 0) * float(usd_val) * 100))
-                except Exception:
-                    pass
             if value is not None:
                 if is_crypto_item(item) and (item.currency_code or "RUB").upper() != "RUB":
                     usd_cents = _get_market_price_usd_cents(db, price) if price else None
@@ -2921,6 +2931,8 @@ def get_item_costs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    apply_due_transaction_balances(db, user)
+    ensure_user_balances_reconciled(db, user.id)
     item = db.get(Item, item_id)
     if not item or item.user_id != user.id:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -3126,7 +3138,6 @@ def _compute_balance_in_item_currency_cents(
     """Баланс по активу в валюте счёта (минорные единицы) на момент at. Считается по цепочке транзакций без учёта курсов; курс применяется только при переводе в рубли для отображения."""
     at_utc = _as_utc(at)
     item_id = item.id
-    item_currency = (item.currency_code or "RUB").upper()
     balance_txs = [
         tx
         for tx in (
@@ -3153,44 +3164,8 @@ def _compute_balance_in_item_currency_cents(
         }
         items_by_id = {r.id: r for r in db.query(Item).filter(Item.id.in_(all_ids)).all()}
 
-    # При переводе с/на «Взаиморасчёты» (settlement) сумма по стороне кошелька хранится в amount_primary_minor; при apply в transactions.py та же логика — повторяем при реплее.
-    SETTLEMENT_TYPE = "counterparty_settlements"
-
     def delta_in_item_currency(tx: Transaction) -> int:
-        amt = tx.amount_primary_minor or 0
-        amt_counterparty_raw = tx.amount_counterparty if tx.amount_counterparty is not None else amt
-        if tx.primary_item_id == item_id:
-            if tx.direction == "INCOME":
-                return amt
-            if tx.direction == "EXPENSE":
-                return -amt
-            if tx.direction == "TRANSFER":
-                primary = items_by_id.get(tx.primary_item_id)
-                counter = items_by_id.get(tx.counterparty_item_id) if tx.counterparty_item_id else None
-                kind = primary.kind if primary else "ASSET"
-                primary_is_settlement = getattr(primary, "type_code", None) == SETTLEMENT_TYPE
-                counter_is_settlement = getattr(counter, "type_code", None) == SETTLEMENT_TYPE
-                if primary_is_settlement and not counter_is_settlement:
-                    amt_primary, amt_counter = amt_counterparty_raw, amt
-                elif counter_is_settlement and not primary_is_settlement:
-                    amt_primary, amt_counter = amt, amt_counterparty_raw
-                else:
-                    amt_primary, amt_counter = amt, amt_counterparty_raw
-                return transfer_delta(kind, True, amt_primary)
-        if tx.counterparty_item_id == item_id and tx.direction == "TRANSFER":
-            primary = items_by_id.get(tx.primary_item_id)
-            counter = items_by_id.get(tx.counterparty_item_id)
-            kind = counter.kind if counter else "ASSET"
-            primary_is_settlement = getattr(primary, "type_code", None) == SETTLEMENT_TYPE
-            counter_is_settlement = getattr(counter, "type_code", None) == SETTLEMENT_TYPE
-            if primary_is_settlement and not counter_is_settlement:
-                amt_primary, amt_counter = amt_counterparty_raw, amt
-            elif counter_is_settlement and not primary_is_settlement:
-                amt_primary, amt_counter = amt, amt_counterparty_raw
-            else:
-                amt_primary, amt_counter = amt, amt_counterparty_raw
-            return transfer_delta(kind, False, amt_counter)
-        return 0
+        return signed_item_delta(tx, item_id, items_by_id)
 
     # Начальный остаток всегда в валюте актива (RUB — копейки, не-RUB — центы).
     if item.opening_counterparty_item_id is not None:
@@ -3231,22 +3206,16 @@ def _compute_balance_rub_at(
 
 def _item_balance_currency_and_rub_consistent(
     db: Session,
-    user_id: int,
+    _user_id: int,
     item: Item,
     as_of_date: date_type,
 ) -> tuple[int, int]:
+    """Текущее сальдо для API: сохранённое current_balance_minor и курс на as_of_date.
+
+    Цепочка транзакций здесь не проигрывается. Перед чтением счетов кэш один раз
+    сверяется с проигрышем (ensure_user_balances_reconciled). Сальдо на прошлую
+    дату по-прежнему считает _compute_balance_cents_at.
     """
-    Сальдо для API (/items, /costs): для обычных балансовых активов/обязательств считаем replay
-    по ACTUAL-транзакциям (как контрольные точки), а не кэш current_balance_minor —
-    иначе после soft-delete и прочих рассинхронов шапка расходится с КТ и историей.
-    Для MOEX/крипты оставляем кэш items: там логика apply отличается от простого replay сумм.
-    """
-    primary = (item.primary_value_kind or "BALANCE").upper()
-    if primary == "BALANCE" and not is_moex_item(item) and not is_crypto_item(item):
-        at = datetime.now(timezone.utc)
-        bc = _compute_balance_cents_at(db, user_id, item, at)
-        br = _compute_balance_rub_at(db, user_id, item, at)
-        return bc, br
     return _item_balance_currency_and_rub(db, item, as_of_date)
 
 
@@ -3326,44 +3295,8 @@ def _build_item_cost_history(
         item_rows = db.query(Item).filter(Item.id.in_(all_ids)).all()
         items_by_id = {r.id: r for r in item_rows}
 
-    # Дельта в валюте счёта (без конвертации в рубли). Для TRANSFER — та же логика amt_primary/amt_counter, что и при apply (в т.ч. settlement).
-    SETTLEMENT_TYPE = "counterparty_settlements"
-
     def delta_in_item_currency(tx: Transaction) -> int:
-        amt = tx.amount_primary_minor or 0
-        amt_counterparty_raw = tx.amount_counterparty if tx.amount_counterparty is not None else amt
-        if tx.primary_item_id == item_id:
-            if tx.direction == "INCOME":
-                return amt
-            if tx.direction == "EXPENSE":
-                return -amt
-            if tx.direction == "TRANSFER":
-                primary = items_by_id.get(tx.primary_item_id)
-                counter = items_by_id.get(tx.counterparty_item_id) if tx.counterparty_item_id else None
-                kind = primary.kind if primary else "ASSET"
-                primary_is_settlement = getattr(primary, "type_code", None) == SETTLEMENT_TYPE
-                counter_is_settlement = getattr(counter, "type_code", None) == SETTLEMENT_TYPE
-                if primary_is_settlement and not counter_is_settlement:
-                    amt_primary, amt_counter = amt_counterparty_raw, amt
-                elif counter_is_settlement and not primary_is_settlement:
-                    amt_primary, amt_counter = amt, amt_counterparty_raw
-                else:
-                    amt_primary, amt_counter = amt, amt_counterparty_raw
-                return transfer_delta(kind, True, amt_primary)
-        if tx.counterparty_item_id == item_id and tx.direction == "TRANSFER":
-            primary = items_by_id.get(tx.primary_item_id)
-            counter = items_by_id.get(tx.counterparty_item_id)
-            kind = counter.kind if counter else "ASSET"
-            primary_is_settlement = getattr(primary, "type_code", None) == SETTLEMENT_TYPE
-            counter_is_settlement = getattr(counter, "type_code", None) == SETTLEMENT_TYPE
-            if primary_is_settlement and not counter_is_settlement:
-                amt_primary, amt_counter = amt_counterparty_raw, amt
-            elif counter_is_settlement and not primary_is_settlement:
-                amt_primary, amt_counter = amt, amt_counterparty_raw
-            else:
-                amt_primary, amt_counter = amt, amt_counterparty_raw
-            return transfer_delta(kind, False, amt_counter)
-        return 0
+        return signed_item_delta(tx, item_id, items_by_id)
 
     # Market: for non-MOEX use manual ItemMarketValue; for MOEX use lots × price from API
     market_rows = (

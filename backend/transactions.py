@@ -22,7 +22,8 @@ from schemas import (
     TransactionType,
 )
 from sqlalchemy import select, and_, or_, func
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from timezones import (
     as_wall_clock,
@@ -272,16 +273,26 @@ def _apply_stored_actual_balance(db: Session, user: User, tx: Transaction) -> No
 
 
 def apply_due_transaction_balances(db: Session, user: User) -> None:
-    """Доначислить фактические транзакции, чей момент уже наступил."""
+    """Доначислить фактические транзакции, чей момент уже наступил.
+
+    Если таких нет в ближайшие двое суток, запрос списка счетов не берёт блокировку.
+    """
     now = datetime.now(timezone.utc)
+    horizon = (datetime.now(ZoneInfo("Europe/Moscow")) + timedelta(days=2)).replace(tzinfo=None)
+    pending_filter = (
+        Transaction.user_id == user.id,
+        Transaction.deleted_at.is_(None),
+        Transaction.transaction_type == "ACTUAL",
+        Transaction.balance_applied.is_(False),
+        Transaction.is_split_parent.is_(False),
+        Transaction.transaction_date <= horizon,
+    )
+    has_pending = db.query(Transaction.id).filter(*pending_filter).limit(1).first()
+    if has_pending is None:
+        return
     pending = (
         db.query(Transaction)
-        .filter(
-            Transaction.user_id == user.id,
-            Transaction.deleted_at.is_(None),
-            Transaction.transaction_type == "ACTUAL",
-            Transaction.balance_applied.is_(False),
-        )
+        .filter(*pending_filter)
         .order_by(Transaction.transaction_date.asc(), Transaction.id.asc())
         .with_for_update()
         .all()
@@ -1219,6 +1230,37 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
     db.commit()
     db.refresh(tx)
     return tx
+
+
+@router.get("/dashboard-feed", response_model=list[TransactionOut])
+def list_dashboard_transactions(
+    date_from: date,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Транзакции для дашборда: окно с date_from и все открытые планы.
+
+    Фактические операции раньше date_from в ответ не входят: их эффект уже
+    сидит в current_balance_minor, от которого клиент строит график.
+    """
+    start = datetime.combine(date_from, time.min)
+    stmt = (
+        select(Transaction)
+        .where(
+            Transaction.user_id == user.id,
+            Transaction.deleted_at.is_(None),
+            or_(
+                Transaction.transaction_date >= start,
+                and_(
+                    Transaction.transaction_type == "PLANNED",
+                    Transaction.status != "REALIZED",
+                ),
+            ),
+        )
+        .options(selectinload(Transaction.chain))
+        .order_by(Transaction.transaction_date.asc(), Transaction.id.asc())
+    )
+    return list(db.execute(stmt).scalars())
 
 
 @router.get("/{tx_id}", response_model=TransactionOut)

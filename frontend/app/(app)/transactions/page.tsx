@@ -185,8 +185,8 @@ import {
   fetchCounterparties,
   fetchCounterpartyIndustries,
   fetchItems,
+  fetchItemTransactionCounts,
   fetchFxRatesBatch,
-  fetchTransactions,
   fetchTransactionsPage,
   fetchTransactionCounts,
   fetchTransactionChains,
@@ -219,7 +219,7 @@ import {
   parseRubToCents,
   formatCentsForInput,
 } from "@/lib/format-rub";
-import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
+import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import {
@@ -4746,8 +4746,12 @@ function TransactionsView({
 
   const loadItemTransactionCounts = useCallback(async () => {
     try {
-      const txData = await fetchTransactions();
-      setItemTxCounts(buildItemTransactionCounts(txData));
+      const counts = await fetchItemTransactionCounts();
+      const map = new Map<number, number>();
+      Object.entries(counts).forEach(([id, count]) => {
+        map.set(Number(id), count);
+      });
+      setItemTxCounts(map);
     } catch {
       setItemTxCounts(new Map());
     }

@@ -1027,6 +1027,12 @@ export async function fetchItems(options?: {
   return raw.map(mapItemFromApi);
 }
 
+export async function fetchItemTransactionCounts(): Promise<Record<string, number>> {
+  const res = await authFetch(`${API_BASE}/items/transaction-counts`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function fetchItem(itemId: number): Promise<ItemOut> {
   const res = await authFetch(`${API_BASE}/items/${itemId}`);
   if (!res.ok) throw new Error(await readError(res));
@@ -1796,6 +1802,14 @@ async function readError(res: Response) {
 
 export async function fetchTransactions(): Promise<TransactionOut[]> {
   const res = await authFetch(`${API_BASE}/transactions`);
+  if (!res.ok) throw new Error(await readError(res));
+  const raw = await res.json() as unknown[];
+  return raw.map(mapTransactionFromApi);
+}
+
+export async function fetchDashboardTransactions(dateFrom: string): Promise<TransactionOut[]> {
+  const params = new URLSearchParams({ date_from: dateFrom });
+  const res = await authFetch(`${API_BASE}/transactions/dashboard-feed?${params.toString()}`);
   if (!res.ok) throw new Error(await readError(res));
   const raw = await res.json() as unknown[];
   return raw.map(mapTransactionFromApi);

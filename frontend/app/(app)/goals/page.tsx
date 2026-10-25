@@ -52,6 +52,7 @@ import { useSidebar } from "@/components/ui/sidebar-context";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { minorToRubCents } from "@/lib/amount-rub";
+import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, ACCENT } from "@/lib/colors";
 import { cn } from "@/lib/utils";

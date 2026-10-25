@@ -67,6 +67,7 @@ import {
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { minorToRubCents } from "@/lib/amount-rub";
+import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import {
   ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
   OVERDUE_TRANSACTIONS_GRADIENT,

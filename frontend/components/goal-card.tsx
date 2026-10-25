@@ -177,7 +177,8 @@ function amountInRange(
   categoryIds: Set<number>,
   startKey: string,
   endKey: string,
-  direction: TransactionDirection
+  direction: TransactionDirection,
+  toRubCents?: (tx: TransactionOut) => number | null
 ): number {
   let sum = 0;
   for (const tx of txs) {
@@ -186,7 +187,9 @@ function amountInRange(
     if (!tx.category_id || !categoryIds.has(tx.category_id)) continue;
     const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
     if (!dateKey || dateKey < startKey || dateKey > endKey) continue;
-    sum += tx.amount;
+    const rub = toRubCents ? toRubCents(tx) : tx.amount;
+    if (rub == null) continue;
+    sum += rub;
   }
   return sum;
 }
@@ -199,6 +202,7 @@ export interface GoalCardProps {
   categoryPathLabel: string;
   categoryDescendants: Map<number, Set<number>>;
   txs: TransactionOut[];
+  toRubCents?: (tx: TransactionOut) => number | null;
   currentAmount: number;
   currentProgress: number;
   onEdit?: (goal: GoalOut) => void;
@@ -214,6 +218,7 @@ export function GoalCard({
   categoryPathLabel,
   categoryDescendants,
   txs,
+  toRubCents,
   currentAmount,
   currentProgress,
   onEdit,
@@ -380,7 +385,8 @@ export function GoalCard({
                     categoryIds,
                     range.startKey,
                     range.endKey,
-                    direction
+                    direction,
+                    toRubCents
                   );
                   const progress =
                     goal.amount > 0 ? Math.min(amount / goal.amount, 1) : 0;

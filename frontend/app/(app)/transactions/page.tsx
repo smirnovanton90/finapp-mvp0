@@ -220,6 +220,7 @@ import {
   formatCentsForInput,
 } from "@/lib/format-rub";
 import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
+import { minorToRubCents } from "@/lib/amount-rub";
 import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
 import { getItemTypeLabel } from "@/lib/item-types";
 import {
@@ -3136,10 +3137,11 @@ function TransactionsView({
   };
 
   const getRubEquivalentCents = (tx: TransactionCard, currencyCode: string) => {
-    const rate = getFxRateForDate(tx.transaction_date, currencyCode);
-    if (!rate) return null;
-    const amount = tx.amount / 100;
-    return Math.round(amount * rate * 100);
+    const rate =
+      !currencyCode || currencyCode.toUpperCase() === "RUB"
+        ? 1
+        : getFxRateForDate(tx.transaction_date, currencyCode);
+    return minorToRubCents(tx.amount, currencyCode, rate);
   };
 
   const isTransfer = direction === "TRANSFER";

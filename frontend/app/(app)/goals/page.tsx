@@ -33,11 +33,15 @@ import {
   deleteGoal,
   fetchCategories,
   fetchGoals,
+  fetchItems,
   fetchTransactions,
+  fetchFxRatesBatch,
   fetchCounterparties,
+  FxRateOut,
   GoalCreate,
   GoalOut,
   GoalPeriod,
+  ItemOut,
   TransactionOut,
   updateGoal,
 } from "@/lib/api";
@@ -47,7 +51,7 @@ import { GoalCard } from "@/components/goal-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
-import { formatRubInput, normalizeRubOnBlur, parseRubToCents, formatCentsForInput } from "@/lib/format-rub";
+import { minorToRubCents } from "@/lib/amount-rub";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 import { PLACEHOLDER_COLOR_DARK, ACTIVE_TEXT_DARK, SIDEBAR_TEXT_ACTIVE, ACCENT } from "@/lib/colors";
 import { cn } from "@/lib/utils";
@@ -163,6 +167,8 @@ export default function GoalsPage() {
 
   const [goals, setGoals] = useState<GoalOut[]>([]);
   const [txs, setTxs] = useState<TransactionOut[]>([]);
+  const [items, setItems] = useState<ItemOut[]>([]);
+  const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
   const [categoryNodes, setCategoryNodes] = useState<CategoryNode[]>([]);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -281,6 +287,21 @@ export default function GoalsPage() {
     txs,
   ]);
 
+  const itemsById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items]
+  );
+
+  const txToRubCents = useCallback((tx: TransactionOut) => {
+    const code = (itemsById.get(tx.primary_item_id)?.currency_code || "RUB").toUpperCase();
+    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
+    const todayKey = todayDateKey();
+    const rateKey = dateKey && dateKey > todayKey ? todayKey : dateKey;
+    const dayRates = rateKey ? fxRatesByDate[rateKey] : undefined;
+    const rate = code === "RUB" ? 1 : dayRates?.find((row) => row.char_code === code)?.rate ?? null;
+    return minorToRubCents(tx.amount, code, rate);
+  }, [fxRatesByDate, itemsById]);
+
   const goalSummaryById = useMemo(() => {
     const now = new Date();
     const map = new Map<
@@ -304,7 +325,9 @@ export default function GoalsPage() {
           const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
           if (!dateKey) return;
           if (dateKey < range.startKey || dateKey > range.endKey) return;
-          amount += tx.amount;
+          const rub = txToRubCents(tx);
+          if (rub == null) return;
+          amount += rub;
         });
       }
       const progress =
@@ -317,22 +340,24 @@ export default function GoalsPage() {
       });
     });
     return map;
-  }, [categoryDescendants, categoryLookup.idToScope, goals, txs]);
+  }, [categoryDescendants, categoryLookup.idToScope, goals, txs, txToRubCents]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [goalsData, txData, categoriesData, counterpartiesData] = await Promise.all([
+      const [goalsData, txData, categoriesData, counterpartiesData, itemsData] = await Promise.all([
         fetchGoals({ include_deleted: true }),
         fetchTransactions(),
         fetchCategories(),
         fetchCounterparties(),
+        fetchItems({ includeArchived: true, includeClosed: true }),
       ]);
       setGoals(goalsData);
       setTxs(txData);
       setCategoryNodes(categoriesData);
       setCounterparties(counterpartiesData);
+      setItems(itemsData);
     } catch (e: unknown) {
       const err = e as { message?: string };
       setError(
@@ -348,6 +373,30 @@ export default function GoalsPage() {
     if (!session) return;
     loadAll();
   }, [session, loadAll]);
+
+  useEffect(() => {
+    const dates = new Set<string>();
+    const todayKey = todayDateKey();
+    txs.forEach((tx) => {
+      const code = itemsById.get(tx.primary_item_id)?.currency_code || "RUB";
+      if (code.toUpperCase() === "RUB") return;
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
+      if (!dateKey) return;
+      dates.add(dateKey > todayKey ? todayKey : dateKey);
+    });
+    const missing = Array.from(dates).filter((dateKey) => !fxRatesByDate[dateKey]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    fetchFxRatesBatch(missing)
+      .then((next) => {
+        if (cancelled || Object.keys(next).length === 0) return;
+        setFxRatesByDate((prev) => ({ ...prev, ...next }));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [fxRatesByDate, itemsById, txs]);
 
   useEffect(() => {
     if (period !== "CUSTOM") return;
@@ -899,6 +948,7 @@ export default function GoalsPage() {
                         categoryPathLabel={formatCategoryLabel(goal.category_id)}
                         categoryDescendants={categoryDescendants}
                         txs={txs}
+                        toRubCents={txToRubCents}
                         currentAmount={summary.amount}
                         currentProgress={summary.progress}
                         onEdit={goal.deleted_at ? undefined : openEditDialog}

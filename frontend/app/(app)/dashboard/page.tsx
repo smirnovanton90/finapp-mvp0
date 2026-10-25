@@ -66,7 +66,7 @@ import {
 } from "@/lib/api";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
-import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
+import { minorToRubCents } from "@/lib/amount-rub";
 import {
   ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
   OVERDUE_TRANSACTIONS_GRADIENT,
@@ -494,7 +494,8 @@ function buildCashflowBreakdown(
   periodStartKey: string,
   periodEndKey: string,
   todayKey: string,
-  colors: Record<CashflowBucket, string>
+  colors: Record<CashflowBucket, string>,
+  toRubCents: (tx: TransactionOut) => number | null
 ): CashflowBreakdown {
   const totals: Record<CashflowBucket, number> = {
     actual: 0,
@@ -512,7 +513,9 @@ function buildCashflowBreakdown(
       todayKey
     );
     if (!bucket) return;
-    totals[bucket] += tx.amount;
+    const rub = toRubCents(tx);
+    if (rub == null) return;
+    totals[bucket] += rub;
   });
 
   const segments = CASHFLOW_BUCKET_ORDER.map((key) => ({
@@ -571,7 +574,8 @@ function buildCashflowBucketGroups(
   todayKey: string,
   categoryLookup: ReturnType<typeof buildCategoryLookup>,
   includePlan: boolean,
-  colors: Record<CashflowBucket, string>
+  colors: Record<CashflowBucket, string>,
+  toRubCents: (tx: TransactionOut) => number | null
 ): CashflowBucketGroup[] {
   const byBucket = new Map<CashflowBucket, Map<string, number>>();
 
@@ -586,10 +590,12 @@ function buildCashflowBucketGroups(
     if (!bucket) return;
     if (!includePlan && bucket !== "actual") return;
     const label = resolveTopLevelLabel(tx.category_id, categoryLookup);
+    const rub = toRubCents(tx);
+    if (rub == null) return;
     if (!byBucket.has(bucket)) byBucket.set(bucket, new Map());
     const categories = byBucket.get(bucket);
     if (!categories) return;
-    categories.set(label, (categories.get(label) ?? 0) + tx.amount);
+    categories.set(label, (categories.get(label) ?? 0) + rub);
   });
 
   const keys = includePlan ? CASHFLOW_BUCKET_ORDER : (["actual"] as CashflowBucket[]);
@@ -650,7 +656,8 @@ function buildCategoryBreakdown(
   endKey: string,
   categoryLookup: ReturnType<typeof buildCategoryLookup>,
   limit: number,
-  includePlan: boolean
+  includePlan: boolean,
+  toRubCents: (tx: TransactionOut) => number | null
 ): CategoryBreakdown {
   const totals = new Map<string, number>();
   let total = 0;
@@ -665,9 +672,11 @@ function buildCategoryBreakdown(
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
     if (!isDashboardTxIncluded(tx, includePlan)) return;
+    const rub = toRubCents(tx);
+    if (rub == null) return;
     const label = resolveLabel(tx.category_id);
-    totals.set(label, (totals.get(label) ?? 0) + tx.amount);
-    total += tx.amount;
+    totals.set(label, (totals.get(label) ?? 0) + rub);
+    total += rub;
   });
 
   if (total <= 0) return { total, rows: [] };
@@ -699,7 +708,8 @@ function buildCategoryTotalsByLabel(
   startKey: string,
   endKey: string,
   categoryLookup: ReturnType<typeof buildCategoryLookup>,
-  includePlan: boolean
+  includePlan: boolean,
+  toRubCents: (tx: TransactionOut) => number | null
 ) {
   const totals = new Map<string, number>();
 
@@ -713,8 +723,10 @@ function buildCategoryTotalsByLabel(
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
     if (!isDashboardTxIncluded(tx, includePlan)) return;
+    const rub = toRubCents(tx);
+    if (rub == null) return;
     const label = resolveLabel(tx.category_id);
-    totals.set(label, (totals.get(label) ?? 0) + tx.amount);
+    totals.set(label, (totals.get(label) ?? 0) + rub);
   });
 
   return totals;
@@ -726,7 +738,8 @@ function buildCategoryMonthlyTotals(
   startKey: string,
   endKey: string,
   categoryLookup: ReturnType<typeof buildCategoryLookup>,
-  includePlan: boolean
+  includePlan: boolean,
+  toRubCents: (tx: TransactionOut) => number | null
 ) {
   const totals = new Map<string, Map<string, number>>();
 
@@ -737,12 +750,14 @@ function buildCategoryMonthlyTotals(
     if (!dateKey) return;
     if (dateKey < startKey || dateKey > endKey) return;
     if (!isDashboardTxIncluded(tx, includePlan)) return;
+    const rub = toRubCents(tx);
+    if (rub == null) return;
     const label = resolveTopLevelLabel(tx.category_id, categoryLookup);
     const monthKey = dateKey.slice(0, 7);
     if (!totals.has(label)) totals.set(label, new Map());
     const monthTotals = totals.get(label);
     if (!monthTotals) return;
-    monthTotals.set(monthKey, (monthTotals.get(monthKey) ?? 0) + tx.amount);
+    monthTotals.set(monthKey, (monthTotals.get(monthKey) ?? 0) + rub);
   });
 
   return totals;
@@ -1119,6 +1134,23 @@ export default function DashboardPage() {
     return map;
   }, [fxRates]);
 
+  const itemsById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items]
+  );
+
+  const txToRubCents = useCallback((tx: TransactionOut) => {
+    const code = (itemsById.get(tx.primary_item_id)?.currency_code || "RUB").toUpperCase();
+    const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
+    const rateKey = dateKey && dateKey > todayKey ? todayKey : dateKey;
+    const dayRates =
+      (rateKey ? fxRatesByDate[rateKey] : undefined) ??
+      (rateKey === todayKey ? fxRates : undefined);
+    const rate =
+      code === "RUB" ? 1 : dayRates?.find((row) => row.char_code === code)?.rate ?? null;
+    return minorToRubCents(tx.amount, code, rate);
+  }, [fxRates, fxRatesByDate, itemsById, todayKey]);
+
   const categoryLookup = useMemo(
     () => buildCategoryLookup(categoryNodes),
     [categoryNodes]
@@ -1165,7 +1197,9 @@ export default function DashboardPage() {
           const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
           if (!dateKey) return;
           if (dateKey < range.startKey || dateKey > range.endKey) return;
-          amount += tx.amount;
+          const rub = txToRubCents(tx);
+          if (rub == null) return;
+          amount += rub;
         });
       }
       const progress =
@@ -1177,7 +1211,7 @@ export default function DashboardPage() {
       });
     });
     return map;
-  }, [activeGoals, categoryDescendants, categoryLookup.idToScope, txs]);
+  }, [activeGoals, categoryDescendants, categoryLookup.idToScope, txs, txToRubCents]);
 
   const formatGoalCategoryLabel = (categoryId: number | null) => {
     if (!categoryId) return "-";
@@ -1296,9 +1330,10 @@ export default function DashboardPage() {
         periodEndKey,
         categoryLookup,
         CATEGORY_BREAKDOWN_LIMIT,
-        showPlan
+        showPlan,
+        txToRubCents
       ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs, txToRubCents]
   );
 
   const expenseBreakdown = useMemo(
@@ -1310,9 +1345,10 @@ export default function DashboardPage() {
         periodEndKey,
         categoryLookup,
         CATEGORY_BREAKDOWN_LIMIT,
-        showPlan
+        showPlan,
+        txToRubCents
       ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs, txToRubCents]
   );
 
   const incomeCashflow = useMemo(
@@ -1323,9 +1359,10 @@ export default function DashboardPage() {
       periodStartKey,
       periodEndKey,
         todayKey,
-        INCOME_SEGMENT_COLORS
+        INCOME_SEGMENT_COLORS,
+        txToRubCents
       ),
-    [periodEndKey, periodStartKey, todayKey, txs]
+    [periodEndKey, periodStartKey, todayKey, txs, txToRubCents]
   );
 
   const expenseCashflow = useMemo(
@@ -1336,9 +1373,10 @@ export default function DashboardPage() {
       periodStartKey,
       periodEndKey,
         todayKey,
-        EXPENSE_SEGMENT_COLORS
+        EXPENSE_SEGMENT_COLORS,
+        txToRubCents
       ),
-    [periodEndKey, periodStartKey, todayKey, txs]
+    [periodEndKey, periodStartKey, todayKey, txs, txToRubCents]
   );
 
   const displayIncomeCashflow = useMemo(
@@ -1361,9 +1399,10 @@ export default function DashboardPage() {
         todayKey,
         categoryLookup,
         showPlan,
-        INCOME_SEGMENT_COLORS
+        INCOME_SEGMENT_COLORS,
+        txToRubCents
       ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, todayKey, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, todayKey, txs, txToRubCents]
   );
 
   const expenseBucketGroups = useMemo(
@@ -1376,9 +1415,10 @@ export default function DashboardPage() {
         todayKey,
         categoryLookup,
         showPlan,
-        EXPENSE_SEGMENT_COLORS
+        EXPENSE_SEGMENT_COLORS,
+        txToRubCents
       ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, todayKey, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, todayKey, txs, txToRubCents]
   );
 
   const toggleCashflowExpand = useCallback((direction: "income" | "expense") => {
@@ -1403,9 +1443,10 @@ export default function DashboardPage() {
         periodStartKey,
         periodEndKey,
         categoryLookup,
-        showPlan
+        showPlan,
+        txToRubCents
       ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs, txToRubCents]
   );
 
   const expenseTotalsCurrent = useMemo(
@@ -1416,9 +1457,10 @@ export default function DashboardPage() {
         periodStartKey,
         periodEndKey,
         categoryLookup,
-        showPlan
+        showPlan,
+        txToRubCents
       ),
-    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs]
+    [categoryLookup, periodEndKey, periodStartKey, showPlan, txs, txToRubCents]
   );
 
   const incomeTotalsPrevMonth = useMemo(
@@ -1429,9 +1471,10 @@ export default function DashboardPage() {
         priorMonthStartKey,
         priorMonthEndKey,
         categoryLookup,
-        showPlan
+        showPlan,
+        txToRubCents
       ),
-    [categoryLookup, priorMonthEndKey, priorMonthStartKey, showPlan, txs]
+    [categoryLookup, priorMonthEndKey, priorMonthStartKey, showPlan, txs, txToRubCents]
   );
 
   const expenseTotalsPrevMonth = useMemo(
@@ -1442,9 +1485,10 @@ export default function DashboardPage() {
         priorMonthStartKey,
         priorMonthEndKey,
         categoryLookup,
-        showPlan
+        showPlan,
+        txToRubCents
       ),
-    [categoryLookup, priorMonthEndKey, priorMonthStartKey, showPlan, txs]
+    [categoryLookup, priorMonthEndKey, priorMonthStartKey, showPlan, txs, txToRubCents]
   );
 
   const incomeMonthlyTotals = useMemo(
@@ -1455,9 +1499,10 @@ export default function DashboardPage() {
         twelveMonthStartKey,
         twelveMonthEndKey,
         categoryLookup,
-        showPlan
+        showPlan,
+        txToRubCents
       ),
-    [categoryLookup, showPlan, twelveMonthEndKey, twelveMonthStartKey, txs]
+    [categoryLookup, showPlan, twelveMonthEndKey, twelveMonthStartKey, txs, txToRubCents]
   );
 
   const expenseMonthlyTotals = useMemo(
@@ -1468,9 +1513,10 @@ export default function DashboardPage() {
         twelveMonthStartKey,
         twelveMonthEndKey,
         categoryLookup,
-        showPlan
+        showPlan,
+        txToRubCents
       ),
-    [categoryLookup, showPlan, twelveMonthEndKey, twelveMonthStartKey, txs]
+    [categoryLookup, showPlan, twelveMonthEndKey, twelveMonthStartKey, txs, txToRubCents]
   );
 
   const incomePrevMonthTotal = useMemo(
@@ -1581,10 +1627,12 @@ export default function DashboardPage() {
         if (!dateKey) return;
         if (dateKey < todayKey) {
           overdueCount += 1;
-          overdueSum += tx.amount;
+          const rub = txToRubCents(tx);
+          if (rub != null) overdueSum += rub;
         } else if (dateKey === todayKey) {
           todayCount += 1;
-          todaySum += tx.amount;
+          const rub = txToRubCents(tx);
+          if (rub != null) todaySum += rub;
         }
       });
       return {
@@ -1593,7 +1641,7 @@ export default function DashboardPage() {
         todayPlannedCount: todayCount,
         todayPlannedSum: todaySum,
       };
-    }, [todayKey, txs]);
+    }, [todayKey, txs, txToRubCents]);
   const hasOverduePlanned = showPlan && overduePlannedCount > 0;
 
   const resolveCategoryIcon = useCallback(
@@ -1628,16 +1676,30 @@ export default function DashboardPage() {
   );
 
   const needsRates = useMemo(
-    () => chartItems.some((item) => item.currency_code !== "RUB"),
-    [chartItems]
+    () =>
+      chartItems.some((item) => (item.currency_code || "RUB").toUpperCase() !== "RUB") ||
+      txs.some((tx) => {
+        const code = itemsById.get(tx.primary_item_id)?.currency_code || "RUB";
+        return code.toUpperCase() !== "RUB";
+      }),
+    [chartItems, itemsById, txs]
   );
 
   const rateFetchKeys = useMemo(() => {
-    if (!needsRates || dateKeys.length === 0) return [];
-    const pastKeys = dateKeys.filter((dateKey) => dateKey <= todayKey);
-    if (pastKeys.length === 0) return [todayKey];
-    return Array.from(new Set(pastKeys));
-  }, [dateKeys, needsRates, todayKey]);
+    const keys = new Set<string>();
+    dateKeys.forEach((dateKey) => {
+      if (dateKey <= todayKey) keys.add(dateKey);
+    });
+    txs.forEach((tx) => {
+      const code = itemsById.get(tx.primary_item_id)?.currency_code || "RUB";
+      if (code.toUpperCase() === "RUB") return;
+      const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
+      if (!dateKey) return;
+      keys.add(dateKey > todayKey ? todayKey : dateKey);
+    });
+    if (keys.size === 0 && needsRates) keys.add(todayKey);
+    return Array.from(keys);
+  }, [dateKeys, itemsById, needsRates, todayKey, txs]);
 
   const latestRatesByCurrency = useMemo(() => {
     const latest = new Map<string, { dateKey: string; rate: number }>();
@@ -1750,8 +1812,7 @@ export default function DashboardPage() {
         if (rate === null) {
           if (currency !== "RUB") missingRate = true;
         } else {
-          const rubValueCents =
-            currency !== "RUB" ? withPlan : Math.round((withPlan / 100) * rate * 100);
+          const rubValueCents = Math.round((withPlan / 100) * rate * 100);
           const effectiveKind = resolveItemEffectiveKind(item, withPlan);
           const signedRub = effectiveKind === "LIABILITY" ? -rubValueCents : rubValueCents;
           if (totalRubCents !== null) totalRubCents += signedRub;
@@ -1787,47 +1848,49 @@ export default function DashboardPage() {
 
   const itemRubCentsById = useMemo(() => {
     const map = new Map<number, number>();
-    if (!showPlan || !txsLoaded) {
-      activeItems.forEach((item) => {
-        const value = getPrimaryValueRubCents(item);
-        if (value != null) map.set(item.id, value);
-      });
-      return map;
-    }
+    const selectedIds = new Set(activeItems.map((item) => item.id));
+    const itemKindById = new Map(activeItems.map((item) => [item.id, item.kind]));
+    const itemTypeById = new Map(items.map((item) => [item.id, item.type_code]));
+    const plannedByDate =
+      showPlan && txsLoaded
+        ? buildDeltasByDate(txs, selectedIds, itemKindById, true, "planned", itemTypeById)
+        : null;
 
-    const asOfKey = rangeEndKey;
-    const rateDateKey = asOfKey > todayKey ? todayKey : asOfKey;
     activeItems.forEach((item) => {
-      const startKeyForItem = getItemStartKey(item, accountingStartDate);
-      if (startKeyForItem && asOfKey < startKeyForItem) return;
-      const valueCents =
-        endBalancesByItemId.get(item.id) ?? item.initial_balance_minor;
-      const currency = (item.currency_code ?? "RUB").toUpperCase();
-      const rate = getRateForDate(
-        fxRatesByDate,
-        rateDateKey,
-        item.currency_code,
-        latestRatesByCurrency,
-        todayKey
-      );
-      if (rate === null && currency !== "RUB") return;
-      const rubValueCents =
-        currency !== "RUB"
-          ? valueCents
-          : Math.round((valueCents / 100) * (rate ?? 1) * 100);
-      map.set(item.id, Math.abs(rubValueCents));
+      const base = getPrimaryValueRubCents(item);
+      if (base == null) return;
+      if (!plannedByDate) {
+        map.set(item.id, base);
+        return;
+      }
+      const currency = item.currency_code ?? "RUB";
+      let plannedRub = 0;
+      plannedByDate.forEach((bucket, dateKey) => {
+        if (dateKey > rangeEndKey) return;
+        const delta = bucket.get(item.id) ?? 0;
+        if (!delta) return;
+        const rateDate = dateKey > todayKey ? todayKey : dateKey;
+        const dayRates = fxRatesByDate[rateDate] ?? (rateDate === todayKey ? fxRates : undefined);
+        const rate =
+          currency.toUpperCase() === "RUB"
+            ? 1
+            : dayRates?.find((row) => row.char_code === currency.toUpperCase())?.rate ?? null;
+        const rub = minorToRubCents(delta, currency, rate);
+        if (rub != null) plannedRub += rub;
+      });
+      map.set(item.id, Math.abs(base + plannedRub));
     });
     return map;
   }, [
-    accountingStartDate,
     activeItems,
-    endBalancesByItemId,
+    fxRates,
     fxRatesByDate,
-    latestRatesByCurrency,
+    items,
     rangeEndKey,
     rateByCode,
     showPlan,
     todayKey,
+    txs,
     txsLoaded,
   ]);
 

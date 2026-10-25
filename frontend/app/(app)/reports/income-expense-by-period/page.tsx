@@ -25,6 +25,7 @@ import {
   TransactionOut,
   TransactionChainOut,
 } from "@/lib/api";
+import { minorToRubCents } from "@/lib/amount-rub";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { FilterSection } from "@/components/filter-panel";
@@ -424,14 +425,12 @@ function getRubEquivalentCents(
   currencyCode: string,
   ratesByDate: Record<string, FxRateOut[]>
 ) {
-  if (!currencyCode || currencyCode === "RUB") return tx.amount;
+  const code = (currencyCode || "RUB").toUpperCase();
+  if (code === "RUB") return minorToRubCents(tx.amount, code, 1);
   const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
   if (!dateKey) return null;
-  const rates = ratesByDate[dateKey];
-  if (!rates) return null;
-  const rate = rates.find((rate) => rate.char_code === currencyCode)?.rate ?? null;
-  if (!rate) return null;
-  return Math.round((tx.amount / 100) * rate * 100);
+  const rate = ratesByDate[dateKey]?.find((rate) => rate.char_code === code)?.rate ?? null;
+  return minorToRubCents(tx.amount, code, rate);
 }
 
 function buildCategoryMatrix(
@@ -868,14 +867,12 @@ function CategoryBreakdownTable({
       const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (!dateKey) return 0;
       const code = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
-      let rubCents = tx.amount;
-      if (code !== "RUB") {
-        const rates = chartRatesByDate[dateKey];
-        const rate = rates?.find((r) => r.char_code === code)?.rate;
-        if (rate == null) return 0;
-        rubCents = Math.round((tx.amount / 100) * rate * 100);
-      }
-      return Math.abs(rubCents);
+      const rate =
+        code.toUpperCase() === "RUB"
+          ? 1
+          : chartRatesByDate[dateKey]?.find((r) => r.char_code === code.toUpperCase())?.rate ?? null;
+      const rubCents = minorToRubCents(tx.amount, code, rate);
+      return rubCents == null ? 0 : Math.abs(rubCents);
     },
     [itemsById, chartRatesByDate]
   );
@@ -1647,14 +1644,12 @@ export default function IncomeExpenseDynamicsPage() {
       const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
       if (!dateKey) return 0;
       const code = itemsById.get(tx.primary_item_id)?.currency_code ?? "RUB";
-      let rubCents = tx.amount;
-      if (code !== "RUB") {
-        const rates = chartRatesByDate[dateKey];
-        const rate = rates?.find((r) => r.char_code === code)?.rate;
-        if (rate == null) return 0;
-        rubCents = Math.round((tx.amount / 100) * rate * 100);
-      }
-      return Math.abs(rubCents);
+      const rate =
+        code.toUpperCase() === "RUB"
+          ? 1
+          : chartRatesByDate[dateKey]?.find((r) => r.char_code === code.toUpperCase())?.rate ?? null;
+      const rubCents = minorToRubCents(tx.amount, code, rate);
+      return rubCents == null ? 0 : Math.abs(rubCents);
     },
     [itemsById, chartRatesByDate]
   );

@@ -80,7 +80,6 @@ import {
   Coins,
   FileDown,
   FileText,
-  Filter,
   Folder,
   Info,
   GraduationCap,
@@ -135,6 +134,7 @@ import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AssetItemIcon } from "@/components/asset-item-icon";
 import { TransactionMobileCard as TransactionMobileCardView } from "@/components/transaction-mobile-card";
+import { TransactionsMobileHeader } from "@/components/transactions-mobile-header";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
 import { CategorySelector } from "@/components/category-selector";
@@ -1257,6 +1257,9 @@ function TransactionMobileCard({
   itemsById,
   getItemCounterparty,
   apiBase,
+  onRealize,
+  onConfirm,
+  isConfirming,
 }: {
   tx: TransactionCard;
   counterparty: CounterpartyOut | null;
@@ -1266,23 +1269,24 @@ function TransactionMobileCard({
   itemsById: Map<number, ItemOut>;
   getItemCounterparty: (itemId: number | null | undefined) => CounterpartyOut | null;
   apiBase: string;
-  [key: string]: unknown;
+  onRealize?: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
+  onConfirm?: (tx: TransactionCard) => void;
+  isConfirming?: boolean;
 }) {
   return (
-    <TableRow className="border-0 bg-transparent hover:bg-transparent">
-      <TableCell colSpan={2} className="px-0 py-1.5 align-top">
-        <TransactionMobileCardView
-          tx={tx}
-          counterparty={counterparty}
-          itemName={itemName}
-          categoryLookup={categoryLookup}
-          getCategoryLines={getCategoryLines}
-          itemsById={itemsById}
-          getItemCounterparty={getItemCounterparty}
-          apiBase={apiBase}
-        />
-      </TableCell>
-    </TableRow>
+    <TransactionMobileCardView
+      tx={tx}
+      counterparty={counterparty}
+      itemName={itemName}
+      categoryLookup={categoryLookup}
+      getCategoryLines={getCategoryLines}
+      itemsById={itemsById}
+      getItemCounterparty={getItemCounterparty}
+      apiBase={apiBase}
+      onRealize={onRealize}
+      onConfirm={onConfirm}
+      isConfirming={isConfirming}
+    />
   );
 }
 
@@ -8113,38 +8117,14 @@ function TransactionsView({
               </div>
             </FormModal>
 
-        <div className="flex-1 min-w-0 pt-[30px]">
+        <div className={cn("min-w-0 flex-1", isDesktop ? "pt-[30px]" : "pt-0")}>
           <div className={CONTENT_WIDTH_CLASS}>
             {!isDesktop && (
-              <div className="mb-5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <h1 className="text-2xl font-medium tracking-[-0.02em]" style={{ color: ACTIVE_TEXT_DARK }}>
-                    Транзакции
-                  </h1>
-                  <p className="mt-1 text-sm" style={{ color: PLACEHOLDER_COLOR_DARK }}>
-                    {hasAnyFilter ? "Показаны операции по выбранным условиям" : "Все операции по вашим счетам"}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="glass"
-                  className="h-11 shrink-0 rounded-[9px] border-0 px-3 text-sm font-medium active:scale-95"
-                  style={{
-                    "--glass-bg": mobileFilterKeys.size > 0 ? "rgba(127, 92, 255, 0.40)" : "rgba(108, 93, 215, 0.22)",
-                    "--glass-bg-hover": "rgba(108, 93, 215, 0.40)",
-                  } as CSSProperties}
-                  onClick={() => setMobileFiltersOpen(true)}
-                  aria-label="Открыть фильтры транзакций"
-                >
-                  <Filter className="mr-2 h-4 w-4" strokeWidth={1.5} />
-                  Добавить фильтр
-                  {mobileFilterKeys.size > 0 && (
-                    <span className="ml-2 grid h-5 min-w-5 place-items-center rounded-full bg-white px-1 text-[11px] font-semibold" style={{ color: ACCENT }}>
-                      {mobileFilterKeys.size}
-                    </span>
-                  )}
-                </Button>
-              </div>
+              <TransactionsMobileHeader
+                filtersActive={mobileFilterKeys.size > 0}
+                onOpenFilters={() => setMobileFiltersOpen(true)}
+                onAdd={() => setMobileAddMenuOpen(true)}
+              />
             )}
             {!isDesktop && mobileFilterKeys.size > 0 && (
               <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
@@ -8155,8 +8135,8 @@ function TransactionsView({
                 ))}
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-2 mb-4">
-              {isDesktop && (
+            {isDesktop && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
                 <>
                   <Dialog
                     open={isDialogOpen}
@@ -8246,9 +8226,10 @@ function TransactionsView({
                     <span style={{ color: "white", opacity: 0.85 }}>Импорт</span>
                   </Button>
                 </>
-              )}
             </div>
-            <div className="space-y-4">
+            )}
+            <div className={cn("space-y-4", !isDesktop && "pt-6")}>
+              {isDesktop && (
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
                   <input
@@ -8407,6 +8388,7 @@ function TransactionsView({
                 )}
                 </div>
               </div>
+              )}
             {isDesktop ? (
               <div className="relative">
                 {mergedRows.length === 0 ? (
@@ -8564,13 +8546,13 @@ function TransactionsView({
                 )}
               </div>
             ) : isInitialLoading && !isDesktop ? (
-              <div className="w-screen relative left-1/2 -translate-x-1/2 max-w-none space-y-6 px-4">
+              <div className="flex flex-col gap-8">
                 {[1, 2, 3].map((sectionIdx) => (
-                  <div key={sectionIdx}>
-                    <Skeleton className="h-6 w-28 mb-2 rounded-[9px]" />
-                    <div className="space-y-2">
-                      {[1, 2, 3, 4].map((cardIdx) => (
-                        <Skeleton key={cardIdx} className="h-20 w-full rounded-lg" />
+                  <div key={sectionIdx} className="flex flex-col gap-3">
+                    <Skeleton className="h-6 w-36 rounded-[4px]" />
+                    <div className="flex flex-col gap-3">
+                      {[1, 2].map((cardIdx) => (
+                        <Skeleton key={cardIdx} className="h-64 w-full rounded-[10px]" />
                       ))}
                     </div>
                   </div>
@@ -8585,14 +8567,7 @@ function TransactionsView({
                 <EmptyState />
               )
             ) : !isDesktop ? (
-              /* Мобильная верстка: карточки от края до края экрана */
-              <div
-                className="w-screen relative left-1/2 -translate-x-1/2 max-w-none space-y-6"
-                style={{
-                  opacity: 1,
-                  transition: "opacity 0.3s ease-in-out",
-                }}
-              >
+              <div className="flex flex-col gap-8">
                 {mobileDaySections.map(({ dateKey, items }) => {
                   const hasTx = items.some(
                     (r) => r.type === "transaction" || r.type === "split_group"
@@ -8602,28 +8577,22 @@ function TransactionsView({
                   if (checkpointsVisible && !hasTx && !hasCp) return null;
                   if (items.length === 0) return null;
                   return (
-                    <div key={dateKey}>
-                      <div
-                        className="text-lg font-medium pt-1 pb-0.5 first:pt-0 px-4"
-                        style={{ color: ACTIVE_TEXT_DARK }}
-                      >
+                    <section key={dateKey} className="flex flex-col gap-3">
+                      <h2 className="text-[22px] font-semibold leading-[23px] tracking-[-0.3px] text-white/95">
                         {formatDateSectionHeader(dateKey)}
-                      </div>
-                      <Table className="table-fixed w-full border-separate border-spacing-0 [&_tr]:border-b [&_tr]:border-border">
-                        <TableBody className="[&_tr]:bg-transparent [&_tr:hover]:bg-transparent">
+                      </h2>
+                      <div className="flex flex-col gap-3">
                           {items.flatMap((row, itemIdx) => {
                             if (row.type === "checkpoint_line") {
                               if (!checkpointsVisible) return [];
                               const hasMismatch = row.checkpoints.some((c) => c.status === "MISMATCH");
                               const lineColor = hasMismatch ? RED : GREEN;
                               return [
-                                <TableRow
+                                <div
                                   key={`cp-${dateKey}-${row.timeKey}-${itemIdx}`}
-                                  className="border-b border-border bg-transparent hover:bg-transparent"
+                                  className="overflow-hidden rounded-[10px]"
                                 >
-                                  <TableCell colSpan={2} className="py-2 px-4 align-top">
-                                    <div className="rounded-lg overflow-hidden">
-                                      <div className="space-y-1.5">
+                                    <div className="space-y-1.5 px-6 py-[18px]">
                                         {row.checkpoints.map((cp) => {
                                           const item = itemsById.get(cp.item_id);
                                           const currencyCode = item?.currency_code ?? "RUB";
@@ -8666,13 +8635,11 @@ function TransactionsView({
                                         })}
                                       </div>
                                       <div
-                                        className="h-1 w-full mt-1.5 rounded-sm"
+                                        className="h-1 w-full"
                                         style={{ backgroundColor: lineColor, opacity: 0.9 }}
                                         aria-hidden
                                       />
-                                    </div>
-                                  </TableCell>
-                                </TableRow>,
+                                </div>,
                               ];
                             }
                             if (row.type === "split_group") {
@@ -8685,12 +8652,12 @@ function TransactionsView({
                                   itemName={itemName}
                                   categoryLookup={categoryLookup}
                                   getCategoryLines={getCategoryLines}
-                                  resolveCategoryIcon={resolveCategoryIcon}
                                   itemsById={itemsById}
                                   getItemCounterparty={getItemCounterparty}
-                                  getCounterpartyForItemId={getCounterpartyForItemId}
                                   apiBase={API_BASE}
-                                  onEdit={openEditDialog}
+                                  onRealize={openRealizeDialog}
+                                  onConfirm={handleConfirmStatus}
+                                  isConfirming={confirmingTxId === parent.id}
                                 />,
                                 ...children.map((child) => (
                                   <TransactionMobileCard
@@ -8700,12 +8667,12 @@ function TransactionsView({
                                     itemName={itemName}
                                     categoryLookup={categoryLookup}
                                     getCategoryLines={getCategoryLines}
-                                    resolveCategoryIcon={resolveCategoryIcon}
                                     itemsById={itemsById}
                                     getItemCounterparty={getItemCounterparty}
-                                    getCounterpartyForItemId={getCounterpartyForItemId}
                                     apiBase={API_BASE}
-                                    onEdit={openEditDialog}
+                                    onRealize={openRealizeDialog}
+                                    onConfirm={handleConfirmStatus}
+                                    isConfirming={confirmingTxId === child.id}
                                   />
                                 )),
                               ];
@@ -8719,18 +8686,17 @@ function TransactionsView({
                                 itemName={itemName}
                                 categoryLookup={categoryLookup}
                                 getCategoryLines={getCategoryLines}
-                                resolveCategoryIcon={resolveCategoryIcon}
                                 itemsById={itemsById}
                                 getItemCounterparty={getItemCounterparty}
-                                getCounterpartyForItemId={getCounterpartyForItemId}
                                 apiBase={API_BASE}
-                                onEdit={openEditDialog}
+                                onRealize={openRealizeDialog}
+                                onConfirm={handleConfirmStatus}
+                                isConfirming={confirmingTxId === tx.id}
                               />,
                             ];
                           })}
-                        </TableBody>
-                      </Table>
-                    </div>
+                      </div>
+                    </section>
                   );
                 })}
               </div>

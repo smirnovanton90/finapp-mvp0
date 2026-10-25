@@ -2897,13 +2897,11 @@ function TransactionsView({
   }, [categoryNodes, direction]);
 
 
+  // Не сужать по direction формы: по умолчанию он EXPENSE, и доходные категории
+  // тогда не резолвятся в id и фильтр списка их молча игнорирует.
   const filterCategoryPaths = useMemo(
-    () =>
-      buildCategoryPaths(
-        categoryNodes,
-        direction === "TRANSFER" ? undefined : direction
-      ),
-    [categoryNodes, direction]
+    () => buildCategoryPaths(categoryNodes),
+    [categoryNodes]
   );
 
 

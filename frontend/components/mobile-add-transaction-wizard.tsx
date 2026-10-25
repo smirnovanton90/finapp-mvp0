@@ -1146,10 +1146,12 @@ export function MobileAddTransactionWizard({
     <div
       className="fixed inset-0 flex flex-col"
       style={{
-        backgroundColor: isTypeSelection ? ACCENT : "#000000",
+        backgroundColor: "#000000",
+        backgroundImage: isTypeSelection
+          ? `linear-gradient(#000000 0, #000000 env(safe-area-inset-top, 0px), ${ACCENT} env(safe-area-inset-top, 0px), ${ACCENT} calc(100% - env(safe-area-inset-bottom, 0px)), #000000 calc(100% - env(safe-area-inset-bottom, 0px)))`
+          : undefined,
         zIndex: 100,
         minHeight: "100dvh",
-        marginTop: "calc(-1 * env(safe-area-inset-top, 0px))",
         paddingTop: "env(safe-area-inset-top, 0px)",
       }}
       aria-modal

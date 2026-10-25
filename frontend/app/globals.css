@@ -233,7 +233,7 @@
       height: 100dvh;
       overflow: hidden;
       overscroll-behavior: none;
-      background-color: #191732;
+      background-color: #000000;
     }
   }
   html.standalone-pwa,
@@ -242,7 +242,7 @@
     height: 100dvh;
     overflow: hidden;
     overscroll-behavior: none;
-    background-color: #191732;
+    background-color: #000000;
   }
 
   /* Принудительно используем CodecProVariable для всех элементов с tabular-nums */

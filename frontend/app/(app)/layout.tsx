@@ -10,12 +10,11 @@ import { signOut, useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, type CSSProperties } from "react";
 import { useTheme } from "@/components/theme-provider";
-import { APP_BG_GRADIENT, APP_BG_START, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
+import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { MobileFloatingBar } from "@/components/mobile-floating-bar";
 import { MobileWizardOpenProvider, useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
-import { SIDEBAR_BG } from "@/lib/colors";
 
 // Таймаут неактивности: только когда вкладка в фокусе (visible).
 // При переключении на другое приложение/вкладку таймер не идёт — разлогин не происходит.
@@ -119,7 +118,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     return null;
   }
 
-  const mobilePageBg = isDashboardPage ? APP_BG_START : SIDEBAR_BG;
+  const mobileCanvasBg = "#000000";
 
   const loadingContent = (
     <div className="relative min-h-screen overflow-hidden flex items-center justify-center">
@@ -154,13 +153,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         style={
           !isDesktop
             ? ({
-                "--app-bg": mobilePageBg,
-                // На странице актива и дашборде safe-area рисует сама страница.
-                // Иначе padding + сплошной фон дают тёмную полосу над шапкой.
+                "--app-bg": mobileCanvasBg,
+                // На странице актива и дашборде отступ safe-area задаёт сама шапка.
                 paddingTop: isAssetDetailPage || isDashboardPage ? 0 : "env(safe-area-inset-top, 0px)",
                 paddingLeft: "env(safe-area-inset-left, 0px)",
                 paddingRight: "env(safe-area-inset-right, 0px)",
-                backgroundColor: mobilePageBg,
+                backgroundColor: mobileCanvasBg,
               } as CSSProperties & Record<"--app-bg", string>)
             : undefined
         }
@@ -170,14 +168,14 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
-            background: !isDesktop ? mobilePageBg : APP_BG_GRADIENT,
+            background: !isDesktop ? mobileCanvasBg : APP_BG_GRADIENT,
             opacity: isDark ? 1 : 0,
           }}
         />
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-700 ease-in-out"
           style={{
-            background: !isDesktop ? mobilePageBg : AUTH_BG_GRADIENT_LIGHT,
+            background: !isDesktop ? mobileCanvasBg : AUTH_BG_GRADIENT_LIGHT,
             opacity: isDark ? 0 : 1,
           }}
         />
@@ -193,8 +191,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
               "flex-1 transition-all duration-300 @container",
               // Вертикальное центрирование только на десктопе — на мобиле оно обрезает верхние заголовки
               isDesktop && !isSpecialPage && "min-h-screen flex items-center",
-              !isDesktop &&
-                "min-h-0 overflow-y-auto overscroll-y-none px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))]"
+              !isDesktop && "min-h-0 overflow-y-auto overscroll-y-none px-4"
             )}
             style={
               !isDesktop
@@ -206,6 +203,10 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             }
             {...(!isDesktop && { "data-app-scroll-container": true })}
           >
+            {/* Отступ на внутренней обёртке: у overflow-контейнера padding-bottom на iOS не прокручивается, и низ экрана остаётся под панелью. */}
+            <div
+              className={cn(!isDesktop && "pb-[calc(6.75rem+env(safe-area-inset-bottom,0px))]")}
+            >
             {isSpecialPage || isAssetDetailPage ? (
               <div className="w-full min-w-0">
                 {children}
@@ -217,6 +218,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
             )}
+            </div>
           </div>
         </div>
       </div>

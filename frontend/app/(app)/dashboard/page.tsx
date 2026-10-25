@@ -86,9 +86,83 @@ const assetCardSurfaceClass =
 /** Верхняя плашка метрики на мобильном дашборде — color/app-bg-end. */
 const MOBILE_METRIC_HEADER_BG = "#4B4197";
 
-/** Короткое уменьшение блока при нажатии, как у MobileTapScale. */
-const mobileBlockPressClass =
-  "origin-center touch-manipulation transition-transform duration-75 ease-out active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100";
+const TAP_MOVE_PX = 10;
+const PRESS_DELAY_MS = 80;
+
+/** Уменьшение карточки только на тап. Сдвиг пальца считается скроллом и анимацию отменяет. */
+function MobileCardPress({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [pressed, setPressed] = useState(false);
+  const pointRef = useRef<{ x: number; y: number; id: number } | null>(null);
+  const movedRef = useRef(false);
+  const pressTimerRef = useRef<number | null>(null);
+  const releaseTimerRef = useRef<number | null>(null);
+
+  const clearPressTimer = () => {
+    if (pressTimerRef.current != null) {
+      window.clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "origin-center touch-manipulation transition-transform duration-75 ease-out motion-reduce:transition-none",
+        pressed && "scale-[0.97] motion-reduce:scale-100",
+        className
+      )}
+      onPointerDown={(event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        pointRef.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
+        movedRef.current = false;
+        clearPressTimer();
+        if (releaseTimerRef.current != null) {
+          window.clearTimeout(releaseTimerRef.current);
+          releaseTimerRef.current = null;
+        }
+        pressTimerRef.current = window.setTimeout(() => {
+          if (!movedRef.current) setPressed(true);
+        }, PRESS_DELAY_MS);
+      }}
+      onPointerMove={(event) => {
+        const start = pointRef.current;
+        if (!start || event.pointerId !== start.id || movedRef.current) return;
+        const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+        if (distance > TAP_MOVE_PX) {
+          movedRef.current = true;
+          clearPressTimer();
+          setPressed(false);
+        }
+      }}
+      onPointerUp={(event) => {
+        if (pointRef.current && event.pointerId !== pointRef.current.id) return;
+        clearPressTimer();
+        pointRef.current = null;
+        if (!movedRef.current) {
+          setPressed(true);
+          releaseTimerRef.current = window.setTimeout(() => setPressed(false), 90);
+        } else {
+          setPressed(false);
+        }
+        movedRef.current = false;
+      }}
+      onPointerCancel={() => {
+        clearPressTimer();
+        pointRef.current = null;
+        movedRef.current = true;
+        setPressed(false);
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 function MobileSolidTag({
   children,
@@ -2084,7 +2158,7 @@ export default function DashboardPage() {
         }));
     if (activityLoading) {
       return (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
           {[0, 1].map((row) => (
             <div key={row} className="flex items-center gap-2">
               <MobileNumberSkeleton className="size-4 shrink-0" />
@@ -2099,7 +2173,7 @@ export default function DashboardPage() {
       return <p className="text-sm leading-4 text-white/55">Нет операций</p>;
     }
     return (
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         {rows.map((row) => {
           const isUncategorized = row.label === UNCATEGORIZED_LABEL;
           const configuredIconName = CATEGORY_ICON_NAME_BY_L1[row.label];
@@ -2144,7 +2218,7 @@ export default function DashboardPage() {
     const apiDirection = direction === "income" ? "INCOME" : "EXPENSE";
     const headerBg = direction === "income" ? MOBILE_METRIC_HEADER_BG : MODAL_BG;
     return (
-      <div className={cn("overflow-hidden rounded-[10px]", mobileBlockPressClass)}>
+      <MobileCardPress className="overflow-hidden rounded-[10px]">
         <div
           className="flex items-center gap-3 px-6 py-[18px]"
           style={{ backgroundColor: headerBg }}
@@ -2184,7 +2258,7 @@ export default function DashboardPage() {
             {renderMobileCategoryRows(apiDirection)}
           </div>
         ) : null}
-      </div>
+      </MobileCardPress>
     );
   };
 
@@ -2192,7 +2266,7 @@ export default function DashboardPage() {
     <>
       <main className="min-h-0 text-white/85 md:hidden">
         <header
-          className="flex items-center gap-3 pb-2"
+          className="sticky top-0 z-30 -mx-4 flex items-center gap-3 bg-black px-4 pb-2"
           style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)" }}
         >
           <Link
@@ -2246,16 +2320,14 @@ export default function DashboardPage() {
               </div>
               <MobilePlusLink href="/assets?openCreate=1" label="Добавить актив" />
             </div>
+            <MobileCardPress className="overflow-hidden rounded-[10px]">
             <button
               type="button"
               onClick={() => {
                 setMobileDetailExpanded(false);
                 setMobileDetail("structure");
               }}
-              className={cn(
-                "w-full overflow-hidden rounded-[10px] text-left",
-                mobileBlockPressClass
-              )}
+              className="w-full text-left"
               aria-label="Открыть структуру активов и обязательств"
             >
               <div
@@ -2298,6 +2370,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             </button>
+            </MobileCardPress>
           </section>
 
               ),
@@ -2362,13 +2435,10 @@ export default function DashboardPage() {
                   categoryLookup.idToScope?.get(goal.category_id) === "INCOME";
                 const progressColor = getGoalProgressColor(ratio, isIncomeGoal);
                 return (
+                  <MobileCardPress key={goal.id} className="overflow-hidden rounded-[10px]">
                   <Link
-                    key={goal.id}
                     href="/goals"
-                    className={cn(
-                      "flex flex-col gap-3 rounded-[10px] px-6 py-[18px]",
-                      mobileBlockPressClass
-                    )}
+                    className="flex flex-col gap-3 px-6 py-[18px]"
                     style={{ backgroundColor: MODAL_BG }}
                   >
                     <span className="flex items-center gap-3">
@@ -2409,6 +2479,7 @@ export default function DashboardPage() {
                       )}
                     </span>
                   </Link>
+                  </MobileCardPress>
                 );
               })
             )}
@@ -2417,16 +2488,15 @@ export default function DashboardPage() {
             }}
           />
 
+          <MobileCardPress className="overflow-hidden rounded-[4px]">
           <button
             type="button"
-            className={cn(
-              "flex h-12 w-full items-center justify-center rounded-[4px] text-[18px] font-medium leading-7 text-white/85",
-              mobileBlockPressClass
-            )}
+            className="flex h-12 w-full items-center justify-center text-[18px] font-medium leading-7 text-white/85"
             style={{ backgroundColor: ACCENT_FILL_LIGHT }}
           >
             Добавить виджет
           </button>
+          </MobileCardPress>
         </div>
       </main>
 

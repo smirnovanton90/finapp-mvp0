@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Providers } from "./providers";
 import "./globals.css";
 
-/** Цвет chrome iOS PWA / статус-бара — совпадает с мобильным фоном приложения (#191732). */
-const PWA_CHROME_COLOR = "#191732";
+/** Цвет chrome PWA и safe-area: чёрный на всех экранах. */
+const PWA_CHROME_COLOR = "#000000";
 
 export const metadata: Metadata = {
   title: "FinApp",

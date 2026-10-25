@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Учёт активов, транзакций и планирование финансов",
     start_url: "/",
     display: "standalone",
-    background_color: "#191732",
-    theme_color: "#191732",
+    background_color: "#000000",
+    theme_color: "#000000",
     orientation: "portrait-primary",
     icons: [
       {

@@ -2913,7 +2913,7 @@ export default function AssetDetailPage() {
               ref={mobileHeroGradientRef}
               className="absolute left-0 right-0 z-0 pointer-events-none overflow-hidden will-change-transform"
               style={{
-                top: 0,
+                top: "env(safe-area-inset-top, 0px)",
                 bottom: 0,
                 background: ASSET_DETAIL_HEADER_GRADIENT_MOBILE,
                 backgroundSize: "200% 200%",

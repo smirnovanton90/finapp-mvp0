@@ -1232,6 +1232,24 @@ def _create_transaction_impl(db: Session, user: User, data: TransactionCreate) -
     return tx
 
 
+@router.get("/counterparty-counts")
+def counterparty_transaction_counts(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[int, int]:
+    """Число операций по контрагенту без выгрузки самих транзакций."""
+    rows = db.execute(
+        select(Transaction.counterparty_id, func.count())
+        .where(
+            Transaction.user_id == user.id,
+            Transaction.deleted_at.is_(None),
+            Transaction.counterparty_id.isnot(None),
+        )
+        .group_by(Transaction.counterparty_id)
+    ).all()
+    return {int(counterparty_id): int(count) for counterparty_id, count in rows}
+
+
 @router.get("/dashboard-feed", response_model=list[TransactionOut])
 def list_dashboard_transactions(
     date_from: date,

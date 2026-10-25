@@ -103,33 +103,25 @@ export function buildItemDailyPrimaryValueRubCents(
   const selectedIds = new Set([item.id]);
   const itemKindById = new Map([[item.id, item.kind]]);
   const itemStartKey = getItemStartKey(item, accountingStartDate);
-  const itemsByStartDate = new Map<string, ItemOut[]>();
-  itemsByStartDate.set(itemStartKey, [item]);
-
   const deltasByDate = buildDeltasByDate(txs, selectedIds, itemKindById, todayKey);
+  const actualNow = item.balance_currency_cents ?? item.initial_balance_minor;
   let current = rangeStart;
   const endDate = rangeEnd;
-  const balances = new Map<number, number>();
   const rows: DailyPrimaryValuePoint[] = [];
 
   while (current <= endDate) {
     const dateKey = toDateKey(current);
-    const newItems = itemsByStartDate.get(dateKey) ?? [];
-    newItems.forEach((i) => balances.set(i.id, i.initial_balance_minor));
+    current = addDays(current, 1);
+    if (itemStartKey && dateKey < itemStartKey) continue;
+    if (dateKey < rangeStartKey) continue;
 
-    const dayDeltas = deltasByDate.get(dateKey);
-    if (dayDeltas) {
-      dayDeltas.forEach((delta, id) => {
-        balances.set(id, (balances.get(id) ?? 0) + delta);
-      });
-    }
-
-    if (dateKey < rangeStartKey) {
-      current = addDays(current, 1);
-      continue;
-    }
-
-    const valueCents = balances.get(item.id) ?? item.initial_balance_minor;
+    let deltaAfter = 0;
+    deltasByDate.forEach((bucket, deltaKey) => {
+      if (deltaKey > dateKey && deltaKey <= todayKey) {
+        deltaAfter += bucket.get(item.id) ?? 0;
+      }
+    });
+    const valueCents = actualNow - deltaAfter;
     const currency = (item.currency_code ?? "RUB").toUpperCase();
     const rubValueCents =
       currency === "RUB"
@@ -137,7 +129,6 @@ export function buildItemDailyPrimaryValueRubCents(
         : Math.round((valueCents / 100) * rate * 100);
 
     rows.push({ date: dateKey, valueRubCents: rubValueCents });
-    current = addDays(current, 1);
   }
 
   return rows;

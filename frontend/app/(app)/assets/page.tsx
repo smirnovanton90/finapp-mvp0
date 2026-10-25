@@ -99,6 +99,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   fetchItems,
+  fetchItemTransactionCounts,
+  fetchCounterpartyTransactionCounts,
   fetchBanks,
   fetchCounterparties,
   fetchCounterpartyIndustries,
@@ -108,7 +110,8 @@ import {
   fetchMarketInstrumentDetails,
   fetchMarketInstrumentPrice,
   fetchMarketInstrumentPrices,
-  fetchTransactions,
+  fetchDashboardTransactions,
+  fetchTransactionsPage,
   fetchTransactionChains,
   fetchItemCosts,
   createItem,
@@ -141,8 +144,7 @@ import {
 } from "@/lib/api";
 import { getDefaultPrimaryValueKind, getPrimaryValueLabel } from "@/lib/asset-item-form-constants";
 import { formatRubInput, normalizeRubOnBlur, parseRubToCents } from "@/lib/format-rub";
-import { buildItemTransactionCounts, getEffectiveItemKind, formatAmount, getItemPhotoUrl, getItemPrimaryValueCents, sortItemsByTransactionCount } from "@/lib/item-utils";
-import { buildCounterpartyTransactionCounts } from "@/lib/counterparty-utils";
+import { getEffectiveItemKind, formatAmount, getItemPhotoUrl, getItemPrimaryValueCents, sortItemsByTransactionCount } from "@/lib/item-utils";
 import { resolveApiImageUrlToBase } from "@/lib/api-image-url";
 import { getItemTypeLabel, ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { assetIconPath } from "@/lib/image-paths";
@@ -641,7 +643,11 @@ export default function Page() {
   const [items, setItems] = useState<ItemOut[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOut[]>([]);
   const [fxRates, setFxRates] = useState<FxRateOut[]>([]);
-  const [txs, setTxs] = useState<TransactionOut[]>([]);
+  const [chartTxs, setChartTxs] = useState<TransactionOut[]>([]);
+  const [editTxs, setEditTxs] = useState<TransactionOut[]>([]);
+  const [itemTxCounts, setItemTxCounts] = useState<Map<number, number>>(new Map());
+  const [counterpartyTxCounts, setCounterpartyTxCounts] = useState<Map<number, number>>(new Map());
+  const [countsLoaded, setCountsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
@@ -1415,8 +1421,6 @@ export default function Page() {
       ),
     [activeItems]
   );
-  const itemTxCounts = useMemo(() => buildItemTransactionCounts(txs), [txs]);
-  const counterpartyTxCounts = useMemo(() => buildCounterpartyTransactionCounts(txs), [txs]);
   // Apply filters
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -2021,12 +2025,25 @@ export default function Page() {
     }
   }
 
-  async function loadTransactions() {
+  async function loadCounts() {
     try {
-      const data = await fetchTransactions();
-      setTxs(data);
+      const [itemCounts, counterpartyCounts] = await Promise.all([
+        fetchItemTransactionCounts(),
+        fetchCounterpartyTransactionCounts(),
+      ]);
+      const itemMap = new Map<number, number>();
+      Object.entries(itemCounts).forEach(([id, count]) => itemMap.set(Number(id), count));
+      const counterpartyMap = new Map<number, number>();
+      Object.entries(counterpartyCounts).forEach(([id, count]) =>
+        counterpartyMap.set(Number(id), count)
+      );
+      setItemTxCounts(itemMap);
+      setCounterpartyTxCounts(counterpartyMap);
     } catch {
-      setTxs([]);
+      setItemTxCounts(new Map());
+      setCounterpartyTxCounts(new Map());
+    } finally {
+      setCountsLoaded(true);
     }
   }
 
@@ -2106,12 +2123,37 @@ export default function Page() {
   useEffect(() => {
     if (sessionStatus === "authenticated") {
       loadItems();
-      loadTransactions();
+      loadCounts();
       loadCurrencies();
       loadFxRates();
       loadCounterparties();
     }
   }, [sessionStatus]);
+
+  useEffect(() => {
+    if (!editingItem) {
+      setEditTxs([]);
+      return;
+    }
+    let cancelled = false;
+    const itemId = editingItem.id;
+    Promise.all([
+      fetchTransactionsPage({ item_ids: [itemId], limit: 10000 }),
+      fetchTransactionsPage({ related_item_ids: [itemId], limit: 10000 }),
+    ])
+      .then(([byItem, byRelated]) => {
+        if (cancelled) return;
+        const byId = new Map<number, TransactionOut>();
+        [...byItem.items, ...byRelated.items].forEach((tx) => byId.set(tx.id, tx));
+        setEditTxs(Array.from(byId.values()));
+      })
+      .catch(() => {
+        if (!cancelled) setEditTxs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingItem]);
 
   useEffect(() => {
     if (items.length > 0) {
@@ -3126,7 +3168,7 @@ export default function Page() {
       const rate = rateByCode[item.currency_code ?? "RUB"] ?? 1;
       const series = buildItemDailyPrimaryValueRubCents(
         item,
-        txs,
+        chartTxs,
         accountingStartDate,
         rate,
         { days: 30 }
@@ -3134,7 +3176,27 @@ export default function Page() {
       map.set(item.id, series);
     });
     return map;
-  }, [isDesktop, visibleItems, txs, accountingStartDate, rateByCode]);
+  }, [isDesktop, visibleItems, chartTxs, accountingStartDate, rateByCode]);
+
+  useEffect(() => {
+    if (isDesktop || sessionStatus !== "authenticated") return;
+    const start = new Date();
+    start.setDate(start.getDate() - 30);
+    const month = String(start.getMonth() + 1).padStart(2, "0");
+    const day = String(start.getDate()).padStart(2, "0");
+    const dateFrom = `${start.getFullYear()}-${month}-${day}`;
+    let cancelled = false;
+    fetchDashboardTransactions(dateFrom)
+      .then((data) => {
+        if (!cancelled) setChartTxs(data);
+      })
+      .catch(() => {
+        if (!cancelled) setChartTxs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDesktop, sessionStatus]);
 
   // Данные costs по активу (как на странице актива [id]) — только для мобильной версии, по активам с небалансовой основной стоимостью
   const [itemCostsByItemId, setItemCostsByItemId] = useState<Map<number, ItemCostsOut>>(new Map());
@@ -3197,7 +3259,7 @@ export default function Page() {
         }}
         onSuccess={async () => {
           await loadItems();
-          await loadTransactions();
+          await loadCounts();
           setIsCreateOpen(false);
           setEditingItem(null);
         }}
@@ -3207,7 +3269,7 @@ export default function Page() {
         initialCreateDefaults={initialCreateDefaults}
         askConfirm={askConfirm}
         items={items}
-        transactionsForEdit={editingItem ? txs.filter((tx) => tx.related_item_id === editingItem.id || tx.primary_item_id === editingItem.id || tx.counterparty_item_id === editingItem.id) : []}
+        transactionsForEdit={editTxs}
       />
 
       <MobileAddAssetWizard
@@ -3217,7 +3279,7 @@ export default function Page() {
         onClose={() => setIsCreateOpen(false)}
         onSuccess={async () => {
           await loadItems();
-          await loadTransactions();
+          await loadCounts();
         }}
       />
 
@@ -3610,7 +3672,7 @@ export default function Page() {
 
       <div className="flex-1 min-w-0">
         <div className={CONTENT_WIDTH_CLASS} style={{ paddingTop: "30px" }}>
-            {loading ? (
+            {loading || !countsLoaded ? (
               <>
                 {/* На мобильной при загрузке сразу показываем поле поиска и скелетоны (без экрана «Загрузка…»). На десктопе этот блок скрыт через CSS. */}
                 <div className="relative flex flex-col gap-4 md:hidden">
@@ -4011,7 +4073,7 @@ export default function Page() {
           itemCounts={itemTxCounts}
           onSuccess={async () => {
             await loadItems();
-            await loadTransactions();
+            await loadCounts();
           }}
         />
       )}

@@ -1308,44 +1308,51 @@ def list_items(
             latest = _get_latest_item_market_value_rub(db, item.id, user.id, item)
             if latest is not None:
                 setattr(item, "latest_market_value_rub", latest)
-    # Стоимость приобретения и вложенных — для отображения основной стоимости (ACQUISITION / INVESTED),
-    # в валюте самого актива с учётом FX.
+    # Стоимость приобретения и вложений нужна только если она и есть основная стоимость.
+    # Для обычного сальдо эти суммы на списке не показываются, а их расчёт читает
+    # все связанные сделки по каждому активу и задерживает весь ответ.
     for item in items:
+        kind = (getattr(item, "primary_value_kind", None) or "BALANCE").upper()
+        if kind not in ("ACQUISITION", "INVESTED"):
+            setattr(item, "acquisition_rub", 0)
+            setattr(item, "invested_rub", 0)
+            continue
         acq = _compute_acquisition_cost_basis(db, user.id, item.id, item)
-        inv_q = (
-            db.query(Transaction)
-            .filter(
-                Transaction.user_id == user.id,
-                Transaction.related_item_id == item.id,
-                Transaction.asset_link_type == "ASSET_INVESTMENT",
-                Transaction.transaction_type == "ACTUAL",
-                Transaction.deleted_at.is_(None),
-                Transaction.is_split_parent.is_(False),
-            )
-        )
-        inv_txs = inv_q.all()
         inv_sum = 0
-        if inv_txs:
-            primary_ids = {t.primary_item_id for t in inv_txs}
-            primary_by_id: dict[int, str | None] = {}
-            if primary_ids:
-                rows = db.query(Item.id, Item.currency_code).filter(Item.id.in_(primary_ids)).all()
-                primary_by_id = {row.id: row.currency_code for row in rows}
-            item_currency = (item.currency_code or "RUB").upper()
-            for tx in inv_txs:
-                rate_date = (
-                    tx.transaction_date.date()
-                    if hasattr(tx.transaction_date, "date")
-                    else tx.transaction_date
+        if kind == "INVESTED":
+            inv_txs = (
+                db.query(Transaction)
+                .filter(
+                    Transaction.user_id == user.id,
+                    Transaction.related_item_id == item.id,
+                    Transaction.asset_link_type == "ASSET_INVESTMENT",
+                    Transaction.transaction_type == "ACTUAL",
+                    Transaction.deleted_at.is_(None),
+                    Transaction.is_split_parent.is_(False),
                 )
-                from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
-                inv_sum += _convert_amount_between_currencies(
-                    tx.amount_primary_minor or 0,
-                    from_currency,
-                    item_currency,
-                    rate_date,
-                    db,
-                )
+                .all()
+            )
+            if inv_txs:
+                primary_ids = {t.primary_item_id for t in inv_txs}
+                primary_by_id: dict[int, str | None] = {}
+                if primary_ids:
+                    rows = db.query(Item.id, Item.currency_code).filter(Item.id.in_(primary_ids)).all()
+                    primary_by_id = {row.id: row.currency_code for row in rows}
+                item_currency = (item.currency_code or "RUB").upper()
+                for tx in inv_txs:
+                    rate_date = (
+                        tx.transaction_date.date()
+                        if hasattr(tx.transaction_date, "date")
+                        else tx.transaction_date
+                    )
+                    from_currency = primary_by_id.get(tx.primary_item_id, item_currency)
+                    inv_sum += _convert_amount_between_currencies(
+                        tx.amount_primary_minor or 0,
+                        from_currency,
+                        item_currency,
+                        rate_date,
+                        db,
+                    )
         setattr(item, "acquisition_rub", acq)
         setattr(item, "invested_rub", acq + inv_sum)
     today = date_type.today()

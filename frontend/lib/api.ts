@@ -1033,6 +1033,12 @@ export async function fetchItemTransactionCounts(): Promise<Record<string, numbe
   return res.json();
 }
 
+export async function fetchCounterpartyTransactionCounts(): Promise<Record<string, number>> {
+  const res = await authFetch(`${API_BASE}/transactions/counterparty-counts`);
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function fetchItem(itemId: number): Promise<ItemOut> {
   const res = await authFetch(`${API_BASE}/items/${itemId}`);
   if (!res.ok) throw new Error(await readError(res));

@@ -203,9 +203,13 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             }
             {...(!isDesktop && { "data-app-scroll-container": true })}
           >
-            {/* Отступ на внутренней обёртке: у overflow-контейнера padding-bottom на iOS не прокручивается, и низ экрана остаётся под панелью. */}
+            {/* Высота панели: 0.75rem от низа + 4rem сама панель. Запас сверху, чтобы последний блок целиком выезжал над ней. */}
             <div
-              className={cn(!isDesktop && "pb-[calc(6.75rem+env(safe-area-inset-bottom,0px))]")}
+              style={
+                !isDesktop
+                  ? { paddingBottom: "calc(9rem + env(safe-area-inset-bottom, 0px))" }
+                  : undefined
+              }
             >
             {isSpecialPage || isAssetDetailPage ? (
               <div className="w-full min-w-0">

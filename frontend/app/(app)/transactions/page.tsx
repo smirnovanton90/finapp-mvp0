@@ -1260,6 +1260,7 @@ function TransactionMobileCard({
   onRealize,
   onConfirm,
   isConfirming,
+  getRubEquivalentCents,
 }: {
   tx: TransactionCard;
   counterparty: CounterpartyOut | null;
@@ -1272,6 +1273,7 @@ function TransactionMobileCard({
   onRealize?: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
   onConfirm?: (tx: TransactionCard) => void;
   isConfirming?: boolean;
+  getRubEquivalentCents?: (tx: TransactionCard, currencyCode: string) => number | null;
 }) {
   return (
     <TransactionMobileCardView
@@ -1286,6 +1288,7 @@ function TransactionMobileCard({
       onRealize={onRealize}
       onConfirm={onConfirm}
       isConfirming={isConfirming}
+      getRubEquivalentCents={getRubEquivalentCents}
     />
   );
 }
@@ -8655,6 +8658,7 @@ function TransactionsView({
                                   itemsById={itemsById}
                                   getItemCounterparty={getItemCounterparty}
                                   apiBase={API_BASE}
+                                  getRubEquivalentCents={getRubEquivalentCents}
                                   onRealize={openRealizeDialog}
                                   onConfirm={handleConfirmStatus}
                                   isConfirming={confirmingTxId === parent.id}
@@ -8670,6 +8674,7 @@ function TransactionsView({
                                     itemsById={itemsById}
                                     getItemCounterparty={getItemCounterparty}
                                     apiBase={API_BASE}
+                                    getRubEquivalentCents={getRubEquivalentCents}
                                     onRealize={openRealizeDialog}
                                     onConfirm={handleConfirmStatus}
                                     isConfirming={confirmingTxId === child.id}
@@ -8689,6 +8694,7 @@ function TransactionsView({
                                 itemsById={itemsById}
                                 getItemCounterparty={getItemCounterparty}
                                 apiBase={API_BASE}
+                                getRubEquivalentCents={getRubEquivalentCents}
                                 onRealize={openRealizeDialog}
                                 onConfirm={handleConfirmStatus}
                                 isConfirming={confirmingTxId === tx.id}

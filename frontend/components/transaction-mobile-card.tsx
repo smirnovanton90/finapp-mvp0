@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { Building2, Check, User, Wallet } from "lucide-react";
 import { CounterpartyOut, ItemOut, TransactionOut } from "@/lib/api";
 import {
+  ACCENT,
   ACCENT2,
   ACCENT_FILL_LIGHT,
   ACCENT_FILL_MEDIUM,
+  ACTIVE_TEXT_DARK,
   GREEN,
   MODAL_BG,
   RED,
@@ -22,10 +24,8 @@ import { AssetItemIcon } from "@/components/asset-item-icon";
 import { CardIcon } from "@/components/card-icon";
 import { Button } from "@/components/ui/button";
 
-/** Средняя полоса суммы: color/app-bg-end. */
-const AMOUNT_BAND = "#4B4197";
 const MUTED = "rgba(255,255,255,0.55)";
-const TRANSFER_AMOUNT = "rgba(255,255,255,0.85)";
+const CHIP_TEXT = "#191732";
 
 function formatTxTime(value: string) {
   const hasTime = /[T\s]\d{1,2}:\d{2}/.test(value);
@@ -83,12 +83,12 @@ function CategoryMark({
   } = useCategoryImage(categoryId, categoryLookup, apiBase);
 
   return (
-    <IconWell size={36}>
+    <IconWell size={24}>
       {imageSrc && !showFallbackIcon ? (
         <CardIcon
           src={imageSrc}
           alt=""
-          size={36}
+          size={24}
           shadow={false}
           objectFit="contain"
           fallbackIcon={CategoryIcon}
@@ -99,7 +99,7 @@ function CategoryMark({
           }}
         />
       ) : (
-        <CategoryIcon className="size-5" strokeWidth={1.5} style={{ color: "rgba(255,255,255,0.85)" }} />
+        <CategoryIcon className="size-3.5" strokeWidth={1.5} style={{ color: "rgba(255,255,255,0.85)" }} />
       )}
     </IconWell>
   );
@@ -157,18 +157,26 @@ function CounterpartyMark({
   );
 }
 
-function CurrencyTag({ code }: { code: string }) {
+function CurrencyChipBadge({
+  code,
+  tone,
+}: {
+  code: string;
+  tone: "income" | "expense" | "transfer";
+}) {
+  const backgroundColor = tone === "income" ? GREEN : tone === "expense" ? RED : ACCENT;
+  const color = tone === "transfer" ? ACTIVE_TEXT_DARK : CHIP_TEXT;
   return (
     <span
-      className="inline-flex h-6 shrink-0 items-center justify-center rounded-[4px] px-2 text-sm font-normal leading-none text-white/85"
-      style={{ backgroundColor: MODAL_BG }}
+      className="inline-flex h-6 shrink-0 items-center justify-center rounded-[4px] px-2 text-xs font-normal leading-none"
+      style={{ backgroundColor, color }}
     >
       {code}
     </span>
   );
 }
 
-function StatusTag({
+function StatusMark({
   confirmed,
   disabled,
   onConfirm,
@@ -186,54 +194,42 @@ function StatusTag({
         event.stopPropagation();
         if (!disabled && !confirmed) onConfirm();
       }}
-      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] disabled:opacity-100"
-      style={{ backgroundColor: MODAL_BG }}
+      className="grid size-4 shrink-0 place-items-center rounded-[4px] disabled:opacity-100"
+      style={{ backgroundColor: confirmed ? GREEN : "transparent", boxShadow: confirmed ? undefined : "inset 0 0 0 1px rgba(255,255,255,0.35)" }}
     >
-      <Check
-        className="size-3.5"
-        strokeWidth={2.75}
-        style={{ color: confirmed ? GREEN : "rgba(255,255,255,0.35)" }}
-      />
+      <Check className="size-3" strokeWidth={3} style={{ color: confirmed ? "#fff" : MUTED }} />
     </button>
-  );
-}
-
-function AmountLine({
-  text,
-  color,
-  currency,
-  confirmed,
-  confirmDisabled,
-  onConfirm,
-}: {
-  text: string;
-  color: string;
-  currency: string;
-  confirmed: boolean;
-  confirmDisabled: boolean;
-  onConfirm: () => void;
-}) {
-  return (
-    <div className="flex h-8 items-center gap-3">
-      <p
-        className="min-w-0 flex-1 truncate text-[28px] font-semibold leading-8 tracking-[-0.6px] tabular-nums"
-        style={{ color }}
-      >
-        {text}
-      </p>
-      <CurrencyTag code={currency} />
-      <StatusTag confirmed={confirmed} disabled={confirmDisabled} onConfirm={onConfirm} />
-    </div>
   );
 }
 
 function CommentChip({ text }: { text: string }) {
   return (
     <div
-      className="flex min-w-0 flex-1 items-center rounded-[4px] px-3 py-2 text-sm font-normal leading-4"
-      style={{ backgroundColor: MODAL_BG, color: MUTED }}
+      className="flex w-full min-w-0 items-center rounded-[10px] px-3 py-2 text-sm font-normal leading-4 text-white"
+      style={{ backgroundColor: MODAL_BG }}
     >
       <span className="min-w-0 break-words">💬 {text}</span>
+    </div>
+  );
+}
+
+function AmountWithChip({
+  text,
+  color,
+  currency,
+  tone,
+}: {
+  text: string;
+  color: string;
+  currency: string;
+  tone: "income" | "expense" | "transfer";
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <p className="text-[28px] font-semibold leading-8 tracking-[-0.6px] tabular-nums" style={{ color }}>
+        {text}
+      </p>
+      <CurrencyChipBadge code={currency} tone={tone} />
     </div>
   );
 }
@@ -250,6 +246,7 @@ export function TransactionMobileCard({
   onRealize,
   onConfirm,
   isConfirming,
+  getRubEquivalentCents,
 }: {
   tx: TransactionMobileCardTx;
   counterparty: CounterpartyOut | null;
@@ -262,6 +259,7 @@ export function TransactionMobileCard({
   onRealize?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
   onConfirm?: (tx: TransactionMobileCardTx) => void;
   isConfirming?: boolean;
+  getRubEquivalentCents?: (tx: TransactionMobileCardTx, currencyCode: string) => number | null;
 }) {
   const router = useRouter();
   const primaryDisplayId = tx.primary_card_item_id ?? tx.primary_item_id;
@@ -278,24 +276,25 @@ export function TransactionMobileCard({
   const isTransfer = tx.direction === "TRANSFER";
   const isPlanned = tx.transaction_type === "PLANNED" && tx.status !== "REALIZED";
   const isConfirmed = tx.status === "CONFIRMED" || tx.status === "REALIZED";
-  const canRealize = isPlanned && !tx.isDeleted && !isTransfer;
+  const canRealize = isPlanned && !tx.isDeleted;
   const accountName = itemName(primaryDisplayId) || "Счёт не указан";
   const destinationName = itemName(counterpartyDisplayId) || "Счёт не указан";
   const counterpartyName = counterparty ? buildCounterpartyDisplayName(counterparty) : "";
   const commentText = tx.comment?.trim() || "";
   const timeLabel = formatTxTime(tx.transaction_date);
-  const primaryCurrency = currencyLabel(primaryItem?.currency_code);
-  const destinationCurrency = currencyLabel(counterpartyItem?.currency_code ?? primaryItem?.currency_code);
-  const amountColor = tx.isDeleted
-    ? "rgba(255,255,255,0.35)"
-    : isTransfer
-      ? TRANSFER_AMOUNT
-      : isIncome
-        ? GREEN
-        : RED;
+  const primaryCode = (primaryItem?.currency_code || "RUB").toUpperCase();
+  const destinationCode = (counterpartyItem?.currency_code || primaryCode).toUpperCase();
+  const primaryCurrency = currencyLabel(primaryCode);
+  const destinationCurrency = currencyLabel(destinationCode);
+  const tone = isTransfer ? "transfer" : isIncome ? "income" : "expense";
+  const amountColor = tx.isDeleted ? "rgba(255,255,255,0.35)" : isTransfer ? ACTIVE_TEXT_DARK : isIncome ? GREEN : RED;
   const signedAmount = `${isIncome ? "+" : "-"}${formatAmount(Math.abs(tx.amount))}`;
   const destinationAmount = `+${formatAmount(Math.abs(tx.amount_counterparty ?? tx.amount))}`;
-  const title = isTransfer ? accountName : categoryLabel;
+  const title = isTransfer ? "Перевод" : categoryLabel;
+  const rubCents =
+    !isTransfer && primaryCode !== "RUB" ? getRubEquivalentCents?.(tx, primaryCode) ?? null : null;
+  const rubLine =
+    rubCents == null ? "" : `${isIncome ? "+" : "-"}${formatAmount(Math.abs(rubCents))} RUB`;
 
   const openDetails = () => {
     if (tx.isDeleted) return;
@@ -323,139 +322,101 @@ export function TransactionMobileCard({
       } ${isPlanned ? "border-2 border-dashed" : ""}`}
       style={isPlanned ? { borderColor: ACCENT2 } : undefined}
     >
-      <div
-        className={`flex flex-col justify-center px-6 py-[18px] ${isTransfer ? "gap-1" : ""}`}
-        style={{
-          backgroundColor: isTransfer
-            ? isPlanned
-              ? ACCENT_FILL_LIGHT
-              : AMOUNT_BAND
-            : ACCENT_FILL_MEDIUM,
-        }}
-      >
-        <div className="flex items-center gap-4">
-          {isTransfer ? (
-            <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
-          ) : (
-            <CategoryMark categoryId={tx.category_id} categoryLookup={categoryLookup} apiBase={apiBase} />
-          )}
-          <p
-            className={`min-w-0 flex-1 truncate leading-4 ${
-              isTransfer ? "text-sm font-normal" : "text-[18px] font-medium text-white"
-            }`}
-            style={isTransfer ? { color: MUTED } : undefined}
-          >
-            {title}
-          </p>
-          {timeLabel ? (
-            <p className="shrink-0 text-sm font-normal leading-4" style={{ color: MUTED }}>
-              {timeLabel}
-            </p>
-          ) : null}
-        </div>
+      <div className="flex items-center gap-3 px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
         {isTransfer ? (
-          <AmountLine
-            text={signedAmount}
-            color={amountColor}
-            currency={primaryCurrency}
-            confirmed={isConfirmed}
-            confirmDisabled={!!tx.isDeleted || !!isConfirming}
-            onConfirm={confirm}
-          />
+          <IconWell size={24}>
+            <span className="size-3.5" />
+          </IconWell>
+        ) : (
+          <CategoryMark categoryId={tx.category_id} categoryLookup={categoryLookup} apiBase={apiBase} />
+        )}
+        <p className="min-w-0 flex-1 truncate text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
+          {title}
+        </p>
+        <StatusMark
+          confirmed={isConfirmed}
+          disabled={!!tx.isDeleted || !!isConfirming}
+          onConfirm={confirm}
+        />
+        {timeLabel ? (
+          <p className="shrink-0 text-sm font-normal leading-4" style={{ color: MUTED }}>
+            {timeLabel}
+          </p>
         ) : null}
       </div>
 
-      {isTransfer ? (
-        <div
-          className="flex items-center gap-3 px-6 py-[18px]"
-          style={{ backgroundColor: isPlanned ? "transparent" : ACCENT_FILL_LIGHT }}
-        >
-          <span className="shrink-0 text-[28px] font-semibold leading-[18px] text-white/90">↓</span>
-          {commentText ? <CommentChip text={commentText} /> : null}
-        </div>
-      ) : (
-        <div className="px-6 py-[18px]" style={{ backgroundColor: AMOUNT_BAND }}>
-          <AmountLine
-            text={signedAmount}
-            color={amountColor}
-            currency={primaryCurrency}
-            confirmed={isConfirmed}
-            confirmDisabled={!!tx.isDeleted || !!isConfirming}
-            onConfirm={confirm}
-          />
-        </div>
-      )}
-
-      <div
-        className={`flex flex-col px-6 py-[18px] ${isTransfer ? "gap-1" : "gap-3"}`}
-        style={{
-          backgroundColor: isTransfer
-            ? isPlanned
-              ? ACCENT_FILL_LIGHT
-              : AMOUNT_BAND
-            : ACCENT_FILL_LIGHT,
-        }}
-      >
+      <div className="flex flex-col gap-3 px-6 py-3" style={{ backgroundColor: ACCENT_FILL_MEDIUM }}>
         {isTransfer ? (
-          <>
-            <div className="flex items-center gap-4">
-              <AccountMark
-                item={counterpartyItem}
-                counterparty={counterpartyItemCounterparty}
-                apiBase={apiBase}
-              />
-              <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4" style={{ color: MUTED }}>
-                {destinationName}
-              </p>
-            </div>
-            <AmountLine
-              text={destinationAmount}
-              color={amountColor}
-              currency={destinationCurrency}
-              confirmed={isConfirmed}
-              confirmDisabled={!!tx.isDeleted || !!isConfirming}
-              onConfirm={confirm}
-            />
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-3">
-              <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
-              <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4" style={{ color: MUTED }}>
-                {accountName}
-              </p>
-            </div>
-            {counterparty && counterpartyName ? (
-              <div className="flex h-6 items-center gap-4">
-                <CounterpartyMark counterparty={counterparty} apiBase={apiBase} />
-                <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4" style={{ color: MUTED }}>
-                  {counterpartyName}
+          <div className="flex items-center gap-3">
+            <div className="flex min-w-0 flex-1 flex-col justify-center rounded-[10px] px-3 py-3" style={{ backgroundColor: MODAL_BG }}>
+              <div className="flex items-center gap-3">
+                <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
+                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {accountName}
                 </p>
               </div>
-            ) : null}
-            {commentText ? <CommentChip text={commentText} /> : null}
-            {canRealize ? (
-              <Button
-                type="button"
-                variant="authPrimary"
-                className="h-12 w-full rounded-[10px] text-base font-medium"
-                style={
-                  {
-                    "--auth-primary-bg": SIDEBAR_SELECTED_GRADIENT,
-                    "--auth-primary-bg-hover":
-                      "linear-gradient(315deg, #9487F3 0%, #6C5DD7 43%, #483BA6 100%)",
-                  } as CSSProperties
-                }
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRealize?.(tx, event.currentTarget);
-                }}
-              >
-                Реализовать
-              </Button>
-            ) : null}
-          </>
+              <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone="transfer" />
+            </div>
+            <span className="shrink-0 text-[32px] font-semibold leading-none text-white">→</span>
+            <div className="flex min-w-0 flex-1 flex-col justify-center rounded-[10px] px-3 py-3" style={{ backgroundColor: MODAL_BG }}>
+              <div className="flex items-center gap-3">
+                <AccountMark item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} />
+                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {destinationName}
+                </p>
+              </div>
+              <AmountWithChip text={destinationAmount} color={amountColor} currency={destinationCurrency} tone="transfer" />
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-stretch gap-3">
+            <div className="flex shrink-0 flex-col justify-center rounded-[10px] px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
+              <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone={tone} />
+              {rubLine ? (
+                <p className="text-sm font-normal leading-4" style={{ color: MUTED }}>
+                  {rubLine}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
+              <div className="flex items-center gap-3">
+                <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
+                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {accountName}
+                </p>
+              </div>
+              {counterparty && counterpartyName ? (
+                <div className="flex items-center gap-3">
+                  <CounterpartyMark counterparty={counterparty} apiBase={apiBase} />
+                  <p className="min-w-0 flex-1 text-sm font-normal leading-4 text-white">
+                    {counterpartyName}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </div>
         )}
+        {commentText ? <CommentChip text={commentText} /> : null}
+        {canRealize ? (
+          <Button
+            type="button"
+            variant="authPrimary"
+            className="h-12 w-full rounded-[10px] text-base font-medium"
+            style={
+              {
+                "--auth-primary-bg": SIDEBAR_SELECTED_GRADIENT,
+                "--auth-primary-bg-hover":
+                  "linear-gradient(315deg, #9487F3 0%, #6C5DD7 43%, #483BA6 100%)",
+              } as CSSProperties
+            }
+            onClick={(event) => {
+              event.stopPropagation();
+              onRealize?.(tx, event.currentTarget);
+            }}
+          >
+            Реализовать
+          </Button>
+        ) : null}
       </div>
     </article>
   );

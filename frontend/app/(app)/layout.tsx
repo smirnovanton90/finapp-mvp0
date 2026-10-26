@@ -189,8 +189,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           <div
             className={cn(
               "flex-1 transition-all duration-300 @container",
-              // Вертикальное центрирование только на десктопе — на мобиле оно обрезает верхние заголовки
-              isDesktop && !isSpecialPage && "min-h-screen flex items-center",
+              // Вертикальное центрирование только на десктопе — на мобиле оно обрезает верхние заголовки.
+              // Колонка, а не ряд: иначе блок контента сжимается по ширине и прилипает к левому краю.
+              isDesktop && !isSpecialPage && "min-h-screen flex flex-col justify-center",
               !isDesktop && "min-h-0 overflow-y-auto overscroll-y-none px-4"
             )}
             style={
@@ -205,6 +206,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           >
             {/* Высота панели: 0.75rem от низа + 4rem сама панель. Запас сверху, чтобы последний блок целиком выезжал над ней. */}
             <div
+              className="w-full min-w-0"
               style={
                 !isDesktop
                   ? { paddingBottom: "calc(9rem + env(safe-area-inset-bottom, 0px))" }
@@ -216,7 +218,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 {children}
               </div>
             ) : (
-              <div className={cn("w-full", isDesktop && "h-full flex items-center")}>
+              <div className="w-full">
                 <div className={CONTENT_WIDTH_CLASS}>
                   {children}
                 </div>

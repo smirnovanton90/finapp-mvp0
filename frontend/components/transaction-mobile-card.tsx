@@ -423,6 +423,15 @@ function AmountWithChip({
   );
 }
 
+type CardRadius = "all" | "top" | "bottom" | "none";
+
+const cardRadiusClass: Record<CardRadius, string> = {
+  all: "rounded-[10px]",
+  top: "rounded-t-[10px] rounded-b-none",
+  bottom: "rounded-b-[10px] rounded-t-none",
+  none: "rounded-none",
+};
+
 export function TransactionMobileCard({
   tx,
   counterparty,
@@ -441,6 +450,10 @@ export function TransactionMobileCard({
   onUnsplit,
   onAddChild,
   actionsDisabled,
+  onActivate,
+  expanded,
+  radius = "all",
+  compact = false,
 }: {
   tx: TransactionMobileCardTx;
   counterparty: CounterpartyOut | null;
@@ -459,6 +472,12 @@ export function TransactionMobileCard({
   onUnsplit?: (tx: TransactionMobileCardTx) => void;
   onAddChild?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
   actionsDisabled?: boolean;
+  /** Тап открывает действие вместо страницы транзакции. */
+  onActivate?: () => void;
+  expanded?: boolean;
+  radius?: CardRadius;
+  /** Дочерняя в раскрытой разделённой транзакции: сумма в шапке, счёт и контрагент в ряд. */
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [pressed, setPressed] = useState(false);
@@ -621,8 +640,9 @@ export function TransactionMobileCard({
   return (
     <>
     <article
-      role={tx.isDeleted ? undefined : "link"}
-      tabIndex={tx.isDeleted ? undefined : 0}
+      role={onActivate ? "button" : tx.isDeleted ? undefined : "link"}
+      tabIndex={onActivate || !tx.isDeleted ? 0 : undefined}
+      aria-expanded={onActivate ? expanded : undefined}
       onClick={(event) => {
         if (suppressClickRef.current) {
           suppressClickRef.current = false;
@@ -630,12 +650,17 @@ export function TransactionMobileCard({
           event.stopPropagation();
           return;
         }
+        if (onActivate) {
+          onActivate();
+          return;
+        }
         openDetails();
       }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          openDetails();
+          if (onActivate) onActivate();
+          else openDetails();
         }
       }}
       onContextMenu={(event) => event.preventDefault()}
@@ -707,7 +732,8 @@ export function TransactionMobileCard({
         closeMenu();
       }}
       className={cn(
-        "flex w-full cursor-pointer flex-col overflow-hidden rounded-[10px] text-left origin-center touch-manipulation select-none transition-transform duration-75 ease-out motion-reduce:transition-none",
+        "flex w-full cursor-pointer flex-col overflow-hidden text-left origin-center touch-manipulation select-none transition-transform duration-75 ease-out motion-reduce:transition-none",
+        cardRadiusClass[radius],
         tx.isDeleted && "opacity-60",
         isPlanned && "border-2 border-dashed",
         pressed && "scale-[0.97] motion-reduce:scale-100"
@@ -729,12 +755,17 @@ export function TransactionMobileCard({
         <p className="min-w-0 flex-1 truncate text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
           {title}
         </p>
+        {compact ? (
+          <span className="shrink-0">
+            <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone={tone} />
+          </span>
+        ) : null}
         <StatusMark
           confirmed={isConfirmed}
           disabled={!!tx.isDeleted || !!isConfirming}
           onConfirm={confirm}
         />
-        {timeLabel ? (
+        {!compact && timeLabel ? (
           <p className="shrink-0 text-sm font-normal leading-4" style={{ color: MUTED }}>
             {timeLabel}
           </p>
@@ -745,7 +776,34 @@ export function TransactionMobileCard({
         className="flex flex-col gap-3 px-6 py-3"
         style={{ backgroundColor: isPlanned ? "transparent" : ACCENT_FILL_MEDIUM }}
       >
-        {isTransfer ? (
+        {compact ? (
+          <>
+            <div className="flex items-center gap-3">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
+                <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {accountName}
+                </p>
+              </div>
+              {isTransfer ? (
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <AccountMark item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} />
+                  <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                    {destinationName}
+                  </p>
+                </div>
+              ) : counterparty && counterpartyName ? (
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <CounterpartyMark counterparty={counterparty} apiBase={apiBase} />
+                  <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4 text-white">
+                    {counterpartyName}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+            {commentText ? <CommentChip text={commentText} /> : null}
+          </>
+        ) : isTransfer ? (
           <div className="flex flex-col items-center gap-1">
             <div className="flex w-full items-center gap-3">
               <div className="flex shrink-0 flex-col justify-center rounded-[10px] px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
@@ -799,7 +857,7 @@ export function TransactionMobileCard({
             </div>
           </div>
         )}
-        {commentText ? <CommentChip text={commentText} /> : null}
+        {!compact && commentText ? <CommentChip text={commentText} /> : null}
       </div>
     </article>
     {menuAnchor && contextActions.length > 0 ? (
@@ -810,6 +868,79 @@ export function TransactionMobileCard({
       />
     ) : null}
     </>
+  );
+}
+
+type TransactionMobileSplitShared = {
+  itemName: (id: number | null | undefined) => string;
+  categoryLookup: ReturnType<typeof buildCategoryLookup>;
+  getCategoryLines: (categoryId: number | null) => [string, string, string];
+  itemsById: Map<number, ItemOut>;
+  getItemCounterparty: (itemId: number | null | undefined) => CounterpartyOut | null;
+  apiBase: string;
+  onConfirm?: (tx: TransactionMobileCardTx) => void;
+  confirmingTxId?: number | null;
+  getRubEquivalentCents?: (tx: TransactionMobileCardTx, currencyCode: string) => number | null;
+  onCreateFrom?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
+  onEdit?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
+  onDelete?: (id: number) => void;
+  onUnsplit?: (tx: TransactionMobileCardTx) => void;
+  onAddChild?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
+  actionsDisabled?: boolean;
+  counterpartyFor: (tx: TransactionMobileCardTx) => CounterpartyOut | null;
+};
+
+/** Свёрнутая разделённая транзакция: полная карточка и узкая подложка. Тап раскрывает дочерние вплотную, с отступом по бокам. */
+export function TransactionMobileSplitGroup({
+  parent,
+  childrenTxs,
+  counterpartyFor,
+  confirmingTxId,
+  ...shared
+}: TransactionMobileSplitShared & {
+  parent: TransactionMobileCardTx;
+  childrenTxs: TransactionMobileCardTx[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const cardProps = (tx: TransactionMobileCardTx) => ({
+    ...shared,
+    tx,
+    counterparty: counterpartyFor(tx),
+    isConfirming: confirmingTxId === tx.id,
+  });
+
+  return (
+    <div>
+      <TransactionMobileCard
+        {...cardProps(parent)}
+        onActivate={() => setExpanded((open) => !open)}
+        expanded={expanded}
+      />
+      {!expanded ? (
+        <div
+          aria-hidden
+          className={cn("mx-4 h-3 rounded-b-[10px]", parent.isDeleted && "opacity-60")}
+          style={{ backgroundColor: MODAL_BG }}
+        />
+      ) : null}
+      <div
+        className={cn(
+          "mx-4 grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        )}
+      >
+        <div className="overflow-hidden" inert={expanded ? undefined : true}>
+          {childrenTxs.map((child, index) => (
+            <TransactionMobileCard
+              key={`${child.id}-${child.isDeleted ? "deleted" : "active"}`}
+              {...cardProps(child)}
+              compact
+              radius={index === childrenTxs.length - 1 ? "bottom" : "none"}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

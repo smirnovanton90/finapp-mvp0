@@ -133,7 +133,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AssetItemIcon } from "@/components/asset-item-icon";
-import { TransactionMobileCard as TransactionMobileCardView, TransactionMobileCardSkeleton } from "@/components/transaction-mobile-card";
+import { TransactionMobileCard as TransactionMobileCardView, TransactionMobileCardSkeleton, TransactionMobileSplitGroup } from "@/components/transaction-mobile-card";
 import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { TransactionsMobileHeader } from "@/components/transactions-mobile-header";
 import { ItemSelector } from "@/components/item-selector";
@@ -8693,10 +8693,13 @@ function TransactionsView({
                             if (row.type === "split_group") {
                               const { parent, children } = row;
                               return [
-                                <TransactionMobileCard
-                                  key={`${parent.id}-split-p-${parent.isDeleted ? "deleted" : "active"}`}
-                                  tx={parent}
-                                  counterparty={parent.counterparty_id ? counterpartiesById.get(parent.counterparty_id) ?? null : null}
+                                <TransactionMobileSplitGroup
+                                  key={`${parent.id}-split-${parent.isDeleted ? "deleted" : "active"}`}
+                                  parent={parent}
+                                  childrenTxs={children}
+                                  counterpartyFor={(tx) =>
+                                    tx.counterparty_id ? counterpartiesById.get(tx.counterparty_id) ?? null : null
+                                  }
                                   itemName={itemName}
                                   categoryLookup={categoryLookup}
                                   getCategoryLines={getCategoryLines}
@@ -8705,26 +8708,9 @@ function TransactionsView({
                                   apiBase={API_BASE}
                                   getRubEquivalentCents={getRubEquivalentCents}
                                   onConfirm={handleConfirmStatus}
-                                  isConfirming={confirmingTxId === parent.id}
+                                  confirmingTxId={confirmingTxId}
                                   {...mobileCardActionProps}
                                 />,
-                                ...children.map((child) => (
-                                  <TransactionMobileCard
-                                    key={`${child.id}-split-c-${child.isDeleted ? "deleted" : "active"}`}
-                                    tx={child}
-                                    counterparty={child.counterparty_id ? counterpartiesById.get(child.counterparty_id) ?? null : null}
-                                    itemName={itemName}
-                                    categoryLookup={categoryLookup}
-                                    getCategoryLines={getCategoryLines}
-                                    itemsById={itemsById}
-                                    getItemCounterparty={getItemCounterparty}
-                                    apiBase={API_BASE}
-                                    getRubEquivalentCents={getRubEquivalentCents}
-                                    onConfirm={handleConfirmStatus}
-                                    isConfirming={confirmingTxId === child.id}
-                                    {...mobileCardActionProps}
-                                  />
-                                )),
                               ];
                             }
                             const tx = row.tx;

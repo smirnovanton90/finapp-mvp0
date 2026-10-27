@@ -39,6 +39,7 @@ import {
   updateCategoryVisibility,
 } from "@/lib/api";
 import { useOnboarding } from "@/components/onboarding-context";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { useSidebar } from "@/components/ui/sidebar-context";
 import {
@@ -465,6 +466,8 @@ export default function CategoriesPage() {
   useEffect(() => {
     loadCategories();
   }, [loadCategories]);
+
+  usePullToRefresh(() => loadCategories(true));
 
   const categoryLookup = useMemo(() => buildCategoryLookup(categories), [categories]);
 

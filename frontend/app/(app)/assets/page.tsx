@@ -55,6 +55,7 @@ import { BuySellAssetModal } from "@/components/buy-sell-asset-modal";
 import { AuthInput } from "@/components/ui/auth-input";
 import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { useSidebar } from "@/components/ui/sidebar-context";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { CollapsibleFormSection } from "@/components/ui/collapsible-form-section";
 import { TextField, DateField, SelectField, FormField } from "@/components/ui/form-field";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
@@ -2002,17 +2003,19 @@ export default function Page() {
     setPrimaryValueKind(getDefaultPrimaryValueKind(typeCode || "", kind));
   }, [isCreateOpen, typeCode, kind, editingItem]);
 
-  async function loadItems() {
-    setLoading(true);
-    setError(null);
-    setItems([]);
+  async function loadItems(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+      setItems([]);
+    }
     try {
       const data = await fetchItems({ includeArchived: true, includeClosed: true });
       setItems(data);
     } catch (e: any) {
       setError(e?.message ?? "Ошибка загрузки");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -3244,6 +3247,22 @@ export default function Page() {
     return map;
   }, [isDesktop, itemCostsByItemId, itemsById, rateByCode]);
 
+  usePullToRefresh(async () => {
+    const start = new Date();
+    start.setDate(start.getDate() - 30);
+    const month = String(start.getMonth() + 1).padStart(2, "0");
+    const day = String(start.getDate()).padStart(2, "0");
+    const dateFrom = `${start.getFullYear()}-${month}-${day}`;
+    await Promise.all([
+      loadItems(true),
+      loadCounts(),
+      loadCurrencies(),
+      loadFxRates(),
+      loadCounterparties(),
+      fetchDashboardTransactions(dateFrom).then(setChartTxs).catch(() => undefined),
+    ]);
+  });
+
   return (
     <main
       className={cn(
@@ -3676,7 +3695,7 @@ export default function Page() {
               <>
                 {/* На мобильной при загрузке сразу показываем поле поиска и скелетоны (без экрана «Загрузка…»). На десктопе этот блок скрыт через CSS. */}
                 <div className="relative flex flex-col gap-4 md:hidden">
-                  <div className="sticky top-0 z-10 -mx-4 px-4 py-4" style={{ backgroundColor: "var(--app-bg, #000)" }}>
+                  <div data-screen-header className="sticky top-0 z-10 -mx-4 px-4 py-4" style={{ backgroundColor: "var(--app-bg, #000)" }}>
                     <MobileSearchField
                       value={mobileAssetsSearch}
                       onChange={setMobileAssetsSearch}
@@ -3943,7 +3962,7 @@ export default function Page() {
             ) : (
               /* Мобильная: поле поиска (при потягивании вниз видно) + карточки активов */
               <div className="relative flex flex-col gap-4">
-                <div className="sticky top-0 z-10 -mx-4 px-4 py-4" style={{ backgroundColor: "var(--app-bg, #000)" }}>
+                <div data-screen-header className="sticky top-0 z-10 -mx-4 px-4 py-4" style={{ backgroundColor: "var(--app-bg, #000)" }}>
                   <MobileSearchField
                     value={mobileAssetsSearch}
                     onChange={setMobileAssetsSearch}

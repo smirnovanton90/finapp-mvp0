@@ -9,6 +9,7 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { Gauge, Plus } from "lucide-react";
 
 import { ConfirmModal } from "@/components/confirm-modal";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { CreateCategoryModal } from "@/components/create-category-modal";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import { Badge } from "@/components/ui/badge";
@@ -305,8 +306,8 @@ export default function GoalsPage() {
     return map;
   }, [categoryLookup.idToScope, goalProgress, goals]);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const [goalsData, categoriesData, counterpartiesData, progressData] = await Promise.all([
@@ -326,7 +327,7 @@ export default function GoalsPage() {
           "Не удалось загрузить цели. Попробуйте обновить страницу."
       );
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -334,6 +335,8 @@ export default function GoalsPage() {
     if (!session) return;
     loadAll();
   }, [session, loadAll]);
+
+  usePullToRefresh(() => loadAll(true));
 
   useEffect(() => {
     if (!session || filterCounterpartyIds.length === 0 || txs.length > 0) return;

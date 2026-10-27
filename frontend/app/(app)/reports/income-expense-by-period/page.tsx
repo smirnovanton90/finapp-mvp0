@@ -11,6 +11,7 @@ import React, {
   useState,
 } from "react";
 import { useSession } from "next-auth/react";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 
 import {
   API_BASE,
@@ -1472,9 +1473,44 @@ export default function IncomeExpenseDynamicsPage() {
   }, [effectiveRangeEnd, rangeStartKey]);
 
   const [chartFetchVersion, setChartFetchVersion] = useState(0);
+  const chartRefreshDoneRef = useRef<(() => void) | null>(null);
   const triggerChartRefetch = useCallback(() => {
     setChartFetchVersion((v) => v + 1);
   }, []);
+
+  usePullToRefresh(async () => {
+    let settled = false;
+    const chartDone = new Promise<void>((resolve) => {
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (chartRefreshDoneRef.current === finish) chartRefreshDoneRef.current = null;
+        resolve();
+      };
+      chartRefreshDoneRef.current = finish;
+      window.setTimeout(finish, 20000);
+    });
+    triggerChartRefetch();
+    await Promise.all([
+      chartDone,
+      (async () => {
+        try {
+          const [itemsData, categoryData, counterpartiesData, chainsData] = await Promise.all([
+            fetchItems({ includeClosed: true, includeArchived: true }),
+            fetchCategories(),
+            fetchCounterparties().catch(() => []),
+            fetchTransactionChains().catch(() => []),
+          ]);
+          setItems(itemsData);
+          setCategoryNodes(categoryData);
+          setCounterparties(counterpartiesData);
+          setChains(chainsData ?? []);
+        } catch {
+          // На экране остаются уже загруженные справочники.
+        }
+      })(),
+    ]);
+  });
 
   // Keep latest params in ref so effect always uses current filters when it runs
   const paramsRef = useRef({
@@ -1515,6 +1551,8 @@ export default function IncomeExpenseDynamicsPage() {
   useEffect(() => {
     if (!session || !rangeStartKey || !rangeEndKey || chartTransactionTypeFilter.length === 0 || statusFilter.length === 0) {
       setChartTxList([]);
+      setChartDataLoading(false);
+      chartRefreshDoneRef.current?.();
       return;
     }
     let cancelled = false;
@@ -1539,42 +1577,50 @@ export default function IncomeExpenseDynamicsPage() {
       deleted_only: p.deleted_only,
     };
     (async () => {
-      const all: TransactionOut[] = [];
-      let cursor: string | null = null;
-      for (;;) {
-        const page = await fetchTransactionsPage({
-          ...params,
-          cursor,
-          limit: 200,
-        });
-        if (cancelled) return;
-        all.push(...page.items);
-        if (!page.has_more || !page.next_cursor) break;
-        cursor = page.next_cursor;
-      }
-      if (cancelled) return;
-      let filtered = all;
-      const chainId = paramsRef.current.chainIdFilter;
-      const mode = paramsRef.current.chainPresetFilter ?? "total";
-      if (chainId != null) {
-        const todayKey = toDateKey(new Date());
-        filtered = all
-          .filter((tx) => tx.transaction_type === "PLANNED" && tx.chain_id === chainId)
-          .filter((tx) => {
-            if (mode === "deleted") return Boolean(tx.deleted_at);
-            if (tx.deleted_at) return false;
-            if (mode === "realized") return tx.status === "REALIZED";
-            if (mode === "total") return true;
-            if (tx.status === "REALIZED") return false;
-            const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
-            if (!dateKey) return false;
-            if (mode === "overdue") return dateKey < todayKey;
-            if (mode === "upcoming") return dateKey >= todayKey;
-            return true;
+      try {
+        const all: TransactionOut[] = [];
+        let cursor: string | null = null;
+        for (;;) {
+          const page = await fetchTransactionsPage({
+            ...params,
+            cursor,
+            limit: 200,
           });
+          if (cancelled) return;
+          all.push(...page.items);
+          if (!page.has_more || !page.next_cursor) break;
+          cursor = page.next_cursor;
+        }
+        if (cancelled) return;
+        let filtered = all;
+        const chainId = paramsRef.current.chainIdFilter;
+        const mode = paramsRef.current.chainPresetFilter ?? "total";
+        if (chainId != null) {
+          const todayKey = toDateKey(new Date());
+          filtered = all
+            .filter((tx) => tx.transaction_type === "PLANNED" && tx.chain_id === chainId)
+            .filter((tx) => {
+              if (mode === "deleted") return Boolean(tx.deleted_at);
+              if (tx.deleted_at) return false;
+              if (mode === "realized") return tx.status === "REALIZED";
+              if (mode === "total") return true;
+              if (tx.status === "REALIZED") return false;
+              const dateKey = toTxDateKey(tx.transaction_date, tx.timezone);
+              if (!dateKey) return false;
+              if (mode === "overdue") return dateKey < todayKey;
+              if (mode === "upcoming") return dateKey >= todayKey;
+              return true;
+            });
+        }
+        setChartTxList(filtered);
+      } catch {
+        if (!cancelled) setChartTxList([]);
+      } finally {
+        if (!cancelled) {
+          setChartDataLoading(false);
+          chartRefreshDoneRef.current?.();
+        }
       }
-      setChartTxList(filtered);
-      setChartDataLoading(false);
     })();
     return () => {
       cancelled = true;

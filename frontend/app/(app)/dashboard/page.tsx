@@ -68,6 +68,7 @@ import {
 } from "@/lib/api";
 import { CategoryIconImage } from "@/components/category-icon-image";
 import { MobileWidgetStack, WidgetDragHandle } from "@/components/mobile-widget-stack";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { ITEM_TYPE_LABELS } from "@/lib/item-types";
 import { getEffectiveItemKind, formatAmount, getItemPrimaryValueCents } from "@/lib/item-utils";
 import { getGoalProgressColor } from "@/lib/goal-progress-color";
@@ -2158,6 +2159,51 @@ export default function DashboardPage() {
     return () => observer.disconnect();
   }, []);
 
+  const refreshDashboard = useCallback(async () => {
+    const [itemsR, fxR, categoriesR, goalsR, progressR, profileR, txR, periodR, comparisonR] =
+      await Promise.allSettled([
+        fetchItems({ includeArchived: true }),
+        fetchFxRates(),
+        fetchCategories({ includeArchived: false }),
+        fetchGoals(),
+        fetchGoalProgress(),
+        fetchUserMe(),
+        fetchDashboardTransactions(feedStartKey),
+        fetchDashboardCashflow(periodStartKey, periodEndKey, false),
+        fetchDashboardCashflow(twelveMonthStartKey, twelveMonthEndKey, true),
+      ]);
+    if (itemsR.status === "fulfilled") setItems(itemsR.value);
+    if (fxR.status === "fulfilled") setFxRates(fxR.value);
+    if (categoriesR.status === "fulfilled") setCategoryNodes(categoriesR.value);
+    if (goalsR.status === "fulfilled") setGoals(goalsR.value);
+    if (progressR.status === "fulfilled") {
+      setGoalProgress(progressR.value);
+      setGoalsProgressLoading(false);
+    }
+    if (profileR.status === "fulfilled") {
+      setUserProfile(profileR.value);
+      if (profileR.value.photo_url?.includes("googleusercontent.com")) {
+        setUserPhotoUrl(profileR.value.photo_url);
+      }
+    }
+    if (txR.status === "fulfilled") {
+      setTxs(txR.value);
+      setTxWindowStartKey(feedStartKey);
+      setTxsLoaded(true);
+    }
+    if (periodR.status === "fulfilled") {
+      setPeriodCashflow(periodR.value);
+      setCashflowLoading(false);
+    }
+    if (comparisonR.status === "fulfilled") {
+      setComparisonCashflow(comparisonR.value);
+      setComparisonReady(true);
+    }
+    setLoading(false);
+  }, [feedStartKey, periodEndKey, periodStartKey, twelveMonthEndKey, twelveMonthStartKey]);
+
+  usePullToRefresh(refreshDashboard);
+
   const mobileCashflowPeriodLabel = formatMobileCashflowPeriod(
     periodStartKey,
     periodEndKey
@@ -2283,6 +2329,7 @@ export default function DashboardPage() {
     <>
       <main className="min-h-0 text-white/85 md:hidden">
         <header
+          data-screen-header
           className="sticky top-0 z-30 -mx-4 flex items-center gap-3 bg-black px-4 pb-2"
           style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)" }}
         >

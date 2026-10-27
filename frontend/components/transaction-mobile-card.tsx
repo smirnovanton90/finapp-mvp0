@@ -23,6 +23,7 @@ import { useCategoryImage } from "@/hooks/use-category-icon";
 import { AssetItemIcon } from "@/components/asset-item-icon";
 import { CardIcon } from "@/components/card-icon";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const MUTED = "rgba(255,255,255,0.55)";
 const CHIP_TEXT = "#191732";
@@ -419,5 +420,42 @@ export function TransactionMobileCard({
         ) : null}
       </div>
     </article>
+  );
+}
+
+/** Плейсхолдер карточки: шапка, сумма с валютой, счёт и контрагент. */
+export function TransactionMobileCardSkeleton() {
+  return (
+    <div className="flex w-full flex-col overflow-hidden rounded-[10px]" aria-hidden>
+      <div className="flex items-center gap-3 px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
+        <Skeleton className="size-6 shrink-0 rounded-[4px]" />
+        <Skeleton className="h-3.5 min-w-0 flex-1 rounded-[4px]" />
+        <Skeleton className="size-4 shrink-0 rounded-[4px]" />
+        <Skeleton className="h-3.5 w-10 shrink-0 rounded-[4px]" />
+      </div>
+      <div className="flex flex-col gap-3 px-6 py-3" style={{ backgroundColor: ACCENT_FILL_MEDIUM }}>
+        <div className="flex items-stretch gap-3">
+          <div
+            className="flex shrink-0 flex-col justify-center rounded-[10px] px-6 py-3"
+            style={{ backgroundColor: MODAL_BG }}
+          >
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-8 w-32 rounded-[4px]" />
+              <Skeleton className="h-6 w-12 rounded-[4px]" />
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-6 shrink-0 rounded-[4px]" />
+              <Skeleton className="h-3.5 flex-1 rounded-[4px]" />
+            </div>
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-6 shrink-0 rounded-[4px]" />
+              <Skeleton className="h-3.5 w-2/3 rounded-[4px]" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

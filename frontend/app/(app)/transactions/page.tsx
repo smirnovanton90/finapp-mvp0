@@ -133,7 +133,8 @@ import { DateInput } from "@/components/ui/date-input";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AssetItemIcon } from "@/components/asset-item-icon";
-import { TransactionMobileCard as TransactionMobileCardView } from "@/components/transaction-mobile-card";
+import { TransactionMobileCard as TransactionMobileCardView, TransactionMobileCardSkeleton } from "@/components/transaction-mobile-card";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { TransactionsMobileHeader } from "@/components/transactions-mobile-header";
 import { ItemSelector } from "@/components/item-selector";
 import { CounterpartySelector } from "@/components/counterparty-selector";
@@ -4792,9 +4793,11 @@ function TransactionsView({
     async ({
       cursor,
       append = false,
+      silent = false,
     }: {
       cursor?: string | null;
       append?: boolean;
+      silent?: boolean;
     } = {}) => {
       if (!session) return;
       if (txQuery.disabled) {
@@ -4809,7 +4812,7 @@ function TransactionsView({
       const requestId = (txRequestIdRef.current += 1);
       if (append) {
         setIsLoadingMore(true);
-      } else {
+      } else if (!silent) {
         setLoading(true);
         setIsInitialLoading(true);
       }
@@ -4848,6 +4851,24 @@ function TransactionsView({
     await loadTransactions({ cursor: null, append: false });
     await loadItemTransactionCounts();
   }, [loadItems, loadTransactions, loadItemTransactionCounts]);
+
+  usePullToRefresh(async () => {
+    const ids = itemFilterIds.length > 0 ? itemFilterIds : undefined;
+    const opts: { date_from?: string; date_to?: string } = {};
+    if (dateFrom) opts.date_from = dateFrom;
+    if (dateTo) opts.date_to = dateTo;
+    await Promise.all([
+      loadItems(),
+      loadItemTransactionCounts(),
+      loadBanks(),
+      loadCounterparties(),
+      loadCategories(),
+      loadTransactions({ cursor: null, append: false, silent: true }),
+      fetchBalanceCheckpointsForItems(ids, opts)
+        .then((list) => setCheckpoints(list))
+        .catch(() => setCheckpoints([])),
+    ]);
+  });
 
   async function loadAll() {
     await refreshAfterMutation();
@@ -8552,10 +8573,10 @@ function TransactionsView({
               <div className="flex flex-col gap-8">
                 {[1, 2, 3].map((sectionIdx) => (
                   <div key={sectionIdx} className="flex flex-col gap-3">
-                    <Skeleton className="h-6 w-36 rounded-[4px]" />
+                    <Skeleton className="h-[23px] w-40 rounded-[4px]" />
                     <div className="flex flex-col gap-3">
                       {[1, 2].map((cardIdx) => (
-                        <Skeleton key={cardIdx} className="h-64 w-full rounded-[10px]" />
+                        <TransactionMobileCardSkeleton key={cardIdx} />
                       ))}
                     </div>
                   </div>

@@ -11,6 +11,7 @@ import {
 
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { useSession } from "next-auth/react";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { useAccountingStart } from "@/components/accounting-start-context";
 import {
   fetchCounterparties,
@@ -659,6 +660,7 @@ export default function AssetsDynamicsPage() {
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [loading, setLoading] = useState(false);
+  const [costHistoryRefreshKey, setCostHistoryRefreshKey] = useState(0);
   const [ratesLoading, setRatesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -711,6 +713,20 @@ export default function AssetsDynamicsPage() {
       active = false;
     };
   }, [session]);
+
+  usePullToRefresh(async () => {
+    const [itemsData, txData, categoriesData, counterpartiesData] = await Promise.all([
+      fetchItems({ includeClosed: true, includeArchived: true }),
+      fetchTransactions(),
+      fetchCategories().catch(() => []),
+      fetchCounterparties().catch(() => []),
+    ]);
+    setItems(itemsData);
+    setTransactions(txData);
+    setCategories(Array.isArray(categoriesData) ? categoriesData : []);
+    setCounterparties(counterpartiesData);
+    setCostHistoryRefreshKey((key) => key + 1);
+  });
 
   const itemTxCounts = useMemo(
     () => buildItemTransactionCounts(transactions),
@@ -967,7 +983,7 @@ export default function AssetsDynamicsPage() {
     return () => {
       cancelled = true;
     };
-  }, [rangeStartKey, rangeEndKey, effectiveSelectedItems]);
+  }, [rangeStartKey, rangeEndKey, effectiveSelectedItems, costHistoryRefreshKey]);
 
   const dateKeys = useMemo(() => {
     if (!rangeStartKey || !rangeEndKey) return [];

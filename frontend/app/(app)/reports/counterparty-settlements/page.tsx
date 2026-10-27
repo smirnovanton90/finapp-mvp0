@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { transactionDateKey } from "@/lib/timezone";
 import { useSession } from "next-auth/react";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import {
   fetchCounterparties,
   fetchItems,
@@ -423,6 +424,17 @@ export default function CounterpartySettlementsPage() {
       active = false;
     };
   }, [session]);
+
+  usePullToRefresh(async () => {
+    const [cpData, itemsData, txData] = await Promise.all([
+      fetchCounterparties(),
+      fetchItems({ includeClosed: true }),
+      fetchTransactions(),
+    ]);
+    setCounterparties(cpData);
+    setItems(itemsData);
+    setTransactions(txData);
+  });
 
   const counterpartyCounts = useMemo(
     () => buildCounterpartyTransactionCounts(transactions),

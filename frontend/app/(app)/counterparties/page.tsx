@@ -36,6 +36,7 @@ import { SegmentedSelector } from "@/components/ui/segmented-selector";
 import { AuthInput } from "@/components/ui/auth-input";
 import { CounterpartyCard } from "@/components/counterparty-card";
 import { useSidebar } from "@/components/ui/sidebar-context";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { cn } from "@/lib/utils";
 import { ACCENT, ACTIVE_TEXT_DARK, PLACEHOLDER_COLOR_DARK, SIDEBAR_TEXT_ACTIVE } from "@/lib/colors";
 import { EmptyState } from "@/components/empty-state";
@@ -224,8 +225,8 @@ export default function CounterpartiesPage() {
 
   const PAGE_SIZE = 50;
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const [pageData, legalFormData, industryData] = await Promise.all([
@@ -244,7 +245,7 @@ export default function CounterpartiesPage() {
     } catch (e: any) {
       setError(e?.message ?? "Не удалось загрузить контрагентов.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [counterpartyQueryParams]);
 
@@ -271,6 +272,8 @@ export default function CounterpartiesPage() {
     if (!session) return;
     loadAll();
   }, [session, loadAll]);
+
+  usePullToRefresh(() => loadAll(true));
 
   const MAX_SYNONYMS = 50;
   const MAX_SYNONYM_LENGTH = 300;

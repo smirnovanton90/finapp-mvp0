@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowDown, ArrowLeft, ArrowLeftRight, Building2, MessageSquare, User, Wallet } from "lucide-react";
@@ -39,15 +40,38 @@ export default function TransactionDetailPage() {
   const [counterparties, setCounterparties] = useState<CounterpartyOut[]>([]);
   const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const loadedRef = useRef(false);
+
+  const load = useCallback(async () => {
+    if (!Number.isFinite(id) || id < 1) {
+      setError("Транзакция не найдена");
+      return;
+    }
+    try {
+      const [transaction, loadedItems, loadedCounterparties, loadedCategories] = await Promise.all([
+        fetchTransaction(id),
+        fetchItems({ includeArchived: true, includeClosed: true }),
+        fetchCounterparties({ include_deleted: true }),
+        fetchCategories(),
+      ]);
+      setTx(transaction);
+      setItems(loadedItems);
+      setCounterparties(loadedCounterparties);
+      setCategories(loadedCategories);
+      loadedRef.current = true;
+      setError(null);
+    } catch (cause) {
+      if (!loadedRef.current) {
+        setError(cause instanceof Error ? cause.message : "Не удалось загрузить транзакцию");
+      }
+    }
+  }, [id]);
 
   useEffect(() => {
-    if (!Number.isFinite(id) || id < 1) { setError("Транзакция не найдена"); return; }
-    Promise.all([fetchTransaction(id), fetchItems({ includeArchived: true, includeClosed: true }), fetchCounterparties({ include_deleted: true }), fetchCategories()])
-      .then(([transaction, loadedItems, loadedCounterparties, loadedCategories]) => {
-        setTx(transaction); setItems(loadedItems); setCounterparties(loadedCounterparties); setCategories(loadedCategories);
-      })
-      .catch((cause) => setError(cause instanceof Error ? cause.message : "Не удалось загрузить транзакцию"));
-  }, [id]);
+    void load();
+  }, [load]);
+
+  usePullToRefresh(load);
 
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const counterpartiesById = useMemo(() => new Map(counterparties.map((counterparty) => [counterparty.id, counterparty])), [counterparties]);

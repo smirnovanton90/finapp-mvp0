@@ -13,6 +13,10 @@ import { useTheme } from "@/components/theme-provider";
 import { APP_BG_GRADIENT, AUTH_BG_GRADIENT_LIGHT } from "@/lib/gradients";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { MobileFloatingBar } from "@/components/mobile-floating-bar";
+import {
+  MobilePullToRefreshProvider,
+  MobilePullToRefreshScroll,
+} from "@/components/mobile-pull-to-refresh";
 import { MobileWizardOpenProvider, useMobileWizardOpen } from "@/components/mobile-wizard-open-context";
 import { CONTENT_WIDTH_CLASS } from "@/lib/content-width";
 
@@ -24,7 +28,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
-  const { isCollapsed, isFilterPanelCollapsed, isDesktop } = useSidebar();
+  const { isCollapsed, isFilterPanelCollapsed, isDesktop, mobileOpen, mobileFiltersOpen } = useSidebar();
   const mobileWizardOpen = useMobileWizardOpen()?.mobileWizardOpen ?? false;
   const sessionKey = (session?.user as { id?: string })?.id ?? "anon";
   const { theme } = useTheme();
@@ -184,9 +188,12 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         <MobileFiltersDrawer />
         {!mobileWizardOpen && <MobileFloatingBar />}
         <PwaInstallPrompt />
+        <MobilePullToRefreshProvider
+          enabled={!isDesktop && !mobileWizardOpen && !mobileOpen && !mobileFiltersOpen}
+        >
         <div className={cn("relative z-10 flex", !isDesktop && "min-h-0 flex-1 overflow-hidden")}>
           <Sidebar />
-          <div
+          <MobilePullToRefreshScroll
             className={cn(
               "flex-1 transition-all duration-300 @container",
               // Вертикальное центрирование только на десктопе — на мобиле оно обрезает верхние заголовки.
@@ -199,6 +206,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                 ? {
                     marginLeft: contentMarginLeft,
                     WebkitOverflowScrolling: "touch",
+                    overflowAnchor: "none",
                   }
                 : { marginLeft: contentMarginLeft }
             }
@@ -225,8 +233,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
               </div>
             )}
             </div>
-          </div>
+          </MobilePullToRefreshScroll>
         </div>
+        </MobilePullToRefreshProvider>
       </div>
       )}
     </AccountingStartGate>

@@ -59,7 +59,7 @@ export function TransactionsMobileHeader({
   const avatarLetter = displayName.slice(0, 1).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 -mx-4 flex items-center gap-3 bg-black px-4 pb-2 pt-4">
+    <header data-screen-header className="sticky top-0 z-30 -mx-4 flex items-center gap-3 bg-black px-4 pb-2 pt-4">
       <Link
         href="/cabinet"
         aria-label="Открыть личный кабинет"

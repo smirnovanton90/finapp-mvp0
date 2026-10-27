@@ -28,6 +28,7 @@ import {
   CalendarCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { IconButton } from "@/components/ui/icon-button";
 import {
   DropdownMenu,
@@ -284,6 +285,8 @@ export default function AssetDetailPage() {
   const [dynamicsTxs, setDynamicsTxs] = useState<TransactionOut[]>([]);
   const [fxRatesByDate, setFxRatesByDate] = useState<Record<string, FxRateOut[]>>({});
   const [loadingDynamics, setLoadingDynamics] = useState(false);
+  const [dynamicsRefreshKey, setDynamicsRefreshKey] = useState(0);
+  const silentDynamicsRefreshRef = useRef(false);
   const [iconFormat, setIconFormat] = useState<"png" | null>("png");
   const [itemPhotoError, setItemPhotoError] = useState<string | null>(null);
   const [itemPhotoUploading, setItemPhotoUploading] = useState(false);
@@ -342,9 +345,9 @@ export default function AssetDetailPage() {
   const [editClosedAtError, setEditClosedAtError] = useState<string | null>(null);
   const [savingClosedAt, setSavingClosedAt] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (!Number.isFinite(id)) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     setQuantityHistoryError(null);
     try {
@@ -395,7 +398,7 @@ export default function AssetDetailPage() {
     } catch (e: any) {
       setError(e?.message ?? "Ошибка загрузки");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [id]);
 
@@ -446,9 +449,9 @@ export default function AssetDetailPage() {
     loadItemsAndCounterparties,
   ]);
 
-  const refetchCostHistory = useCallback(async () => {
+  const refetchCostHistory = useCallback(async (silent = false) => {
     if (!item?.id || !item?.open_date) return;
-    setLoadingCostHistory(true);
+    if (!silent) setLoadingCostHistory(true);
     try {
       const dateFrom = item.open_date ?? undefined;
       const dateTo = item.closed_at ? item.closed_at.slice(0, 10) : todayDateKey(displayTimezone);
@@ -457,9 +460,15 @@ export default function AssetDetailPage() {
     } catch {
       setCostHistoryData(null);
     } finally {
-      setLoadingCostHistory(false);
+      if (!silent) setLoadingCostHistory(false);
     }
   }, [item?.id, item?.open_date, item?.closed_at, displayTimezone]);
+
+  usePullToRefresh(async () => {
+    silentDynamicsRefreshRef.current = true;
+    setDynamicsRefreshKey((key) => key + 1);
+    await Promise.all([load(true), loadItemsAndCounterparties(), refetchCostHistory(true)]);
+  });
 
   /** Местные цифры контрольной точки. Пояс задаётся отдельно и не сдвигает часы. */
   const buildCheckpointWall = useCallback((dateStr: string, timeStr: string) => {
@@ -621,12 +630,14 @@ export default function AssetDetailPage() {
 
   useEffect(() => {
     if (!item?.id) {
+      silentDynamicsRefreshRef.current = false;
       setDynamicsTxs([]);
       setFxRatesByDate({});
       return;
     }
     let cancelled = false;
-    setLoadingDynamics(true);
+    const silent = silentDynamicsRefreshRef.current;
+    if (!silent) setLoadingDynamics(true);
     const dateEnd = todayDateKey();
     const dateStart = item.open_date ?? dateEnd;
     Promise.all([fetchTransactions(), fetchCategories(), fetchItems(), fetchCounterparties()])
@@ -654,12 +665,15 @@ export default function AssetDetailPage() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoadingDynamics(false);
+        if (!cancelled) {
+          silentDynamicsRefreshRef.current = false;
+          setLoadingDynamics(false);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [item?.id, item?.open_date]);
+  }, [item?.id, item?.open_date, dynamicsRefreshKey]);
 
   // Догружаем курсы на каждую дату из истории стоимости, чтобы рублёвый эквивалент в графике считался по курсу на дату, а не по ближайшей известной.
   useEffect(() => {
@@ -2897,6 +2911,7 @@ export default function AssetDetailPage() {
         {/* Мобильная шапка: градиент от верха экрана (включая safe-area) */}
         {!isDesktop && (
           <div
+            data-screen-header
             className="relative flex flex-col gap-3 pb-4 px-6 w-screen max-w-none ml-[calc(-50vw+50%)]"
             style={{
               paddingTop: "calc(env(safe-area-inset-top, 0px) + 8px)",

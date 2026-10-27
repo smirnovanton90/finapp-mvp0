@@ -39,6 +39,7 @@ import { useAccountingStart } from "@/components/accounting-start-context";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 import { ConfirmModal } from "@/components/confirm-modal";
+import { usePullToRefresh } from "@/components/mobile-pull-to-refresh";
 import { CreateCategoryModal } from "@/components/create-category-modal";
 import { CreateCounterpartyModal } from "@/components/create-counterparty-modal";
 import { Badge } from "@/components/ui/badge";
@@ -589,6 +590,10 @@ export default function FinancialPlanningPage() {
     };
     loadAll();
   }, [session]);
+
+  usePullToRefresh(async () => {
+    await Promise.all([reloadPlanningData(), loadItemsCategoriesCounterparties()]);
+  });
 
   const applyCategorySelection = (l1: string, l2: string, l3: string) => {
     if (!l1 || (l1 === CATEGORY_PLACEHOLDER && !l2 && !l3)) {

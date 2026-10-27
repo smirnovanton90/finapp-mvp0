@@ -77,7 +77,6 @@ import { cn } from "@/lib/utils";
 import {
   CASHFLOW_BUCKET_ORDER,
   CASHFLOW_LABELS,
-  buildCashflowTransactionsHref,
   classifyCashflowBucket,
   type CashflowBucket,
 } from "@/lib/cashflow-buckets";
@@ -122,6 +121,7 @@ function MobileCardPress({
       )}
       onPointerDown={(event) => {
         if (event.pointerType === "mouse" && event.button !== 0) return;
+        if ((event.target as HTMLElement | null)?.closest("[data-card-press-ignore]")) return;
         pointRef.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
         movedRef.current = false;
         clearPressTimer();
@@ -175,6 +175,34 @@ function goalTrackColor(color: string) {
 
 function MobileNumberSkeleton({ className }: { className?: string }) {
   return <Skeleton aria-hidden className={cn("rounded-[4px]", className)} />;
+}
+
+function excludedCategoryNote(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const noun =
+    mod10 === 1 && mod100 !== 11
+      ? "категория"
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+        ? "категории"
+        : "категорий";
+  return `${count} ${noun} не в сумме`;
+}
+
+function CashflowStrike({
+  on,
+  delay = false,
+}: {
+  on: boolean;
+  delay?: boolean;
+}) {
+  return (
+    <span
+      aria-hidden
+      data-on={on ? "true" : "false"}
+      className={delay ? "cashflow-strike cashflow-strike-late" : "cashflow-strike"}
+    />
+  );
 }
 
 function MobilePlusLink({ href, label }: { href: string; label: string }) {
@@ -1179,6 +1207,10 @@ export default function DashboardPage() {
     income: false,
     expense: false,
   });
+  const [excludedCashflowLabels, setExcludedCashflowLabels] = useState<{
+    income: Record<string, boolean>;
+    expense: Record<string, boolean>;
+  }>({ income: {}, expense: {} });
   const [periodStartKey, setPeriodStartKey] = useState(
     () => getCurrentMonthRangeKeys().startKey
   );
@@ -1618,6 +1650,19 @@ export default function DashboardPage() {
   const toggleCashflowExpand = useCallback((direction: "income" | "expense") => {
     setCashflowExpanded((prev) => ({ ...prev, [direction]: !prev[direction] }));
   }, []);
+
+  const toggleExcludedCashflowCategory = useCallback(
+    (direction: "income" | "expense", label: string) => {
+      setExcludedCashflowLabels((prev) => ({
+        ...prev,
+        [direction]: {
+          ...prev[direction],
+          [label]: !prev[direction][label],
+        },
+      }));
+    },
+    []
+  );
 
   const incomeSegments = useMemo(
     () => buildCategorySegments(incomeBreakdown, 0),
@@ -2209,16 +2254,23 @@ export default function DashboardPage() {
     periodEndKey
   );
 
-  const renderMobileCategoryRows = (direction: "INCOME" | "EXPENSE") => {
+  const mobileCashflowRows = (direction: "INCOME" | "EXPENSE") => {
     const groups = direction === "INCOME" ? incomeBucketGroups : expenseBucketGroups;
-    const rows = showPlan
-      ? groups.flatMap((group) =>
-          group.categories.map((row) => ({ ...row, bucket: group.key }))
-        )
-      : (groups[0]?.categories ?? []).map((row) => ({
-          ...row,
-          bucket: "actual" as const,
-        }));
+    if (showPlan) {
+      return groups.flatMap((group) =>
+        group.categories.map((row) => ({ ...row, bucket: group.key }))
+      );
+    }
+    return (groups[0]?.categories ?? []).map((row) => ({
+      ...row,
+      bucket: "actual" as const,
+    }));
+  };
+
+  const renderMobileCategoryRows = (direction: "income" | "expense") => {
+    const apiDirection = direction === "income" ? "INCOME" : "EXPENSE";
+    const rows = mobileCashflowRows(apiDirection);
+    const excluded = excludedCashflowLabels[direction];
     if (cashflowLoading) {
       return (
         <div className="flex flex-col gap-3">
@@ -2236,36 +2288,57 @@ export default function DashboardPage() {
       return <p className="text-sm leading-4 text-white/55">Нет операций</p>;
     }
     return (
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col">
         {rows.map((row) => {
-          const isUncategorized = row.label === UNCATEGORIZED_LABEL;
+          const isExcluded = Boolean(excluded[row.label]);
           const configuredIconName = CATEGORY_ICON_NAME_BY_L1[row.label];
           const CategoryIcon =
             (configuredIconName ? CATEGORY_ICON_BY_NAME[configuredIconName] : undefined) ??
             topLevelIconByLabel.get(row.label) ??
             CATEGORY_ICON_FALLBACK;
           return (
-            <div key={`${row.bucket}-${row.label}`} className="flex items-center gap-2">
-              <span className="shrink-0" style={{ color: ACCENT }}>
+            <button
+              key={`${row.bucket}-${row.label}`}
+              type="button"
+              data-card-press-ignore=""
+              aria-pressed={isExcluded}
+              onClick={() => toggleExcludedCashflowCategory(direction, row.label)}
+              className="flex min-h-11 w-full items-center gap-2 rounded-[6px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7F5CFF] active:bg-white/5"
+            >
+              <span
+                className={cn(
+                  "shrink-0 transition-opacity duration-300 motion-reduce:transition-none",
+                  isExcluded ? "opacity-45" : "opacity-100"
+                )}
+                style={{ color: ACCENT }}
+              >
                 <CategoryIcon className="size-4" strokeWidth={1.75} />
               </span>
-              <span className="min-w-0 flex-1 truncate text-sm leading-4 text-white/55">
-                {row.label}
+              <span className="flex min-w-0 flex-1">
+                <span className="relative inline-grid min-w-0 max-w-full">
+                  <span className="col-start-1 row-start-1 truncate text-sm leading-4 text-white/55">
+                    {row.label}
+                  </span>
+                  <CashflowStrike on={isExcluded} />
+                </span>
               </span>
-              <Link
-                href={buildCashflowTransactionsHref({
-                  direction,
-                  bucket: row.bucket,
-                  periodStartKey,
-                  periodEndKey,
-                  categoryL1: isUncategorized ? null : row.label,
-                  uncategorized: isUncategorized,
-                })}
-                className="shrink-0 text-base font-medium leading-[18px] tabular-nums text-white/90"
-              >
-                {formatRub(row.value)}
-              </Link>
-            </div>
+              <span className="sr-only">
+                {isExcluded
+                  ? ", не в сумме. Нажмите, чтобы вернуть"
+                  : ". Нажмите, чтобы исключить из суммы"}
+              </span>
+              <span className="relative shrink-0">
+                <span
+                  className={cn(
+                    "block text-base font-medium leading-[18px] tabular-nums transition-colors duration-300 motion-reduce:transition-none",
+                    isExcluded ? "text-white/55" : "text-white/90"
+                  )}
+                >
+                  {formatRub(row.value)}
+                </span>
+                <CashflowStrike on={isExcluded} delay />
+              </span>
+            </button>
           );
         })}
       </div>
@@ -2274,12 +2347,25 @@ export default function DashboardPage() {
 
   const renderMobileCashflowCard = (direction: "income" | "expense") => {
     const expanded = cashflowExpanded[direction];
-    const total =
+    const fullTotal =
       direction === "income" ? displayIncomeCashflow.total : displayExpenseCashflow.total;
+    const rows = mobileCashflowRows(direction === "income" ? "INCOME" : "EXPENSE");
+    const excluded = excludedCashflowLabels[direction];
+    const excludedLabels = new Set(
+      rows.filter((row) => excluded[row.label]).map((row) => row.label)
+    );
+    const excludedSum = rows.reduce(
+      (sum, row) => (excludedLabels.has(row.label) ? sum + row.value : sum),
+      0
+    );
+    const total = Math.max(0, fullTotal - excludedSum);
     const sign = direction === "income" ? "+" : "−";
     const signColor = direction === "income" ? GREEN : RED;
-    const apiDirection = direction === "income" ? "INCOME" : "EXPENSE";
     const headerBg = direction === "income" ? MOBILE_METRIC_HEADER_BG : MODAL_BG;
+    const excludedNote =
+      !cashflowLoading && excludedLabels.size > 0
+        ? excludedCategoryNote(excludedLabels.size)
+        : null;
     return (
       <MobileCardPress className="overflow-hidden rounded-[10px]">
         <div
@@ -2289,19 +2375,29 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => toggleCashflowExpand(direction)}
-            className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            className={cn(
+              "flex min-w-0 flex-1 gap-3 text-left",
+              excludedNote ? "items-start" : "items-center"
+            )}
             aria-expanded={expanded}
           >
             <span className="text-[28px] font-semibold leading-7" style={{ color: signColor }}>
               {sign}
             </span>
-            {cashflowLoading ? (
-              <MobileNumberSkeleton className="h-7 w-28" />
-            ) : (
-              <span className="min-w-0 truncate text-[28px] font-semibold leading-7 tabular-nums text-white/85">
-                {formatRub(total)}
-              </span>
-            )}
+            <span className="min-w-0 flex-1">
+              {cashflowLoading ? (
+                <MobileNumberSkeleton className="h-7 w-28" />
+              ) : (
+                <span className="block truncate text-[28px] font-semibold leading-7 tabular-nums text-white/85">
+                  {formatRub(total)}
+                </span>
+              )}
+              {excludedNote ? (
+                <span className="mt-1 block truncate text-xs leading-4 text-white/70">
+                  {excludedNote}
+                </span>
+              ) : null}
+            </span>
           </button>
           <button
             type="button"
@@ -2318,7 +2414,7 @@ export default function DashboardPage() {
         </div>
         {expanded ? (
           <div className="px-6 py-[18px]" style={{ backgroundColor: ACCENT_FILL_LIGHT }}>
-            {renderMobileCategoryRows(apiDirection)}
+            {renderMobileCategoryRows(direction)}
           </div>
         ) : null}
       </MobileCardPress>

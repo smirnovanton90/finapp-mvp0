@@ -415,7 +415,7 @@ function AmountWithChip({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <p className="text-[28px] font-semibold leading-8 tracking-[-0.6px] tabular-nums" style={{ color }}>
+      <p className="text-[24px] font-bold leading-7 tracking-[-0.4px] tabular-nums" style={{ color }}>
         {text}
       </p>
       <CurrencyChipBadge code={currency} tone={tone} />
@@ -746,25 +746,29 @@ export function TransactionMobileCard({
         style={{ backgroundColor: isPlanned ? "transparent" : ACCENT_FILL_MEDIUM }}
       >
         {isTransfer ? (
-          <div className="flex flex-col items-center gap-3">
-            <div className="flex w-full flex-col justify-center rounded-[10px] px-3 py-3" style={{ backgroundColor: MODAL_BG }}>
-              <div className="flex items-center gap-3">
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex w-full items-center gap-3">
+              <div className="flex shrink-0 flex-col justify-center rounded-[10px] px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
+                <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone="transfer" />
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-3">
                 <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
                 <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
                   {accountName}
                 </p>
               </div>
-              <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone="transfer" />
             </div>
-            <span className="text-[36px] font-semibold leading-none text-white">↓</span>
-            <div className="flex w-full flex-col justify-center rounded-[10px] px-3 py-3" style={{ backgroundColor: MODAL_BG }}>
-              <div className="flex items-center gap-3">
+            <span className="text-xl font-semibold leading-none text-white">↓</span>
+            <div className="flex w-full items-center gap-3">
+              <div className="flex shrink-0 flex-col justify-center rounded-[10px] px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
+                <AmountWithChip text={destinationAmount} color={amountColor} currency={destinationCurrency} tone="transfer" />
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-3">
                 <AccountMark item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} />
                 <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
                   {destinationName}
                 </p>
               </div>
-              <AmountWithChip text={destinationAmount} color={amountColor} currency={destinationCurrency} tone="transfer" />
             </div>
           </div>
         ) : (
@@ -817,7 +821,7 @@ export function TransactionMobileCardSkeleton() {
         <Skeleton className="h-3.5 w-2/5 rounded-[4px]" />
       </div>
       <div className="flex flex-col gap-3 px-6 py-3" style={{ backgroundColor: ACCENT_FILL_MEDIUM }}>
-        <Skeleton className="h-8 w-36 rounded-[10px]" />
+        <Skeleton className="h-7 w-32 rounded-[10px]" />
         <Skeleton className="h-3.5 w-1/2 rounded-[4px]" />
       </div>
     </div>

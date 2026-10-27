@@ -1,20 +1,18 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, Check, User, Wallet } from "lucide-react";
+import { Building2, User, Wallet } from "lucide-react";
 import { CounterpartyOut, ItemOut, TransactionOut } from "@/lib/api";
 import {
   ACCENT,
   ACCENT2,
   ACCENT_FILL_LIGHT,
-  ACCENT_FILL_MEDIUM,
   ACTIVE_TEXT_DARK,
   GREEN,
   MODAL_BG,
   RED,
 } from "@/lib/colors";
-import { SIDEBAR_SELECTED_GRADIENT } from "@/lib/gradients";
 import { buildCounterpartyDisplayName } from "@/lib/counterparty-utils";
 import { formatAmount } from "@/lib/item-utils";
 import type { buildCategoryLookup } from "@/lib/categories";
@@ -22,11 +20,12 @@ import { useCounterpartyImage } from "@/hooks/use-counterparty-image";
 import { useCategoryImage } from "@/hooks/use-category-icon";
 import { AssetItemIcon } from "@/components/asset-item-icon";
 import { CardIcon } from "@/components/card-icon";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const MUTED = "rgba(255,255,255,0.55)";
 const CHIP_TEXT = "#191732";
+/** Шапка и блок суммы: color/app-bg-end. */
+const BAND = "#4B4197";
 
 function formatTxTime(value: string) {
   const hasTime = /[T\s]\d{1,2}:\d{2}/.test(value);
@@ -58,8 +57,8 @@ function IconWell({
 }) {
   return (
     <span
-      className="grid shrink-0 place-items-center overflow-hidden rounded-[4px]"
-      style={{ width: size, height: size, backgroundColor: ACCENT_FILL_LIGHT }}
+      className="grid shrink-0 place-items-center overflow-hidden"
+      style={{ width: size, height: size }}
     >
       {children}
     </span>
@@ -70,10 +69,12 @@ function CategoryMark({
   categoryId,
   categoryLookup,
   apiBase,
+  size = 24,
 }: {
   categoryId: number | null;
   categoryLookup: ReturnType<typeof buildCategoryLookup>;
   apiBase: string;
+  size?: 24 | 36;
 }) {
   const {
     imageSrc,
@@ -84,12 +85,12 @@ function CategoryMark({
   } = useCategoryImage(categoryId, categoryLookup, apiBase);
 
   return (
-    <IconWell size={24}>
+    <IconWell size={size}>
       {imageSrc && !showFallbackIcon ? (
         <CardIcon
           src={imageSrc}
           alt=""
-          size={24}
+          size={size}
           shadow={false}
           objectFit="contain"
           fallbackIcon={CategoryIcon}
@@ -100,7 +101,7 @@ function CategoryMark({
           }}
         />
       ) : (
-        <CategoryIcon className="size-3.5" strokeWidth={1.5} style={{ color: "rgba(255,255,255,0.85)" }} />
+        <CategoryIcon className={size === 36 ? "size-5" : "size-3.5"} strokeWidth={1.5} style={{ color: "rgba(255,255,255,0.85)" }} />
       )}
     </IconWell>
   );
@@ -110,19 +111,21 @@ function AccountMark({
   item,
   counterparty,
   apiBase,
+  size = 24,
 }: {
   item: ItemOut | null;
   counterparty: CounterpartyOut | null;
   apiBase: string;
+  size?: 24 | 36;
 }) {
   return (
-    <IconWell size={24}>
+    <IconWell size={size}>
       {item ? (
         <AssetItemIcon
           item={item}
           counterparty={counterparty}
           apiBase={apiBase}
-          size={20}
+          size={size === 36 ? 28 : 20}
           fallbackIconColor="rgba(255,255,255,0.85)"
           alt=""
         />
@@ -195,10 +198,10 @@ function StatusMark({
         event.stopPropagation();
         if (!disabled && !confirmed) onConfirm();
       }}
-      className="grid size-4 shrink-0 place-items-center rounded-[4px] disabled:opacity-100"
-      style={{ backgroundColor: confirmed ? GREEN : "transparent", boxShadow: confirmed ? undefined : "inset 0 0 0 1px rgba(255,255,255,0.35)" }}
+      className="shrink-0 bg-transparent text-sm leading-none disabled:opacity-100"
+      style={{ color: confirmed ? undefined : "#FF8D28" }}
     >
-      <Check className="size-3" strokeWidth={3} style={{ color: confirmed ? "#fff" : MUTED }} />
+      {confirmed ? "✅" : "○"}
     </button>
   );
 }
@@ -206,10 +209,11 @@ function StatusMark({
 function CommentChip({ text }: { text: string }) {
   return (
     <div
-      className="flex w-full min-w-0 items-center rounded-[10px] px-3 py-2 text-sm font-normal leading-4 text-white"
-      style={{ backgroundColor: MODAL_BG }}
+      className="flex h-[41px] w-full min-w-0 items-center gap-3 rounded-[10px] px-3 py-1.5 text-sm font-normal leading-4 text-white"
+      style={{ backgroundColor: ACCENT_FILL_LIGHT }}
     >
-      <span className="min-w-0 break-words">💬 {text}</span>
+      <span className="shrink-0 text-sm leading-none" aria-hidden>💬</span>
+      <span className="min-w-0 break-words">{text}</span>
     </div>
   );
 }
@@ -244,7 +248,6 @@ export function TransactionMobileCard({
   itemsById,
   getItemCounterparty,
   apiBase,
-  onRealize,
   onConfirm,
   isConfirming,
   getRubEquivalentCents,
@@ -257,7 +260,6 @@ export function TransactionMobileCard({
   itemsById: Map<number, ItemOut>;
   getItemCounterparty: (itemId: number | null | undefined) => CounterpartyOut | null;
   apiBase: string;
-  onRealize?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
   onConfirm?: (tx: TransactionMobileCardTx) => void;
   isConfirming?: boolean;
   getRubEquivalentCents?: (tx: TransactionMobileCardTx, currencyCode: string) => number | null;
@@ -277,7 +279,6 @@ export function TransactionMobileCard({
   const isTransfer = tx.direction === "TRANSFER";
   const isPlanned = tx.transaction_type === "PLANNED" && tx.status !== "REALIZED";
   const isConfirmed = tx.status === "CONFIRMED" || tx.status === "REALIZED";
-  const canRealize = isPlanned && !tx.isDeleted;
   const accountName = itemName(primaryDisplayId) || "Счёт не указан";
   const destinationName = itemName(counterpartyDisplayId) || "Счёт не указан";
   const counterpartyName = counterparty ? buildCounterpartyDisplayName(counterparty) : "";
@@ -323,17 +324,7 @@ export function TransactionMobileCard({
       } ${isPlanned ? "border-2 border-dashed" : ""}`}
       style={isPlanned ? { borderColor: ACCENT2 } : undefined}
     >
-      <div className="flex items-center gap-3 px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
-        {isTransfer ? (
-          <IconWell size={24}>
-            <span className="size-3.5" />
-          </IconWell>
-        ) : (
-          <CategoryMark categoryId={tx.category_id} categoryLookup={categoryLookup} apiBase={apiBase} />
-        )}
-        <p className="min-w-0 flex-1 truncate text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
-          {title}
-        </p>
+      <div className="flex h-[41px] items-center justify-end gap-3 px-6 py-1.5" style={{ backgroundColor: BAND }}>
         <StatusMark
           confirmed={isConfirmed}
           disabled={!!tx.isDeleted || !!isConfirming}
@@ -346,114 +337,116 @@ export function TransactionMobileCard({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-3 px-6 py-3" style={{ backgroundColor: ACCENT_FILL_MEDIUM }}>
+      <div
+        className="flex flex-col gap-3 px-6 py-3"
+        style={{ backgroundColor: isPlanned ? "transparent" : MODAL_BG }}
+      >
         {isTransfer ? (
-          <div className="flex items-center gap-3">
-            <div className="flex min-w-0 flex-1 flex-col justify-center rounded-[10px] px-3 py-3" style={{ backgroundColor: MODAL_BG }}>
-              <div className="flex items-center gap-3">
-                <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
-                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
-                  {accountName}
-                </p>
-              </div>
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex w-full items-center gap-3 rounded-[10px] px-6 py-3" style={{ backgroundColor: BAND }}>
               <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone="transfer" />
+              <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} size={36} />
+              <p className="min-w-0 flex-1 text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
+                {accountName}
+              </p>
             </div>
-            <span className="shrink-0 text-[32px] font-semibold leading-none text-white">→</span>
-            <div className="flex min-w-0 flex-1 flex-col justify-center rounded-[10px] px-3 py-3" style={{ backgroundColor: MODAL_BG }}>
-              <div className="flex items-center gap-3">
-                <AccountMark item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} />
-                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
-                  {destinationName}
-                </p>
-              </div>
+            <span className="text-[36px] font-semibold leading-none text-white">↓</span>
+            <div className="flex w-full items-center gap-3 rounded-[10px] px-6 py-3" style={{ backgroundColor: BAND }}>
               <AmountWithChip text={destinationAmount} color={amountColor} currency={destinationCurrency} tone="transfer" />
+              <AccountMark item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} size={36} />
+              <p className="min-w-0 flex-1 text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
+                {destinationName}
+              </p>
             </div>
           </div>
         ) : (
-          <div className="flex items-stretch gap-3">
-            <div className="flex shrink-0 flex-col justify-center rounded-[10px] px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
-              <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone={tone} />
-              {rubLine ? (
-                <p className="text-sm font-normal leading-4" style={{ color: MUTED }}>
-                  {rubLine}
+          <>
+            <div className="flex items-stretch gap-3">
+              <div className="flex w-fit shrink-0 flex-col justify-center rounded-[10px] px-4 py-3" style={{ backgroundColor: BAND }}>
+                <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone={tone} />
+                {rubLine ? (
+                  <p className="text-sm font-normal leading-4" style={{ color: MUTED }}>
+                    {rubLine}
+                  </p>
+                ) : null}
+              </div>
+              <div
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] px-4 py-3"
+                style={{ backgroundColor: ACCENT_FILL_LIGHT }}
+              >
+                <CategoryMark
+                  categoryId={tx.category_id}
+                  categoryLookup={categoryLookup}
+                  apiBase={apiBase}
+                  size={36}
+                />
+                <p className="min-w-0 flex-1 text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {title}
                 </p>
-              ) : null}
+              </div>
             </div>
-            <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
                 <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
-                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
                   {accountName}
                 </p>
               </div>
               {counterparty && counterpartyName ? (
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
                   <CounterpartyMark counterparty={counterparty} apiBase={apiBase} />
-                  <p className="min-w-0 flex-1 text-sm font-normal leading-4 text-white">
+                  <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4 text-white">
                     {counterpartyName}
                   </p>
                 </div>
               ) : null}
             </div>
-          </div>
+          </>
         )}
         {commentText ? <CommentChip text={commentText} /> : null}
-        {canRealize ? (
-          <Button
-            type="button"
-            variant="authPrimary"
-            className="h-12 w-full rounded-[10px] text-base font-medium"
-            style={
-              {
-                "--auth-primary-bg": SIDEBAR_SELECTED_GRADIENT,
-                "--auth-primary-bg-hover":
-                  "linear-gradient(315deg, #9487F3 0%, #6C5DD7 43%, #483BA6 100%)",
-              } as CSSProperties
-            }
-            onClick={(event) => {
-              event.stopPropagation();
-              onRealize?.(tx, event.currentTarget);
-            }}
-          >
-            Реализовать
-          </Button>
-        ) : null}
       </div>
     </article>
   );
 }
 
-/** Плейсхолдер карточки: шапка, сумма с валютой, счёт и контрагент. */
+/** Плейсхолдер карточки: шапка, сумма и категория, счета, комментарий. */
 export function TransactionMobileCardSkeleton() {
   return (
     <div className="flex w-full flex-col overflow-hidden rounded-[10px]" aria-hidden>
-      <div className="flex items-center gap-3 px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
-        <Skeleton className="size-6 shrink-0 rounded-[4px]" />
-        <Skeleton className="h-3.5 min-w-0 flex-1 rounded-[4px]" />
+      <div className="flex h-[41px] items-center justify-end gap-3 px-6 py-1.5" style={{ backgroundColor: BAND }}>
         <Skeleton className="size-4 shrink-0 rounded-[4px]" />
         <Skeleton className="h-3.5 w-10 shrink-0 rounded-[4px]" />
       </div>
-      <div className="flex flex-col gap-3 px-6 py-3" style={{ backgroundColor: ACCENT_FILL_MEDIUM }}>
+      <div className="flex flex-col gap-3 px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
         <div className="flex items-stretch gap-3">
+          <div className="flex w-fit shrink-0 flex-col justify-center gap-2 rounded-[10px] px-4 py-3" style={{ backgroundColor: BAND }}>
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-8 w-28 rounded-[4px]" />
+              <Skeleton className="h-6 w-10 rounded-[4px]" />
+            </div>
+            <Skeleton className="h-3.5 w-24 rounded-[4px]" />
+          </div>
           <div
-            className="flex shrink-0 flex-col justify-center rounded-[10px] px-6 py-3"
-            style={{ backgroundColor: MODAL_BG }}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] px-4 py-3"
+            style={{ backgroundColor: ACCENT_FILL_LIGHT }}
           >
-            <div className="flex items-center gap-3">
-              <Skeleton className="h-8 w-32 rounded-[4px]" />
-              <Skeleton className="h-6 w-12 rounded-[4px]" />
-            </div>
+            <Skeleton className="size-9 shrink-0 rounded-[4px]" />
+            <Skeleton className="h-4 flex-1 rounded-[4px]" />
           </div>
-          <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
-            <div className="flex items-center gap-3">
-              <Skeleton className="size-6 shrink-0 rounded-[4px]" />
-              <Skeleton className="h-3.5 flex-1 rounded-[4px]" />
-            </div>
-            <div className="flex items-center gap-3">
-              <Skeleton className="size-6 shrink-0 rounded-[4px]" />
-              <Skeleton className="h-3.5 w-2/3 rounded-[4px]" />
-            </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Skeleton className="size-6 shrink-0 rounded-[4px]" />
+            <Skeleton className="h-3.5 flex-1 rounded-[4px]" />
           </div>
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Skeleton className="size-6 shrink-0 rounded-[4px]" />
+            <Skeleton className="h-3.5 w-2/3 rounded-[4px]" />
+          </div>
+        </div>
+        <div className="flex h-[41px] items-center gap-3 rounded-[10px] px-3 py-1.5" style={{ backgroundColor: ACCENT_FILL_LIGHT }}>
+          <Skeleton className="size-4 shrink-0 rounded-full" />
+          <Skeleton className="h-3.5 flex-1 rounded-[4px]" />
         </div>
       </div>
     </div>

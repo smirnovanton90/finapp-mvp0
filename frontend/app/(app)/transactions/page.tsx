@@ -1261,6 +1261,12 @@ function TransactionMobileCard({
   onConfirm,
   isConfirming,
   getRubEquivalentCents,
+  onCreateFrom,
+  onEdit,
+  onDelete,
+  onUnsplit,
+  onAddChild,
+  actionsDisabled,
 }: {
   tx: TransactionCard;
   counterparty: CounterpartyOut | null;
@@ -1273,6 +1279,12 @@ function TransactionMobileCard({
   onConfirm?: (tx: TransactionCard) => void;
   isConfirming?: boolean;
   getRubEquivalentCents?: (tx: TransactionCard, currencyCode: string) => number | null;
+  onCreateFrom?: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
+  onEdit?: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
+  onDelete?: (id: number) => void;
+  onUnsplit?: (tx: TransactionCard) => void;
+  onAddChild?: (tx: TransactionCard, trigger?: HTMLElement | null) => void;
+  actionsDisabled?: boolean;
 }) {
   return (
     <TransactionMobileCardView
@@ -1287,6 +1299,12 @@ function TransactionMobileCard({
       onConfirm={onConfirm}
       isConfirming={isConfirming}
       getRubEquivalentCents={getRubEquivalentCents}
+      onCreateFrom={onCreateFrom}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      onUnsplit={onUnsplit}
+      onAddChild={onAddChild}
+      actionsDisabled={actionsDisabled}
     />
   );
 }
@@ -5581,6 +5599,15 @@ function TransactionsView({
     />
   );
 
+  const mobileCardActionProps = {
+    onCreateFrom: openCreateFromDialog,
+    onEdit: openEditDialog,
+    onDelete: (id: number) => openDeleteDialog([id]),
+    onUnsplit: (tx: TransactionCard) => setUnsplitConfirmTxId(tx.id),
+    onAddChild: openAddChildDialog,
+    actionsDisabled: isDeleting,
+  };
+
   return (
     <main
       className={cn(
@@ -8679,6 +8706,7 @@ function TransactionsView({
                                   getRubEquivalentCents={getRubEquivalentCents}
                                   onConfirm={handleConfirmStatus}
                                   isConfirming={confirmingTxId === parent.id}
+                                  {...mobileCardActionProps}
                                 />,
                                 ...children.map((child) => (
                                   <TransactionMobileCard
@@ -8694,6 +8722,7 @@ function TransactionsView({
                                     getRubEquivalentCents={getRubEquivalentCents}
                                     onConfirm={handleConfirmStatus}
                                     isConfirming={confirmingTxId === child.id}
+                                    {...mobileCardActionProps}
                                   />
                                 )),
                               ];
@@ -8713,6 +8742,7 @@ function TransactionsView({
                                 getRubEquivalentCents={getRubEquivalentCents}
                                 onConfirm={handleConfirmStatus}
                                 isConfirming={confirmingTxId === tx.id}
+                                {...mobileCardActionProps}
                               />,
                             ];
                           })}

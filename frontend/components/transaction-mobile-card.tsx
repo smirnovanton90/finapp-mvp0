@@ -1,14 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Building2, User, Wallet } from "lucide-react";
+import { Building2, Check, Pencil, Plus, Trash2, Undo2, User, Wallet, type LucideIcon } from "lucide-react";
 import { CounterpartyOut, ItemOut, TransactionOut } from "@/lib/api";
 import {
   ACCENT,
   ACCENT2,
-  ACCENT_FILL_LIGHT,
+  ACCENT_FILL_MEDIUM,
   ACTIVE_TEXT_DARK,
+  DROPDOWN_BG,
   GREEN,
   MODAL_BG,
   RED,
@@ -21,11 +23,194 @@ import { useCategoryImage } from "@/hooks/use-category-icon";
 import { AssetItemIcon } from "@/components/asset-item-icon";
 import { CardIcon } from "@/components/card-icon";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 const MUTED = "rgba(255,255,255,0.55)";
 const CHIP_TEXT = "#191732";
-/** Шапка и блок суммы: color/app-bg-end. */
-const BAND = "#4B4197";
+
+/** Как MobileCardPress на дашборде: масштаб только после короткой задержки и без сдвига пальца. */
+const TAP_MOVE_PX = 10;
+const PRESS_DELAY_MS = 80;
+const PRESS_RELEASE_MS = 90;
+const LONG_PRESS_MS = 500;
+
+const dropdownSelectorWrapperStyle = {
+  padding: "1px",
+  background: "linear-gradient(to right, #7C6CF1, #6C5DD7, #5544D1)",
+  WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+  WebkitMaskComposite: "xor" as const,
+  maskComposite: "exclude" as const,
+};
+
+function isGestureBlockedTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("button, a, input, textarea, select, [role='button']"));
+}
+
+type MenuAnchor = { x: number; y: number; pointerId: number; releasePending: boolean };
+
+type ContextAction = {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+  disabled?: boolean;
+  destructive?: boolean;
+  separatorBefore?: boolean;
+  onSelect: (trigger: HTMLButtonElement) => void;
+};
+
+function clampMenuPosition(anchorX: number, anchorY: number, width: number, height: number) {
+  const margin = 8;
+  const maxLeft = Math.max(margin, window.innerWidth - margin - width);
+  const maxTop = Math.max(margin, window.innerHeight - margin - height);
+  let left = anchorX - width / 2;
+  let top = anchorY - height - 8;
+  if (top < margin) top = Math.min(anchorY + 8, maxTop);
+  left = Math.min(Math.max(margin, left), maxLeft);
+  top = Math.min(Math.max(margin, top), maxTop);
+  return { left, top };
+}
+
+function MenuActionButton({
+  action,
+  onClose,
+}: {
+  action: ContextAction;
+  onClose: () => void;
+}) {
+  const [pressed, setPressed] = useState(false);
+  const Icon = action.icon;
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={action.disabled}
+      className={cn(
+        "flex min-h-11 w-full origin-center items-center gap-2 whitespace-nowrap rounded-md px-2 py-2 text-left text-sm text-[rgba(207,207,214,1)] outline-none select-none transition-transform duration-75 ease-out motion-reduce:transition-none active:bg-[rgba(108,93,215,0.22)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:opacity-80",
+        pressed && "scale-[0.97] motion-reduce:scale-100",
+        action.destructive && "text-destructive active:bg-destructive/10"
+      )}
+      onPointerDown={(event) => {
+        if (action.disabled || (event.pointerType === "mouse" && event.button !== 0)) return;
+        setPressed(true);
+      }}
+      onPointerUp={() => setPressed(false)}
+      onPointerCancel={() => setPressed(false)}
+      onPointerLeave={() => setPressed(false)}
+      onClick={(event) => {
+        if (action.disabled) return;
+        onClose();
+        action.onSelect(event.currentTarget);
+      }}
+    >
+      <Icon />
+      {action.label}
+    </button>
+  );
+}
+
+function TransactionContextMenu({
+  anchor,
+  actions,
+  onClose,
+}: {
+  anchor: MenuAnchor;
+  actions: ContextAction[];
+  onClose: () => void;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ left: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    setBox(clampMenuPosition(anchor.x, anchor.y, rect.width, rect.height));
+  }, [anchor.x, anchor.y]);
+
+  useEffect(() => {
+    let waitingForRelease = anchor.releasePending;
+    let swallowClick = false;
+    let clearSwallow = 0;
+    const onPointerUp = (event: PointerEvent) => {
+      if (!waitingForRelease || event.pointerId !== anchor.pointerId) return;
+      waitingForRelease = false;
+      swallowClick = true;
+      clearSwallow = window.setTimeout(() => {
+        swallowClick = false;
+      }, 80);
+    };
+    const onClick = (event: MouseEvent) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    let scrollArmed = false;
+    const armScroll = window.setTimeout(() => {
+      scrollArmed = true;
+    }, 400);
+    const onScroll = () => {
+      if (scrollArmed) onClose();
+    };
+    window.addEventListener("pointerup", onPointerUp, true);
+    window.addEventListener("click", onClick, true);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.clearTimeout(clearSwallow);
+      window.clearTimeout(armScroll);
+      window.removeEventListener("pointerup", onPointerUp, true);
+      window.removeEventListener("click", onClick, true);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [anchor.pointerId, anchor.releasePending, onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50"
+      onClick={onClose}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <div
+        ref={panelRef}
+        role="menu"
+        aria-label="Действия с транзакцией"
+        data-transaction-context-menu
+        className={cn("absolute w-max min-w-56", box && "transaction-menu-enter")}
+        style={{
+          left: box?.left ?? 0,
+          top: box?.top ?? 0,
+          visibility: box ? "visible" : "hidden",
+          transformOrigin: box && box.top + 8 < anchor.y ? "bottom center" : "top center",
+          ["--menu-enter-y" as string]: box && box.top + 8 < anchor.y ? "10px" : "-10px",
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="relative rounded-lg shadow-lg">
+          <div
+            className="pointer-events-none absolute inset-0 z-0 rounded-lg"
+            style={dropdownSelectorWrapperStyle}
+          />
+          <div className="relative z-10 min-h-8 rounded-lg p-1" style={{ backgroundColor: DROPDOWN_BG }}>
+            {actions.map((action) => (
+              <div key={action.key}>
+                {action.separatorBefore ? (
+                  <div className="-mx-1 my-1 h-px" style={{ backgroundColor: "rgba(255,255,255,0.1)" }} role="separator" />
+                ) : null}
+                <MenuActionButton action={action} onClose={onClose} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 function formatTxTime(value: string) {
   const hasTime = /[T\s]\d{1,2}:\d{2}/.test(value);
@@ -101,7 +286,7 @@ function CategoryMark({
           }}
         />
       ) : (
-        <CategoryIcon className={size === 36 ? "size-5" : "size-3.5"} strokeWidth={1.5} style={{ color: "rgba(255,255,255,0.85)" }} />
+        <CategoryIcon className={size === 36 ? "size-8" : "size-3.5"} strokeWidth={1.5} style={{ color: "rgba(255,255,255,0.85)" }} />
       )}
     </IconWell>
   );
@@ -198,10 +383,10 @@ function StatusMark({
         event.stopPropagation();
         if (!disabled && !confirmed) onConfirm();
       }}
-      className="shrink-0 bg-transparent text-sm leading-none disabled:opacity-100"
-      style={{ color: confirmed ? undefined : "#FF8D28" }}
+      className="grid size-4 shrink-0 place-items-center rounded-[4px] disabled:opacity-100"
+      style={{ backgroundColor: confirmed ? GREEN : "transparent", boxShadow: confirmed ? undefined : "inset 0 0 0 1px rgba(255,255,255,0.35)" }}
     >
-      {confirmed ? "✅" : "○"}
+      <Check className="size-3" strokeWidth={3} style={{ color: confirmed ? "#fff" : MUTED }} />
     </button>
   );
 }
@@ -209,11 +394,10 @@ function StatusMark({
 function CommentChip({ text }: { text: string }) {
   return (
     <div
-      className="flex h-[41px] w-full min-w-0 items-center gap-3 rounded-[10px] px-3 py-1.5 text-sm font-normal leading-4 text-white"
-      style={{ backgroundColor: ACCENT_FILL_LIGHT }}
+      className="flex w-full min-w-0 items-center rounded-[10px] px-3 py-2 text-sm font-normal leading-4 text-white"
+      style={{ backgroundColor: MODAL_BG }}
     >
-      <span className="shrink-0 text-sm leading-none" aria-hidden>💬</span>
-      <span className="min-w-0 break-words">{text}</span>
+      <span className="min-w-0 break-words">💬 {text}</span>
     </div>
   );
 }
@@ -251,6 +435,12 @@ export function TransactionMobileCard({
   onConfirm,
   isConfirming,
   getRubEquivalentCents,
+  onCreateFrom,
+  onEdit,
+  onDelete,
+  onUnsplit,
+  onAddChild,
+  actionsDisabled,
 }: {
   tx: TransactionMobileCardTx;
   counterparty: CounterpartyOut | null;
@@ -263,8 +453,43 @@ export function TransactionMobileCard({
   onConfirm?: (tx: TransactionMobileCardTx) => void;
   isConfirming?: boolean;
   getRubEquivalentCents?: (tx: TransactionMobileCardTx, currencyCode: string) => number | null;
+  onCreateFrom?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
+  onEdit?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
+  onDelete?: (id: number) => void;
+  onUnsplit?: (tx: TransactionMobileCardTx) => void;
+  onAddChild?: (tx: TransactionMobileCardTx, trigger?: HTMLElement | null) => void;
+  actionsDisabled?: boolean;
 }) {
   const router = useRouter();
+  const [pressed, setPressed] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
+  const pointRef = useRef<{ x: number; y: number; id: number; at: number } | null>(null);
+  const movedRef = useRef(false);
+  const pressTimerRef = useRef<number | null>(null);
+  const releaseTimerRef = useRef<number | null>(null);
+  const longTimerRef = useRef<number | null>(null);
+  const longPressOpenedRef = useRef(false);
+  const suppressClickRef = useRef(false);
+  const gestureCleanupRef = useRef<(() => void) | null>(null);
+  const closeMenu = useCallback(() => setMenuAnchor(null), []);
+  const canLongPress =
+    !actionsDisabled && Boolean(onCreateFrom || onEdit || onDelete || onUnsplit || onAddChild);
+
+  const clearTimer = (timerRef: { current: number | null }) => {
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      clearTimer(pressTimerRef);
+      clearTimer(releaseTimerRef);
+      clearTimer(longTimerRef);
+      gestureCleanupRef.current?.();
+    };
+  }, []);
   const primaryDisplayId = tx.primary_card_item_id ?? tx.primary_item_id;
   const counterpartyDisplayId = tx.counterparty_card_item_id ?? tx.counterparty_item_id;
   const primaryItem = primaryDisplayId != null ? itemsById.get(primaryDisplayId) ?? null : null;
@@ -308,23 +533,202 @@ export function TransactionMobileCard({
     onConfirm?.(tx);
   };
 
+  const openMenu = (point: { x: number; y: number; id: number }, releasePending: boolean) => {
+    longPressOpenedRef.current = true;
+    suppressClickRef.current = true;
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      navigator.vibrate(10);
+    }
+    setMenuAnchor({ x: point.x, y: point.y, pointerId: point.id, releasePending });
+  };
+
+  const finishPress = (pointerId: number) => {
+    const start = pointRef.current;
+    if (!start || start.id !== pointerId) return;
+    clearTimer(pressTimerRef);
+    clearTimer(longTimerRef);
+    const heldLong = performance.now() - start.at >= LONG_PRESS_MS;
+    const opened = longPressOpenedRef.current;
+    const justOpened = !movedRef.current && canLongPress && heldLong && !opened;
+    if (justOpened) openMenu(start, false);
+    pointRef.current = null;
+    if (opened || justOpened) {
+      suppressClickRef.current = true;
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 300);
+      setPressed(false);
+    } else if (!movedRef.current) {
+      setPressed(true);
+      releaseTimerRef.current = window.setTimeout(() => setPressed(false), PRESS_RELEASE_MS);
+    } else {
+      setPressed(false);
+    }
+    movedRef.current = false;
+    longPressOpenedRef.current = false;
+  };
+
+  const contextActions: ContextAction[] = [];
+  const isSplitParent = tx.is_split_parent === true;
+  if (isSplitParent && onUnsplit) {
+    contextActions.push({
+      key: "unsplit",
+      label: "Отменить разделение",
+      icon: Undo2,
+      onSelect: () => onUnsplit(tx),
+    });
+  }
+  if (isSplitParent && onAddChild) {
+    contextActions.push({
+      key: "add-child",
+      label: "Добавить дочернюю",
+      icon: Plus,
+      onSelect: (trigger) => onAddChild(tx, trigger),
+    });
+  }
+  const hasSplitActions = contextActions.length > 0;
+  if (onCreateFrom) {
+    contextActions.push({
+      key: "create",
+      label: "Создать на основе",
+      icon: Plus,
+      disabled: !!actionsDisabled,
+      separatorBefore: hasSplitActions,
+      onSelect: (trigger) => onCreateFrom(tx, trigger),
+    });
+  }
+  if (onEdit) {
+    contextActions.push({
+      key: "edit",
+      label: "Редактировать",
+      icon: Pencil,
+      disabled: !!tx.isDeleted || !!actionsDisabled,
+      separatorBefore: Boolean(onCreateFrom) || hasSplitActions,
+      onSelect: (trigger) => onEdit(tx, trigger),
+    });
+  }
+  if (onDelete) {
+    contextActions.push({
+      key: "delete",
+      label: "Удалить",
+      icon: Trash2,
+      destructive: true,
+      disabled: !!tx.isDeleted || !!actionsDisabled,
+      onSelect: () => onDelete(tx.id),
+    });
+  }
+
   return (
+    <>
     <article
       role={tx.isDeleted ? undefined : "link"}
       tabIndex={tx.isDeleted ? undefined : 0}
-      onClick={openDetails}
+      onClick={(event) => {
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        openDetails();
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           openDetails();
         }
       }}
-      className={`flex w-full cursor-pointer flex-col overflow-hidden rounded-[10px] text-left ${
-        tx.isDeleted ? "opacity-60" : "active:opacity-90"
-      } ${isPlanned ? "border-2 border-dashed" : ""}`}
-      style={isPlanned ? { borderColor: ACCENT2 } : undefined}
+      onContextMenu={(event) => event.preventDefault()}
+      onPointerDown={(event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        if (isGestureBlockedTarget(event.target)) return;
+        pointRef.current = { x: event.clientX, y: event.clientY, id: event.pointerId, at: performance.now() };
+        movedRef.current = false;
+        longPressOpenedRef.current = false;
+        clearTimer(pressTimerRef);
+        clearTimer(releaseTimerRef);
+        clearTimer(longTimerRef);
+        const pointerId = event.pointerId;
+        gestureCleanupRef.current?.();
+        const detachGesture = () => {
+          window.removeEventListener("pointerup", endFromWindow);
+          window.removeEventListener("pointercancel", cancelFromWindow);
+          if (gestureCleanupRef.current === detachGesture) gestureCleanupRef.current = null;
+        };
+        const endFromWindow = (endEvent: PointerEvent) => {
+          if (endEvent.pointerId !== pointerId) return;
+          detachGesture();
+          finishPress(pointerId);
+        };
+        const cancelFromWindow = (endEvent: PointerEvent) => {
+          if (endEvent.pointerId !== pointerId) return;
+          detachGesture();
+          clearTimer(pressTimerRef);
+          clearTimer(longTimerRef);
+          if (pointRef.current?.id === pointerId) pointRef.current = null;
+          movedRef.current = true;
+          longPressOpenedRef.current = false;
+          suppressClickRef.current = false;
+          setPressed(false);
+          closeMenu();
+        };
+        gestureCleanupRef.current = detachGesture;
+        window.addEventListener("pointerup", endFromWindow);
+        window.addEventListener("pointercancel", cancelFromWindow);
+        pressTimerRef.current = window.setTimeout(() => {
+          if (!movedRef.current) setPressed(true);
+        }, PRESS_DELAY_MS);
+        if (!canLongPress) return;
+        longTimerRef.current = window.setTimeout(() => {
+          const point = pointRef.current;
+          if (!point || movedRef.current || longPressOpenedRef.current) return;
+          openMenu(point, true);
+        }, LONG_PRESS_MS);
+      }}
+      onPointerMove={(event) => {
+        const start = pointRef.current;
+        if (!start || event.pointerId !== start.id || movedRef.current) return;
+        const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+        if (distance > TAP_MOVE_PX) {
+          movedRef.current = true;
+          clearTimer(pressTimerRef);
+          clearTimer(longTimerRef);
+          setPressed(false);
+        }
+      }}
+      onPointerCancel={() => {
+        clearTimer(pressTimerRef);
+        clearTimer(longTimerRef);
+        pointRef.current = null;
+        movedRef.current = true;
+        longPressOpenedRef.current = false;
+        suppressClickRef.current = false;
+        setPressed(false);
+        closeMenu();
+      }}
+      className={cn(
+        "flex w-full cursor-pointer flex-col overflow-hidden rounded-[10px] text-left origin-center touch-manipulation select-none transition-transform duration-75 ease-out motion-reduce:transition-none",
+        tx.isDeleted && "opacity-60",
+        isPlanned && "border-2 border-dashed",
+        pressed && "scale-[0.97] motion-reduce:scale-100"
+      )}
+      style={{
+        ...(isPlanned ? { borderColor: ACCENT2 } : {}),
+        WebkitTouchCallout: "none",
+        WebkitUserSelect: "none",
+      }}
     >
-      <div className="flex h-[41px] items-center justify-end gap-3 px-6 py-1.5" style={{ backgroundColor: BAND }}>
+      <div className="flex items-center gap-3 px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
+        {isTransfer ? (
+          <IconWell size={24}>
+            <span className="size-3.5" />
+          </IconWell>
+        ) : (
+          <CategoryMark categoryId={tx.category_id} categoryLookup={categoryLookup} apiBase={apiBase} size={36} />
+        )}
+        <p className="min-w-0 flex-1 truncate text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
+          {title}
+        </p>
         <StatusMark
           confirmed={isConfirmed}
           disabled={!!tx.isDeleted || !!isConfirming}
@@ -339,115 +743,82 @@ export function TransactionMobileCard({
 
       <div
         className="flex flex-col gap-3 px-6 py-3"
-        style={{ backgroundColor: isPlanned ? "transparent" : MODAL_BG }}
+        style={{ backgroundColor: isPlanned ? "transparent" : ACCENT_FILL_MEDIUM }}
       >
         {isTransfer ? (
           <div className="flex flex-col items-center gap-3">
-            <div className="flex w-full items-center gap-3 rounded-[10px] px-6 py-3" style={{ backgroundColor: BAND }}>
+            <div className="flex w-full flex-col justify-center rounded-[10px] px-3 py-3" style={{ backgroundColor: MODAL_BG }}>
+              <div className="flex items-center gap-3">
+                <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
+                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {accountName}
+                </p>
+              </div>
               <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone="transfer" />
-              <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} size={36} />
-              <p className="min-w-0 flex-1 text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
-                {accountName}
-              </p>
             </div>
             <span className="text-[36px] font-semibold leading-none text-white">↓</span>
-            <div className="flex w-full items-center gap-3 rounded-[10px] px-6 py-3" style={{ backgroundColor: BAND }}>
+            <div className="flex w-full flex-col justify-center rounded-[10px] px-3 py-3" style={{ backgroundColor: MODAL_BG }}>
+              <div className="flex items-center gap-3">
+                <AccountMark item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} />
+                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                  {destinationName}
+                </p>
+              </div>
               <AmountWithChip text={destinationAmount} color={amountColor} currency={destinationCurrency} tone="transfer" />
-              <AccountMark item={counterpartyItem} counterparty={counterpartyItemCounterparty} apiBase={apiBase} size={36} />
-              <p className="min-w-0 flex-1 text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
-                {destinationName}
-              </p>
             </div>
           </div>
         ) : (
-          <>
-            <div className="flex items-stretch gap-3">
-              <div className="flex w-fit shrink-0 flex-col justify-center rounded-[10px] px-4 py-3" style={{ backgroundColor: BAND }}>
-                <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone={tone} />
-                {rubLine ? (
-                  <p className="text-sm font-normal leading-4" style={{ color: MUTED }}>
-                    {rubLine}
-                  </p>
-                ) : null}
-              </div>
-              <div
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] px-4 py-3"
-                style={{ backgroundColor: ACCENT_FILL_LIGHT }}
-              >
-                <CategoryMark
-                  categoryId={tx.category_id}
-                  categoryLookup={categoryLookup}
-                  apiBase={apiBase}
-                  size={36}
-                />
-                <p className="min-w-0 flex-1 text-base font-semibold leading-[14px]" style={{ color: ACTIVE_TEXT_DARK }}>
-                  {title}
+          <div className="flex items-stretch gap-3">
+            <div className="flex shrink-0 flex-col justify-center rounded-[10px] px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
+              <AmountWithChip text={signedAmount} color={amountColor} currency={primaryCurrency} tone={tone} />
+              {rubLine ? (
+                <p className="text-sm font-normal leading-4" style={{ color: MUTED }}>
+                  {rubLine}
                 </p>
-              </div>
+              ) : null}
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
+              <div className="flex items-center gap-3">
                 <AccountMark item={primaryItem} counterparty={primaryCounterparty} apiBase={apiBase} />
-                <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
+                <p className="min-w-0 flex-1 text-sm font-normal leading-4" style={{ color: ACTIVE_TEXT_DARK }}>
                   {accountName}
                 </p>
               </div>
               {counterparty && counterpartyName ? (
-                <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div className="flex items-center gap-3">
                   <CounterpartyMark counterparty={counterparty} apiBase={apiBase} />
-                  <p className="min-w-0 flex-1 truncate text-sm font-normal leading-4 text-white">
+                  <p className="min-w-0 flex-1 text-sm font-normal leading-4 text-white">
                     {counterpartyName}
                   </p>
                 </div>
               ) : null}
             </div>
-          </>
+          </div>
         )}
         {commentText ? <CommentChip text={commentText} /> : null}
       </div>
     </article>
+    {menuAnchor && contextActions.length > 0 ? (
+      <TransactionContextMenu
+        anchor={menuAnchor}
+        actions={contextActions}
+        onClose={closeMenu}
+      />
+    ) : null}
+    </>
   );
 }
 
-/** Плейсхолдер карточки: шапка, сумма и категория, счета, комментарий. */
+/** Плейсхолдер карточки: шапка, сумма и одна строка. */
 export function TransactionMobileCardSkeleton() {
   return (
     <div className="flex w-full flex-col overflow-hidden rounded-[10px]" aria-hidden>
-      <div className="flex h-[41px] items-center justify-end gap-3 px-6 py-1.5" style={{ backgroundColor: BAND }}>
-        <Skeleton className="size-4 shrink-0 rounded-[4px]" />
-        <Skeleton className="h-3.5 w-10 shrink-0 rounded-[4px]" />
+      <div className="flex items-center px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
+        <Skeleton className="h-3.5 w-2/5 rounded-[4px]" />
       </div>
-      <div className="flex flex-col gap-3 px-6 py-3" style={{ backgroundColor: MODAL_BG }}>
-        <div className="flex items-stretch gap-3">
-          <div className="flex w-fit shrink-0 flex-col justify-center gap-2 rounded-[10px] px-4 py-3" style={{ backgroundColor: BAND }}>
-            <div className="flex items-center gap-3">
-              <Skeleton className="h-8 w-28 rounded-[4px]" />
-              <Skeleton className="h-6 w-10 rounded-[4px]" />
-            </div>
-            <Skeleton className="h-3.5 w-24 rounded-[4px]" />
-          </div>
-          <div
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] px-4 py-3"
-            style={{ backgroundColor: ACCENT_FILL_LIGHT }}
-          >
-            <Skeleton className="size-9 shrink-0 rounded-[4px]" />
-            <Skeleton className="h-4 flex-1 rounded-[4px]" />
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Skeleton className="size-6 shrink-0 rounded-[4px]" />
-            <Skeleton className="h-3.5 flex-1 rounded-[4px]" />
-          </div>
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Skeleton className="size-6 shrink-0 rounded-[4px]" />
-            <Skeleton className="h-3.5 w-2/3 rounded-[4px]" />
-          </div>
-        </div>
-        <div className="flex h-[41px] items-center gap-3 rounded-[10px] px-3 py-1.5" style={{ backgroundColor: ACCENT_FILL_LIGHT }}>
-          <Skeleton className="size-4 shrink-0 rounded-full" />
-          <Skeleton className="h-3.5 flex-1 rounded-[4px]" />
-        </div>
+      <div className="flex flex-col gap-3 px-6 py-3" style={{ backgroundColor: ACCENT_FILL_MEDIUM }}>
+        <Skeleton className="h-8 w-36 rounded-[10px]" />
+        <Skeleton className="h-3.5 w-1/2 rounded-[4px]" />
       </div>
     </div>
   );

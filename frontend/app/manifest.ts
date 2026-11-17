@@ -12,21 +12,15 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: "portrait-primary",
     icons: [
       {
-        src: "/favicon.ico",
-        sizes: "48x48",
-        type: "image/x-icon",
-        purpose: "any",
-      },
-      {
-        src: "/favicon.ico",
-        sizes: "192x192",
-        type: "image/x-icon",
-        purpose: "any",
-      },
-      {
-        src: "/favicon.ico",
+        src: "/icon",
         sizes: "512x512",
-        type: "image/x-icon",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/apple-icon",
+        sizes: "180x180",
+        type: "image/png",
         purpose: "any",
       },
     ],

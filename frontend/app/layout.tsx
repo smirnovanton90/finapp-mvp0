@@ -14,10 +14,6 @@ export const metadata: Metadata = {
     title: "Финатик",
     statusBarStyle: "black-translucent",
   },
-  // Иконка на домашнем экране (180×180). При наличии app/apple-icon.png Next.js подставит её сам.
-  icons: {
-    apple: "/favicon.ico",
-  },
 };
 
 export const viewport: Viewport = {

@@ -1,5 +1,5 @@
 /**
- * Преобразование экспорта ПРОСТОФИН (ParsedExport) в формат DzenParsedData
+ * Преобразование экспорта Финатик (ParsedExport) в формат DzenParsedData
  * для единого пошагового импорта (счета → категории → контрагенты → подтверждение).
  */
 
@@ -37,7 +37,7 @@ function buildCategoryFullPath(
 }
 
 /**
- * Преобразует распарсенный экспорт ПРОСТОФИН в DzenParsedData для использования
+ * Преобразует распарсенный экспорт Финатик в DzenParsedData для использования
  * в общем потоке импорта (шаги 2–5 и executeImportDzen).
  */
 export function parsedExportToDzenParsedData(data: ParsedExport): DzenParsedData {

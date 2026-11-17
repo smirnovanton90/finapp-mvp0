@@ -110,7 +110,7 @@ export function PwaInstallPrompt() {
           <>
             <p className="text-sm font-medium">Открыть как приложение</p>
             <p className="text-xs opacity-80 mt-0.5">
-              Установите FinApp для быстрого доступа без вкладки браузера.
+              Установите Финатик для быстрого доступа без вкладки браузера.
             </p>
           </>
         )}

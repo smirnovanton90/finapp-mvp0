@@ -38,7 +38,7 @@ def load_logo_from_url(url: str) -> tuple[bytes | None, str | None]:
         response = requests.get(
             url,
             timeout=20,
-            headers={"User-Agent": "Mozilla/5.0 (FinApp Logo Migrator)"},
+            headers={"User-Agent": "Mozilla/5.0 (Финатик Logo Migrator)"},
         )
         if not response.ok:
             return None, None

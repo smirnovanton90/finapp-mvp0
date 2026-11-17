@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI):
     telegram_stop_scheduler()
 
 
-app = FastAPI(title="FinApp API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Финатик API", version="0.1.0", lifespan=lifespan)
 
 _FX_CACHE: dict[str, tuple[datetime, list[FxRateOut]]] = {}
 _FX_CACHE_TTL = timedelta(hours=1)

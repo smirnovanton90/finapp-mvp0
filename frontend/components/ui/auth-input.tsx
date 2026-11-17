@@ -17,6 +17,8 @@ interface AuthInputProps extends Omit<React.ComponentProps<"input">, "prefix"> {
   prefixPlClass?: string;
   /** Override prefix wrapper class. Default "flex h-6 w-6 items-center justify-center shrink-0 pointer-events-none". Use e.g. "flex items-center shrink-0 pointer-events-none" for wider prefix (chip). */
   prefixContainerClass?: string;
+  /** Высота поля. По умолчанию h-10. */
+  controlClassName?: string;
 }
 
 const DEFAULT_PREFIX_CONTAINER_CLASS = "flex h-6 w-6 items-center justify-center shrink-0 pointer-events-none";
@@ -29,6 +31,7 @@ function AuthInput({
   prefixLeftClass = "left-4",
   prefixPlClass = "pl-11",
   prefixContainerClass = DEFAULT_PREFIX_CONTAINER_CLASS,
+  controlClassName,
   ...props 
 }: AuthInputProps) {
   const { theme } = useTheme();
@@ -132,7 +135,7 @@ function AuthInput({
         }}
       >
         {/* Inner container */}
-        <div className={cn("relative flex items-center rounded-lg px-4 h-10 z-10", prefix && prefixPlClass)}>
+        <div className={cn("relative flex items-center rounded-lg px-4 z-10", controlClassName ?? "h-10", prefix && prefixPlClass)}>
           {prefix && (
             <div className={cn("absolute", prefixContainerClass, prefixLeftClass)}>
               {prefix}

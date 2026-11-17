@@ -184,7 +184,7 @@ export function FirstLoadOnboarding() {
                 className="text-[18px] font-normal max-w-md"
                 style={{ ...textStyle, lineHeight: 1.125 }}
               >
-                ПРОСТОФИН — это полная картина Ваших финансов. Счета, имущество,
+                Финатик — это полная картина Ваших финансов. Счета, имущество,
                 инвестиции, кредиты — все в одном месте!
               </p>
               <div className="pt-2">
@@ -441,7 +441,7 @@ export function FirstLoadOnboarding() {
                       style={textStyle}
                     >
                       Подойдет тем, кто уже вел ранее учет финансов и хочет
-                      перейти на ПРОСТОФИН
+                      перейти на Финатик
                     </p>
                     <p
                       className="text-[14px] font-normal max-w-sm"

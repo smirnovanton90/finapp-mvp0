@@ -753,7 +753,7 @@ export async function buildExportCsv(): Promise<ExportDataResult> {
   }
 
   const csv = lines.join("\r\n");
-  const filename = `finapp-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  const filename = `finatik-export-${new Date().toISOString().slice(0, 10)}.csv`;
   return { csv, filename };
 }
 

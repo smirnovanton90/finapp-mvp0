@@ -6,12 +6,12 @@ import "./globals.css";
 const PWA_CHROME_COLOR = "#000000";
 
 export const metadata: Metadata = {
-  title: "FinApp",
+  title: "Финатик",
   description: "Учёт активов, транзакций и планирование финансов",
   // black-translucent + viewport-fit=cover: контент под статус-баром, отступы через env(safe-area-inset-*).
   appleWebApp: {
     capable: true,
-    title: "FinApp",
+    title: "Финатик",
     statusBarStyle: "black-translucent",
   },
   // Иконка на домашнем экране (180×180). При наличии app/apple-icon.png Next.js подставит её сам.

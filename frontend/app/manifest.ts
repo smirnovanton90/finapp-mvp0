@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "FinApp — финансы",
-    short_name: "FinApp",
+    name: "Финатик — финансы",
+    short_name: "Финатик",
     description: "Учёт активов, транзакций и планирование финансов",
     start_url: "/",
     display: "standalone",

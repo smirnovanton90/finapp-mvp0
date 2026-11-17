@@ -3,7 +3,10 @@ export const PINK_GRADIENT = "linear-gradient(90deg, #2491FF 0%, #6C5DD7 45%, #B
 /** Градиент голубой: линейный от #0082D3 до #4D3BF6 */
 export const BLUE_GRADIENT = "linear-gradient(90deg, #0082D3 0%, #4D3BF6 100%)";
 
-// Dark theme gradient for auth screens (login / register) — original complex radial
+/** Окно на экранах входа и регистрации: фиолетовый свет сверху, почти чёрный снизу. */
+export const AUTH_WINDOW_GRADIENT =
+  "linear-gradient(180deg, #AB7AFF 0%, #5C29C7 32%, #1A0A33 68%, #08050D 100%)";
+
 export const AUTH_BG_GRADIENT =
   "radial-gradient(1800px 1200px at 0% 0%, rgba(127, 58, 161, 0.95) 0%, rgba(127, 58, 161, 0) 78%)," +
   "radial-gradient(1800px 1200px at 100% 0%, rgba(15, 8, 59, 0.95) 0%, rgba(15, 8, 59, 0) 78%)," +
